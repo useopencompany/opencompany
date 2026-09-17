@@ -33,6 +33,7 @@ const COLUMNS = [
 
 const LEGAL = [
   { label: "Privacy", href: "/privacy" },
+  { label: "Terms", href: "/terms" },
   { label: "Support", href: "/support" },
   { label: "License", href: "https://github.com/useopencompany/opencompany/blob/main/LICENSE" },
   {

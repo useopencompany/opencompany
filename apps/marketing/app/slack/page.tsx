@@ -240,7 +240,11 @@ export default function SlackPage() {
             <Link href="/privacy" className="underline underline-offset-3">
               privacy policy
             </Link>{" "}
-            or visit{" "}
+            and{" "}
+            <Link href="/terms" className="underline underline-offset-3">
+              terms of service
+            </Link>
+            , or visit{" "}
             <Link href="/support" className="underline underline-offset-3">
               support
             </Link>
