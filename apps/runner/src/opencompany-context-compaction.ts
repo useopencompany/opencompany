@@ -36,6 +36,23 @@ export type ContextCompactionResult = {
   state: ProductChatContextCompactionState | null;
 };
 
+export class ContextCompactionCapacityError extends Error {
+  constructor(
+    message: string,
+    readonly diagnostics: {
+      contextWindowTokens: number;
+      fixedContextTokens: number;
+      availableTailTokens: number;
+      retainedMessageCount: number;
+      estimatedTokensBefore: number;
+      estimatedTokensAfter: number;
+    },
+  ) {
+    super(message);
+    this.name = "ContextCompactionCapacityError";
+  }
+}
+
 export function contextWindowTokensForModel(modelId: string) {
   return (
     AGENT_MODEL_CATALOG.find((candidate) => candidate.id === modelId)?.contextWindowTokens ??
@@ -142,16 +159,17 @@ export async function compactProductChatContextIfNeeded(input: {
   // Use the already hydrated model input for both tail selection and summarization. Rehydrating
   // subsets can change attachment deduplication and fetch the same private blobs more than once.
   const turns = preparedTurns(activeMessages, activeModelMessages);
-  const fixedTokens = estimateAssembledContextTokens({
+  const fixedContextTokens = estimateAssembledContextTokens({
     modelId: input.modelId,
     system: input.system,
     messages: [],
     tools: input.tools,
   });
-  const tailBudget = Math.min(
-    RECENT_TAIL_TOKEN_BUDGET,
-    contextCompactionThreshold(contextWindowTokens) - fixedTokens - SUMMARY_TOKEN_RESERVE,
+  const availableTailTokens = Math.max(
+    0,
+    contextCompactionThreshold(contextWindowTokens) - fixedContextTokens - SUMMARY_TOKEN_RESERVE,
   );
+  const tailBudget = Math.min(RECENT_TAIL_TOKEN_BUDGET, availableTailTokens);
   let keepTurn = turns.length - 1;
   let keptTokens = estimateTurns(turns.slice(keepTurn), input.modelId);
   while (keepTurn > 0) {
@@ -178,9 +196,17 @@ export async function compactProductChatContextIfNeeded(input: {
     messages: retainedModelMessages,
     tools: input.tools,
   });
-  const failPreservedContext = () => {
-    throw new Error(
+  const failPreservedContext = (estimatedTokensAfter: number) => {
+    throw new ContextCompactionCapacityError(
       `opencompany context compaction could not fit the preserved context within the ${contextWindowTokens}-token model window. Reduce the current request or its attachments.`,
+      {
+        contextWindowTokens,
+        fixedContextTokens,
+        availableTailTokens,
+        retainedMessageCount: retainedMessages.length,
+        estimatedTokensBefore,
+        estimatedTokensAfter,
+      },
     );
   };
   if (!fitsImageRequest(retainedModelMessages)) {
@@ -190,11 +216,12 @@ export async function compactProductChatContextIfNeeded(input: {
   }
   if (messagesToCompact.length === 0) {
     if (estimatedTokensBefore + CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS >= contextWindowTokens)
-      failPreservedContext();
+      failPreservedContext(estimatedTokensBefore);
     return { messages: currentContext, compacted: false, state: usableState };
   }
   // Detect irreducible input before spending tokens on summaries that cannot help.
-  if (preservedTokens + SUMMARY_TOKEN_RESERVE >= contextWindowTokens) failPreservedContext();
+  if (preservedTokens + SUMMARY_TOKEN_RESERVE >= contextWindowTokens)
+    failPreservedContext(preservedTokens);
   const summaryResult = await summarizeHistory({
     turns: turns.slice(0, keepTurn),
     previousSummary: usableState?.summary ?? null,
@@ -211,8 +238,16 @@ export async function compactProductChatContextIfNeeded(input: {
     tools: input.tools,
   });
   if (estimatedTokensAfter + CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS >= contextWindowTokens) {
-    throw new Error(
+    throw new ContextCompactionCapacityError(
       `opencompany context compaction could not fit the preserved context within the ${contextWindowTokens}-token model window.`,
+      {
+        contextWindowTokens,
+        fixedContextTokens,
+        availableTailTokens,
+        retainedMessageCount: retainedMessages.length,
+        estimatedTokensBefore,
+        estimatedTokensAfter,
+      },
     );
   }
 
@@ -264,8 +299,10 @@ function messagesAfterPreviousCompaction(
   };
 }
 
-// Covers the estimated serialized size of a 4096-token checkpoint, plus request framing.
-const SUMMARY_TOKEN_RESERVE = CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS * 4;
+// A 4,096-token summary can serialize to roughly twice as many tokens under the deliberately
+// conservative two-bytes-per-token estimator. Reserve that estimated footprint before choosing
+// the verbatim tail and while building rolling summary requests.
+const SUMMARY_TOKEN_RESERVE = CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS * 2;
 type PreparedTurn = { rows: StoredChatMessage[]; messages: ModelMessage[] };
 
 function preparedTurns(
