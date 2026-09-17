@@ -892,8 +892,9 @@ function SidebarSessionStatus({
 }
 
 /**
- * The marker before the row link carries the row's own padding. The link only needs the compact
- * gap from that fixed-width slot to the title.
+ * The gap between a marker slot and the title beside it. Only a row that renders a marker uses it:
+ * the slot carries the row's own padding, so the link after it needs nothing more. A row with no
+ * marker takes that padding itself.
  */
 const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
 

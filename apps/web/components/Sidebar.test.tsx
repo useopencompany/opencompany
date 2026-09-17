@@ -2016,8 +2016,9 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const projects = await findLoadedProjects();
-      // The row's leading status column carries the indent; the link beside it only ever carries
-      // the gap between the two.
+      // The indent lands on whatever leads the row: the status slot when the session has a marker,
+      // and the link itself when it has none. These fixtures are settled and seen, so it is the
+      // link.
       for (const name of ["chat_filed title", /task_filed name/]) {
         const row = within(projects).getByRole("link", { name }).parentElement;
         expect(row?.firstElementChild).toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
