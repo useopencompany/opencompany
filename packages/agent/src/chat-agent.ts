@@ -712,6 +712,9 @@ export function createProductChatToolContext(input: {
     tools.workflows = tool<WorkflowToolInput, unknown, Record<string, unknown>>({
       description: WORKFLOWS_TOOL_DESCRIPTION,
       inputSchema: jsonSchema<WorkflowToolInput>(WORKFLOWS_INPUT_SCHEMA),
+      // This command schema intentionally has optional, operation-specific fields. The
+      // Codex backend otherwise treats every property as required and invents placeholders.
+      strict: false,
       execute: async (raw, context) => {
         visibleToolActivity = true;
         const args = parseWorkflowToolInput(raw);
