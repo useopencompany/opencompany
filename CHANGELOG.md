@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!-- Hold #1924 here until the live WhatsApp pairing, reply, and STOP test is confirmed. -->
+
+### Added
+- try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
+
+## [1.30.0] - 2026-09-17
+
+### Added
+- workspace admins can now create and manage workflows from chat. describe the work and when it should run, then ask to edit, pause, run, or archive it. create one-step workflows with a schedule or manual start; use the editor for more steps, event triggers, model choices, and channels (#1926) — @louis.
+
+### Changed
+- new coding chats remember your last model and reasoning effort in this browser, separately for codex and claude code. existing chats keep their own choices (#1920, #1923) — @louis.
+- connecting a codex subscription as a workspace admin now turns on sharing with your team automatically (#1911) — @louis.
+- plugin and repository mentions are easier to read, with service icons and colors, clearer contrast in sent messages, and labels that line up with the surrounding text (#1910, #1915, #1918) — @louis.
+- the composer now says queue a follow-up while a coding agent works, so it is clear your next message will wait for the current turn (#1922) — @louis.
+- the optional connect mcp prompt no longer appears in the sidebar. find the setup guide in settings → mcp when you need it (#1931) — @louis.
+
+### Fixed
+- finished tasks now stop showing a working indicator and running timer, even when part of the page is slow to update (#1933) — @louis.
+- codex can now ask questions with suggested answers during normal coding chats and tasks. pending questions open automatically so you can answer and let work continue (#1930, #1935) — @louis.
+- replying in a slack thread now resumes a paused task instead of leaving your reply waiting indefinitely (#1925) — @louis.
+- personal workflows can use your personal skills again, including scheduled runs that previously failed before returning a result (#1917) — @louis.
+- connecting a plugin during signup now installs it and opens its account connection in one click (#1916) — @louis.
+- github access in active coding sessions no longer breaks when another session refreshes the shared connection (#1913) — @louis.
+- use your mac's two-finger swipe to go back and forward in the app again (#1929) — @louis.
+
 ## [1.29.0] - 2026-09-16
 
 ### Added
