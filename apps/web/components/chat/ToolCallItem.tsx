@@ -100,9 +100,15 @@ export function ToolCallItem({
       allowActionApproval &&
       onActionApproval,
   );
-  // Summary params can omit recipients or truncate message bodies. Fetch the complete request
-  // automatically, keeping the decision card visible while approval waits for that detail.
-  useHistoricalPresentationDetail(expanded || pendingApproval, detail);
+  const pendingQuestion = Boolean(
+    !readOnly &&
+      tool.name === CODEX_QUESTION_TOOL_NAME &&
+      tool.status === "waiting" &&
+      onCodexAction,
+  );
+  // Summary params can omit recipients, question choices, or message bodies. Fetch the complete
+  // request automatically, keeping the blocking card visible while it waits for that detail.
+  useHistoricalPresentationDetail(expanded || pendingApproval || pendingQuestion, detail);
   const disclosure: ToolCallDisclosure = {
     expanded,
     onToggle: () => {
@@ -142,6 +148,9 @@ export function ToolCallItem({
         detail={detail}
       />
     );
+  }
+  if (pendingQuestion && detail && detail.state !== "loaded") {
+    return <PendingCodexQuestionCard detail={detail} />;
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -581,6 +590,20 @@ type CodexQuestion = {
   isOther: boolean;
   options: Array<{ label: string; description: string }>;
 };
+
+function PendingCodexQuestionCard({ detail }: { detail: HistoricalPresentationDetailController }) {
+  return (
+    <div
+      data-testid="chat-codex-question"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">The coding engine needs your input</div>
+      <div className="mt-2">
+        <HistoricalPresentationDetailStatus detail={detail} />
+      </div>
+    </div>
+  );
+}
 
 function CodexQuestionRow({
   tool,
