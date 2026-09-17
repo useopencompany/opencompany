@@ -38,9 +38,8 @@ produces one immediately. Rotating the key in Jamie and saving the new one keeps
 connection and the same URL, so workflows already bound to it keep firing.
 
 Gmail has no plain webhook — push needs a GCP Pub/Sub topic and a per-mailbox `watch` renewal — so
-`email.received` is delivered by the Gmail history poller that already runs for Brain ingestion. An
-account is polled while it has an enabled ingestion source, an active event trigger, or both, and
-the shared history cursor means neither consumer can be starved by the other. The event binds to
+`email.received` is delivered by the Gmail history poller. An account is polled while it has an
+active event trigger, which since the Brain retirement is the poller's only consumer. The event binds to
 the same personal Gmail connection the plugin page connects; there is no separate Events section.
 
 The `label` filter offers the account's own labels, minus the ones that cannot describe an arriving
@@ -70,8 +69,7 @@ retry attempts and any re-processing idempotent.
 
 Granola API keys require Business or Enterprise API access; Enterprise administrators may need to
 enable key scopes for members. The poller requests only the note summary and metadata for workflow
-events. Full transcripts are fetched separately only for an enabled Brain ingestion subscription,
-after the workflow delivery is durable, so an oversized transcript cannot block the event.
+events; full transcripts are no longer fetched, so an oversized transcript cannot block the event.
 An event-only account is polled only while its owner has an enabled plugin event and an active
 workflow in a workspace they still belong to.
 
@@ -114,11 +112,11 @@ retains the workflow slug used by the existing task contract.
 
 Provider-to-Wiki routing, the Wiki ingestion worker, import writers, source settings, and their UI
 entry points are removed. Old source/import HTTP endpoints return 410 and bookmarks redirect to
-plugin settings. Legacy Brain-specific paths remain scoped to Brain.
+plugin settings.
 
 Migration `0273_retire_wiki_ingestion` disables Wiki sources, marks queued/running Wiki jobs skipped,
-and cancels unfinished Wiki imports. It retains Wiki pages, source records, completed job history,
-and Brain imports. Constraints prevent an older API or runner from re-enabling Wiki sources or
+and cancels unfinished Wiki imports. It retains Wiki pages, source records, and completed job
+history. Constraints prevent an older API or runner from re-enabling Wiki sources or
 queueing new Wiki jobs during a staggered release or application rollback.
 
 An application rollback does not resume canceled ingestion. Restoring it would require an explicit

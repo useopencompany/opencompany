@@ -3,7 +3,7 @@
 Start with:
 
 - [opencompany system map](./system-map.md) — current web, API, runner, Chat, Task,
-  Workflow, Brain, and coding paths.
+  Workflow, Wiki, and coding paths.
 - [Getting started](./getting-started.md) — local prerequisites, branch-isolated setup, and development.
 - [Architecture](./architecture.md) — application, runner, database, and integration boundaries.
 - [Database](./database.md) — Neon branches, Drizzle schemas, and migration rules.

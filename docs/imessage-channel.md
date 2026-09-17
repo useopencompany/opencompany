@@ -27,7 +27,7 @@ even for admins.
 The assistant gets web search and fetch, the wiki tool, skill discovery and use, plugin actions, and
 one channel tool, `imessage_send`, which sends text and/or a tapback reaction to the paired phone and
 can thread a reply under a specific message. At most three sends per turn. Workflows, schedules,
-browser, artifacts, Brain and subagents are not wired and are also fenced server-side.
+browser, artifacts and subagents are not wired and are also fenced server-side.
 
 A Run that a text started carries `settings.imessage` (delivery id, message id, chat id, sender).
 Only such a Run gets the send tool and the texting prompt block; a Run the member typed in the web

@@ -34,7 +34,6 @@ vi.mock("@/components/AppDataProvider", () => ({
       email: "ada@example.com",
       firstName: "Ada",
     },
-    activeBrain: null,
     workspace: { id: "workspace_1" },
     tasks: mocks.tasks,
     schedules: [],

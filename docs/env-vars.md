@@ -27,7 +27,7 @@ mirror an API-owned secret into `/web` unless a current thin relay actually cons
 
 The names-only production audit is recorded in [#1243](https://github.com/useopencompany/opencompany/issues/1243).
 Two web exceptions remain deliberately classified as suspects rather than prune candidates:
-`BLOB_READ_WRITE_TOKEN` backs the cached-client Brain upload adapter. The runner also uses its
+`BLOB_READ_WRITE_TOKEN` backs the cached-client blob upload adapter. The runner also uses its
 `/runner` value for private, bounded durable Plugin data archives; it never places that token in a
 Plugin process environment. `DATABASE_URL` is still reached indirectly by `AppShell`
 integration-state loaders composed from shared packages. The latter violates the intended

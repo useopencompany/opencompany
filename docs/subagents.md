@@ -30,7 +30,7 @@ nothing but the task text. Its summary is the only thing that crosses back.
 
 Inheritance is default-deny, listed in `SUBAGENT_INHERITED_TOOL_NAMES` and
 `SUBAGENT_WITHHELD_TOOL_NAMES` in `packages/agent/src/subagent.ts`. A subagent gets the read-only
-tools — Brain read, Wiki read, web search and fetch, Skills, and integration actions — and nothing
+tools — Wiki read, web search and fetch, Skills, and integration actions — and nothing
 that writes, publishes, schedules, or spawns durable work.
 
 Two consequences are worth stating plainly:

@@ -1,7 +1,7 @@
 # Agent coding guidelines
 
 You're working on opencompany: an AI workspace for chat, durable tasks and workflows,
-connected integrations, Brain knowledge, and cloud coding sessions.
+connected integrations, Wiki knowledge, and cloud coding sessions.
 
 Read the nested `AGENTS.md` files when reading/editing files inside folders that contain it.
 
@@ -39,10 +39,10 @@ The user usually keeps a dev server running. Do not start another one unless ask
 
 - Start in `apps/web` for product and API work.
 - `web` is the Next.js client and composition root. "opencompany runner" means the retained
-  opencompany-domain execution paths inside `apps/runner`. Look first at Brain, task, and chat
+  opencompany-domain execution paths inside `apps/runner`. Look first at the task and chat
   modules, `/internal/goat/*` routes, and the `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` gate. There is no
   separate runner package.
-- Follow shared code into `packages/db/src/*`, `packages/brain`, and
+- Follow shared code into `packages/db/src/*`, `packages/wiki`, and
   `packages/telemetry` as needed. Preserve the isolated legacy-billing and LLM-broker
   compatibility schemas unless a task explicitly retires those contracts.
 - Use `docs/system-map.md` for the current app/runner flow and `bun run dev:web` for the

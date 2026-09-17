@@ -1,7 +1,7 @@
 # opencompany
 
 opencompany is an AI workspace with chat, durable tasks and workflows,
-connected integrations, Brain knowledge, and cloud coding sessions.
+connected integrations, Wiki knowledge, and cloud coding sessions.
 
 ## Stack
 
@@ -39,13 +39,13 @@ See [Getting started](./docs/getting-started.md) for prerequisites and troublesh
 
 - `apps/web` — the opencompany Next.js presentation client and stable public relay surface.
 - `apps/api` — the canonical typed API, application services, and provider ingress handlers.
-- `apps/runner` — opencompany background workers, durable turns, Brain ingestion, and cloud coding.
+- `apps/runner` — opencompany background workers, durable turns, Wiki ingestion, and cloud coding.
 - `apps/docs` — user and API documentation built with Fumadocs.
 - `apps/stripe-webhooks` — local Stripe CLI forwarding for opencompany billing.
 - `apps/marketing` — the public marketing site.
 - `apps/design-system` and `packages/ui` — shared UI development.
 - `packages/db` — opencompany schema plus isolated billing and LLM-broker compatibility schemas.
-- `packages/agent`, `packages/brain`, `packages/telemetry`, `packages/wiki` — opencompany agent, Brain, telemetry, and wiki support.
+- `packages/agent`, `packages/telemetry`, `packages/wiki` — opencompany agent, telemetry, and wiki support.
 - `drizzle` — immutable migration history.
 - `scripts` — local setup, Neon branching, release, and operational checks.
 

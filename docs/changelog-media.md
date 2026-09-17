@@ -27,7 +27,7 @@ two stores:
 | Store | Access | Purpose | Token |
 |---|---|---|---|
 | `opencompany-changelog` | Public | Changelog media, served by direct CDN URL | `CHANGELOG_BLOB_READ_WRITE_TOKEN` (Infisical `prod` + `/release`) |
-| `opencompany-attachments` | Private | Chat attachments, generated artifacts, and Brain assets | `BLOB_READ_WRITE_TOKEN` (API and runner runtimes) |
+| `opencompany-attachments` | Private | Chat attachments and generated artifacts | `BLOB_READ_WRITE_TOKEN` (API and runner runtimes) |
 
 Changelog media never goes through the deploy pipeline — blobs are uploaded at
 authoring time and served straight from Blob's CDN, so CI needs no changes when

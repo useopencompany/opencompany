@@ -14,7 +14,7 @@ An org-less AuthKit mobile session bearer can bootstrap through `GET /v1/identit
 user is synchronized as usual, and `user.onboardedAt` remains the readiness contract: `null` means
 the user must complete web onboarding later; a non-null value with no workspaces is the normal
 no-workspace state. Org-less bearer responses list accessible workspaces but deliberately return no
-active workspace, active Brain, or Brains. `POST /v1/workspaces/{workspaceId}/switch` authorizes an
+active workspace. `POST /v1/workspaces/{workspaceId}/switch` authorizes an
 onboarded user's selection and returns the workspace's WorkOS organization ID so a mobile client can
 refresh into an org-bound session.
 
@@ -56,7 +56,7 @@ Authentication completion forwards the newly sealed browser session and the trus
 The canonical API has three credential profiles:
 
 - Browser cookies are sealed and refreshed through the primary `WORKOS_CLIENT_ID`; only this profile
-  reads the active-workspace and active-Brain preference cookies.
+  reads the active-workspace preference cookie.
 - AuthKit session bearers from the dedicated `WORKOS_MOBILE_CLIENT_ID` verify against WorkOS's fixed
   per-client session JWKS and require signed `sub`, `sid`, and matching `client_id` claims. They may be
   org-less only on verified-identity routes; Actor-tier routes require `org_id`.

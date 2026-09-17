@@ -55,6 +55,11 @@ DROP TABLE IF EXISTS goat.google_drive_watch_channels;
 DROP TABLE IF EXISTS goat.google_drive_sync_cursors;
 --> statement-breakpoint
 
+-- The worker-admission notifier fired only on Brain tables. DROP TABLE takes the
+-- triggers with it but leaves the function behind, so drop it explicitly.
+DROP FUNCTION IF EXISTS goat.notify_brain_worker_admission_v1();
+--> statement-breakpoint
+
 -- The Brain itself, dependants before their parents so every FK unwinds without
 -- CASCADE (an explicit order fails loudly if a new dependant ever appears).
 DROP TABLE IF EXISTS goat.brain_tool_runs;

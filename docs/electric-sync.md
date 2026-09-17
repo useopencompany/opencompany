@@ -11,12 +11,11 @@ predicate.
 
 Current product collections live in domain-specific modules under `apps/web/lib`, including the
 Chat collections in `headless-chat-collections.ts`. Named read models cover Conversations,
-Messages, Runs, Tasks, Workflows, schedules, Brain documents and activity, Wiki, Skills,
+Messages, Runs, Tasks, Workflows, schedules, Wiki, Skills,
 integrations, and related projections. Commands still go through typed `/v1` resources; the runner
 persists durable state before Electric delivers a committed projection.
 
-`brain-ingest-jobs-v1` exposes only bounded activity and normalized result fields. Source metadata
-is read separately through the authorized, bounded Brain source-item resource. Worker leases,
+Job read models expose only bounded activity and normalized result fields. Worker leases,
 provider payloads, credential locators, physical Actor fields, and raw result data do not enter the
 read model.
 
@@ -43,7 +42,7 @@ stream ID and empty disk, then warm and validate shapes before traffic moves.
 
 1. Provision the self-hosted service with a unique replication stream while Electric Cloud remains
    connected. Confirm `/v1/health` reports `active` and the new slot is active with bounded lag.
-2. Warm every named read model through the API proxy and verify Chat, Tasks, Workflows, Brain, Wiki,
+2. Warm every named read model through the API proxy and verify Chat, Tasks, Workflows, Wiki,
    Skills, schedules, and integrations. Postgres is authoritative; no Electric data is copied.
 3. Set prod `/api` `ELECTRIC_URL` to the Render private origin and switch `ELECTRIC_AUTH_MODE` to
    `self-hosted`. Keep both the self-hosted secret and Cloud source credentials during the

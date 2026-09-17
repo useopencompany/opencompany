@@ -68,10 +68,8 @@ dead tuples exceed 20% of the estimated row population.
 
 Existing LISTEN/NOTIFY paths are latency hints over durable polling. PostgreSQL releases before 19
 serialize NOTIFY-adjacent commits on a database-wide lock, so do not add channels or consumers
-without revisiting the architecture; new wakeups use the existing poll+wake pattern. The Brain
-worker listener samples `pg_notification_queue_usage()` once per minute, exports
-`goat.postgres.notify_queue_usage`, and logs a threshold warning at 25% usage. Polling remains the
-correctness path if notifications or the listener fail.
+without revisiting the architecture; new wakeups use the existing poll+wake pattern. Polling remains
+the correctness path if notifications or a listener fail.
 
 ## Canonical execution projections
 
@@ -84,7 +82,7 @@ code must not depend on physical table, planner payload, or lease names.
 The `*_read_model_v1` tables are derived, API-owned Electric projections. Postgres source rows stay
 authoritative, and every public Electric model fixes its server-owned table, columns, predicate,
 Actor, Workspace, and allowed parameters. Clients select only named versions such as
-`chat-conversations-v1`, `tasks-v1`, `workflows-v1`, `brain-documents-v1`, or
+`chat-conversations-v1`, `tasks-v1`, `workflows-v1`, `wiki-pages-v2`, or
 `integration-accounts-v1`; there is no generic web shape selector. Adding or changing a projection
 requires an additive migration, an idempotent backfill when existing rows need it, and authorization
 tests.

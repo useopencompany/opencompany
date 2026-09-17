@@ -23,7 +23,7 @@ sufficient. No per-action database admission requirement or historical transcrip
 The persisted session contract controls rolling deployment behavior. Retained Codex contracts
 v2–v4 and chat contracts v3–v4 receive their original full-schema listings. The MCP adapter exposes
 `describe_actions` only for v5; legacy gateway description requests are rejected. Previous
-approval continuations and legacy Brain capture remain supported.
+approval continuations remain supported.
 
 ## Action budget
 
@@ -59,8 +59,8 @@ External-engine MCP calls use the shared `mcpInvocationId` boundary. JSON-RPC re
 only stable within an actual MCP transport session. The runner's stateless HTTP route has no
 such session: each dispatch receives a server-generated UUID, so restarted or concurrent clients
 cannot collide when their request counters reset. Adding a runner attempt ID is insufficient
-because multiple clients can exist within one attempt. Artifacts, Skills, Wiki, and legacy Brain
-capture use the same identity rule.
+because multiple clients can exist within one attempt. Artifacts, Skills, and Wiki writes use the
+same identity rule.
 
 Transport identity is separate from operation deduplication. The action gateway still atomically
 blocks identical non-idempotent external writes within the durable turn, and task approvals keep
@@ -68,7 +68,7 @@ their saved operation identity and result across resumes. A stateless HTTP redel
 dispatch; JSON-RPC IDs alone do not provide exactly-once execution or result replay.
 
 That gateway claim is derived from the action's own parameters, so it holds regardless of transport
-identity. Wiki, Skill, and legacy Brain writes have no equivalent semantic claim: they deduplicated
+identity. Wiki and Skill writes have no equivalent semantic claim: they deduplicated
 purely on the transport-derived key, so a redelivered stateless dispatch now runs twice (a repeated
 `timeline-add` appends a second entry, a repeated Skill edit publishes a second version). That is
 the deliberate trade for never again collapsing two genuinely different writes from clients whose
