@@ -422,6 +422,10 @@ export type HarnessSpec = {
     // The workspace-scoped workflow slug that spawned this task.
     id: string;
     workspaceId: string;
+    // Company workflows may only use Company standalone Skills. Personal workflows execute as
+    // their owner and may also use that actor's Personal Skills. Optional for persisted harnesses
+    // created before this authorization decision became part of the immutable contract.
+    skillAccess?: "company" | "actor";
     skillIds: string[];
     skillBundleIds: string[];
     pluginIds: string[];

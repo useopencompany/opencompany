@@ -96,6 +96,8 @@ export type WorkspaceWorkflow = {
   name: string;
   description: string;
   steps: WorkflowStep[];
+  scope?: WorkflowScope;
+  createdByUserId?: string | null;
 };
 
 export type WorkflowListItem = {
@@ -245,6 +247,8 @@ export async function getWorkflow(
       scheduleLastRunAt: workflows.scheduleLastRunAt,
       scheduleNextRunAt: workflows.scheduleNextRunAt,
       status: workflows.status,
+      scope: workflows.scope,
+      createdByUserId: workflows.createdByWorkosId,
     })
     .from(workflows)
     .where(
@@ -261,6 +265,8 @@ export async function getWorkflow(
     name: row.name,
     description: row.description,
     steps: workflowStepsWithLegacyFallback(row),
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
     status: row.status,
     trigger: workflowTriggerFromRow(row),
   };
