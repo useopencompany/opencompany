@@ -3930,6 +3930,7 @@ export const IdentityUserSchema = z
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
+    whatsappEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -4000,6 +4001,7 @@ export const UserPreferencesSchema = z
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
+    whatsappEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -4020,6 +4022,7 @@ export const UpdateUserPreferencesBodySchema = z
     subagentsEnabled: z.boolean().optional(),
     pastSessionAccessEnabled: z.boolean().optional(),
     imessageEnabled: z.boolean().optional(),
+    whatsappEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -4266,6 +4269,31 @@ export const ImessageSettingsEnvelopeSchema = z
   .object({ data: ImessageSettingsSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("ImessageSettingsEnvelope");
+
+export const WhatsappSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    lineHandle: z.string().max(64).nullable(),
+    binding: z
+      .object({
+        status: z.enum(["pending", "linked"]),
+        linkCode: z.string().max(12).nullable(),
+        linkCodeExpiresAt: TimestampSchema.nullable(),
+        handle: z.string().max(64).nullable(),
+        conversationId: z.string().max(128).nullable(),
+        linkedAt: TimestampSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("WhatsappSettings");
+export type WhatsappSettingsDto = z.infer<typeof WhatsappSettingsSchema>;
+
+export const WhatsappSettingsEnvelopeSchema = z
+  .object({ data: WhatsappSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WhatsappSettingsEnvelope");
 
 export const SlackBotDestinationSchema = z
   .object({

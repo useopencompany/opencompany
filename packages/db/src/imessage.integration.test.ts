@@ -11,6 +11,12 @@ import {
   startImessageLink,
 } from "./imessage";
 import { createTestPGlite } from "./test-pglite";
+import {
+  acceptWhatsappEvent,
+  completeWhatsappLink,
+  findLinkedWhatsappBinding,
+  startWhatsappLink,
+} from "./whatsapp";
 
 const migrationPath = path.resolve(
   import.meta.dirname,
@@ -29,11 +35,20 @@ describe("iMessage binding lifecycle", () => {
     for (const statement of migration.split("--> statement-breakpoint")) {
       if (statement.trim()) await database.exec(statement);
     }
+    const whatsappMigration = await readFile(
+      migrationPath.replace("0299_imessage_personal_agent", "0300_whatsapp_personal_agent"),
+      "utf8",
+    );
+    for (const statement of whatsappMigration.split("--> statement-breakpoint")) {
+      if (statement.trim()) await database.exec(statement);
+    }
     db = drizzle(database);
   });
 
   beforeEach(async () => {
     await database.exec(`
+      DELETE FROM goat.whatsapp_ingress_receipts;
+      DELETE FROM goat.whatsapp_bindings;
       DELETE FROM goat.imessage_bindings;
       DELETE FROM goat.codex_chat_sessions;
       DELETE FROM goat.chat_sessions;
@@ -99,6 +114,78 @@ describe("iMessage binding lifecycle", () => {
       [linked!.conversationId],
     );
     expect(conversations).toEqual([{ id: linked!.conversationId }]);
+  });
+
+  it("commits webhook receipts with pairing and rolls them back on failure", async () => {
+    await database.exec(
+      "UPDATE goat.users SET whatsapp_enabled = true WHERE workos_user_id = 'enabled_user'",
+    );
+    const pending = await startWhatsappLink(
+      { userWorkosId: "enabled_user", workspaceId: "workspace_1" },
+      db,
+    );
+    const pair = async (tx: any) => {
+      expect(
+        await completeWhatsappLink(
+          { code: pending.linkCode!, handle: "+4915112345678", model: "moonshotai/kimi-k3" },
+          tx,
+        ),
+      ).not.toBeNull();
+    };
+    await expect(
+      acceptWhatsappEvent(
+        "event1",
+        async (tx) => {
+          await pair(tx);
+          throw new Error("rollback");
+        },
+        db,
+      ),
+    ).rejects.toThrow("rollback");
+    expect(await findLinkedWhatsappBinding({ handle: "+4915112345678" }, db)).toBeNull();
+    expect(await acceptWhatsappEvent("event1", pair, db)).toBe(true);
+    expect(
+      await acceptWhatsappEvent(
+        "event1",
+        async () => {
+          throw new Error("duplicate ran");
+        },
+        db,
+      ),
+    ).toBe(false);
+  });
+
+  it("isolates WhatsApp and iMessage bindings for the same member and phone", async () => {
+    await database.exec(
+      "UPDATE goat.users SET whatsapp_enabled = true WHERE workos_user_id = 'enabled_user'",
+    );
+    const owner = { userWorkosId: "enabled_user", workspaceId: "workspace_1" };
+    const imessage = await startImessageLink(owner, db);
+    const whatsapp = await startWhatsappLink(owner, db);
+    expect(whatsapp.linkCode).toMatch(/^\d{12}$/);
+    const phone = { handle: "+4915112345678", model: "moonshotai/kimi-k3" };
+    expect(await completeWhatsappLink({ ...phone, code: imessage.linkCode! }, db)).toBeNull();
+    const first = await completeImessageLink({ ...phone, code: imessage.linkCode! }, db);
+    const second = await completeWhatsappLink({ ...phone, code: whatsapp.linkCode! }, db);
+    expect(first?.conversationId).not.toEqual(second?.conversationId);
+    await deleteImessageBinding(owner, db);
+    expect((await findLinkedWhatsappBinding({ handle: phone.handle }, db))?.binding.id).toBe(
+      second?.id,
+    );
+  });
+
+  it("does not pair a member who left the selected workspace", async () => {
+    const pending = await startImessageLink(
+      { userWorkosId: "enabled_user", workspaceId: "workspace_1" },
+      db,
+    );
+    await database.exec("DELETE FROM goat.workspace_members");
+    expect(
+      await completeImessageLink(
+        { code: pending.linkCode!, handle: "+4915112345678", model: "moonshotai/kimi-k3" },
+        db,
+      ),
+    ).toBeNull();
   });
 
   it("refuses expired codes and members whose feature was disabled", async () => {

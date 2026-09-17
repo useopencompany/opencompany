@@ -32,8 +32,10 @@ export type RunnerEnv = {
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
   exaApiKey: string | undefined;
-  // messages.dev line for the iMessage personal assistant. Both are needed to send; absent means
-  // the channel is not configured on this deployment.
+  // Provider configuration for personal assistant phone channels.
+  kapsoApiKey?: string | undefined;
+  kapsoPhoneNumberId?: string | undefined;
+  whatsappLineHandle?: string | undefined;
   messagesApiKey?: string | undefined;
   messagesLineHandle?: string | undefined;
   browserEnabled: boolean;
@@ -100,6 +102,9 @@ export function loadEnv(): RunnerEnv {
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
+    kapsoApiKey: optionalEnv("KAPSO_API_KEY"),
+    kapsoPhoneNumberId: optionalEnv("KAPSO_PHONE_NUMBER_ID"),
+    whatsappLineHandle: optionalEnv("WHATSAPP_LINE_HANDLE"),
     messagesApiKey: optionalEnv("MESSAGES_API_KEY"),
     messagesLineHandle: optionalEnv("MESSAGES_LINE_HANDLE"),
     browserEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_BROWSER_ENABLED", false),

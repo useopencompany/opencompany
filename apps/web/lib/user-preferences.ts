@@ -20,6 +20,7 @@ type UserPreferences = {
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -104,4 +105,11 @@ export async function updateImessageAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.imessageEnabled } as const;
+}
+
+export async function updateWhatsappAction(enabled: boolean) {
+  const preferences = await patchPreferences({ whatsappEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.whatsappEnabled } as const;
 }

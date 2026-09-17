@@ -28,6 +28,7 @@ export type UserPreferenceSet = {
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<
@@ -63,6 +64,7 @@ const PREFERENCE_COLUMNS = {
   subagentsEnabled: users.subagentsEnabled,
   pastSessionAccessEnabled: users.pastSessionAccessEnabled,
   imessageEnabled: users.imessageEnabled,
+  whatsappEnabled: users.whatsappEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -87,6 +89,7 @@ export function createUserSettingsService(input: {
         "subagentsEnabled",
         "pastSessionAccessEnabled",
         "imessageEnabled",
+        "whatsappEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

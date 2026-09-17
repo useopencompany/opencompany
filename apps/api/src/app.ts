@@ -127,6 +127,8 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WhatsappIngressService } from "./whatsapp-ingress";
+import type { WhatsappSettingsService } from "./whatsapp-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
 import type { WorkflowAvatarService } from "./workflow-avatars";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
@@ -221,6 +223,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
   imessageSettings?: ImessageSettingsService;
+  whatsappSettings?: WhatsappSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleAdminMcp?: GoogleAdminMcpService;
@@ -252,6 +255,7 @@ export type CreateApiAppInput = {
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
   imessageIngress?: ImessageIngressService;
+  whatsappIngress?: WhatsappIngressService;
   stripeIngress?: StripeIngressService;
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
@@ -2444,6 +2448,24 @@ export function createApiApp(input: CreateApiAppInput) {
       if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
       return c.json({ data: await input.imessageSettings.unlink(actor), meta }, 200);
     },
+    getWhatsappSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.get(actor), meta }, 200);
+    },
+    startWhatsappLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.startLink(actor), meta }, 200);
+    },
+    unlinkWhatsapp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.unlink(actor), meta }, 200);
+    },
     updateMcpSetup: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -3324,6 +3346,11 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.imessageIngress;
     app.use("/webhooks/imessage/events", ingressBodyLimit(256 * 1024));
     app.post("/webhooks/imessage/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.whatsappIngress) {
+    const ingress = input.whatsappIngress;
+    app.use("/webhooks/whatsapp/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/whatsapp/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));

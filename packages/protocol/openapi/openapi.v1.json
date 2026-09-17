@@ -4529,6 +4529,9 @@
           "imessageEnabled": {
             "type": "boolean"
           },
+          "whatsappEnabled": {
+            "type": "boolean"
+          },
           "wikiEnabled": {
             "type": "boolean",
             "enum": [
@@ -4597,6 +4600,7 @@
           "subagentsEnabled",
           "pastSessionAccessEnabled",
           "imessageEnabled",
+          "whatsappEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -10695,6 +10699,9 @@
           },
           "imessageEnabled": {
             "type": "boolean"
+          },
+          "whatsappEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10709,7 +10716,8 @@
           "sidebarProjectsEnabled",
           "subagentsEnabled",
           "pastSessionAccessEnabled",
-          "imessageEnabled"
+          "imessageEnabled",
+          "whatsappEnabled"
         ],
         "additionalProperties": false
       },
@@ -10764,6 +10772,9 @@
             "type": "boolean"
           },
           "imessageEnabled": {
+            "type": "boolean"
+          },
+          "whatsappEnabled": {
             "type": "boolean"
           }
         },
@@ -10848,6 +10859,88 @@
         "additionalProperties": false
       },
       "ImessageSettings": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "lineHandle": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "binding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "linked"
+                ]
+              },
+              "linkCode": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 12
+              },
+              "linkCodeExpiresAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "handle": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 64
+              },
+              "conversationId": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 128
+              },
+              "linkedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "status",
+              "linkCode",
+              "linkCodeExpiresAt",
+              "handle",
+              "conversationId",
+              "linkedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "configured",
+          "lineHandle",
+          "binding"
+        ],
+        "additionalProperties": false
+      },
+      "WhatsappSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WhatsappSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WhatsappSettings": {
         "type": "object",
         "properties": {
           "configured": {
@@ -24450,6 +24543,78 @@
         }
       }
     },
+    "/v1/me/whatsapp": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's WhatsApp assistant channel state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone is unlinked; the Conversation and its history remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/me/imessage/link": {
       "post": {
         "tags": [
@@ -24470,6 +24635,43 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/whatsapp/link": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A fresh link code the user texts to the opencompany line.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
                 }
               }
             }

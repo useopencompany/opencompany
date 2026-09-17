@@ -12,6 +12,7 @@ import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { imessageConfig } from "@opencompany/agent/integrations/imessage";
+import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -94,6 +95,8 @@ import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWhatsappIngress } from "./whatsapp-ingress";
+import { createWhatsappSettingsService } from "./whatsapp-settings";
 import { createWikiControlService } from "./wiki-control";
 import { createWorkflowAvatarService } from "./workflow-avatars";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
@@ -248,6 +251,11 @@ const app = createApiApp({
     db: database.db,
     lineHandle: () => imessageConfig()?.lineHandle ?? null,
   }),
+  whatsappSettings: createWhatsappSettingsService({
+    db: database.db,
+    lineHandle: () =>
+      process.env.KAPSO_WEBHOOK_SECRET?.trim() ? (whatsappConfig()?.lineHandle ?? null) : null,
+  }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
     // loopback HTTP. The gateway resolves wiki access and reauthorizes the actor
@@ -397,6 +405,11 @@ const app = createApiApp({
     runner: runnerClient,
   }),
   imessageIngress: createImessageIngress({
+    db: database.db,
+    chat,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+  }),
+  whatsappIngress: createWhatsappIngress({
     db: database.db,
     chat,
     defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",

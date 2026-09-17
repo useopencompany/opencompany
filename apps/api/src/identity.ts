@@ -171,6 +171,7 @@ export function createIdentityService(input: {
         subagentsEnabled: user.subagentsEnabled,
         pastSessionAccessEnabled: user.pastSessionAccessEnabled,
         imessageEnabled: user.imessageEnabled,
+        whatsappEnabled: user.whatsappEnabled,
         wikiEnabled: true as const,
         taskViewMode: user.taskViewMode,
         taskTimeRange: user.taskTimeRange,

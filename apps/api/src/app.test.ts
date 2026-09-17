@@ -3482,6 +3482,7 @@ describe("canonical Hono API", () => {
             subagentsEnabled: false,
             pastSessionAccessEnabled: false,
             imessageEnabled: false,
+            whatsappEnabled: false,
           }),
         },
       });
@@ -3550,6 +3551,7 @@ describe("canonical Hono API", () => {
         subagentsEnabled: false,
         pastSessionAccessEnabled: false,
         imessageEnabled: false,
+        whatsappEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3581,6 +3583,7 @@ describe("canonical Hono API", () => {
       subagentsEnabled: false,
       pastSessionAccessEnabled: false,
       imessageEnabled: false,
+      whatsappEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
