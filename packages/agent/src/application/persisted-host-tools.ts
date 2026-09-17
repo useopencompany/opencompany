@@ -53,9 +53,15 @@ export type PersistedHostRuntime = {
   defer: (work: Promise<unknown>) => void;
   gatewayApiKey: string;
   /**
-   * Executes a `wiki` tool command through the API-owned boundary. The runner
+   * Executes workflow and wiki commands through the API-owned boundary. The runner
    * injects an HTTP client that reaches apps/api; there is no direct-DB path.
    */
+  executeWorkflowCommand?: (input: {
+    workspaceId: string;
+    actorId: string;
+    toolInput: Record<string, unknown>;
+    idempotencyKey: string;
+  }) => Promise<unknown>;
   executeWikiCommand?: (input: {
     workspaceId: string;
     actorId: string;
@@ -177,6 +183,11 @@ export function executePersistedChatHostTool(input: {
         ...(wikiId ? { wikiId } : {}),
         idempotencyKey,
       });
+    },
+    manageWorkflows: (command) => {
+      if (!input.runtime.executeWorkflowCommand)
+        throw new Error("Workflow management is unavailable.");
+      return input.runtime.executeWorkflowCommand(command);
     },
     postSlackMessage: postWorkflowSlackMessage,
     writeArtifact: () => {

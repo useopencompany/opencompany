@@ -778,3 +778,60 @@ describe("action discovery tools", () => {
     ).resolves.toMatchObject({ ok: true });
   });
 });
+
+describe("consolidated workflow tool", () => {
+  it("authors with an empty catalog, forwards the tool-call identity, and hides the overlapping run tool", async () => {
+    const manage = vi.fn(async () => ({ ok: true }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog: [], manage, execute: vi.fn() },
+    });
+    expect(context.tools).toHaveProperty("workflows");
+    expect(context.tools).not.toHaveProperty("start_workflow");
+    const execute = context.tools.workflows!.execute!;
+    await execute(
+      { command: "create", workflow: { name: "Draft" } },
+      { toolCallId: "call_1", messages: [], context: {} },
+    );
+    expect(manage).toHaveBeenCalledWith(
+      { command: "create", name: "Draft" },
+      { toolCallId: "call_1" },
+    );
+  });
+  it("runs a just-created workflow from live readback and preserves one run per turn", async () => {
+    const run = vi.fn(async () => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "New monitor",
+      prompt: "Run",
+    }));
+    const manage = vi.fn(async (args: { workflowId?: string | undefined }) => ({
+      ok: true,
+      workflow: { slug: args.workflowId, status: "active" },
+    }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog: [], manage, execute: run },
+    });
+    const execute = context.tools.workflows!.execute!;
+    await expect(
+      execute(
+        { command: "run", workflowId: "new-monitor", prompt: "Run" },
+        { toolCallId: "run_1", messages: [], context: {} },
+      ),
+    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(
+      execute(
+        { command: "run", workflowId: "new-monitor", prompt: "Run" },
+        { toolCallId: "run_2", messages: [], context: {} },
+      ),
+    ).resolves.toMatchObject({ status: "already_started" });
+    await expect(
+      execute(
+        { command: "run", workflowId: "other", prompt: "Run" },
+        { toolCallId: "run_3", messages: [], context: {} },
+      ),
+    ).rejects.toThrow("Only one workflow");
+    expect(run).toHaveBeenCalledOnce();
+  });
+});

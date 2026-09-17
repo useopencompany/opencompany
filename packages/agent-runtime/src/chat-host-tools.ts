@@ -6,6 +6,7 @@ export type ChatHostToolOperation =
   | "edit_workspace_skill"
   | "workspace_skills"
   | "start_workflow"
+  | "workflows"
   | "browser_use_profile"
   | "browser_end_profile"
   | "browser"

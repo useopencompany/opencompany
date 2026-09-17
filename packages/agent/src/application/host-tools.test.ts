@@ -3,6 +3,7 @@ import {
   type ChatHostContext,
   type ChatHostToolServiceDependencies,
   executeChatHostToolService,
+  workflowCommandIdempotencyKey,
   workspaceSkillIdempotencyKey,
 } from "./host-tools";
 
@@ -115,34 +116,56 @@ describe("opencompany Chat Task host tools", () => {
     ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: false } });
   });
 
-  it("rejects direct start_workflow calls from tasks before any side effect", async () => {
+  it("does not allow management calls to bypass the one-run-per-turn dispatcher", async () => {
+    const manageWorkflows = vi.fn();
     const dependencies = testDependencies({
-      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+      loadContext: vi.fn(async () => context),
+      manageWorkflows,
     });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_workflow",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            taskConversation: false,
-            name: "Research",
-            prompt: "Research the requested topic.",
-            model: "moonshotai/kimi-k2.6",
-            engine: "opencompany",
-            workflowId: "research",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: "Tasks cannot start workflows. Use a main chat instead.",
+    const result = await executeChatHostToolService({
+      command: {
+        operation: "workflows",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: { command: "run", workflowId: "monitor", prompt: "Run" },
+      },
+      dependencies,
     });
-    expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("run dispatcher") });
+    expect(manageWorkflows).not.toHaveBeenCalled();
   });
+
+  it.each(["start_workflow", "workflows"] as const)(
+    "rejects direct %s calls from tasks before any side effect",
+    async (operation) => {
+      const dependencies = testDependencies({
+        loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+      });
+
+      await expect(
+        executeChatHostToolService({
+          command: {
+            operation,
+            sessionId: "runtime_1",
+            runId: "run_1",
+            input: {
+              taskConversation: false,
+              name: "Research",
+              prompt: "Research the requested topic.",
+              model: "moonshotai/kimi-k2.6",
+              engine: "opencompany",
+              workflowId: "research",
+            },
+          },
+          dependencies,
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        error: "Tasks cannot start workflows. Use a main chat instead.",
+      });
+      expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
     const dependencies = testDependencies({
@@ -620,3 +643,26 @@ function testDependencies(
     ...overrides,
   };
 }
+
+describe("workflow creation identity", () => {
+  it("replays a model retry with a different tool-call ID and equivalent defaults", () => {
+    const first = workflowCommandIdempotencyKey("turn_1", "call_1", {
+      command: "create",
+      name: "Monitor",
+    });
+    expect(
+      workflowCommandIdempotencyKey("turn_1", "call_2", {
+        name: "Monitor",
+        scope: "personal",
+        status: "draft",
+        command: "create",
+      }),
+    ).toBe(first);
+    expect(
+      workflowCommandIdempotencyKey("turn_2", "call_1", { command: "create", name: "Monitor" }),
+    ).not.toBe(first);
+    expect(
+      workflowCommandIdempotencyKey("turn_1", "call_2", { command: "create", name: "Other" }),
+    ).not.toBe(first);
+  });
+});

@@ -6876,3 +6876,53 @@ describe("retired Wiki ingestion endpoints", () => {
     });
   });
 });
+
+describe("POST /internal/workflows/commands", () => {
+  const request = (command: unknown, token = "workflow-test-token") => ({
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "Idempotency-Key": "workflow:turn:call",
+    },
+    body: JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command }),
+  });
+  it("requires the internal credential before resolving the actor", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }, "wrong")))
+        .status,
+    ).toBe(401);
+    expect(resolveWikiServiceActor).not.toHaveBeenCalled();
+  });
+  it("reauthorizes workspace membership and rejects malformed commands", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    const read = await app.request("/internal/workflows/commands", request({ command: "list" }));
+    expect(read.status).toBe(200);
+    expect(resolveWikiServiceActor).toHaveBeenCalledWith(
+      expect.objectContaining({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
+    );
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "oops" }))).status,
+    ).toBe(400);
+  });
+  it("does not grant access to a caller-supplied workspace", async () => {
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor: async () => {
+        throw new ApiError(403, "forbidden", "Not a workspace member");
+      },
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }))).status,
+    ).toBe(403);
+  });
+});

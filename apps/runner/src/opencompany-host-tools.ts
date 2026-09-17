@@ -27,6 +27,7 @@ import type {
 } from "@opencompany/agent-runtime";
 import { assertSafeRelativePath } from "@opencompany/agent-runtime";
 import { executeApiWikiCommand } from "./api-wiki-client";
+import { executeApiWorkflowCommand } from "./api-workflow-client";
 import { publishInBandChatArtifact } from "./chat-artifacts";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { getDb } from "./db";
@@ -183,10 +184,11 @@ export async function loadHostTools(
           },
         }
       : {}),
-    ...(bootstrap.automationToolsEnabled && bootstrap.workflows.length
+    ...(bootstrap.automationToolsEnabled
       ? {
           workflows: {
             catalog: bootstrap.workflows,
+            manage: (input, toolContext) => call("workflows", input, toolContext.toolCallId),
             execute: (input) => call("start_workflow", input) as Promise<StartedTask>,
           },
         }
@@ -276,6 +278,13 @@ async function callGateway(
       gatewayApiKey: context.env.vercelAiGatewayApiKey,
       // Wiki commands cross the authenticated HTTP boundary into apps/api; the
       // runner never touches the wiki database directly.
+      executeWorkflowCommand: (workflowInput) =>
+        executeApiWorkflowCommand({
+          ...workflowInput,
+          origin: context.env.apiOrigin,
+          token: context.env.apiInternalToken,
+          signal: context.signal,
+        }),
       executeWikiCommand: (wikiInput) =>
         executeApiWikiCommand({
           origin: context.env.apiOrigin,

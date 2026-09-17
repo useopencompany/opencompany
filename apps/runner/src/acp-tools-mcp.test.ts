@@ -946,3 +946,60 @@ describe("runner ACP tools MCP", () => {
     }
   });
 });
+
+describe("workflow authoring over MCP", () => {
+  it.each([false, true])(
+    "only exposes authoring in interactive chat (task=%s)",
+    async (taskConversation) => {
+      let currentTask = taskConversation;
+      const executeWorkflowCommand = vi.fn(async () => ({ ok: true, operation: "created" }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize: async () => ({ ...authorized, taskConversation: currentTask }),
+        executeWorkflowCommand,
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP server");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "workflow-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.some((tool) => tool.name === "workflows")).toBe(
+          !taskConversation,
+        );
+        if (!taskConversation) {
+          const result = await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Draft" } },
+          });
+          expect(result.isError).not.toBe(true);
+          expect(executeWorkflowCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+              actorId: "user_1",
+              workspaceId: "workspace_1",
+              toolInput: { command: "create", name: "Draft" },
+              idempotencyKey: expect.stringMatching(/^agent-workflow:/),
+            }),
+          );
+          currentTask = true;
+          await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Blocked" } },
+          });
+          expect(executeWorkflowCommand).toHaveBeenCalledOnce();
+        }
+      } finally {
+        await client.close();
+      }
+    },
+  );
+});
