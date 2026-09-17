@@ -788,6 +788,7 @@ describe("consolidated workflow tool", () => {
     });
     expect(context.tools).toHaveProperty("workflows");
     expect(context.tools).not.toHaveProperty("start_workflow");
+    expect(context.tools.workflows).toMatchObject({ strict: false });
     const execute = context.tools.workflows!.execute!;
     await execute(
       { command: "create", workflow: { name: "Draft" } },
