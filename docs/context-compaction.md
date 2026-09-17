@@ -37,11 +37,13 @@ intentionally conservative for ordinary prose and code. Compaction starts at 80%
 catalog context window, while always reserving at least 16,384 tokens.
 
 The runner walks backward over whole user turns and retains up to an estimated 20,000-token recent
-tail, always keeping the current turn. It asks the selected conversation model for a structured
-checkpoint of the older segment, capped at 4,096 output tokens. The summary prompt explicitly asks
-for current objectives, constraints, decisions, unresolved approvals, exact tool/action IDs, and
-next steps. System/workflow instructions remain outside message history and are passed verbatim to
-the next model call; the current user request and retained tail also remain verbatim.
+tail, always keeping the current turn. The exact tail budget is reduced when the system prompt,
+advertised tools, and reserved summary need more of the selected model's window. It asks the
+selected conversation model for a structured checkpoint of the older segment, capped at 4,096
+output tokens. The summary prompt explicitly asks for current objectives, constraints, decisions,
+unresolved approvals, exact tool/action IDs, and next steps. System/workflow instructions remain
+outside message history and are passed verbatim to the next model call; the current user request
+and retained tail also remain verbatim.
 
 `goat.chat_context_compactions` holds one row per chat. On a later pass, the previous checkpoint and
 newly aged-out messages are summarized together and the same row is replaced, so summaries cannot
