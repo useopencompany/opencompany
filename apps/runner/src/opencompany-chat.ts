@@ -103,6 +103,7 @@ import {
 import {
   CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
+  ContextCompactionCapacityError,
   compactProductChatContextIfNeeded,
 } from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
@@ -346,6 +347,16 @@ export async function runProductChatTurn(input: {
         chat_session_id: session.chatSessionId,
         model: runtime.model,
         error: errorMessage(error),
+        ...(error instanceof ContextCompactionCapacityError
+          ? {
+              context_window_tokens: error.diagnostics.contextWindowTokens,
+              fixed_context_tokens: error.diagnostics.fixedContextTokens,
+              available_tail_tokens: error.diagnostics.availableTailTokens,
+              retained_message_count: error.diagnostics.retainedMessageCount,
+              estimated_tokens_before: error.diagnostics.estimatedTokensBefore,
+              estimated_tokens_after: error.diagnostics.estimatedTokensAfter,
+            }
+          : {}),
       });
       throw error;
     }
