@@ -10,6 +10,7 @@ import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-trans
 import { createDictationTicket } from "./dictation-auth";
 import { cancelDopplerAuth, pollDopplerAuthFlow, startDopplerAuthFlow } from "./doppler-auth";
 import type { RunnerEnv } from "./env";
+import { registerGitHubBrokerRoutes } from "./github-broker";
 import { planHarnessForTask } from "./harness";
 import { getHarnessPlannerContextForRunner } from "./harness-planner";
 import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-auth";
@@ -58,6 +59,7 @@ export function createServer(
   });
 
   registerAcpToolsMcpRoute(app, env);
+  registerGitHubBrokerRoutes(app, { secret: env.internalToken });
 
   app.get("/healthz", async () => ({
     ok: true,

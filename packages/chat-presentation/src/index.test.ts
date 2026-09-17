@@ -54,6 +54,48 @@ describe("Redis Chat presentation stream", () => {
     await stream.close();
   });
 
+  it("does not apply the command timeout while establishing a connection", async () => {
+    const onError = vi.fn();
+    const exec = vi.fn(async () => []);
+    const client = fakeClient({
+      connect: vi.fn(async () => new Promise((resolve) => setTimeout(resolve, 10))),
+      exec,
+    });
+    const stream = new RedisChatPresentationStream({
+      url: "redis://slow-connect",
+      createClient: () => client,
+      commandTimeoutMs: 5,
+      onError,
+    });
+
+    stream.publish(frame());
+    await eventually(() => expect(exec).toHaveBeenCalledOnce());
+    expect(onError).not.toHaveBeenCalled();
+    await stream.close();
+  });
+
+  it("fails open when a connection never finishes its handshake", async () => {
+    const onError = vi.fn();
+    const stream = new RedisChatPresentationStream({
+      url: "redis://wedged",
+      createClient: () => fakeClient({ connect: vi.fn(() => new Promise<never>(() => undefined)) }),
+      connectTimeoutMs: 5,
+      onError,
+    });
+
+    await expect(stream.read({ runId: "run_1" })).resolves.toMatchObject({
+      status: "unavailable",
+      entries: [],
+    });
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "read",
+        error: expect.objectContaining({ name: "RedisPresentationConnectTimeoutError" }),
+      }),
+    );
+    await stream.close();
+  });
+
   it("coalesces queued deltas and recovers after a mid-stream failure", async () => {
     let clock = 0;
     const onError = vi.fn();
@@ -104,7 +146,12 @@ describe("Redis Chat presentation stream", () => {
       status: "unavailable",
       entries: [],
     });
-    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "read",
+        error: expect.objectContaining({ name: "RedisPresentationCommandTimeoutError" }),
+      }),
+    );
     await stream.close();
   });
 

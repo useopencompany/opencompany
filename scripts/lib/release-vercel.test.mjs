@@ -20,6 +20,7 @@ import {
   surfaceConfig,
   validateProject,
   vercelCurlArgs,
+  vercelDeployArgs,
 } from "./release-vercel.mjs";
 
 test("validates the web project root and skew protection", () => {
@@ -139,5 +140,26 @@ test("targets an immutable Vercel URL without forwarding global flags to curl", 
     "curl",
     "https://web.example.vercel.app/api/healthz",
     "--yes",
+  ]);
+});
+
+test("archives prebuilt Vercel deployments to avoid per-file upload limits", () => {
+  assert.deepEqual(vercelDeployArgs({ token: "token", teamId: "team", projectId: "project" }), [
+    "vercel",
+    "deploy",
+    "--prebuilt",
+    "--archive=tgz",
+    "--prod",
+    "--no-wait",
+    "--skip-domain",
+    "--yes",
+    "--format",
+    "json",
+    "--token",
+    "token",
+    "--scope",
+    "team",
+    "--project",
+    "project",
   ]);
 });
