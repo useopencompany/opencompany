@@ -276,17 +276,13 @@ function preparedTurns(
   const modelStarts = messages.flatMap((message, index) =>
     message.role === "user" ? [index] : [],
   );
-  if (
-    !rowStarts.length ||
-    rowStarts.length !== modelStarts.length ||
-    rowStarts[0] !== 0 ||
-    modelStarts[0] !== 0
-  ) {
+  if (!rowStarts.length || rowStarts.length !== modelStarts.length) {
     throw new Error("Cannot compact conversation: replay does not preserve user-turn boundaries.");
   }
   return rowStarts.map((start, index) => ({
-    rows: rows.slice(start, rowStarts[index + 1]),
-    messages: messages.slice(modelStarts[index], modelStarts[index + 1]),
+    // Keep any assistant prelude with the first user turn; never discard canonical rows.
+    rows: rows.slice(index === 0 ? 0 : start, rowStarts[index + 1]),
+    messages: messages.slice(index === 0 ? 0 : modelStarts[index], modelStarts[index + 1]),
   }));
 }
 

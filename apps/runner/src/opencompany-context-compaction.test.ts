@@ -480,6 +480,30 @@ describe("opencompany context compaction", () => {
     },
   );
 
+  it("keeps an assistant prelude when partitioning historical turns", async () => {
+    const rows = [
+      storedMessage({ id: "welcome", role: "assistant", content: "Welcome message" }),
+      ...conversation(6, 8_000),
+    ];
+    const summarize = vi.fn(async (_messages: ModelMessage[]) => ({ text: "Checkpoint" }));
+    const result = await compactProductChatContextIfNeeded({
+      storedMessages: rows,
+      currentUserMessageId: "user_6",
+      modelId: "openai/gpt-5.5",
+      contextWindowTokens: 50_000,
+      system: "system",
+      tools: {},
+      previousState: null,
+      toModelMessages,
+      summarize,
+      persist: vi.fn(),
+    });
+    expect(result.compacted).toBe(true);
+    expect(JSON.stringify(summarize.mock.calls)).toContain("Welcome message");
+    expect(result.state?.compactedFromMessageId).toBe("welcome");
+    expect(result.state?.firstRetainedMessageId).toMatch(/^user_/);
+  });
+
   it("preserves complete assistant/tool exchanges in the retained model input", async () => {
     const rows = conversation(4, 30_000);
     rows.push(storedMessage({ id: "current", role: "user", content: "Continue" }));
