@@ -7,6 +7,8 @@ import type {
 import type { ModelMessage } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
+  ContextCompactionCapacityError,
   compactProductChatContextIfNeeded,
   contextCompactionThreshold,
   contextWindowTokensForModel,
@@ -68,6 +70,82 @@ describe("opencompany context compaction", () => {
     expect(result.state!.estimatedTokensAfter).toBeLessThan(result.state!.estimatedTokensBefore);
     expect(JSON.stringify(messages)).toBe(originalTranscript);
     expect(persist).toHaveBeenCalledOnce();
+  });
+
+  it("shrinks the recent tail when fixed context leaves less than the default tail budget", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_1",
+        role: "user",
+        content: `old-request ${"u".repeat(8_000)}`,
+      }),
+      storedMessage({
+        id: "assistant_1",
+        role: "assistant",
+        content: `old-response ${"a".repeat(8_000)}`,
+      }),
+      storedMessage({
+        id: "user_2",
+        role: "user",
+        content: "current request must remain verbatim",
+      }),
+    ];
+    const summary = "s".repeat(CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS * 4);
+    const persist = vi.fn(async () => undefined);
+
+    const result = await compactProductChatContextIfNeeded({
+      storedMessages: messages,
+      currentUserMessageId: "user_2",
+      modelId: "anthropic/claude-sonnet-5",
+      contextWindowTokens: 50_000,
+      system: "i".repeat(68_000),
+      tools: {},
+      previousState: null,
+      toModelMessages,
+      summarize: async () => ({ text: summary }),
+      persist,
+    });
+
+    expect(result.compacted).toBe(true);
+    expect(result.state?.compactedThroughMessageId).toBe("assistant_1");
+    expect(result.state?.firstRetainedMessageId).toBe("user_2");
+    expect(result.state!.estimatedTokensAfter).toBeLessThan(50_000);
+    expect(JSON.stringify(result.messages)).toContain("current request must remain verbatim");
+    expect(JSON.stringify(result.messages)).not.toContain("old-request");
+    expect(persist).toHaveBeenCalledOnce();
+  });
+
+  it("reports capacity diagnostics without including context content", async () => {
+    const persist = vi.fn();
+    const result = compactProductChatContextIfNeeded({
+      storedMessages: [
+        storedMessage({ id: "user_1", role: "user", content: "historical request" }),
+        storedMessage({ id: "assistant_1", role: "assistant", content: "historical response" }),
+        storedMessage({ id: "user_2", role: "user", content: "current request" }),
+      ],
+      currentUserMessageId: "user_2",
+      modelId: "anthropic/claude-sonnet-5",
+      contextWindowTokens: 50_000,
+      system: "i".repeat(96_000),
+      tools: {},
+      previousState: null,
+      toModelMessages,
+      summarize: async () => ({
+        text: "s".repeat(CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS * 4),
+      }),
+      persist,
+    });
+
+    await expect(result).rejects.toMatchObject({
+      name: ContextCompactionCapacityError.name,
+      diagnostics: {
+        contextWindowTokens: 50_000,
+        availableTailTokens: 0,
+        retainedMessageCount: 1,
+      },
+    });
+    await expect(result).rejects.not.toThrow(/historical request|current request/);
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it("merges the previous checkpoint with newly aged-out turns instead of stacking summaries", async () => {

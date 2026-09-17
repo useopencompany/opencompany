@@ -10,6 +10,11 @@ const CONTEXT_HEADROOM_RATIO = 0.2;
 const RECENT_TAIL_TOKEN_BUDGET = 20_000;
 const APPROXIMATE_BYTES_PER_TOKEN = 2;
 const MIN_TOOL_DEFINITION_TOKENS = 256;
+// A 4,096-token summary can serialize to roughly twice as many tokens under the deliberately
+// conservative two-bytes-per-token estimator. Reserve that full estimated footprint before
+// choosing the verbatim tail so compaction cannot retain history that the rebuilt request cannot
+// afford.
+const CONTEXT_COMPACTION_SUMMARY_ESTIMATE_TOKENS = CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS * 2;
 
 export const CONTEXT_COMPACTION_SYSTEM_PROMPT = `You create a checkpoint of historical conversation so another model can continue the work.
 
@@ -32,6 +37,23 @@ export type ContextCompactionResult = {
   state: ProductChatContextCompactionState | null;
   usage?: LanguageModelUsage;
 };
+
+export class ContextCompactionCapacityError extends Error {
+  constructor(
+    message: string,
+    readonly diagnostics: {
+      contextWindowTokens: number;
+      fixedContextTokens: number;
+      availableTailTokens: number;
+      retainedMessageCount: number;
+      estimatedTokensBefore: number;
+      estimatedTokensAfter: number;
+    },
+  ) {
+    super(message);
+    this.name = "ContextCompactionCapacityError";
+  }
+}
 
 export function contextWindowTokensForModel(modelId: string) {
   return (
@@ -110,7 +132,21 @@ export async function compactProductChatContextIfNeeded(input: {
     };
   }
 
-  const tailStart = selectRecentTailStart(activeMessages);
+  const fixedContextTokens = estimateAssembledContextTokens({
+    system: input.system,
+    messages: [],
+    tools: input.tools,
+  });
+  const availableTailTokens = Math.max(
+    0,
+    contextCompactionThreshold(contextWindowTokens) -
+      fixedContextTokens -
+      CONTEXT_COMPACTION_SUMMARY_ESTIMATE_TOKENS,
+  );
+  const tailStart = selectRecentTailStart(
+    activeMessages,
+    Math.min(RECENT_TAIL_TOKEN_BUDGET, availableTailTokens),
+  );
   const messagesToCompact = activeMessages.slice(0, tailStart);
   const retainedMessages = activeMessages.slice(tailStart);
   if (messagesToCompact.length === 0 || retainedMessages.length === 0) {
@@ -138,8 +174,16 @@ export async function compactProductChatContextIfNeeded(input: {
     tools: input.tools,
   });
   if (estimatedTokensAfter >= contextWindowTokens) {
-    throw new Error(
+    throw new ContextCompactionCapacityError(
       `opencompany context compaction could not fit the preserved context within the ${contextWindowTokens}-token model window.`,
+      {
+        contextWindowTokens,
+        fixedContextTokens,
+        availableTailTokens,
+        retainedMessageCount: retainedMessages.length,
+        estimatedTokensBefore,
+        estimatedTokensAfter,
+      },
     );
   }
 
@@ -192,7 +236,7 @@ function messagesAfterPreviousCompaction(
   };
 }
 
-function selectRecentTailStart(messages: readonly StoredChatMessage[]) {
+function selectRecentTailStart(messages: readonly StoredChatMessage[], tokenBudget: number) {
   const turnStarts = messages.flatMap((message, index) => (message.role === "user" ? [index] : []));
   if (turnStarts.length === 0) return 0;
 
@@ -201,7 +245,7 @@ function selectRecentTailStart(messages: readonly StoredChatMessage[]) {
   for (let index = turnStarts.length - 2; index >= 0; index -= 1) {
     const candidateStart = turnStarts[index]!;
     const candidateTokens = estimateContextTokens(messages.slice(candidateStart, keepFrom));
-    if (keptTokens + candidateTokens > RECENT_TAIL_TOKEN_BUDGET) break;
+    if (keptTokens + candidateTokens > tokenBudget) break;
     keepFrom = candidateStart;
     keptTokens += candidateTokens;
   }
