@@ -3,11 +3,14 @@ import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AUTO_MODEL_SELECTION, type AutoModelSelection } from "@/lib/chat-auto-model";
 import {
   CLAUDE_PICKER_VALUE,
+  type ClaudeChatModelId,
   type ClaudePickerValue,
   CODEX_PICKER_VALUE,
+  type CodexChatModelId,
   type CodexPickerValue,
   ENGINE_REGISTRY,
   type EngineChatKind,
+  type EngineChatModelId,
 } from "@/lib/engine-registry";
 import { DEFAULT_MODEL, normalizeModel } from "@/lib/model-options";
 
@@ -26,7 +29,7 @@ type ChatEngineAvailability = {
 const CHAT_SELECTION_STORAGE_KEY = "opencompany-goat-main-chat-selection";
 const chatSelectionListeners = new Set<() => void>();
 const REASONING_EFFORT_STORAGE_KEY = "opencompany-goat-main-chat-reasoning-effort";
-const reasoningEffortListeners = new Set<() => void>();
+const ENGINE_MODEL_STORAGE_KEY = "opencompany-goat-main-chat-engine-model";
 
 export function normalizeStoredChatSelection(
   value: unknown,
@@ -93,58 +96,109 @@ function storageKey(userWorkosId: string) {
   return `${CHAT_SELECTION_STORAGE_KEY}:${userKey}`;
 }
 
-// The composer's reasoning dial is a preference, not a per-chat decision: the level you last
-// picked for an agent is the level your next chat with that agent should open on. Kept per
-// engine because Codex and Claude Code have different sensible defaults, and browser-local
-// for the same reason the model selection is — it is a convenience, not workspace state.
-export function readLastReasoningEffort(
-  userWorkosId: string,
-  engine: EngineChatKind,
-): CodexReasoningEffort {
-  const fallback = ENGINE_REGISTRY[engine].defaultReasoningEffort;
-  if (typeof window === "undefined") return fallback;
-
-  try {
-    const stored = window.localStorage.getItem(reasoningEffortStorageKey(userWorkosId, engine));
-    return typeof stored === "string" && isCodexReasoningEffort(stored) ? stored : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-export function persistLastReasoningEffort(
-  userWorkosId: string,
-  engine: EngineChatKind,
-  effort: CodexReasoningEffort,
+// Composer preferences the user sets per coding agent: the level and the model you last picked
+// for an agent are what your next chat with that agent opens on. Browser-local for the same
+// reason the model selection is — a convenience, not workspace state.
+//
+// Both are the same shape, so they share one store. Only the storage key and how a stored
+// string is validated differ; an unreadable or retired value falls back to the engine default.
+function engineScopedPreference<T extends string>(
+  storageKeyPrefix: string,
+  normalize: (stored: string | null, engine: EngineChatKind) => T,
 ) {
-  if (typeof window === "undefined") return;
+  const listeners = new Set<() => void>();
+  const keyFor = (userWorkosId: string, engine: EngineChatKind) =>
+    `${storageKeyPrefix}:${userWorkosId.trim() || "anonymous"}:${engine}`;
 
-  try {
-    window.localStorage.setItem(reasoningEffortStorageKey(userWorkosId, engine), effort);
-    for (const listener of reasoningEffortListeners) listener();
-  } catch {
-    // Same progressive-enhancement contract as the model selection: the current page keeps
-    // working from in-memory state when storage is unavailable.
-  }
-}
+  function read(userWorkosId: string, engine: EngineChatKind): T {
+    if (typeof window === "undefined") return normalize(null, engine);
 
-export function subscribeLastReasoningEffort(onStoreChange: () => void) {
-  reasoningEffortListeners.add(onStoreChange);
-
-  function handleStorage(event: StorageEvent) {
-    if (event.key === null || event.key.startsWith(`${REASONING_EFFORT_STORAGE_KEY}:`)) {
-      onStoreChange();
+    try {
+      return normalize(window.localStorage.getItem(keyFor(userWorkosId, engine)), engine);
+    } catch {
+      return normalize(null, engine);
     }
   }
 
-  window.addEventListener("storage", handleStorage);
-  return () => {
-    reasoningEffortListeners.delete(onStoreChange);
-    window.removeEventListener("storage", handleStorage);
-  };
+  function persist(userWorkosId: string, engine: EngineChatKind, value: T) {
+    if (typeof window === "undefined") return;
+
+    try {
+      window.localStorage.setItem(keyFor(userWorkosId, engine), value);
+      for (const listener of listeners) listener();
+    } catch {
+      // Same progressive-enhancement contract as the model selection: the current page keeps
+      // working from in-memory state when storage is unavailable.
+    }
+  }
+
+  function subscribe(onStoreChange: () => void) {
+    listeners.add(onStoreChange);
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === null || event.key.startsWith(`${storageKeyPrefix}:`)) onStoreChange();
+    }
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      listeners.delete(onStoreChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }
+
+  return { read, persist, subscribe };
 }
 
-function reasoningEffortStorageKey(userWorkosId: string, engine: EngineChatKind) {
-  const userKey = userWorkosId.trim() || "anonymous";
-  return `${REASONING_EFFORT_STORAGE_KEY}:${userKey}:${engine}`;
+// Kept per engine because Codex and Claude Code have different sensible defaults: dialling one
+// down must not drag the other with it.
+const reasoningEffortPreference = engineScopedPreference<CodexReasoningEffort>(
+  REASONING_EFFORT_STORAGE_KEY,
+  (stored, engine) =>
+    stored !== null && isCodexReasoningEffort(stored)
+      ? stored
+      : ENGINE_REGISTRY[engine].defaultReasoningEffort,
+);
+
+const engineModelPreference = engineScopedPreference<EngineChatModelId>(
+  ENGINE_MODEL_STORAGE_KEY,
+  (stored, engine) => ENGINE_REGISTRY[engine].normalizeModelId(stored),
+);
+
+export const readLastReasoningEffort = reasoningEffortPreference.read;
+export const persistLastReasoningEffort = reasoningEffortPreference.persist;
+export const subscribeLastReasoningEffort = reasoningEffortPreference.subscribe;
+
+// Overloaded per engine so a caller cannot read a Claude model where a Codex one is expected,
+// or store one engine's model under the other's key.
+export function readLastEngineModel(userWorkosId: string, engine: "codex"): CodexChatModelId;
+export function readLastEngineModel(userWorkosId: string, engine: "claude_code"): ClaudeChatModelId;
+export function readLastEngineModel(
+  userWorkosId: string,
+  engine: EngineChatKind,
+): EngineChatModelId;
+export function readLastEngineModel(
+  userWorkosId: string,
+  engine: EngineChatKind,
+): EngineChatModelId {
+  return engineModelPreference.read(userWorkosId, engine);
 }
+
+export function persistLastEngineModel(
+  userWorkosId: string,
+  engine: "codex",
+  model: CodexChatModelId,
+): void;
+export function persistLastEngineModel(
+  userWorkosId: string,
+  engine: "claude_code",
+  model: ClaudeChatModelId,
+): void;
+export function persistLastEngineModel(
+  userWorkosId: string,
+  engine: EngineChatKind,
+  model: EngineChatModelId,
+): void {
+  engineModelPreference.persist(userWorkosId, engine, model);
+}
+
+export const subscribeLastEngineModel = engineModelPreference.subscribe;

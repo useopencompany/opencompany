@@ -6,7 +6,9 @@ import {
   type CloudCodingEngine,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  isClaudeCodeModelId,
   isCloudCodingEngine,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AnthropicIcon, type LucideIcon, OpenAIIcon } from "@opencompany/ui/icons";
@@ -42,6 +44,21 @@ export function normalizeCodexChatModelId(value: unknown): CodexChatModelId {
 
 export function normalizeClaudeChatModelId(value: unknown): ClaudeChatModelId {
   return normalizeConversationModel("claude_code", value);
+}
+
+export type EngineChatModelId = CodexChatModelId | ClaudeChatModelId;
+
+// The model a chat pins for one engine, or null when it pins none: a Codex chat says nothing
+// about which Claude model to use, and an opencompany chat says nothing about either. Distinct
+// from normalizeModelId, which answers the same question with the engine default and so cannot
+// tell "this chat chose the default" apart from "this chat chose nothing".
+export function engineChatModelIdForChat(
+  engine: EngineChatKind,
+  value: unknown,
+): EngineChatModelId | null {
+  if (typeof value !== "string") return null;
+  if (engine === "codex") return isCodexModelId(value) ? (value as CodexChatModelId) : null;
+  return isClaudeCodeModelId(value) ? (value as ClaudeChatModelId) : null;
 }
 
 // A cloud coding engine's client-side presentation and model catalog. Adding an engine is a
