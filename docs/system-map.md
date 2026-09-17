@@ -244,3 +244,19 @@ share IDs remain independent, unguessable capabilities. New share links require 
 and web validators; deploy those readers before enabling new writers in a staggered release, and
 retain reader compatibility when rolling back. Physical database names, storage roots, provider
 contracts, and deterministic ingestion IDs retain their existing names.
+
+### Chat context checkpoints
+
+The runner budgets hydrated model input before generation in both product chat and personal-agent
+turns. Image payloads remain typed vision inputs: local raster dimensions and documented model/detail
+rules determine their estimated context cost, independently of base64 size. Unreadable or remote
+image dimensions reserve the known model maximum; unverified models use a conservative 40k allowance.
+These are estimates, not provider billing counts. The model catalog remains the application budget.
+
+Compaction retains complete recent turns and the current request, then summarizes older text and
+actual images in bounded rolling requests. Each summary call records its own usage (including calls
+before a later failure), avoiding artificial long-context pricing from aggregated input counts.
+A checkpoint is persisted only after every batch and final-context validation succeeds. The original
+transcript is unchanged. Image count and encoded payload size are bounded separately from tokens:
+at most 20 images and 16 MiB of image transport data per active request or summary batch. Older
+images can age into a checkpoint; an oversized current request needs fewer or smaller attachments.
