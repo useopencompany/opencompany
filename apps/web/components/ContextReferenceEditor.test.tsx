@@ -100,4 +100,15 @@ describe("workflow and message references", () => {
       expect(link).toHaveAttribute("rel", "noopener noreferrer");
     }
   });
+  it("lets references without an inline brand color inherit their surface foreground", () => {
+    render(
+      <div className="bg-ink text-canvas">
+        <ContextReferenceText text="Ask [org/repo](https://github.com/org/repo)" />
+      </div>,
+    );
+    const link = screen.getByRole("link", { name: "org/repo" });
+    expect(link).toHaveClass("context-reference");
+    expect(link).not.toHaveClass("text-ink");
+    expect(link.querySelector("svg")).not.toHaveClass("text-ink");
+  });
 });
