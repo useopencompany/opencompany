@@ -4,15 +4,22 @@ import type {
   ChatMessage,
   ProductChatContextCompactionState,
 } from "@opencompany/db/product-schema";
-import { convertToModelMessages, type FilePart, type ModelMessage } from "ai";
+import {
+  convertToModelMessages,
+  type FilePart,
+  type LanguageModelUsage,
+  type ModelMessage,
+} from "ai";
 import { describe, expect, it, vi } from "vitest";
 import {
+  CONTEXT_COMPACTION_SYSTEM_PROMPT,
   compactProductChatContextIfNeeded,
   contextCompactionThreshold,
   contextWindowTokensForModel,
   estimateAssembledContextTokens,
   estimateContextTokens,
 } from "./opencompany-context-compaction";
+import { fitsImageRequest } from "./opencompany-image-context";
 
 describe("opencompany context compaction", () => {
   it("keeps a screenshot and repeated follow-ups without treating base64 as text tokens", async () => {
@@ -185,7 +192,7 @@ describe("opencompany context compaction", () => {
   });
 
   it("does not retain an image-heavy historical tail as tiny attachment metadata", async () => {
-    const messages = conversation(10, 20).map((message) => ({
+    const messages = conversation(20, 20).map((message) => ({
       ...message,
       attachments:
         message.role === "user"
@@ -204,7 +211,7 @@ describe("opencompany context compaction", () => {
     }));
     const result = await compactProductChatContextIfNeeded({
       storedMessages: messages,
-      currentUserMessageId: "user_10",
+      currentUserMessageId: "user_20",
       modelId: "openai/gpt-5.5",
       system: "system",
       tools: {},
@@ -228,7 +235,7 @@ describe("opencompany context compaction", () => {
       persist: async () => undefined,
     });
     expect(result.compacted).toBe(true);
-    expect(result.state?.firstRetainedMessageId).toBe("user_10");
+    expect(result.state?.firstRetainedMessageId).toBe("user_20");
     expect(result.state?.estimatedTokensAfter).toBeLessThan(contextCompactionThreshold(272_000));
   });
 
@@ -293,7 +300,7 @@ describe("opencompany context compaction", () => {
       previousState,
       toModelMessages,
       summarize: async (prompt) => {
-        secondPrompt = prompt;
+        secondPrompt += JSON.stringify(prompt);
         return { text: "## Objective\nSecond checkpoint marker." };
       },
       persist: async () => undefined,
@@ -360,6 +367,236 @@ describe("opencompany context compaction", () => {
     expect(JSON.stringify(result.messages)).not.toContain("stale summary");
     expect(JSON.stringify(result.messages)).toContain("current-request-1");
     expect(result.state).toBeNull();
+  });
+
+  it("summarizes actual images in bounded requests without rehydrating attachments", async () => {
+    const rows = conversation(3, 100_000);
+    rows.push(storedMessage({ id: "current", role: "user", content: "Continue" }));
+    const image: FilePart = {
+      type: "file",
+      mediaType: "image/png",
+      data: { type: "data", data: Buffer.alloc(1_147_181) },
+    };
+    const summarize = vi.fn(async (messages: ModelMessage[]) => {
+      expect(
+        estimateAssembledContextTokens({
+          modelId: "openai/gpt-5.5",
+          system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+          tools: {},
+          messages,
+        }),
+      ).toBeLessThanOrEqual(contextCompactionThreshold(50_000));
+      expect(messages.every((message) => message.role === "user")).toBe(true);
+      return { text: "Checkpoint preserving the screenshot error and earlier requests" };
+    });
+    const replay = vi.fn(
+      async (messages: readonly StoredChatMessage[]): Promise<ModelMessage[]> => {
+        const converted = await toModelMessages(messages);
+        converted[0] = { role: "user", content: [{ type: "text", text: rows[0]!.content }, image] };
+        return converted;
+      },
+    );
+    const persist = vi.fn();
+    const result = await compactProductChatContextIfNeeded({
+      storedMessages: rows,
+      currentUserMessageId: "current",
+      modelId: "openai/gpt-5.5",
+      contextWindowTokens: 50_000,
+      system: "system",
+      tools: {},
+      previousState: null,
+      toModelMessages: replay,
+      summarize,
+      persist,
+    });
+    const calls = summarize.mock.calls;
+    expect(calls.length).toBeGreaterThan(2);
+    const images = calls.flatMap(([messages]) =>
+      messages.flatMap((message) =>
+        typeof message.content === "string"
+          ? []
+          : message.content.filter((part) => part.type === "file"),
+      ),
+    );
+    expect(images).toEqual([image]);
+    expect(images[0]).toBe(image);
+    expect(JSON.stringify(calls[1])).toContain("Checkpoint preserving the screenshot");
+    expect(replay).toHaveBeenCalledOnce();
+    expect(persist).toHaveBeenCalledOnce();
+    expect(result.messages.at(-1)).toEqual({ role: "user", content: "Continue" });
+  });
+
+  it("does not persist partial checkpoints when a later batch fails", async () => {
+    const rows = conversation(3, 100_000);
+    rows.push(storedMessage({ id: "current", role: "user", content: "Continue" }));
+    const original = JSON.stringify(rows);
+    const summarize = vi
+      .fn()
+      .mockResolvedValueOnce({ text: "Partial checkpoint" })
+      .mockRejectedValue(new Error("provider unavailable"));
+    const persist = vi.fn();
+    await expect(
+      compactProductChatContextIfNeeded({
+        storedMessages: rows,
+        currentUserMessageId: "current",
+        modelId: "openai/gpt-5.5",
+        contextWindowTokens: 50_000,
+        system: "system",
+        tools: {},
+        previousState: null,
+        toModelMessages,
+        summarize,
+        persist,
+      }),
+    ).rejects.toThrow("provider unavailable");
+    expect(summarize).toHaveBeenCalledTimes(2);
+    expect(persist).not.toHaveBeenCalled();
+    expect(JSON.stringify(rows)).toBe(original);
+  });
+
+  it.each([0, 3])(
+    "rejects an irreducible current request before summary calls with %i old turns",
+    async (oldTurns) => {
+      const rows = conversation(oldTurns, 8_000);
+      rows.push(storedMessage({ id: "current", role: "user", content: "x".repeat(120_000) }));
+      const summarize = vi.fn();
+      const persist = vi.fn();
+      await expect(
+        compactProductChatContextIfNeeded({
+          storedMessages: rows,
+          currentUserMessageId: "current",
+          modelId: "openai/gpt-5.5",
+          contextWindowTokens: 50_000,
+          system: "system",
+          tools: {},
+          previousState: null,
+          toModelMessages,
+          summarize,
+          persist,
+        }),
+      ).rejects.toThrow("Reduce the current request");
+      expect(summarize).not.toHaveBeenCalled();
+      expect(persist).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves complete assistant/tool exchanges in the retained model input", async () => {
+    const rows = conversation(4, 30_000);
+    rows.push(storedMessage({ id: "current", role: "user", content: "Continue" }));
+    const call: ModelMessage = {
+      role: "assistant",
+      content: [{ type: "tool-call", toolCallId: "call-1", toolName: "read", input: {} }],
+    };
+    const output: ModelMessage = {
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "call-1",
+          toolName: "read",
+          output: { type: "text", value: "Approved result" },
+        },
+      ],
+    };
+    const replay = async (messages: readonly StoredChatMessage[]) => [
+      ...(await toModelMessages(messages)),
+      call,
+      output,
+    ];
+    const result = await compactProductChatContextIfNeeded({
+      storedMessages: rows,
+      currentUserMessageId: "current",
+      modelId: "openai/gpt-5.5",
+      contextWindowTokens: 50_000,
+      system: "system",
+      tools: {},
+      previousState: null,
+      toModelMessages: replay,
+      summarize: async () => ({ text: "Checkpoint" }),
+      persist: vi.fn(),
+    });
+    expect(result.messages.slice(-2)).toEqual([call, output]);
+  });
+
+  it.each(["image count", "encoded bytes"])(
+    "compacts and batches on %s even below the token threshold",
+    async (limit) => {
+      const tiny = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+        "base64",
+      );
+      const data = limit === "image count" ? tiny : Buffer.alloc(4 * 1024 * 1024);
+      tiny.copy(data);
+      const rows = conversation(limit === "image count" ? 42 : 6, 20);
+      const replay = async (messages: readonly StoredChatMessage[]): Promise<ModelMessage[]> =>
+        messages.map((row) => ({
+          role: row.role === "user" ? "user" : "assistant",
+          content:
+            row.role === "user"
+              ? [
+                  {
+                    type: "file" as const,
+                    mediaType: "image/png",
+                    data: { type: "data" as const, data },
+                  },
+                ]
+              : row.content,
+        }));
+      const summarize = vi.fn(async (messages: ModelMessage[]) => {
+        expect(fitsImageRequest(messages)).toBe(true);
+        return { text: "Visual checkpoint" };
+      });
+      const before = await replay(rows);
+      expect(fitsImageRequest(before)).toBe(false);
+      expect(
+        estimateAssembledContextTokens({
+          modelId: "openai/gpt-5.5",
+          system: "system",
+          tools: {},
+          messages: before,
+        }),
+      ).toBeLessThan(contextCompactionThreshold(272_000));
+      const result = await compactProductChatContextIfNeeded({
+        storedMessages: rows,
+        currentUserMessageId: rows.at(-2)!.id,
+        modelId: "openai/gpt-5.5",
+        system: "system",
+        tools: {},
+        previousState: null,
+        toModelMessages: replay,
+        summarize,
+        persist: vi.fn(),
+      });
+      expect(result.compacted).toBe(true);
+      expect(fitsImageRequest(result.messages)).toBe(true);
+      expect(summarize.mock.calls.length).toBeGreaterThan(1);
+    },
+  );
+
+  it("rejects an oversized current image request before paid compaction", async () => {
+    const rows = [storedMessage({ id: "current", role: "user", content: "Inspect all" })];
+    const summarize = vi.fn();
+    const image: FilePart = {
+      type: "file",
+      mediaType: "image/png",
+      data: { type: "url", url: new URL("https://example.com/image.png") },
+    };
+    await expect(
+      compactProductChatContextIfNeeded({
+        storedMessages: rows,
+        currentUserMessageId: "current",
+        modelId: "anthropic/claude-opus-5",
+        system: "system",
+        tools: {},
+        previousState: null,
+        toModelMessages: async () => [
+          { role: "user", content: Array.from({ length: 21 }, () => image) },
+        ],
+        summarize,
+        persist: vi.fn(),
+      }),
+    ).rejects.toThrow("too much image data");
+    expect(summarize).not.toHaveBeenCalled();
   });
 
   it("uses configured catalog windows and includes system and tool definitions in estimates", () => {

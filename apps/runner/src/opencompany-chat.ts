@@ -134,10 +134,6 @@ const logger = createLogger({
   runtime: "goat-opencompany-chat",
 });
 
-// Main turn steps index from 0 and context compaction uses -1, so subagent usage rows start well
-// below both and descend.
-const SUBAGENT_USAGE_STEP_INDEX_BASE = -1_000;
-
 export function productChatGatewayProviderOptions(attribution: GatewayAttribution) {
   return gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
 }
@@ -271,10 +267,9 @@ export async function runProductChatTurn(input: {
     const prelistedActionSourceIds = listedActionSourceIdsFromMessages(storedUiMessages);
     const prelistedSkillIds = listedSkillIdsFromMessages(storedUiMessages);
     const subagentTrace = createSubagentTraceChannel();
-    // Subagent steps bill against this turn but are not turn steps. They take their own descending
-    // index so they never collide with a main step's subscription-covered idempotency key, and so
-    // they never become the "latest step" the context-window meter reads.
-    let subagentUsageStepIndex = SUBAGENT_USAGE_STEP_INDEX_BASE;
+    // Summary and subagent calls share descending indices, separate from main steps (0+).
+    // Keep each provider request separate: aggregating input tokens can change the billing tier.
+    let auxiliaryUsageStepIndex = -1;
     const runtime = await resolveProductChatRuntime({
       turn,
       session,
@@ -285,7 +280,7 @@ export async function runProductChatTurn(input: {
       taskContext: input.taskContext,
       subagentTrace,
       recordSubagentUsage: (usage) =>
-        projector.recordStepUsage({ stepIndex: subagentUsageStepIndex--, usage }),
+        projector.recordStepUsage({ stepIndex: auxiliaryUsageStepIndex--, usage }),
     });
     runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
@@ -318,16 +313,20 @@ export async function runProductChatTurn(input: {
             blobToken: env.blobReadWriteToken,
             activeSkills: runtime.activeSkills,
           }),
-        summarize: async (prompt) => {
+        summarize: async (messages) => {
           const result = await generateText({
             model: modelResolution.model,
-            system: `${runtime.system}\n\n${CONTEXT_COMPACTION_SYSTEM_PROMPT}`,
-            prompt,
+            system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+            messages,
             maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
             abortSignal: generationController.signal,
             providerOptions,
           });
-          return { text: result.text, usage: result.usage };
+          await projector.recordStepUsage({
+            stepIndex: auxiliaryUsageStepIndex--,
+            usage: result.usage,
+          });
+          return { text: result.text };
         },
         persist: (state) =>
           persistProductChatContextCompaction({
@@ -362,9 +361,6 @@ export async function runProductChatTurn(input: {
         estimated_tokens_before: context.state.estimatedTokensBefore,
         estimated_tokens_after: context.state.estimatedTokensAfter,
       });
-      if (context.usage) {
-        await projector.recordStepUsage({ stepIndex: -1, usage: context.usage });
-      }
     }
     const messages = context.messages;
     // Steering rides alongside the turn that is already producing work. The product agent has no
