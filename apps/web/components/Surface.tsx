@@ -1224,32 +1224,37 @@ export function Surface({
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
+  const runtimeMatchesForegroundTurn = Boolean(
+    foregroundTurn &&
+      isChatRuntimeActive(conversationRuntime) &&
+      (!conversationRuntime?.activeRunId ||
+        !foregroundTurn.runId ||
+        conversationRuntime.activeRunId === foregroundTurn.runId),
+  );
   const chatTurnPhase = deriveChatTurnPhase({
     runStatus: foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
-    runtimeMatchesTurn: Boolean(
-      foregroundTurn &&
-        isChatRuntimeActive(conversationRuntime) &&
-        (!conversationRuntime?.activeRunId ||
-          !foregroundTurn.runId ||
-          conversationRuntime.activeRunId === foregroundTurn.runId),
-    ),
+    runtimeMatchesTurn: runtimeMatchesForegroundTurn,
     transportStatus: status,
     submitting: engineSubmitting,
   });
   // The runtime is the authoritative session-level signal and also drives the header badge.
-  // Keep the composer in the same state when its run-specific projection is briefly missing or
-  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
+  // When it has advanced to another Run, keep the composer working through projection lag without
+  // reviving a terminal turn whose matching runtime row is merely stale.
   const isForegroundTurnWorking = isChatConversationWorking(
     chatTurnPhase,
-    Boolean(activeEngineChat && conversationRunning),
+    Boolean(activeEngineChat && conversationRunning && !runtimeMatchesForegroundTurn),
   );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
       activeTaskConversation &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  const composerQueuesMessage = Boolean(
+    canQueueWhileWorking &&
+      (activeTaskConversation ? isTaskConversationWorking : isForegroundTurnWorking),
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -3474,7 +3479,7 @@ export function Surface({
                       id="prompt"
                       value={input}
                       placeholder={
-                        isForegroundTurnWorking && canQueueWhileWorking
+                        composerQueuesMessage
                           ? "Queue a follow-up..."
                           : activeTaskConversation || mode === "chat"
                             ? "Reply..."
@@ -3531,7 +3536,7 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
-                    queuesMessage={isForegroundTurnWorking && canQueueWhileWorking}
+                    queuesMessage={composerQueuesMessage}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />

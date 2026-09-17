@@ -30,7 +30,11 @@ describe("chat turn lifecycle", () => {
 
   it("keeps conversation controls active while the session runtime owns a newer Run", () => {
     expect(isChatConversationWorking("completed", true)).toBe(true);
+  });
+
+  it("lets a terminal foreground Run override stale runtime state for the same Run", () => {
     expect(isChatConversationWorking("completed", false)).toBe(false);
+    expect(isChatConversationWorking("running", false)).toBe(true);
   });
 
   it("lets a finalized matching assistant override a stale active Run projection", () => {

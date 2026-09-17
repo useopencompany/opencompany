@@ -48,11 +48,13 @@ export function isChatTurnWorking(phase: ChatTurnPhase) {
 }
 
 // A conversation can already have moved to its next durable Run while the foreground turn
-// projection still describes the one that just settled. The session runtime owns that handoff and
-// drives the header status, so interactive controls must also keep treating the conversation as
-// active until the runtime becomes idle.
-export function isChatConversationWorking(phase: ChatTurnPhase, engineRuntimeActive: boolean) {
-  return isChatTurnWorking(phase) || engineRuntimeActive;
+// projection still describes the one that just settled. Keep controls active for that handoff,
+// while allowing a terminal foreground Run to override stale runtime state for the same turn.
+export function isChatConversationWorking(
+  phase: ChatTurnPhase,
+  engineRuntimeOwnsDifferentTurn: boolean,
+) {
+  return isChatTurnWorking(phase) || engineRuntimeOwnsDifferentTurn;
 }
 
 export function isChatTurnTerminal(
