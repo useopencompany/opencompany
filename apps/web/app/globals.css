@@ -564,7 +564,11 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   vertical-align: baseline;
   white-space: nowrap;
 }
+/* An inline-flex box inherits its baseline from its first item, which here is the icon, so the
+   whole chip rides above the surrounding text. Aligning the label on the baseline instead hands
+   the chip the label's baseline while the icon stays optically centred on the line. */
 .context-reference > span {
+  align-self: baseline;
   overflow: hidden;
   text-overflow: ellipsis;
 }
