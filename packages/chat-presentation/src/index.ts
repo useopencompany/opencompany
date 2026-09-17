@@ -8,6 +8,14 @@ export const CHAT_PRESENTATION_STREAM_TTL_SECONDS = 5 * 60;
 export const CHAT_PRESENTATION_STREAM_MAX_LENGTH = 1_024;
 export const CHAT_PRESENTATION_READ_LIMIT = 100;
 
+const SOCKET_CONNECT_TIMEOUT_MS = 500;
+// `socket.connectTimeout` only covers the socket reaching `connect`/`secureConnect`; node-redis
+// clears that listener before running the HELLO/AUTH handshake, and no `socketTimeout` is set. A
+// peer that accepts the socket but never answers the handshake would leave `connect()` pending
+// forever, wedging the SSE read loop that awaits `read()`. This backstop keeps the degrade path
+// reachable, and sits above the socket limit so a genuinely slow connect still fails as `connect`.
+const CONNECT_TIMEOUT_MS = 2 * SOCKET_CONNECT_TIMEOUT_MS;
+
 export type ChatPresentationEntry = {
   streamId: string;
   frame: PresentationDeltaFrameDto;
@@ -50,6 +58,7 @@ export class RedisChatPresentationStream
       now?: () => number;
       retryDelayMs?: number;
       commandTimeoutMs?: number;
+      connectTimeoutMs?: number;
       createClient?: (url: string) => RedisClient;
     },
   ) {}
@@ -151,9 +160,15 @@ export class RedisChatPresentationStream
   ): Promise<T | null> {
     if (this.closed || this.now() < this.unavailableUntil) return null;
     try {
+      const client = await withTimeout(
+        this.client(),
+        this.options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS,
+        () => new RedisPresentationConnectTimeoutError(),
+      );
       const result = await withTimeout(
-        (async () => command(await this.client()))(),
+        command(client),
         this.options.commandTimeoutMs ?? 250,
+        () => new RedisPresentationCommandTimeoutError(),
       );
       this.outageReported = false;
       return result;
@@ -176,7 +191,7 @@ export class RedisChatPresentationStream
         : (createClient({
             url: this.options.url,
             disableOfflineQueue: true,
-            socket: { connectTimeout: 500, reconnectStrategy: false },
+            socket: { connectTimeout: SOCKET_CONNECT_TIMEOUT_MS, reconnectStrategy: false },
           }) as RedisClient);
       client.on("error", (error) => this.reportOutage("connect", error));
       await client.connect();
@@ -233,20 +248,35 @@ function coalesceFrames(
   };
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  createError: () => Error,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       promise,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error("Redis presentation command timed out.")),
-          timeoutMs,
-        );
+        timer = setTimeout(() => reject(createError()), timeoutMs);
         timer.unref?.();
       }),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+class RedisPresentationCommandTimeoutError extends Error {
+  constructor() {
+    super("Redis presentation command timed out.");
+    this.name = "RedisPresentationCommandTimeoutError";
+  }
+}
+
+class RedisPresentationConnectTimeoutError extends Error {
+  constructor() {
+    super("Redis presentation connection timed out.");
+    this.name = "RedisPresentationConnectTimeoutError";
   }
 }
