@@ -34,6 +34,7 @@ describe("persistent bot storage", () => {
         subagents_enabled boolean NOT NULL DEFAULT false,
         past_session_access_enabled boolean NOT NULL DEFAULT false,
         imessage_enabled boolean NOT NULL DEFAULT false,
+        whatsapp_enabled boolean NOT NULL DEFAULT false,
         updated_at timestamptz NOT NULL DEFAULT now()
       );
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
