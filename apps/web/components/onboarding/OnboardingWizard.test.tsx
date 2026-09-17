@@ -228,29 +228,41 @@ describe("OnboardingWizard", () => {
     }
   });
 
-  it("installs the recommended plugin and offers to connect it", async () => {
+  it("installs and starts connecting the recommended plugin in one click", async () => {
     const user = userEvent.setup();
-    render(<OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />);
+    const popup = { close: vi.fn(), focus: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    try {
+      render(
+        <OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />,
+      );
 
-    expect(
-      await screen.findByRole("heading", { name: "Give your agent some tools" }),
-    ).toBeInTheDocument();
+      expect(
+        await screen.findByRole("heading", { name: "Give your agent some tools" }),
+      ).toBeInTheDocument();
 
-    const githubRow = screen.getByText("GitHub as you").closest("div.rounded-xl");
-    expect(githubRow).not.toBeNull();
-    await user.click(within(githubRow as HTMLElement).getByRole("button", { name: "Install" }));
+      const githubRow = screen.getByText("GitHub as you").closest("div.rounded-xl");
+      expect(githubRow).not.toBeNull();
+      await user.click(within(githubRow as HTMLElement).getByRole("button", { name: "Connect" }));
 
-    await waitFor(() =>
-      expect(mocks.installOfficialPlugin).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "github" }),
-      ),
-    );
-    // Installed but not yet connected: the row switches to the connect action and
-    // the step's primary button stops reading as a skip.
-    expect(
-      await within(githubRow as HTMLElement).findByRole("button", { name: "Connect" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Continue/u })).toBeInTheDocument();
+      expect(open).toHaveBeenCalledWith(
+        "/api/integrations/github/start?returnTo=%2Fonboarding%2Fconnected",
+        "_blank",
+        "width=600,height=760,noopener=no,noreferrer=no",
+      );
+      expect(popup.focus).toHaveBeenCalledOnce();
+      await waitFor(() =>
+        expect(mocks.installOfficialPlugin).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "github" }),
+        ),
+      );
+      expect(
+        await within(githubRow as HTMLElement).findByRole("button", { name: "Connect" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Continue/u })).toBeInTheDocument();
+    } finally {
+      open.mockRestore();
+    }
   });
 
   it("consumes a same-tab connection result when browser storage is unavailable", async () => {
