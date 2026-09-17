@@ -115,6 +115,49 @@ describe("opencompany context compaction", () => {
     expect(persist).toHaveBeenCalledOnce();
   });
 
+  it("budgets the recent tail from the converted model messages", async () => {
+    const messages = [
+      storedMessage({
+        id: "user_1",
+        role: "user",
+        content: `old-request ${"u".repeat(50_000)}`,
+      }),
+      storedMessage({ id: "assistant_1", role: "assistant", content: "old response" }),
+      storedMessage({ id: "user_2", role: "user", content: "attachment placeholder" }),
+      storedMessage({ id: "assistant_2", role: "assistant", content: "candidate response" }),
+      storedMessage({ id: "user_3", role: "user", content: "current request" }),
+    ];
+    let summaryPrompt = "";
+
+    const result = await compactProductChatContextIfNeeded({
+      storedMessages: messages,
+      currentUserMessageId: "user_3",
+      modelId: "anthropic/claude-sonnet-5",
+      contextWindowTokens: 50_000,
+      system: "i".repeat(20_000),
+      tools: {},
+      previousState: null,
+      toModelMessages: async (selectedMessages) =>
+        selectedMessages.map((message) => ({
+          role: message.role === "user" ? "user" : "assistant",
+          content:
+            message.id === "user_2" ? `hydrated attachment ${"x".repeat(82_000)}` : message.content,
+        })),
+      summarize: async (prompt) => {
+        summaryPrompt = prompt;
+        return { text: "## Objective\nContinue with the current request." };
+      },
+      persist: async () => undefined,
+    });
+
+    expect(result.compacted).toBe(true);
+    expect(result.state?.compactedThroughMessageId).toBe("assistant_2");
+    expect(result.state?.firstRetainedMessageId).toBe("user_3");
+    expect(summaryPrompt).toContain("attachment placeholder");
+    expect(JSON.stringify(result.messages)).not.toContain("hydrated attachment");
+    expect(result.state!.estimatedTokensAfter).toBeLessThan(50_000);
+  });
+
   it("reports capacity diagnostics without including context content", async () => {
     const persist = vi.fn();
     const result = compactProductChatContextIfNeeded({
@@ -145,6 +188,39 @@ describe("opencompany context compaction", () => {
       },
     });
     await expect(result).rejects.not.toThrow(/historical request|current request/);
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("reports irreducible capacity before calling the provider", async () => {
+    const summarize = vi.fn();
+    const persist = vi.fn();
+    const result = compactProductChatContextIfNeeded({
+      storedMessages: [
+        storedMessage({
+          id: "user_1",
+          role: "user",
+          content: `oversized current request ${"u".repeat(110_000)}`,
+        }),
+      ],
+      currentUserMessageId: "user_1",
+      modelId: "anthropic/claude-sonnet-5",
+      contextWindowTokens: 50_000,
+      system: "system",
+      tools: {},
+      previousState: null,
+      toModelMessages,
+      summarize,
+      persist,
+    });
+
+    await expect(result).rejects.toMatchObject({
+      name: ContextCompactionCapacityError.name,
+      diagnostics: {
+        contextWindowTokens: 50_000,
+        retainedMessageCount: 1,
+      },
+    });
+    expect(summarize).not.toHaveBeenCalled();
     expect(persist).not.toHaveBeenCalled();
   });
 

@@ -143,13 +143,27 @@ export async function compactProductChatContextIfNeeded(input: {
       fixedContextTokens -
       CONTEXT_COMPACTION_SUMMARY_ESTIMATE_TOKENS,
   );
-  const tailStart = selectRecentTailStart(
+  const { tailStart, retainedModelMessages } = await selectRecentTail(
     activeMessages,
     Math.min(RECENT_TAIL_TOKEN_BUDGET, availableTailTokens),
+    input.toModelMessages,
   );
   const messagesToCompact = activeMessages.slice(0, tailStart);
   const retainedMessages = activeMessages.slice(tailStart);
   if (messagesToCompact.length === 0 || retainedMessages.length === 0) {
+    if (estimatedTokensBefore >= contextWindowTokens) {
+      throw new ContextCompactionCapacityError(
+        `opencompany context compaction could not fit the preserved context within the ${contextWindowTokens}-token model window.`,
+        {
+          contextWindowTokens,
+          fixedContextTokens,
+          availableTailTokens,
+          retainedMessageCount: retainedMessages.length,
+          estimatedTokensBefore,
+          estimatedTokensAfter: estimatedTokensBefore,
+        },
+      );
+    }
     return {
       messages: currentContext,
       compacted: false,
@@ -166,7 +180,6 @@ export async function compactProductChatContextIfNeeded(input: {
   const summary = summaryResult.text.trim();
   if (!summary) throw new Error("opencompany context compaction returned an empty summary.");
 
-  const retainedModelMessages = await input.toModelMessages(retainedMessages);
   const compactedContext = [contextSummaryMessage(summary), ...retainedModelMessages];
   const estimatedTokensAfter = estimateAssembledContextTokens({
     system: input.system,
@@ -236,9 +249,15 @@ function messagesAfterPreviousCompaction(
   };
 }
 
-function selectRecentTailStart(messages: readonly StoredChatMessage[], tokenBudget: number) {
+async function selectRecentTail(
+  messages: readonly StoredChatMessage[],
+  tokenBudget: number,
+  toModelMessages: (messages: readonly StoredChatMessage[]) => Promise<ModelMessage[]>,
+) {
   const turnStarts = messages.flatMap((message, index) => (message.role === "user" ? [index] : []));
-  if (turnStarts.length === 0) return 0;
+  if (turnStarts.length === 0) {
+    return { tailStart: 0, retainedModelMessages: await toModelMessages(messages) };
+  }
 
   let keepFrom = turnStarts.at(-1)!;
   let keptTokens = estimateContextTokens(messages.slice(keepFrom));
@@ -249,7 +268,17 @@ function selectRecentTailStart(messages: readonly StoredChatMessage[], tokenBudg
     keepFrom = candidateStart;
     keptTokens += candidateTokens;
   }
-  return keepFrom;
+
+  while (true) {
+    const retainedModelMessages = await toModelMessages(messages.slice(keepFrom));
+    if (
+      estimateContextTokens(retainedModelMessages) <= tokenBudget ||
+      keepFrom === turnStarts.at(-1)
+    ) {
+      return { tailStart: keepFrom, retainedModelMessages };
+    }
+    keepFrom = turnStarts.find((turnStart) => turnStart > keepFrom)!;
+  }
 }
 
 function contextCompactionPrompt(input: {
