@@ -184,7 +184,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
 
   async cancel(chatId: string) {
     const state = readRunState(chatId);
-    if (!state || isTerminal(state.status)) return false;
+    if (!state || isTerminal(state.status)) return null;
     const client = createApiClient(this.baseUrl(), {
       fetch: this.apiFetchImpl,
     });
@@ -192,9 +192,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       param: { runId: state.runId },
     });
     if (!response.ok) throw await responseError(response);
-    state.status = (await response.json()).data.status;
+    const result = (await response.json()).data;
+    state.status = result.status;
     writeRunStateAliases(chatId, state);
-    return true;
+    return result;
   }
 
   async resolveApproval(input: ResolveHeadlessApprovalInput) {

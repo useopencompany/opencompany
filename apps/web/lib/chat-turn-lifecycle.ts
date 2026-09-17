@@ -78,3 +78,19 @@ export function reconcileRuntimeWithTaskStatus(
   if (!liveStatus && runtime.activeRunId === null) return runtime;
   return { ...runtime, status: liveStatus ? "idle" : runtime.status, activeRunId: null };
 }
+
+// A directly confirmed Run may settle while Electric still holds the previous runtime row. Park
+// only that exact Run so a newer queued follow-up remains authoritative.
+export function reconcileRuntimeWithSettledRun(
+  runtime: ConversationRuntimeView | null,
+  runId: string | null,
+  runStatus: TerminalChatTurnPhase | null,
+): ConversationRuntimeView | null {
+  if (!runtime || !runId || !runStatus || runtime.activeRunId !== runId) return runtime;
+  return {
+    ...runtime,
+    status: runStatus === "failed" ? "failed" : runStatus === "canceled" ? "interrupted" : "idle",
+    activeRunId: null,
+    hasError: runStatus === "failed" ? true : runtime.hasError,
+  };
+}
