@@ -10,6 +10,11 @@ const CONTEXT_HEADROOM_RATIO = 0.2;
 const RECENT_TAIL_TOKEN_BUDGET = 20_000;
 const APPROXIMATE_BYTES_PER_TOKEN = 2;
 const MIN_TOOL_DEFINITION_TOKENS = 256;
+// Images are vision inputs, not tokenized base64 text. Reserve headroom per image independently
+// of its transport encoding. 40k exceeds the current OpenAI 30k-patch / 1.2x maximum; this is a
+// conservative context budget, not a provider billing estimate. Keep it under review as models
+// change: https://developers.openai.com/api/docs/guides/images-vision
+const IMAGE_CONTEXT_TOKEN_RESERVE = 40_000;
 
 export const CONTEXT_COMPACTION_SYSTEM_PROMPT = `You create a checkpoint of historical conversation so another model can continue the work.
 
@@ -65,7 +70,28 @@ export function estimateAssembledContextTokens(input: {
       total + Math.max(MIN_TOOL_DEFINITION_TOKENS, estimateContextTokens({ name, definition })),
     0,
   );
-  return estimateContextTokens({ system: input.system, messages: input.messages }) + toolTokens;
+  let imageTokens = 0;
+  const messages = input.messages.map((message) => {
+    if (
+      message.role === "system" ||
+      message.role === "tool" ||
+      typeof message.content === "string"
+    ) {
+      return message;
+    }
+    return {
+      ...message,
+      content: message.content.map((part) => {
+        if (part.type !== "file" || !part.mediaType.startsWith("image/")) return part;
+        imageTokens += IMAGE_CONTEXT_TOKEN_RESERVE;
+        // Only the estimation copy omits transport data. The original file is still sent to the
+        // model; text, tool results, and non-image documents keep their existing accounting.
+        const { data: _data, ...metadata } = part;
+        return metadata;
+      }),
+    };
+  });
+  return estimateContextTokens({ system: input.system, messages }) + toolTokens + imageTokens;
 }
 
 export async function compactProductChatContextIfNeeded(input: {
@@ -197,15 +223,32 @@ function selectRecentTailStart(messages: readonly StoredChatMessage[]) {
   if (turnStarts.length === 0) return 0;
 
   let keepFrom = turnStarts.at(-1)!;
-  let keptTokens = estimateContextTokens(messages.slice(keepFrom));
+  let keptTokens = estimateStoredTurnTokens(messages.slice(keepFrom));
   for (let index = turnStarts.length - 2; index >= 0; index -= 1) {
     const candidateStart = turnStarts[index]!;
-    const candidateTokens = estimateContextTokens(messages.slice(candidateStart, keepFrom));
+    const candidateTokens = estimateStoredTurnTokens(messages.slice(candidateStart, keepFrom));
     if (keptTokens + candidateTokens > RECENT_TAIL_TOKEN_BUDGET) break;
     keepFrom = candidateStart;
     keptTokens += candidateTokens;
   }
   return keepFrom;
+}
+
+function estimateStoredTurnTokens(messages: readonly StoredChatMessage[]) {
+  // Stored attachments only contain metadata. Include the same image reserve used after hydration
+  // so selecting the recent tail cannot retain many images as if they were tiny text messages.
+  return (
+    estimateContextTokens(messages) +
+    messages.reduce(
+      (total, message) =>
+        total +
+        (message.role === "user"
+          ? (message.attachments ?? []).filter((attachment) => attachment.kind === "image").length *
+            IMAGE_CONTEXT_TOKEN_RESERVE
+          : 0),
+      0,
+    )
+  );
 }
 
 function contextCompactionPrompt(input: {
