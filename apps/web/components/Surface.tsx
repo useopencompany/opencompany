@@ -139,10 +139,13 @@ import {
 import {
   type ChatModelSelection,
   persistLastChatSelection,
+  persistLastEngineModel,
   persistLastReasoningEffort,
   readLastChatSelection,
+  readLastEngineModel,
   readLastReasoningEffort,
   subscribeLastChatSelection,
+  subscribeLastEngineModel,
   subscribeLastReasoningEffort,
 } from "@/lib/chat-composer-selection";
 import {
@@ -187,6 +190,7 @@ import {
   type CodexChatModelId,
   ENGINE_REGISTRY,
   type EngineChatKind,
+  engineChatModelIdForChat,
   isCloudCodingEngine,
   normalizeClaudeChatModelId,
   normalizeCodexChatModelId,
@@ -566,12 +570,17 @@ export function Surface({
   const initialCodexComposerUiState = initialChat
     ? codexComposerUiStateForChat(initialChat)
     : defaultCodexComposerUiState();
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(initialChat?.model),
+  // The model the open chat pins for each engine. Null means the chat pins none, so the picker
+  // shows the model last used with that engine.
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(() =>
+    engineChatModelIdForChat("codex", initialChat?.model),
   );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(initialChat?.model),
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(() =>
+    engineChatModelIdForChat("claude_code", initialChat?.model),
   );
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   // The selected model for each engine, keyed so a send reads the active engine's model
   // without a per-engine branch (a third engine reads its own model, not Claude's).
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
@@ -1552,8 +1561,8 @@ export function Surface({
               ? normalizeModel(chat.model)
               : null,
       );
-      setCodexModel(normalizeCodexChatModelId(chat?.model));
-      setClaudeModel(normalizeClaudeChatModelId(chat?.model));
+      setCodexModelOverride(engineChatModelIdForChat("codex", chat?.model));
+      setClaudeModelOverride(engineChatModelIdForChat("claude_code", chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
@@ -1594,8 +1603,8 @@ export function Surface({
       releaseAllOptimisticAttachmentPreviews,
       saveComposerDraft,
       setChatModelOverride,
-      setClaudeModel,
-      setCodexModel,
+      setClaudeModelOverride,
+      setCodexModelOverride,
       setMessages,
       setInput,
       setSelectedMentions,
@@ -2097,7 +2106,7 @@ export function Surface({
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: chatSessionId ? ENGINE_REGISTRY[engine].defaultModelId : engineChatModel[engine],
+          model: chatSessionId ? rememberedEngineModel[engine] : engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -3644,12 +3653,22 @@ export function Surface({
                         <EngineComposerControls
                           model={
                             composerEngine === "codex"
-                              ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                              ? {
+                                  engine: "codex",
+                                  value: codexModel,
+                                  onChange: (model) => {
+                                    setCodexModelOverride(model);
+                                    persistLastEngineModel(userWorkosId, "codex", model);
+                                  },
+                                }
                               : composerEngine === "claude_code"
                                 ? {
                                     engine: "claude_code",
                                     value: claudeModel,
-                                    onChange: setClaudeModel,
+                                    onChange: (model) => {
+                                      setClaudeModelOverride(model);
+                                      persistLastEngineModel(userWorkosId, "claude_code", model);
+                                    },
                                   }
                                 : null
                           }
@@ -3784,12 +3803,11 @@ export function QuickChatComposer({
   );
   const [chatModelOverride, setChatModelOverride] = useState<ChatModelSelection | null>(null);
   const baseChatModel = chatModelOverride ?? rememberedChatModel;
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(undefined),
-  );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(undefined),
-  );
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(null);
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(null);
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
     codex: codexModel,
     claude_code: claudeModel,
@@ -4635,9 +4653,13 @@ export function QuickChatComposer({
               <EngineComposerControls
                 model={
                   composerEngine === "codex"
-                    ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                    ? { engine: "codex", value: codexModel, onChange: setCodexModelOverride }
                     : composerEngine === "claude_code"
-                      ? { engine: "claude_code", value: claudeModel, onChange: setClaudeModel }
+                      ? {
+                          engine: "claude_code",
+                          value: claudeModel,
+                          onChange: setClaudeModelOverride,
+                        }
                       : null
                 }
                 engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
@@ -5126,6 +5148,26 @@ function useRememberedReasoningEffort(
     () => readLastReasoningEffort(userWorkosId, effortEngine),
     () => ENGINE_REGISTRY[effortEngine].defaultReasoningEffort,
   );
+}
+
+// The model each engine's picker shows when the open chat pins none: the model last used with
+// that engine, falling back to the engine default. Both engines are read on every render so a
+// picker never lags the engine the composer just switched to.
+function useRememberedEngineModels(userWorkosId: string): {
+  codex: CodexChatModelId;
+  claude_code: ClaudeChatModelId;
+} {
+  const codex = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "codex"),
+    () => CODEX_CHAT_DEFAULT_MODEL_ID,
+  );
+  const claudeCode = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "claude_code"),
+    () => CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  );
+  return { codex, claude_code: claudeCode };
 }
 
 function defaultCodexComposerUiState(): CodexComposerUiState {
