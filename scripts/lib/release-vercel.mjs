@@ -132,6 +132,27 @@ export function vercelCurlArgs(path, deploymentUrl) {
   return ["vercel", "curl", target, "--yes"];
 }
 
+export function vercelDeployArgs({ token, teamId, projectId }) {
+  return [
+    "vercel",
+    "deploy",
+    "--prebuilt",
+    "--archive=tgz",
+    "--prod",
+    "--no-wait",
+    "--skip-domain",
+    "--yes",
+    "--format",
+    "json",
+    "--token",
+    token,
+    "--scope",
+    teamId,
+    "--project",
+    projectId,
+  ];
+}
+
 function copyDirectoryContents(source, destination) {
   for (const entry of readdirSync(source)) {
     cpSync(`${source}/${entry}`, `${destination}/${entry}`, {
