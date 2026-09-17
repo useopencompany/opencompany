@@ -43,7 +43,7 @@ function PhoneChannelSettings({
         {channel === "WhatsApp" ? (
           <p className="mb-4 text-[13px] leading-5 text-ink-subtle">
             This beta supports phone numbers registered in the European Economic Area, including
-            Germany. US, UK and Swiss numbers aren't available yet. Text messages only.
+            Germany. US, UK and Swiss numbers aren&apos;t available yet. Text messages only.
           </p>
         ) : null}
         {!data.configured ? (

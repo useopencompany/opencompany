@@ -90,7 +90,7 @@ const WEB_VIEW_BLOCK = [
   "</channel>",
 ].join("\n");
 
-// The iMessage personal assistant: an opencompany-engine runtime with `harness = 'personal_agent'`.
+// The personal assistant shared by phone channels: an opencompany-engine runtime with `harness = 'personal_agent'`.
 // It shares the durable session, run and message tables, the projector, the action and host-tool
 // gateways and context compaction with the main chat harness, and owns its prompt, tool set,
 // approval policy and delivery. Nothing here runs for a `chat` harness session.
