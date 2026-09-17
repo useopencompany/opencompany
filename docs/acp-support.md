@@ -37,7 +37,7 @@ transcript from the runner's own confirmed injection. See `docs/chat-operations.
 | Agent-to-client method | Status | opencompany behavior |
 | --- | --- | --- |
 | `session/request_permission` | Supported | Creates a durable one-time approval, waits for the user's choice, and returns the matching ACP option ID. `allow_once` and `reject_once` are preferred when the agent supplies them; there is no persistent “always allow” product control. |
-| `elicitation/create` (`form`) | Supported with limits | Creates a durable question for up to three flat primitive fields. Supports strings, numbers, integers, booleans, titled single-selects, and one selection from a titled multi-select. Codex and Claude companion “Other” fields are folded into the related question. |
+| `elicitation/create` (`form`) | Supported with limits | Creates a durable question for up to three flat primitive fields. Codex exposes its native question tool in both Default and Plan modes; Claude Code maps `AskUserQuestion` to the same form. Supports strings, numbers, integers, booleans, titled single-selects, and one selection from a titled multi-select. Codex and Claude companion “Other” fields are folded into the related question. |
 | `elicitation/create` (`url`) | Supported | Presents the message and URL as a durable accept/decline question. The agent remains responsible for observing completion of the external flow. |
 | `elicitation/complete` | Accepted | The notification is accepted. The durable URL question has already been resolved when the user accepts or declines it, so no additional UI transition is applied. |
 | `fs/read_text_file`, `fs/write_text_file` | Not advertised | Sandbox agents access their shared checkout directly. The runner does not advertise ACP filesystem RPCs. |
