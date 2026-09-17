@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.44",
-    "@ai-sdk/react": "4.0.95",
+    "@ai-sdk/react": "4.0.108",
     "@browserbasehq/sdk": "^2.19.1",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-css": "^6.3.1",

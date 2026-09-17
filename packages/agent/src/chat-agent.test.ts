@@ -53,6 +53,7 @@ describe("knowledge tools", () => {
       "read",
       "grep",
       "search",
+      "query",
       "recent",
       "timeline",
     ]);
