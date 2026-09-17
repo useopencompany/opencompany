@@ -33,7 +33,6 @@ vi.mock("@opencompany/agent/integrations/github-user", () => ({
 vi.mock("./db", () => ({ getDb: () => dbMocks.db }));
 
 import {
-  buildGitHubCommandEnv,
   codingSandboxAcquisitionLogFields,
   GITHUB_RECONNECT_NOTICE,
   loadGitHubAuthForUser,
@@ -110,28 +109,6 @@ describe("GitHub sandbox auth", () => {
     });
     await expect(loadGitHubAuthForUser("user_1")).resolves.toBeNull();
     expect(githubUserMocks.getAccessToken).not.toHaveBeenCalled();
-  });
-
-  it("injects the personal token into gh and git through the existing environment contract", () => {
-    const env = buildGitHubCommandEnv({
-      githubAuthHeader: "Authorization: Basic encoded-personal-token",
-      githubToken: "ghu_personal",
-      repositoryFullName: "opencompany/app",
-      toolCallId: "turn/unsafe",
-      gitAuthorName: "The Octocat",
-      gitAuthorEmail: "octocat@github.com",
-    });
-
-    expect(env).toMatchObject({
-      GH_TOKEN: "ghu_personal",
-      GH_REPO: "opencompany/app",
-      GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-      GIT_CONFIG_VALUE_0: "Authorization: Basic encoded-personal-token",
-      GIT_AUTHOR_NAME: "The Octocat",
-      GIT_AUTHOR_EMAIL: "octocat@github.com",
-      GIT_COMMITTER_NAME: "The Octocat",
-      GIT_COMMITTER_EMAIL: "octocat@github.com",
-    });
   });
 
   it("does not override git identity when an existing connection has no verified email", async () => {

@@ -33,6 +33,12 @@ const authMocks = vi.hoisted(() => ({
   loadCodexCliAuth: vi.fn(),
   persistRefreshedCodexAuth: vi.fn(),
 }));
+const githubRelayMocks = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
+vi.mock("./github-sandbox-auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./github-sandbox-auth")>()),
+  prepareGitHubSandboxAuth: githubRelayMocks.prepare,
+}));
+
 const cliMocks = vi.hoisted(() => ({
   buildCodexAcpCommandEnv: vi.fn(),
   ensureCodexAcpAdapterInstalled: vi.fn(),
@@ -120,12 +126,10 @@ vi.mock("./coding-agent-shared", async (importOriginal) => ({
     "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
   GITHUB_UNAVAILABLE_NOTICE:
     "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
-  buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: (await importOriginal<typeof import("./coding-agent-shared")>())
     .createKnownSecretRedactor,
   gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
   logCodingSandboxAcquisition: () => () => undefined,
-  githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: githubAuthMocks.loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice: (
     history: { messages: Array<{ role: string; content: string }> },
@@ -649,6 +653,11 @@ describe("runCodexChatTurn over ACP", () => {
     cliMocks.killLeftoverCodexTurnProcesses.mockResolvedValue(undefined);
     historyMocks.loadCodingChatHistory.mockResolvedValue(emptyHistory());
     githubAuthMocks.loadGitHubAuthForUser.mockResolvedValue(null);
+    githubRelayMocks.dispose.mockReset().mockResolvedValue(undefined);
+    githubRelayMocks.prepare.mockReset().mockImplementation(async (input) => ({
+      env: { GH_TOKEN: input.capability.localToken, GH_CONFIG_DIR: input.capability.root },
+      dispose: githubRelayMocks.dispose,
+    }));
     eventMocks.loadCodexChatAssistantMessageParts.mockResolvedValue([]);
     eventMocks.createExternalEngineProjector.mockImplementation(
       (input: { normalizeEvent?: (event: Record<string, unknown>) => unknown }) => ({
@@ -1038,10 +1047,51 @@ describe("runCodexChatTurn over ACP", () => {
       }),
     ).resolves.toBe("settled");
 
-    expect(githubAuthMocks.loadGitHubAuthForUser).toHaveBeenCalledWith("user_1", {
-      minimumValidityMs: 1_800_000,
-    });
+    expect(githubAuthMocks.loadGitHubAuthForUser).toHaveBeenCalledWith("user_1");
     expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("uses attempt-scoped GitHub relay credentials and disposes the relay after settlement", async () => {
+    githubAuthMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
+      githubToken: "ghu_provider_secret",
+      githubAuthHeader: "provider-header",
+      provider: "github_user",
+      gitAuthorName: "Synthetic",
+      gitAuthorEmail: "synthetic@example.invalid",
+    });
+    await runCodexChatTurn({
+      turn: codexTurn(),
+      session: codexSession(),
+      env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      canonicalAttemptId: "attempt_github",
+    });
+    expect(githubRelayMocks.prepare).toHaveBeenCalledOnce();
+    const prepared = githubRelayMocks.prepare.mock.calls[0]![0];
+    expect(prepared.capability.ticket).toBeTruthy();
+    expect(prepared.capability.localToken).not.toBe("ghu_provider_secret");
+    expect(cliMocks.buildCodexAcpCommandEnv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        githubEnv: {
+          GH_TOKEN: prepared.capability.localToken,
+          GH_CONFIG_DIR: prepared.capability.root,
+        },
+      }),
+    );
+    expect(githubRelayMocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not fall back to provider-token injection when the GitHub broker is unavailable", async () => {
+    githubAuthMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
+      githubToken: "ghu_provider_secret",
+      githubAuthHeader: "provider-header",
+      provider: "github_user",
+    });
+    await runCodexChatTurn({ turn: codexTurn(), session: codexSession(), env: env() });
+    expect(githubRelayMocks.prepare).not.toHaveBeenCalled();
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    );
     expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 

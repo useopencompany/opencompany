@@ -44,7 +44,17 @@ const chatMocks = vi.hoisted(() => ({
   updateCodexChatSessionIfLeaseHeld: vi.fn(),
 }));
 
+const githubRelayMocks = vi.hoisted(() => ({ prepare: vi.fn(), dispose: vi.fn() }));
+vi.mock("./github-sandbox-auth", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./github-sandbox-auth")>()),
+  prepareGitHubSandboxAuth: githubRelayMocks.prepare,
+}));
+
 const cliMocks = vi.hoisted(() => ({
+  buildClaudeAcpCommandEnv: vi.fn((input: { githubEnv?: Record<string, string> }) => ({
+    CLAUDE_CODE_OAUTH_TOKEN: "claude_token",
+    ...input.githubEnv,
+  })),
   ensureClaudeAcpAdapterInstalled: vi.fn(),
   killLeftoverClaudeTurnProcesses: vi.fn(),
 }));
@@ -140,7 +150,7 @@ vi.mock("@opencompany/db/plugin-runtime-repository", () => ({
 
 vi.mock("./claude-code-cli", () => ({
   buildClaudeAcpCommand: () => "exec claude-agent-acp",
-  buildClaudeAcpCommandEnv: () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude_token" }),
+  buildClaudeAcpCommandEnv: cliMocks.buildClaudeAcpCommandEnv,
   ensureClaudeAcpAdapterInstalled: cliMocks.ensureClaudeAcpAdapterInstalled,
   killLeftoverClaudeTurnProcesses: cliMocks.killLeftoverClaudeTurnProcesses,
 }));
@@ -158,10 +168,9 @@ vi.mock("./coding-agent-shared", () => ({
     "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.",
   GITHUB_UNAVAILABLE_NOTICE:
     "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
-  buildGitHubCommandEnv: () => ({}),
   createKnownSecretRedactor: () => (value: string) => value,
+  gitAuthHeader: (token: string) => `Authorization: Basic ${token}`,
   logCodingSandboxAcquisition: () => () => undefined,
-  githubSandboxTokenMinimumValidityMs: (turnTimeoutMs: number) => turnTimeoutMs + 600_000,
   loadGitHubAuthForUser: chatMocks.loadGitHubAuthForUser,
   shouldAppendGitHubAuthNotice: (
     history: { messages: Array<{ role: string; content: string }> },
@@ -461,6 +470,11 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       });
     pluginMcpMocks.stopPluginMcpProcesses.mockReset().mockResolvedValue(undefined);
     chatMocks.loadGitHubAuthForUser.mockResolvedValue(null);
+    githubRelayMocks.dispose.mockReset().mockResolvedValue(undefined);
+    githubRelayMocks.prepare.mockReset().mockImplementation(async (input) => ({
+      env: { GH_TOKEN: input.capability.localToken, GH_CONFIG_DIR: input.capability.root },
+      dispose: githubRelayMocks.dispose,
+    }));
     chatMocks.markCodexChatSandboxTimeoutArmed.mockResolvedValue(undefined);
     chatMocks.materializeCodexChatAttachments.mockResolvedValue({
       paths: [],
@@ -692,10 +706,51 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       }),
     ).resolves.toBe("settled");
 
-    expect(chatMocks.loadGitHubAuthForUser).toHaveBeenCalledWith("user_1", {
-      minimumValidityMs: 1_800_000,
-    });
+    expect(chatMocks.loadGitHubAuthForUser).toHaveBeenCalledWith("user_1");
     expect(eventMocks.appendNotice).toHaveBeenCalledWith(notice);
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
+  it("uses attempt-scoped GitHub relay credentials and disposes the relay after settlement", async () => {
+    chatMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
+      githubToken: "ghu_provider_secret",
+      githubAuthHeader: "provider-header",
+      provider: "github_user",
+      gitAuthorName: "Synthetic",
+      gitAuthorEmail: "synthetic@example.invalid",
+    });
+    await runClaudeCodeChatTurn({
+      turn: claudeTurn(),
+      session: claudeSession(),
+      env: env({ runnerPublicUrl: "https://runner.example.com" }),
+      canonicalAttemptId: "attempt_github",
+    });
+    expect(githubRelayMocks.prepare).toHaveBeenCalledOnce();
+    const prepared = githubRelayMocks.prepare.mock.calls[0]![0];
+    expect(prepared.capability.ticket).toBeTruthy();
+    expect(prepared.capability.localToken).not.toBe("ghu_provider_secret");
+    expect(cliMocks.buildClaudeAcpCommandEnv).toHaveBeenCalledWith(
+      expect.objectContaining({
+        githubEnv: {
+          GH_TOKEN: prepared.capability.localToken,
+          GH_CONFIG_DIR: prepared.capability.root,
+        },
+      }),
+    );
+    expect(githubRelayMocks.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("does not fall back to provider-token injection when the GitHub broker is unavailable", async () => {
+    chatMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
+      githubToken: "ghu_provider_secret",
+      githubAuthHeader: "provider-header",
+      provider: "github_user",
+    });
+    await runClaudeCodeChatTurn({ turn: claudeTurn(), session: claudeSession(), env: env() });
+    expect(githubRelayMocks.prepare).not.toHaveBeenCalled();
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    );
     expect(acpMocks.runTurn).toHaveBeenCalledOnce();
   });
 
