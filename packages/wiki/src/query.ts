@@ -32,7 +32,12 @@ export async function queryWiki(input: {
   const limit = Math.min(10, Math.max(1, Math.floor(input.limit ?? 10)));
   const started = performance.now();
   const signal = AbortSignal.timeout(20_000);
-  const nodes = new Map(input.tree.map((node) => [node.path.replace(/\/$/, ""), node]));
+  const nodes = new Map(
+    input.tree.map((node) => {
+      const path = node.path.replace(/\/$/, "");
+      return [path, { ...node, path }];
+    }),
+  );
   const children = new Map<string, WikiQueryNode[]>();
   for (const node of nodes.values()) {
     const parent = node.path.split("/").slice(0, -1).join("/");
@@ -75,7 +80,9 @@ export async function queryWiki(input: {
         result.probabilities.length !== batch.length ||
         result.probabilities.some((p) => !Number.isFinite(p) || p < 0 || p > 1) ||
         !Number.isFinite(result.costUsd) ||
-        result.costUsd < 0
+        result.costUsd < 0 ||
+        !Number.isSafeInteger(result.inputTokens) ||
+        result.inputTokens < 0
       ) {
         throw new WikiQueryError("The wiki query model returned an invalid evaluation.");
       }
@@ -111,6 +118,7 @@ export async function queryWiki(input: {
     frontier = folders.slice(0, 8).flatMap((path) => children.get(path) ?? []);
     if (truncated && calls >= 20) break;
   }
+  if (frontier.length) truncated = true;
   let pending = [...candidates].sort((a, b) => b[1] - a[1]).map(([path]) => path);
   for (let round = 0; round < 3 && pending.length; round++) {
     const remaining = 48 - visited.size;

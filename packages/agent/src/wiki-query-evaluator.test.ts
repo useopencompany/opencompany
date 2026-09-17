@@ -49,5 +49,13 @@ describe("wiki query evaluator", () => {
     await expect(createWikiQueryEvaluator("test-key")(input)).rejects.toThrow(
       "verify gateway usage",
     );
+    evaluate.mockResolvedValue({
+      answers: {},
+      usage: { inputTokens: 1 },
+      providerMetadata: { gateway: { cost: null } },
+    });
+    await expect(createWikiQueryEvaluator("test-key")(input)).rejects.toThrow(
+      "verify gateway usage",
+    );
   });
 });

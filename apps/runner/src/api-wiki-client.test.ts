@@ -18,6 +18,31 @@ const base = {
 describe("executeApiWikiCommand", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("gives a bounded query longer than the API's 20-second model deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init: RequestInit) => {
+          signal = init.signal as AbortSignal;
+          await new Promise((resolve) => setTimeout(resolve, 21_000));
+          return new Response(JSON.stringify({ data: { ok: true, result: { matches: [] } } }));
+        }),
+      );
+      const result = executeApiWikiCommand({
+        ...base,
+        toolInput: { command: "query", query: "question" },
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(result).resolves.toMatchObject({ ok: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("posts the command with bearer auth and the idempotency header", async () => {
     const fetchMock = stubFetch(
       new Response(JSON.stringify({ data: { ok: true, result: { action: "created" } } }), {

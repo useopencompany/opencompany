@@ -22,15 +22,24 @@ export function createWikiQueryEvaluator(apiKey: string): WikiQueryEvaluator {
         abortSignal: signal,
         providerOptions: { gateway: { zeroDataRetention: true } },
       });
-      const cost = Number(result.providerMetadata?.gateway?.cost);
-      if (!Number.isFinite(cost) || cost < 0 || result.usage.inputTokens === undefined) {
+      const rawCost = result.providerMetadata?.gateway?.cost;
+      const cost =
+        typeof rawCost === "number" || (typeof rawCost === "string" && rawCost.trim())
+          ? Number(rawCost)
+          : Number.NaN;
+      if (
+        !Number.isFinite(cost) ||
+        cost < 0 ||
+        !Number.isSafeInteger(result.usage.inputTokens) ||
+        (result.usage.inputTokens ?? -1) < 0
+      ) {
         throw new WikiQueryError("Wiki query could not verify gateway usage.");
       }
       return {
         probabilities: candidates.map(
           (_, index) => result.answers[`candidate_${index}`]?.probability ?? Number.NaN,
         ),
-        inputTokens: result.usage.inputTokens,
+        inputTokens: result.usage.inputTokens!,
         costUsd: cost,
       };
     } catch (error) {
