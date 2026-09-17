@@ -1,4 +1,5 @@
 import { LinkedInIcon, XIcon, YouTubeIcon } from "@opencompany/ui/icons";
+import Link from "next/link";
 import { DayCount } from "./DayCount";
 import { Mark } from "./Mark";
 
@@ -28,9 +29,18 @@ export function SiteFooter() {
           <span aria-hidden="true" className="h-3 w-px bg-border" />
           <DayCount />
         </div>
-        <p className="font-mono text-[12px] text-ink-subtle sm:justify-self-center">
-          © {new Date().getFullYear()} opencompany. All rights reserved.
-        </p>
+        <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 font-mono text-[12px] text-ink-subtle sm:justify-self-center">
+          <span>© {new Date().getFullYear()} opencompany.</span>
+          <Link href="/slack" className="transition-colors hover:text-ink">
+            Slack
+          </Link>
+          <Link href="/privacy" className="transition-colors hover:text-ink">
+            Privacy
+          </Link>
+          <Link href="/support" className="transition-colors hover:text-ink">
+            Support
+          </Link>
+        </div>
         <nav aria-label="Social media" className="sm:justify-self-end">
           <ul className="flex items-center gap-1">
             {SOCIAL_LINKS.map(({ label, href, Icon }) => (
