@@ -1224,27 +1224,26 @@ export function Surface({
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
-  const runtimeMatchesForegroundTurn = Boolean(
-    foregroundTurn &&
-      isChatRuntimeActive(conversationRuntime) &&
-      (!conversationRuntime?.activeRunId ||
-        !foregroundTurn.runId ||
-        conversationRuntime.activeRunId === foregroundTurn.runId),
-  );
   const chatTurnPhase = deriveChatTurnPhase({
     runStatus: foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
-    runtimeMatchesTurn: runtimeMatchesForegroundTurn,
+    runtimeMatchesTurn: Boolean(
+      foregroundTurn &&
+        isChatRuntimeActive(conversationRuntime) &&
+        (!conversationRuntime?.activeRunId ||
+          !foregroundTurn.runId ||
+          conversationRuntime.activeRunId === foregroundTurn.runId),
+    ),
     transportStatus: status,
     submitting: engineSubmitting,
   });
   // The runtime is the authoritative session-level signal and also drives the header badge.
-  // When it has advanced to another Run, keep the composer working through projection lag without
-  // reviving a terminal turn whose matching runtime row is merely stale.
+  // Keep the composer in the same state when its run-specific projection is briefly missing or
+  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
   const isForegroundTurnWorking = isChatConversationWorking(
     chatTurnPhase,
-    Boolean(activeEngineChat && conversationRunning && !runtimeMatchesForegroundTurn),
+    Boolean(activeEngineChat && conversationRunning),
   );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
@@ -1253,8 +1252,7 @@ export function Surface({
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
   );
   const composerQueuesMessage = Boolean(
-    canQueueWhileWorking &&
-      (activeTaskConversation ? isTaskConversationWorking : isForegroundTurnWorking),
+    !activeTaskConversation && isForegroundTurnWorking && canQueueWhileWorking,
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -6509,8 +6507,8 @@ function SubmitButton({
   );
 }
 
-// Sits beside the composer so Send stays free to queue a message into the turn that is still
-// working. `stopping` covers the gap between asking to interrupt and the runner settling it.
+// Sits beside the composer so its message action stays available while the turn is working.
+// `stopping` covers the gap between asking to interrupt and the runner settling it.
 function EngineStopButton({
   label,
   stopping = false,

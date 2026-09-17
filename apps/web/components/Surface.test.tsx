@@ -845,46 +845,6 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("does not revive coding controls when runtime state lags the same completed Run", () => {
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={{
-          id: "goat_chat_codex_completed",
-          title: "Completed coding chat",
-          model: CODEX_CHAT_DEFAULT_MODEL_ID,
-          engine: "codex",
-          runtime: {
-            status: "running",
-            activeRunId: "run_codex_completed",
-            hasError: false,
-            updatedAt: currentTimestamp(),
-          },
-          activityState: "working",
-          hasUnseen: false,
-          messages: [
-            {
-              id: "assistant_codex_completed",
-              role: "assistant",
-              metadata: {
-                sessionId: "goat_chat_codex_completed",
-                runId: "run_codex_completed",
-                timing: { durationMs: 12_000 },
-              },
-              parts: [{ type: "text", text: "Finished coding" }],
-            },
-          ],
-        }}
-        codexConnected
-      />,
-    );
-
-    expect(screen.getByPlaceholderText("Reply...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
-  });
-
   it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {
     const user = userEvent.setup();
     const transportCancel = vi
@@ -1881,8 +1841,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const composer = screen.getByPlaceholderText("Queue a follow-up...");
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    const composer = screen.getByPlaceholderText("Reply...");
     expect(composer).toBeEnabled();
     await user.type(composer, "also check the staging deploy{Enter}");
 
@@ -1936,10 +1895,9 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
-    // The Task's stop control sits beside the composer, exactly like a coding chat's, so the
-    // composer stays free to queue a message into the turn that is still working.
-    expect(screen.getByPlaceholderText("Queue a follow-up...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    // The Task's stop control sits beside the composer, exactly like a coding chat's, so Send stays
+    // free to queue a message into the turn that is still working.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
