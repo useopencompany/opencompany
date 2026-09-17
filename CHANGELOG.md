@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - finished tasks now stop showing a working indicator and running timer, even when part of the page is slow to update (#1933) — @louis.
-- codex can now ask questions with suggested answers during normal coding chats, so you can answer in the question card and let work continue (#1930) — @louis.
+- codex can now ask questions with suggested answers during normal coding chats and tasks. pending questions open automatically so you can answer and let work continue (#1930, #1935) — @louis.
 - replying in a slack thread now resumes a paused task instead of leaving your reply waiting indefinitely (#1925) — @louis.
 - personal workflows can use your personal skills again, including scheduled runs that previously failed before returning a result (#1917) — @louis.
 - connecting a plugin during signup now installs it and opens its account connection in one click (#1916) — @louis.
