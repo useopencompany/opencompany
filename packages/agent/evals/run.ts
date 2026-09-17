@@ -213,7 +213,7 @@ export async function main(args: string[]): Promise<number> {
     const jobs: {
       scenario: (typeof scenarios)[number];
       model: AgentModelId;
-      variant: "v4" | "v5";
+      variant: import("./types").Variant;
       repeat: number;
     }[] = [];
     for (let repeat = 0; repeat < options.k; repeat++)

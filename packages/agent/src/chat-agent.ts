@@ -176,6 +176,13 @@ import {
   type UpdateWorkflowMemoryToolOutput,
 } from "./workflow-memory";
 import {
+  parseWorkflowToolInput,
+  WORKFLOWS_INPUT_SCHEMA,
+  WORKFLOWS_TOOL_DESCRIPTION,
+  type WorkflowCommand,
+  type WorkflowToolInput,
+} from "./workflow-tool";
+import {
   WORKSPACE_SKILL_AUTHORING_INPUT_SCHEMA,
   WORKSPACE_SKILL_EDIT_INPUT_SCHEMA,
   WORKSPACE_SKILLS_INPUT_SCHEMA,
@@ -322,6 +329,7 @@ export type SkillDispatcher = {
 };
 
 export type WorkflowDispatcher = {
+  manage?: (input: WorkflowCommand, context: { toolCallId: string }) => Promise<unknown>;
   catalog: readonly ChatWorkflowCatalogItem[];
   execute: (input: StartWorkflowToolInput) => Promise<StartedTask>;
 };
@@ -700,7 +708,32 @@ export function createProductChatToolContext(input: {
   };
 
   const workflows = input.workflows;
-  if (workflows && workflows.catalog.length > 0) {
+  if (workflows?.manage) {
+    tools.workflows = tool<WorkflowToolInput, unknown, Record<string, unknown>>({
+      description: WORKFLOWS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WorkflowToolInput>(WORKFLOWS_INPUT_SCHEMA),
+      execute: async (raw, context) => {
+        visibleToolActivity = true;
+        const args = parseWorkflowToolInput(raw);
+        if (args.command === "run") {
+          if (!args.workflowId || !args.prompt)
+            throw new Error("Run requires workflowId and prompt.");
+          // Resolve through the live service, so a workflow created this turn is runnable.
+          const read = await workflows.manage!(
+            { command: "read", workflowId: args.workflowId },
+            { toolCallId: context.toolCallId },
+          );
+          const current = (read as { workflow?: { slug: string; status: string } }).workflow;
+          if (!current || current.status !== "active")
+            throw new Error("Only an active workflow can be run.");
+          return startWorkflowTask(current.slug, () =>
+            workflows.execute({ workflowId: current.slug, prompt: args.prompt! }),
+          );
+        }
+        return workflows.manage!(args, { toolCallId: context.toolCallId });
+      },
+    });
+  } else if (workflows && workflows.catalog.length > 0) {
     const workflowIds = workflows.catalog.map((workflow) => workflow.id);
     tools[START_WORKFLOW_TOOL_NAME] = tool<
       StartWorkflowToolInput,

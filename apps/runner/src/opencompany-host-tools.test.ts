@@ -79,6 +79,7 @@ describe("loadHostTools", () => {
       runWiki: hostTools.runWiki as never,
     });
     expect(tools).not.toHaveProperty("start_workflow");
+    expect(tools).not.toHaveProperty("workflows");
     expect(tools).toHaveProperty("wiki");
     expect(tools).toHaveProperty("write_artifact");
     expect(tools).toHaveProperty("list_skills");
@@ -102,7 +103,8 @@ describe("loadHostTools", () => {
     });
 
     expect(tools).not.toHaveProperty("start_task");
-    expect(tools).toHaveProperty("start_workflow");
+    expect(tools).toHaveProperty("workflows");
+    expect(tools).not.toHaveProperty("start_workflow");
 
     const prompt = createProductChatSystemPrompt({
       automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,

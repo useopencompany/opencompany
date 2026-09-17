@@ -7,6 +7,7 @@ import type {
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
+import { WorkflowCommandSchema } from "../workflow-tool";
 
 export type ChatHostContext = {
   taskConversation: boolean;
@@ -70,6 +71,12 @@ type ActiveSkill = {
 type TaskResult = { id: string; displayId: string; name: string; prompt: string };
 
 export type ChatHostToolServiceDependencies = {
+  manageWorkflows?: (input: {
+    actorId: string;
+    workspaceId: string;
+    toolInput: Record<string, unknown>;
+    idempotencyKey: string;
+  }) => Promise<unknown>;
   loadContext: (command: ChatHostToolCommand) => Promise<ChatHostContext | null>;
   browserProfilesAvailable: () => boolean;
   createAgentSession: (input: {
@@ -336,6 +343,18 @@ async function executeOperation(
         },
       });
     }
+    case "workflows": {
+      assertAutomationTools(context);
+      if (toolInput.command === "run")
+        throw new Error("Workflow runs must use the turn's run dispatcher.");
+      if (!dependencies.manageWorkflows) throw new Error("Workflow management is unavailable.");
+      return dependencies.manageWorkflows({
+        actorId: context.actorId,
+        workspaceId: context.workspaceId,
+        toolInput,
+        idempotencyKey: workflowCommandIdempotencyKey(command.runId, command.toolCallId, toolInput),
+      });
+    }
     case "start_workflow": {
       assertAutomationTools(context);
       const created = await dependencies.createWorkflowTask({
@@ -597,4 +616,31 @@ function failure(error: string): ChatHostToolGatewayResponse {
 function skillScope(value: unknown): "personal" | "company" {
   if (value !== "personal" && value !== "company") throw new Error("Choose Personal or Company.");
   return value;
+}
+
+// Repeating the same creation within a turn is a model retry, even when the model
+// gives it a new tool-call ID. Zod fixes property order before hashing the request.
+export function workflowCommandIdempotencyKey(
+  turnId: string,
+  toolCallId: string | undefined,
+  input: unknown,
+) {
+  const args = WorkflowCommandSchema.parse(input);
+  if (args.command !== "create")
+    return workspaceSkillIdempotencyKey(turnId, toolCallId).replace(
+      "agent-skill:",
+      "agent-workflow:",
+    );
+  const definition = WorkflowCommandSchema.parse({
+    ...args,
+    description: args.description ?? "",
+    instructions: args.instructions ?? "",
+    status: args.status ?? "draft",
+    scope: args.scope ?? "personal",
+    schedule: args.schedule ?? null,
+    memoryEnabled: args.memoryEnabled ?? false,
+  });
+  return `agent-workflow:${createHash("sha256")
+    .update(JSON.stringify([turnId, definition]))
+    .digest("hex")}`;
 }

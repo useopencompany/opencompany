@@ -64,6 +64,23 @@ describe("External engine tool capability authority", () => {
     ).toMatchObject({ taskConversation: true });
   });
 
+  it.each([
+    ["admin", "chat", true],
+    ["member", "chat", false],
+    ["admin", "task", false],
+  ] as const)(
+    "derives workflow access for %s in %s",
+    (workspaceRole, conversationKind, expected) => {
+      expect(
+        authorizeExternalEngineToolCapability({
+          capability,
+          state: state({ workspaceRole, conversationKind }),
+          now,
+        }),
+      ).toMatchObject({ automationToolsEnabled: expected });
+    },
+  );
+
   it("exposes Slack only for workflow tasks whose channel is enabled", () => {
     expect(
       authorizeExternalEngineToolCapability({
@@ -84,6 +101,7 @@ describe("External engine tool capability authority", () => {
   it("authorizes only the active persisted external-engine attempt", () => {
     expect(authorizeExternalEngineToolCapability({ capability, state: state(), now })).toEqual({
       taskConversation: false,
+      automationToolsEnabled: true,
       slackChannelEnabled: false,
       skillToolsEnabled: true,
       actorId: "user_1",

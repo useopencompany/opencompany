@@ -23,6 +23,7 @@ import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/g
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
+import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -131,6 +132,7 @@ import type { WhatsappIngressService } from "./whatsapp-ingress";
 import type { WhatsappSettingsService } from "./whatsapp-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
 import type { WorkflowAvatarService } from "./workflow-avatars";
+import { executeWorkflowCommand } from "./workflow-commands";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -3179,10 +3181,33 @@ export function createApiApp(input: CreateApiAppInput) {
     const skipped = await input.onboardingEmails.unsubscribe(email);
     return c.json({ data: { skipped }, meta }, 200);
   });
-  // Internal runner→API entrypoint for the `wiki` agent tool. The API owns the
+  // Internal runner→API entrypoints for workflow and wiki tools. The API owns the
   // whole boundary: bearer auth, body validation, server-side actor
   // reauthorization, command-aware rate limits, and command execution against
-  // Postgres. The runner never touches the wiki database directly.
+  // Postgres. The runner never touches these domain tables directly.
+  app.post("/internal/workflows/commands", async (c) => {
+    authorizeInternalBearer(
+      c.req.raw,
+      input.wikiCommandsInternalSecret,
+      "Workflow command execution is unavailable.",
+    );
+    const idempotencyKey = boundedString(c.req.header("idempotency-key"), 200);
+    if (!idempotencyKey)
+      throw new ApiError(400, "invalid_request", "An Idempotency-Key header is required.");
+    const body = InternalWorkflowCommandRequestSchema.safeParse(await internalJsonBody(c.req.raw));
+    if (!body.success)
+      throw new ApiError(400, "invalid_request", "A valid workflow command is required.");
+    const actor = await input.resolveWikiServiceActor(body.data);
+    const isRead = ["list", "read"].includes(String(body.data.command.command));
+    await enforceRateLimit(rateLimiter, actor, isRead ? "read" : "write", 60);
+    const output = await executeWorkflowCommand({
+      actor,
+      command: body.data.command,
+      idempotencyKey,
+      workflows: input.workflows,
+    });
+    return c.json({ data: output, meta }, 200);
+  });
   app.post("/internal/wiki/commands", async (c) => {
     authorizeInternalBearer(
       c.req.raw,
