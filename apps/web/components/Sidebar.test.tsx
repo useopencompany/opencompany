@@ -34,7 +34,6 @@ const workspacesMock = vi.hoisted(() => ({
     role: "admin" | "member";
   }>,
 }));
-const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const featureFlagsMock = vi.hoisted(() => ({
   autoModelRouting: false,
   legacyBrain: true,
@@ -250,7 +249,7 @@ vi.mock("@/components/AppDataProvider", async () => {
           sidebarProjects: featureFlagsMock.sidebarProjects,
         },
         reviewCount: reviewCountMock.value,
-        mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
+        mcpSetup: { preferredClient: null, completedAt: null },
       };
     },
   };
@@ -301,7 +300,6 @@ describe("Sidebar", () => {
     pathnameMock.value = "/";
     workspaceRoleMock.value = "admin";
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
-    mcpSetupMock.completedAt = null;
     featureFlagsMock.legacyBrain = true;
     featureFlagsMock.reviewInbox = false;
     featureFlagsMock.sidebarProjects = false;
@@ -828,24 +826,11 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows MCP setup until the first successful query is verified", () => {
+  it("keeps MCP setup out of the primary nav", () => {
     pathnameMock.value = "/settings/mcp";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const setup = screen.getByRole("link", { name: "Connect MCP" });
-    expect(setup).toHaveAttribute("href", "/settings/mcp");
-    expect(setup).toHaveAttribute("aria-current", "page");
-  });
-
-  it("hides MCP setup after completion", () => {
-    pathnameMock.value = "/settings/mcp";
-    mcpSetupMock.completedAt = "2026-07-13T09:00:00.000Z";
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.queryByRole("link", { name: "Connect your brain" })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Account menu for Ada Lovelace" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect MCP" })).not.toBeInTheDocument();
   });
 
   it("does not mark home active on chat subroutes", () => {

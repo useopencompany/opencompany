@@ -3,6 +3,7 @@ import {
   deriveChatTurnPhase,
   isChatConversationWorking,
   isChatTurnWorking,
+  reconcileRuntimeWithTaskStatus,
 } from "./chat-turn-lifecycle";
 
 const idleInput = {
@@ -86,5 +87,31 @@ describe("chat turn lifecycle", () => {
     ["streaming", "running"],
   ] as const)("uses %s transport state before durable state arrives", (transportStatus, phase) => {
     expect(deriveChatTurnPhase({ ...idleInput, transportStatus })).toBe(phase);
+  });
+
+  it("parks a runtime projection that still looks live after its Task reached a terminal status", () => {
+    const runtime = {
+      status: "running" as const,
+      activeRunId: "run_1",
+      hasError: false,
+      updatedAt: "2026-09-17T15:16:04.100Z",
+    };
+
+    expect(reconcileRuntimeWithTaskStatus(runtime, "succeeded")).toEqual({
+      ...runtime,
+      status: "idle",
+      activeRunId: null,
+    });
+    expect(reconcileRuntimeWithTaskStatus({ ...runtime, status: "idle" }, "canceled")).toEqual({
+      ...runtime,
+      status: "idle",
+      activeRunId: null,
+    });
+    // A Task that is still live, waiting, or absent keeps the runtime as synced.
+    expect(reconcileRuntimeWithTaskStatus(runtime, "running")).toBe(runtime);
+    expect(reconcileRuntimeWithTaskStatus(runtime, "waiting")).toBe(runtime);
+    expect(reconcileRuntimeWithTaskStatus(runtime, null)).toBe(runtime);
+    const failed = { ...runtime, status: "failed" as const, activeRunId: null, hasError: true };
+    expect(reconcileRuntimeWithTaskStatus(failed, "failed")).toBe(failed);
   });
 });

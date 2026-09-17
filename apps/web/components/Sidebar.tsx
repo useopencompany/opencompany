@@ -16,7 +16,6 @@ import {
   Navigation,
   PanelLeft,
   Pin,
-  PlugZap,
   Plus,
   Puzzle,
   ScrollText,
@@ -113,7 +112,6 @@ function SidebarNavRow({
   // A row highlights for its whole subtree, but only one element on a page can be the current
   // one. The Tasks row hands that claim to the task it lists when the reader is inside a task.
   current = active,
-  incomplete = false,
   count,
   onClick,
 }: {
@@ -123,7 +121,6 @@ function SidebarNavRow({
   label: string;
   active: boolean;
   current?: boolean;
-  incomplete?: boolean;
   count?: number;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
@@ -149,9 +146,6 @@ function SidebarNavRow({
           {count}
         </span>
       ) : null}
-      {incomplete ? (
-        <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
-      ) : null}
     </IntentPrefetchLink>
   );
 }
@@ -165,10 +159,9 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup, reviewCount, sidebarTasks, user } = useAppData();
+  const { featureFlags, reviewCount, sidebarTasks, user } = useAppData();
   const wikis = useSidebarWikis();
   const pathname = usePathname();
-  const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
   const reviewActive = pathname === "/review";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
@@ -256,15 +249,6 @@ export function Sidebar({
             label="Workflows"
             active={workflowsActive}
           />
-          {!mcpSetup.completedAt ? (
-            <SidebarNavRow
-              href="/settings/mcp"
-              icon={PlugZap}
-              label="Connect MCP"
-              active={mcpSetupActive}
-              incomplete
-            />
-          ) : null}
         </nav>
 
         {/* Brains */}

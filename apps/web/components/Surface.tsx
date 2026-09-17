@@ -161,6 +161,7 @@ import {
   deriveChatTurnPhase,
   isChatConversationWorking,
   isChatTurnTerminal,
+  reconcileRuntimeWithTaskStatus,
 } from "@/lib/chat-turn-lifecycle";
 import {
   type ChatMention,
@@ -624,10 +625,8 @@ export function Surface({
     initialCodexComposerUiState.goalTokenBudget,
   );
   const [codingSandboxStatus, setCodingSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
-  const [conversationRuntime, setConversationRuntime] = useState<ConversationRuntimeView | null>(
-    initialChat?.runtime ?? null,
-  );
-  const conversationRunning = isChatRuntimeActive(conversationRuntime);
+  const [syncedConversationRuntime, setConversationRuntime] =
+    useState<ConversationRuntimeView | null>(initialChat?.runtime ?? null);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [queuedMessageSubmitting, setQueuedMessageSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
@@ -652,6 +651,15 @@ export function Surface({
   const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
+  const conversationRuntime = useMemo(
+    () =>
+      reconcileRuntimeWithTaskStatus(
+        syncedConversationRuntime,
+        activeTaskConversation?.status ?? null,
+      ),
+    [activeTaskConversation?.status, syncedConversationRuntime],
+  );
+  const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled = !activeTaskConversation;

@@ -28,6 +28,18 @@ function shapeOptions(readModel: ChatReadModel) {
   };
 }
 
+// Electric marks a collection ready even when its shape stream fails, so without this the rows it
+// already holds freeze in place: a transcript renders as a silent empty conversation, and a Run or
+// engine session keeps reporting the last status it saw. Record the failure for the retry surface
+// and return {} to keep the shape stream retrying with Electric's backoff.
+function keepStreamRetrying(message: string, conversationId: string) {
+  return (error: unknown) => {
+    console.warn(message, { conversationId, error });
+    recordChatSyncError(conversationId);
+    return {};
+  };
+}
+
 function createConversations() {
   return createCollection(
     electricCollectionOptions({
@@ -47,14 +59,7 @@ function createMessages(conversationId: string, messageShapeEpoch: number) {
       shapeOptions: {
         ...shapeOptions("chat-messages-v2"),
         params: { conversationId, messageShapeEpoch: String(messageShapeEpoch) },
-        // Electric already marks the collection ready on error, so without this the transcript
-        // renders as a silent empty conversation. Record the failure for the retry surface and
-        // return {} to keep the shape stream retrying with Electric's backoff.
-        onError: (error) => {
-          console.warn("Chat transcript sync failed; retrying.", { conversationId, error });
-          recordChatSyncError(conversationId);
-          return {};
-        },
+        onError: keepStreamRetrying("Chat transcript sync failed; retrying.", conversationId),
       },
       getKey: (row) => row.id,
     }),
@@ -69,6 +74,7 @@ function createRuns(conversationId: string) {
       shapeOptions: {
         ...shapeOptions("chat-runs-v1"),
         params: { conversationId },
+        onError: keepStreamRetrying("Chat run sync failed; retrying.", conversationId),
       },
       getKey: (row) => row.id,
     }),
@@ -83,6 +89,7 @@ function createEngineSession(conversationId: string) {
       shapeOptions: {
         ...shapeOptions("engine-sessions-v1"),
         params: { conversationId },
+        onError: keepStreamRetrying("Engine session sync failed; retrying.", conversationId),
       },
       // goat_codex_chat_sessions_chat_session_idx guarantees one engine session per Conversation.
       getKey: (row) => row.conversationId,
