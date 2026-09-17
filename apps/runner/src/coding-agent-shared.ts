@@ -74,10 +74,6 @@ export function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
 }
 
-export function safePathSegment(value: string, fallback = "coder") {
-  return value.replace(/[^A-Za-z0-9_.-]/g, "-") || fallback;
-}
-
 export function gitAuthHeader(token: string) {
   return `Authorization: Basic ${Buffer.from(`x-access-token:${token}`, "utf8").toString(
     "base64",
