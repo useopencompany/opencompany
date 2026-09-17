@@ -47,6 +47,14 @@ export function isChatTurnWorking(phase: ChatTurnPhase) {
   return phase === "submitting" || phase === "queued" || phase === "running";
 }
 
+// A conversation can already have moved to its next durable Run while the foreground turn
+// projection still describes the one that just settled. The session runtime owns that handoff and
+// drives the header status, so interactive controls must also keep treating the conversation as
+// active until the runtime becomes idle.
+export function isChatConversationWorking(phase: ChatTurnPhase, engineRuntimeActive: boolean) {
+  return isChatTurnWorking(phase) || engineRuntimeActive;
+}
+
 export function isChatTurnTerminal(
   phase: ChatTurnPhase,
 ): phase is Extract<ChatTurnPhase, "completed" | "failed" | "canceled"> {

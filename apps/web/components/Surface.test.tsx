@@ -774,7 +774,8 @@ describe("Surface chat streaming UI", () => {
 
     // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Send message" });
+    expect(screen.getByPlaceholderText("Queue a follow-up...")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Queue message" });
     expect(send).toBeDisabled();
 
     await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");

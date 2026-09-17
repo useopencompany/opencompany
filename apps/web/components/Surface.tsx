@@ -153,8 +153,8 @@ import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ActiveChatTurn,
   deriveChatTurnPhase,
+  isChatConversationWorking,
   isChatTurnTerminal,
-  isChatTurnWorking,
 } from "@/lib/chat-turn-lifecycle";
 import {
   type ChatMention,
@@ -1227,7 +1227,13 @@ export function Surface({
     transportStatus: status,
     submitting: engineSubmitting,
   });
-  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
+  // The runtime is the authoritative session-level signal and also drives the header badge.
+  // Keep the composer in the same state when its run-specific projection is briefly missing or
+  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
+  const isForegroundTurnWorking = isChatConversationWorking(
+    chatTurnPhase,
+    Boolean(activeEngineChat && conversationRunning),
+  );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
       activeTaskConversation &&
@@ -3451,9 +3457,11 @@ export function Surface({
                       id="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation || mode === "chat"
-                          ? "Reply..."
-                          : "Ask a question or describe a task..."
+                        isForegroundTurnWorking && canQueueWhileWorking
+                          ? "Queue a follow-up..."
+                          : activeTaskConversation || mode === "chat"
+                            ? "Reply..."
+                            : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3506,6 +3514,7 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
+                    queuesMessage={isForegroundTurnWorking && canQueueWhileWorking}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -6385,11 +6394,13 @@ function findModel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  queuesMessage = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  queuesMessage?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
@@ -6407,11 +6418,12 @@ function SubmitButton({
     );
   }
 
+  const action = startsTask ? "Start task" : queuesMessage ? "Queue message" : "Send message";
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={action}
+      title={startsTask || queuesMessage ? action : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
