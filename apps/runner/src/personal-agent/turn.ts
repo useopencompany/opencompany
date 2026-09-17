@@ -200,6 +200,7 @@ export async function runPersonalAgentTurn(
           chatSessionId: session.chatSessionId,
         }),
       );
+    let summaryUsageStepIndex = -1;
     const context = await compactProductChatContextIfNeeded({
       storedMessages,
       currentUserMessageId: turn.userMessageId,
@@ -213,16 +214,20 @@ export async function runPersonalAgentTurn(
           blobToken: env.blobReadWriteToken,
           activeSkills: runtime.activeSkills,
         }),
-      summarize: async (prompt) => {
+      summarize: async (messages) => {
         const result = await generateText({
           model: modelResolution.model,
-          system: `${runtime.system}\n\n${CONTEXT_COMPACTION_SYSTEM_PROMPT}`,
-          prompt,
+          system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+          messages,
           maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
           abortSignal: generationController.signal,
           providerOptions,
         });
-        return { text: result.text, usage: result.usage };
+        await projector.recordStepUsage({
+          stepIndex: summaryUsageStepIndex--,
+          usage: result.usage,
+        });
+        return { text: result.text };
       },
       persist: (state) =>
         persistProductChatContextCompaction({
@@ -234,9 +239,6 @@ export async function runPersonalAgentTurn(
           leaseOwner,
         }),
     });
-    if (context.compacted && context.usage) {
-      await projector.recordStepUsage({ stepIndex: -1, usage: context.usage });
-    }
     const stream = streamText({
       model: guardKimiOutput(modelResolution.model, runtime.model),
       system: runtime.system,
