@@ -1,4 +1,7 @@
-import type { HarnessSpec } from "./product-schema";
+import { and, eq, isNull } from "drizzle-orm";
+import { type HarnessSpec, workflows, workspaceMembers } from "./product-schema";
+
+type DbClient = any;
 
 export type WorkflowHarnessMetadata = NonNullable<HarnessSpec["workflow"]>;
 
@@ -84,4 +87,35 @@ export function getWorkflowHarnessPluginSkillBundleIds(harnessSpec: HarnessSpec)
     throw new Error("Workflow Task Harness contains an unassigned Plugin Skill bundle ID.");
   }
   return bundleIds;
+}
+
+// Harnesses written before workflow Skill access was persisted default to Company access. The one
+// safe compatibility case is a live Personal workflow executing as its owner, who is still a
+// workspace member. This lets existing schedules keep running without allowing a Company workflow
+// to acquire access to an actor's Personal Skills.
+export async function resolveLegacyWorkflowSkillAccess(
+  db: DbClient,
+  input: { workspaceId: string; workflowId: string; userId: string },
+): Promise<"company" | "actor"> {
+  const [ownedPersonalWorkflow] = await db
+    .select({ id: workflows.id })
+    .from(workflows)
+    .innerJoin(
+      workspaceMembers,
+      and(
+        eq(workspaceMembers.workspaceId, workflows.workspaceId),
+        eq(workspaceMembers.userWorkosId, input.userId),
+      ),
+    )
+    .where(
+      and(
+        eq(workflows.workspaceId, input.workspaceId),
+        eq(workflows.slug, input.workflowId),
+        eq(workflows.scope, "personal"),
+        eq(workflows.createdByWorkosId, input.userId),
+        isNull(workflows.archivedAt),
+      ),
+    )
+    .limit(1);
+  return ownedPersonalWorkflow ? "actor" : "company";
 }

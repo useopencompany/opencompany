@@ -182,6 +182,13 @@ async function prepareWorkflow(
         name: input.workflow.name,
         description: input.workflow.description,
         steps: input.workflow.steps as never,
+        scope: input.workflow.scope,
+        // Claiming a creator-less legacy workflow as Personal assigns this actor in the same
+        // update. The planner must use that effective owner before the repository write lands.
+        createdByUserId:
+          input.workflow.scope === "personal"
+            ? (input.workflow.createdByUserId ?? input.actor.userId)
+            : input.workflow.createdByUserId,
       },
       description: input.prompt,
       ...(input.skillIds?.length ? { skillMentions: input.skillIds.map((id) => ({ id })) } : {}),

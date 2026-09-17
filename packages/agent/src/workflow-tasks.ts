@@ -75,6 +75,7 @@ export function compileWorkflowHarnessSpec(input: {
   invokedSkillIds?: readonly string[];
   tools: TaskToolName[];
   description: string;
+  skillAccess?: "company" | "actor";
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
   for (const skill of input.skills) {
@@ -148,6 +149,7 @@ export function compileWorkflowHarnessSpec(input: {
     workflow: {
       id: input.workflow.id,
       workspaceId: input.workspaceId,
+      skillAccess: input.skillAccess ?? "company",
       skillIds: input.skills.map((skill) => skill.id),
       skillBundleIds: input.skills.map((skill) => skill.bundleId),
       // Task creation replaces this placeholder with the currently enabled immutable Plugin IDs.
@@ -274,8 +276,11 @@ export async function prepareWorkflowRunForUser(
       [...workflowSkillRefs, ...invokedSkillRefs].map((mention) => [mention.id, mention]),
     ).values(),
   ];
+  const skillAccess = workflowSkillAccess(workflow, input.userWorkosId);
   const skills = await dependencies.resolveSkills({
     workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
+    ...(skillAccess === "company" ? { skillAccess: "company" as const } : {}),
     mentions: skillRefs,
   });
   let tools: TaskToolName[];
@@ -297,7 +302,19 @@ export async function prepareWorkflowRunForUser(
     invokedSkillIds: invokedSkillRefs.map((mention) => mention.id),
     tools,
     description,
+    skillAccess,
   });
 
   return { description, stepSelections, harnessSpec };
+}
+
+function workflowSkillAccess(
+  workflow: WorkspaceWorkflow,
+  userWorkosId: string,
+): "company" | "actor" {
+  if (workflow.scope !== "personal") return "company";
+  if (workflow.createdByUserId !== userWorkosId) {
+    throw new WorkflowMentionError(`Workflow "#${workflow.id}" is unavailable.`);
+  }
+  return "actor";
 }

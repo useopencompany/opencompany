@@ -75,8 +75,9 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
         userId: context.user.workosUserId,
         role: context.role,
       })}
-      // A workflow can be run by anyone who can see it, so it never carries a personal Skill.
-      skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
+      skillCatalog={skillCatalog.filter(
+        (skill: SkillCatalogItemDto) => workflow.scope === "personal" || skill.scope !== "personal",
+      )}
       eventProviders={eventProviders}
       slackBotSettings={slackBotSettings}
       owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}
