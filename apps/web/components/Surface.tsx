@@ -159,8 +159,8 @@ import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ActiveChatTurn,
   deriveChatTurnPhase,
+  isChatConversationWorking,
   isChatTurnTerminal,
-  isChatTurnWorking,
 } from "@/lib/chat-turn-lifecycle";
 import {
   type ChatMention,
@@ -1238,12 +1238,21 @@ export function Surface({
     transportStatus: status,
     submitting: engineSubmitting,
   });
-  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
+  // The runtime is the authoritative session-level signal and also drives the header badge.
+  // Keep the composer in the same state when its run-specific projection is briefly missing or
+  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
+  const isForegroundTurnWorking = isChatConversationWorking(
+    chatTurnPhase,
+    Boolean(activeEngineChat && conversationRunning),
+  );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
       activeTaskConversation &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  const composerQueuesMessage = Boolean(
+    !activeTaskConversation && isForegroundTurnWorking && canQueueWhileWorking,
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -3468,9 +3477,11 @@ export function Surface({
                       id="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation || mode === "chat"
-                          ? "Reply..."
-                          : "Ask a question or describe a task..."
+                        composerQueuesMessage
+                          ? "Queue a follow-up..."
+                          : activeTaskConversation || mode === "chat"
+                            ? "Reply..."
+                            : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3523,6 +3534,7 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
+                    queuesMessage={composerQueuesMessage}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -6453,11 +6465,13 @@ function findModel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  queuesMessage = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  queuesMessage?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
@@ -6475,11 +6489,12 @@ function SubmitButton({
     );
   }
 
+  const action = startsTask ? "Start task" : queuesMessage ? "Queue message" : "Send message";
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={action}
+      title={startsTask || queuesMessage ? action : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
@@ -6492,8 +6507,8 @@ function SubmitButton({
   );
 }
 
-// Sits beside the composer so Send stays free to queue a message into the turn that is still
-// working. `stopping` covers the gap between asking to interrupt and the runner settling it.
+// Sits beside the composer so its message action stays available while the turn is working.
+// `stopping` covers the gap between asking to interrupt and the runner settling it.
 function EngineStopButton({
   label,
   stopping = false,

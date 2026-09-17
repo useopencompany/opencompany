@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { deriveChatTurnPhase, isChatTurnWorking } from "./chat-turn-lifecycle";
+import {
+  deriveChatTurnPhase,
+  isChatConversationWorking,
+  isChatTurnWorking,
+} from "./chat-turn-lifecycle";
 
 const idleInput = {
   runStatus: null,
@@ -22,6 +26,11 @@ describe("chat turn lifecycle", () => {
 
     expect(phase).toBe("completed");
     expect(isChatTurnWorking(phase)).toBe(false);
+  });
+
+  it("keeps conversation controls active while the session runtime owns a newer Run", () => {
+    expect(isChatConversationWorking("completed", true)).toBe(true);
+    expect(isChatConversationWorking("completed", false)).toBe(false);
   });
 
   it("lets a finalized matching assistant override a stale active Run projection", () => {

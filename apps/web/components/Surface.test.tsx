@@ -781,7 +781,8 @@ describe("Surface chat streaming UI", () => {
 
     // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Send message" });
+    expect(screen.getByPlaceholderText("Queue a follow-up...")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Queue message" });
     expect(send).toBeDisabled();
 
     await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
@@ -1266,7 +1267,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
 
     await user.type(textarea, "& summarize the release notes");
@@ -1315,7 +1316,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "& @codex refactor the parser");
@@ -1409,7 +1410,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "#");
