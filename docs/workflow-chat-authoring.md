@@ -1,6 +1,6 @@
 # Workflow authoring from chat (PRO-242)
 
-Main chat exposes one `workflows` tool in native chat and the Codex/Claude MCP bridge.
+For workspace admins, main chat exposes one `workflows` tool in native chat and the Codex/Claude MCP bridge.
 Commands are `list`, `read`, `create`, `update`, `activate`, `pause`, `run`, `archive`, and
 `clear_memory`. Definition fields live under `workflow`; identity, command and expected version
 stay at the top level. The API adapter translates these into the existing workflow service.

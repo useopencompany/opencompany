@@ -224,7 +224,10 @@ export function registerAcpToolsMcpRoute(
           },
         );
       }
-      if (authorizedContext.taskConversation === false) {
+      if (
+        authorizedContext.taskConversation === false &&
+        authorizedContext.automationToolsEnabled
+      ) {
         server.registerTool(
           "workflows",
           {
@@ -233,8 +236,10 @@ export function registerAcpToolsMcpRoute(
           },
           async (raw, extra) => {
             const current = await authorizeOperation();
-            if (!current || current.taskConversation !== false)
-              throw new Error("Workflow management is only available in main chat.");
+            if (!current || current.taskConversation !== false || !current.automationToolsEnabled)
+              throw new Error(
+                "Workflow management is only available to workspace admins in main chat.",
+              );
             const args = parseWorkflowToolInput(raw);
             const invocation = mcpInvocationId("workflows", extra.sessionId, extra.requestId);
             const result = await resolved.executeWorkflowCommand({
