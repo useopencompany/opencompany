@@ -16,6 +16,7 @@ import {
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
+import type { EngineSandboxState } from "@/lib/engine-sandbox-state";
 import {
   CLAUDE_CODE_MODELS,
   CODEX_MODELS,
@@ -203,6 +204,80 @@ export function statusPresenter(
   runtime: ConversationRuntimeView | null,
 ): EngineStatusPresentation {
   return { ...conversationRuntimeMeta(runtime), engineLabel: engineLabel(engine) };
+}
+
+export type SandboxStatusPresentation = ConversationRuntimeMeta & {
+  engineLabel: string;
+  detail: string;
+};
+
+// The header pill describes the E2B sandbox, so a completed control-plane check owns its label.
+// Conversation runtime is only a pre-check fallback and extra detail; it must never turn an E2B
+// "running", "sleeping", or "deleted" result into a different sandbox state.
+export function sandboxStatusPresenter(
+  engine: EngineChatKind,
+  runtime: ConversationRuntimeView | null,
+  sandboxState: EngineSandboxState,
+): SandboxStatusPresentation {
+  const logical = statusPresenter(engine, runtime);
+  const agentDetail = ` Agent status: ${logical.label.toLowerCase()}.`;
+
+  if (sandboxState.kind === "pending") {
+    return {
+      ...logical,
+      detail: " Checking the sandbox state.",
+    };
+  }
+  if (sandboxState.kind === "unavailable") {
+    return {
+      ...logical,
+      kind: "connecting",
+      label: "Unknown",
+      dotClass: "bg-ink/25",
+      textClass: "text-ink-subtle",
+      detail: " The sandbox state is temporarily unavailable.",
+    };
+  }
+  if (sandboxState.status === "running") {
+    return {
+      ...logical,
+      kind: "ready",
+      label: "Running",
+      dotClass: "bg-success",
+      textClass: "text-success",
+      detail: agentDetail,
+    };
+  }
+  if (sandboxState.status === "sleeping") {
+    return {
+      ...logical,
+      kind: "asleep",
+      label: "Asleep",
+      dotClass: "bg-ink/30",
+      textClass: "text-ink-subtle",
+      detail: " The sandbox will wake automatically on the next message." + agentDetail,
+    };
+  }
+  if (sandboxState.status === "deleted") {
+    return {
+      ...logical,
+      kind: "stopped",
+      label: "Deleted",
+      dotClass: "bg-ink/30",
+      textClass: "text-ink-subtle",
+      detail: " A new sandbox will start on the next message." + agentDetail,
+    };
+  }
+
+  const starting = logical.kind === "queued" || logical.kind === "starting";
+  return {
+    ...logical,
+    kind: starting ? "starting" : "stopped",
+    label: starting ? "Starting" : "Not started",
+    dotClass: starting ? "animate-pulse bg-warning" : "bg-ink/30",
+    textClass: starting ? "text-warning" : "text-ink-subtle",
+    detail: agentDetail,
+  };
 }
 
 export { isCloudCodingEngine };

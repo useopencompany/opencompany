@@ -6,6 +6,7 @@ import {
   ENGINE_REGISTRY,
   type EngineChatKind,
   engineLabel,
+  sandboxStatusPresenter,
   statusPresenter,
 } from "@/lib/engine-registry";
 
@@ -57,6 +58,43 @@ describe("statusPresenter", () => {
         updatedAt: "",
       }).kind,
     ).toBe("ready");
+  });
+});
+
+describe("sandboxStatusPresenter", () => {
+  const startingRuntime: ConversationRuntimeView = {
+    status: "starting",
+    activeRunId: "run_1",
+    hasError: false,
+    updatedAt: "",
+  };
+
+  it.each([
+    ["running", "Running"],
+    ["sleeping", "Asleep"],
+    ["deleted", "Deleted"],
+  ] as const)("lets a resolved E2B %s state override a stale starting runtime", (status, label) => {
+    expect(
+      sandboxStatusPresenter("codex", startingRuntime, { kind: "resolved", status }).label,
+    ).toBe(label);
+  });
+
+  it("distinguishes an absent sandbox from an unavailable lifecycle check", () => {
+    expect(
+      sandboxStatusPresenter("codex", startingRuntime, { kind: "resolved", status: null }).label,
+    ).toBe("Starting");
+    expect(
+      sandboxStatusPresenter("codex", startingRuntime, {
+        kind: "unavailable",
+        lastKnownStatus: "running",
+      }).label,
+    ).toBe("Unknown");
+  });
+
+  it("uses the logical runtime only while the first sandbox check is pending", () => {
+    expect(sandboxStatusPresenter("codex", startingRuntime, { kind: "pending" }).label).toBe(
+      "Starting",
+    );
   });
 });
 
