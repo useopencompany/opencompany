@@ -12,7 +12,8 @@ function referenceMark(plugin: string): ServiceMark | undefined {
 }
 
 export function contextReferenceClassName(plugin: string) {
-  return `context-reference ${referenceMark(plugin)?.inlineClassName ?? "text-ink"}`;
+  const inlineClassName = referenceMark(plugin)?.inlineClassName;
+  return inlineClassName ? `context-reference ${inlineClassName}` : "context-reference";
 }
 
 export function ContextReferenceIcon({ plugin, size = 16 }: { plugin: string; size?: number }) {
@@ -21,7 +22,7 @@ export function ContextReferenceIcon({ plugin, size = 16 }: { plugin: string; si
   return (
     <Icon
       size={size}
-      className={`inline-block shrink-0 ${mark?.inlineClassName ?? "text-ink"}`}
+      className={`inline-block shrink-0${mark?.inlineClassName ? ` ${mark.inlineClassName}` : ""}`}
       aria-hidden="true"
     />
   );
