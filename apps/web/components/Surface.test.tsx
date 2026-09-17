@@ -3446,6 +3446,38 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
   });
 
+  it("does not keep a settled Task working on a stale engine session projection", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "conversation_task_codex_settled",
+          title: "Codex task",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_codex_settled",
+          status: "succeeded",
+          startedAtMs: Date.now() - 200_000,
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
+    expect(screen.queryByRole("status", { name: /is working/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
+  });
+
   it("shows the context token usage in a tooltip", async () => {
     const user = userEvent.setup();
 

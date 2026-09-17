@@ -6,10 +6,15 @@ import {
   getHeadlessChatEngineSession,
   getHeadlessChatMessages,
   getHeadlessChatMessagesGeneration,
+  getHeadlessChatRuns,
   retryHeadlessChatMessages,
   syncHeadlessChatMessageShapeEpochs,
 } from "./headless-chat-collections";
-import { getChatSyncFailed, recordChatSyncError } from "./headless-chat-sync-status";
+import {
+  clearChatSyncError,
+  getChatSyncFailed,
+  recordChatSyncError,
+} from "./headless-chat-sync-status";
 
 vi.mock("@tanstack/electric-db-collection", () => ({
   electricCollectionOptions: vi.fn((options) => options),
@@ -32,7 +37,11 @@ vi.mock("./headless-chat-api", () => ({
 type TestCollection = {
   options: {
     id: string;
-    shapeOptions: { url: string; params?: Record<string, string> };
+    shapeOptions: {
+      url: string;
+      params?: Record<string, string>;
+      onError?: (error: unknown) => unknown;
+    };
   };
 };
 
@@ -68,6 +77,25 @@ describe("headless Chat collections", () => {
         params: { conversationId: "conversation_1" },
       },
     });
+  });
+
+  it("surfaces a failed Run or engine session stream instead of freezing its last rows", () => {
+    const conversationId = "conversation_stream_failure";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runs = getHeadlessChatRuns(conversationId) as unknown as TestCollection;
+    const engineSession = getHeadlessChatEngineSession(conversationId) as unknown as TestCollection;
+
+    expect(getChatSyncFailed(conversationId)).toBe(false);
+    expect(runs.options.shapeOptions.onError?.(new Error("shape stream closed"))).toEqual({});
+    expect(getChatSyncFailed(conversationId)).toBe(true);
+
+    clearChatSyncError(conversationId);
+    expect(engineSession.options.shapeOptions.onError?.(new Error("shape stream closed"))).toEqual(
+      {},
+    );
+    expect(getChatSyncFailed(conversationId)).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 
   it("stops the old stream and recreates the message collection on retry", async () => {
