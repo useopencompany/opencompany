@@ -110,6 +110,29 @@ describe("TaskDetailPanel", () => {
     });
   });
 
+  it("preserves the model selected for a Codex task", () => {
+    const run = buildHarnessRun({
+      task: {
+        ...task(),
+        engine: "codex",
+        model: "openai/gpt-6-astra",
+        harnessSpec: {
+          engine: "codex",
+          model: "openai/gpt-6-astra",
+        },
+      },
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(mocks.surfaceProps?.initialChat).toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-6-astra",
+    });
+  });
+
   it("uses the task name over a stale workflow chat title", () => {
     const run = buildHarnessRun({
       task: {
