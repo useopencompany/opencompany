@@ -3585,11 +3585,15 @@ describe("Surface chat streaming UI", () => {
         userWorkosId="user_1"
         codexConnected
         initialChat={{
-          id: "goat_chat_codex_1",
+          id: "conversation_codex_preference_1",
           title: "Codex chat",
           model: DEFAULT_MODEL,
           engine: "codex" as const,
-          codexComposerSettings: { reasoningEffort: "medium" as const, goalMode: null },
+          codexComposerSettings: {
+            reasoningEffort: "medium" as const,
+            planModeEnabled: false,
+            goalMode: null,
+          },
           messages: [],
         }}
       />,

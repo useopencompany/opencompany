@@ -2343,6 +2343,9 @@ export function Surface({
       if (activeSessionId) {
         setEngineChatSession({ engine: activeEngine, chatSessionId: activeSessionId });
         if (engineSettings) {
+          // A sent chat stops following the preference: its composer keeps the level the turn
+          // actually ran at, so a preference change in another tab cannot move it.
+          setCodexReasoningEffortOverride(engineSettings.reasoningEffort);
           setCodexComposerStateByChatId((current) => {
             const next = new Map(current);
             next.set(activeSessionId, codexComposerUiStateFromSettings(engineSettings));
@@ -2558,6 +2561,7 @@ export function Surface({
     setEngineSubmitting(true);
     try {
       setCodexPlanModeEnabled(false);
+      setCodexReasoningEffortOverride(settings.reasoningEffort);
       setCodexComposerStateByChatId((current) => {
         const next = new Map(current);
         next.set(sessionId, codexComposerUiStateFromSettings(settings));
