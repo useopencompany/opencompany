@@ -38,7 +38,7 @@ export function OnboardingPluginsStep({
 }) {
   const [installed, setInstalled] = useState<Set<string>>(new Set());
   const [connected, setConnected] = useState<Set<string>>(new Set());
-  const [installing, setInstalling] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -68,29 +68,37 @@ export function OnboardingPluginsStep({
 
   useConnectionResults(markConnected);
 
-  const install = (config: OfficialMcpPluginConfig) => {
+  const connect = (config: OfficialMcpPluginConfig, isInstalled: boolean) => {
     if (isPending) return;
-    setInstalling(config.name);
+
+    const href = onboardingConnectHref(config.connectHref);
+    const popup = window.open(href, "_blank", CONNECT_POPUP_FEATURES);
+    if (popup) popup.focus();
+
+    if (isInstalled) {
+      // Popup blocked: the connected route writes the result to localStorage and
+      // bounces back to /onboarding, which resumes on this step via the cookie.
+      if (!popup) window.location.assign(href);
+      return;
+    }
+
+    setConnecting(config.name);
     startTransition(async () => {
       try {
         await installOfficialPlugin(config);
         setInstalled((current) => new Set(current).add(config.name));
+        // Keep installation and authorization as one user action. When the popup
+        // was blocked, wait for installation to finish before leaving this page.
+        if (!popup) window.location.assign(href);
       } catch (cause) {
+        popup?.close();
         toast.error(
-          `Couldn't install ${config.label}. ${cause instanceof Error ? cause.message : "Please try again."}`,
+          `Couldn't connect ${config.label}. ${cause instanceof Error ? cause.message : "Please try again."}`,
         );
       } finally {
-        setInstalling(null);
+        setConnecting(null);
       }
     });
-  };
-
-  const connect = (config: OfficialMcpPluginConfig) => {
-    const href = onboardingConnectHref(config.connectHref);
-    const popup = window.open(href, "opencompany-connect", CONNECT_POPUP_FEATURES);
-    // Popup blocked: the connected route writes the result to localStorage and
-    // bounces back to /onboarding, which resumes on this step via the cookie.
-    if (!popup) window.location.assign(href);
   };
 
   return (
@@ -100,7 +108,7 @@ export function OnboardingPluginsStep({
           Give your agent some tools
         </h1>
         <p className="text-[14px] leading-6 text-ink-muted">
-          Plugins let opencompany act in the tools you already use. Install a few now, or add them
+          Plugins let opencompany act in the tools you already use. Connect a few now, or add them
           later from Plugins in the sidebar.
         </p>
       </div>
@@ -111,9 +119,8 @@ export function OnboardingPluginsStep({
           recommended
           installed={installed.has(RECOMMENDED.name)}
           connected={connected.has(RECOMMENDED.connectionProvider)}
-          installing={installing === RECOMMENDED.name}
+          connecting={connecting === RECOMMENDED.name}
           disabled={isPending}
-          onInstall={install}
           onConnect={connect}
         />
 
@@ -124,9 +131,8 @@ export function OnboardingPluginsStep({
             config={config}
             installed={installed.has(config.name)}
             connected={connected.has(config.connectionProvider)}
-            installing={installing === config.name}
+            connecting={connecting === config.name}
             disabled={isPending}
-            onInstall={install}
             onConnect={connect}
           />
         ))}
@@ -140,19 +146,17 @@ function PluginRow({
   recommended = false,
   installed,
   connected,
-  installing,
+  connecting,
   disabled,
-  onInstall,
   onConnect,
 }: {
   config: OfficialMcpPluginConfig;
   recommended?: boolean;
   installed: boolean;
   connected: boolean;
-  installing: boolean;
+  connecting: boolean;
   disabled: boolean;
-  onInstall: (config: OfficialMcpPluginConfig) => void;
-  onConnect: (config: OfficialMcpPluginConfig) => void;
+  onConnect: (config: OfficialMcpPluginConfig, installed: boolean) => void;
 }) {
   return (
     <div
@@ -189,26 +193,17 @@ function PluginRow({
         </p>
       </div>
       <div className="shrink-0">
-        {installed && connected ? null : installed ? (
+        {installed && connected ? null : (
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onConnect(config)}
-            className="h-8 rounded-full px-3 text-[12px] shadow-none"
-          >
-            Connect
-          </Button>
-        ) : (
-          <Button
-            variant={recommended ? "default" : "outline"}
+            variant={recommended && !installed ? "default" : "outline"}
             size="sm"
             disabled={disabled}
-            aria-busy={installing}
-            onClick={() => onInstall(config)}
+            aria-busy={connecting}
+            onClick={() => onConnect(config, installed)}
             className="h-8 gap-1.5 rounded-full px-3 text-[12px] shadow-none"
           >
-            {installing ? <Loader2 className="animate-spin" /> : null}
-            {installing ? "Installing…" : "Install"}
+            {connecting ? <Loader2 className="animate-spin" /> : null}
+            {connecting ? "Connecting…" : "Connect"}
           </Button>
         )}
       </div>
