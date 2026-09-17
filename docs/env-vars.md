@@ -181,6 +181,21 @@ switch in Preferences, so a missing value only surfaces as "not available on thi
 the Channels → iMessage page; release preflight still requires the variables so the channel cannot
 silently disappear from a release.
 
+## WhatsApp personal assistant
+
+The Kapso-backed beta uses `KAPSO_API_KEY`, `KAPSO_PHONE_NUMBER_ID`,
+`KAPSO_WEBHOOK_SECRET`, and `WHATSAPP_LINE_HANDLE` in Infisical `prod` `/api`.
+The runner needs the same API key, phone number ID, and line handle in `prod` `/runner`.
+For local development use `dev` `/web` and `dev` `/runner`; setup keeps these server-only.
+The ID is Meta's numeric phone-number ID, not the displayed phone number. The line handle
+is the displayed E.164 number including `+`. The webhook secret is the Kapso webhook's
+signing secret, not a Meta verification token.
+
+Release preflight requires these values in both hosted services. See
+[WhatsApp setup and launch verification](./whatsapp-channel.md) before enabling the beta.
+An enabled member sees “not available on this deployment” when the API configuration is
+incomplete. Configuration presence does not establish provider account eligibility or delivery.
+
 ## Local generated values
 
 `bun run setup` writes branch-specific `DATABASE_URL`, the local API listener/origin and browser

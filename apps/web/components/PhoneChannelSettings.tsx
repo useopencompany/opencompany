@@ -5,30 +5,63 @@ import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import { Check, Copy, MessageCircle, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { PageContent } from "@/components/PageContent";
 import { startImessageLinkAction, unlinkImessageAction } from "@/lib/imessage-actions";
+import { startWhatsappLinkAction, unlinkWhatsappAction } from "@/lib/whatsapp-actions";
+
+const ChannelContext = createContext<"iMessage" | "WhatsApp">("iMessage");
 
 const POLL_INTERVAL_MS = 4_000;
 
 export function ImessageSettings({ data }: { data: ImessageSettingsDto }) {
+  return <PhoneChannelSettings data={data} channel="iMessage" />;
+}
+export function WhatsappSettings({ data }: { data: ImessageSettingsDto }) {
+  return <PhoneChannelSettings data={data} channel="WhatsApp" />;
+}
+function PhoneChannelSettings({
+  data,
+  channel,
+}: {
+  data: ImessageSettingsDto;
+  channel: "iMessage" | "WhatsApp";
+}) {
   return (
-    <PageContent
-      title="iMessage"
-      description="Text a personal assistant from your phone. It answers with web search, the Wiki, Skills and your connected plugins."
-    >
-      {!data.configured ? (
-        <p className="text-[13px] leading-5 text-ink-subtle">
-          iMessage isn&apos;t available on this deployment yet.
-        </p>
-      ) : (
-        <ImessagePanel data={data} />
-      )}
-    </PageContent>
+    <ChannelContext.Provider value={channel}>
+      <PageContent
+        title={channel}
+        description="Text a personal assistant from your phone. It answers with web search, the Wiki, Skills and your connected plugins."
+      >
+        {channel === "WhatsApp" ? (
+          <p className="mb-4 text-[13px] leading-5 text-ink-subtle">
+            This beta supports phone numbers registered in the European Economic Area, including
+            Germany. US, UK and Swiss numbers aren&apos;t available yet. Text messages only.
+          </p>
+        ) : null}
+        {!data.configured ? (
+          <p className="text-[13px] leading-5 text-ink-subtle">
+            {channel} isn&apos;t available on this deployment yet.
+          </p>
+        ) : (
+          <PhoneChannelPanel data={data} />
+        )}
+      </PageContent>
+    </ChannelContext.Provider>
   );
 }
 
-function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
+function PhoneChannelPanel({ data }: { data: ImessageSettingsDto }) {
+  const channel = useContext(ChannelContext);
+  const startLink = channel === "WhatsApp" ? startWhatsappLinkAction : startImessageLinkAction;
+  const unlink = channel === "WhatsApp" ? unlinkWhatsappAction : unlinkImessageAction;
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -90,12 +123,7 @@ function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
                 Open conversation
               </Link>
             ) : null}
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={pending}
-              onClick={() => run(unlinkImessageAction)}
-            >
+            <Button variant="ghost" size="sm" disabled={pending} onClick={() => run(unlink)}>
               Unlink phone
             </Button>
           </div>
@@ -106,7 +134,7 @@ function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
           lineHandle={data.lineHandle ?? ""}
           expiresAt={binding.linkCodeExpiresAt}
           pending={pending}
-          onNewCode={() => run(startImessageLinkAction)}
+          onNewCode={() => run(startLink)}
         />
       ) : (
         <section className="flex flex-col gap-4 rounded-lg border border-line px-4 py-4">
@@ -119,12 +147,12 @@ function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
               <p className="text-[13px] leading-5 text-ink-subtle">
                 {codeExpired
                   ? "Your last code expired. Get a new one and text it within ten minutes."
-                  : "You'll get a six-digit code to text to the opencompany number. That pairs this account with your phone."}
+                  : `You'll get a ${channel === "WhatsApp" ? "12-digit" : "six-digit"} code to text to the opencompany number. That pairs this account with your phone.`}
               </p>
             </div>
           </div>
           <div>
-            <Button size="sm" disabled={pending} onClick={() => run(startImessageLinkAction)}>
+            <Button size="sm" disabled={pending} onClick={() => run(startLink)}>
               {codeExpired ? "Get a new code" : "Get a code"}
             </Button>
           </div>
@@ -133,7 +161,7 @@ function ImessagePanel({ data }: { data: ImessageSettingsDto }) {
 
       <p className="text-[12px] leading-5 text-ink-subtle">
         The assistant runs with your access in this workspace. Actions that need approval are
-        declined over iMessage; run those from the app.
+        declined over {channel}; run those from the app.
       </p>
     </div>
   );
@@ -167,7 +195,11 @@ function LinkCodeCard({
   onNewCode: () => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const smsHref = `sms:${lineHandle}&body=${encodeURIComponent(code)}`;
+  const channel = useContext(ChannelContext);
+  const smsHref =
+    channel === "WhatsApp"
+      ? `https://wa.me/${lineHandle.replace(/\D/g, "")}?text=${encodeURIComponent(code)}`
+      : `sms:${lineHandle}&body=${encodeURIComponent(code)}`;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code);
@@ -201,7 +233,7 @@ function LinkCodeCard({
         </Button>
         <a href={smsHref} className={buttonVariants({ size: "sm" })}>
           <MessageCircle size={14} strokeWidth={1.75} />
-          Open Messages
+          {channel === "WhatsApp" ? "Open WhatsApp" : "Open Messages"}
         </a>
       </div>
       <div className="flex items-center gap-2 text-[12px] text-ink-subtle">

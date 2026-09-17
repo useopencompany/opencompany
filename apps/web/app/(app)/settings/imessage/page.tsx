@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { ImessageSettings } from "@/components/ImessageSettings";
+import { ImessageSettings } from "@/components/PhoneChannelSettings";
 import { serverApiClient, serverApiErrorMessage } from "@/lib/server-api-client";
 
 export default async function ImessageSettingsPage() {

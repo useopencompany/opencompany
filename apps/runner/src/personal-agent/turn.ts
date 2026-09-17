@@ -17,6 +17,7 @@ import {
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
 import { imessageConfig, imessageSystemBlock } from "@opencompany/agent/integrations/imessage";
+import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { guardKimiOutput } from "@opencompany/agent/kimi-output-guard";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
@@ -70,12 +71,10 @@ import {
 } from "../opencompany-context-compaction";
 import { loadHostTools } from "../opencompany-host-tools";
 import { createSubagentTraceChannel } from "../opencompany-subagent";
-import {
-  createImessageDelivery,
-  type ImessageDelivery,
-  readImessageInboundSettings,
-  withoutActionApprovals,
-} from "./imessage-delivery";
+import { withoutActionApprovals } from "./approval-policy";
+import type { PersonalAgentDelivery } from "./delivery";
+import { createImessageDelivery, readImessageInboundSettings } from "./imessage-delivery";
+import { createWhatsappDelivery, readWhatsappInboundSettings } from "./whatsapp-delivery";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "goat-personal-agent" });
 
@@ -83,15 +82,15 @@ const OUT_OF_CREDITS_MESSAGE =
   "This workspace is out of credits. Hobby usage refreshes on the first of the month; Pro admins can add credits in Settings → Billing.";
 const FAILURE_TEXT = "Something went wrong on my end. Give me a minute and text me again.";
 
-// The web view of the iMessage Conversation. A member typing here gets an ordinary in-chat answer
+// The web view of a personal-agent Conversation. A member typing here gets an ordinary in-chat answer
 // with the same narrowed tool set; nothing is sent to the phone from a web-originated turn.
 const WEB_VIEW_BLOCK = [
-  '<channel name="imessage_web_view">',
-  "This is the web view of the user's iMessage assistant. Earlier assistant turns answered by text message through the imessage_send tool; this turn was typed in the opencompany app, so answer here in plain prose. Nothing from this turn is sent to the phone.",
+  '<channel name="personal_agent_web_view">',
+  "This is the web view of the user's personal assistant. Earlier assistant turns answered by text message through a phone delivery tool; this turn was typed in the opencompany app, so answer here in plain prose. Nothing from this turn is sent to the phone.",
   "</channel>",
 ].join("\n");
 
-// The iMessage personal assistant: an opencompany-engine runtime with `harness = 'personal_agent'`.
+// The personal assistant shared by phone channels: an opencompany-engine runtime with `harness = 'personal_agent'`.
 // It shares the durable session, run and message tables, the projector, the action and host-tool
 // gateways and context compaction with the main chat harness, and owns its prompt, tool set,
 // approval policy and delivery. Nothing here runs for a `chat` harness session.
@@ -277,7 +276,7 @@ export async function runPersonalAgentTurn(
     projection = withCompletedResponseFallback(projection);
     // The tool is the delivery path; prose the model wrote instead of calling it would otherwise
     // land only in the web view while the phone stays silent.
-    if (delivery && !delivery.delivered()) {
+    if (delivery && !delivery.hasReply()) {
       await delivery.sendFallback(projectionText(projection));
     }
     await abortWatcher.stop();
@@ -312,7 +311,7 @@ export async function runPersonalAgentTurn(
       error_name: effectiveError instanceof Error ? effectiveError.name : typeof effectiveError,
       error: message,
     });
-    if (delivery && !delivery.delivered()) await delivery.sendFallback(FAILURE_TEXT);
+    if (delivery && !delivery.hasReply()) await delivery.sendFallback(FAILURE_TEXT);
     await projector.failed(message, projection, null);
     return "settled";
   } finally {
@@ -335,7 +334,26 @@ async function resolveDelivery(input: {
   turn: CodexChatTurn;
   env: RunnerEnv;
   signal: AbortSignal;
-}): Promise<ImessageDelivery | null> {
+}): Promise<PersonalAgentDelivery | null> {
+  const whatsapp = readWhatsappInboundSettings(input.turn.settings as Record<string, unknown>);
+  if (whatsapp) {
+    const config = whatsappConfig({
+      KAPSO_API_KEY: input.env.kapsoApiKey,
+      KAPSO_PHONE_NUMBER_ID: input.env.kapsoPhoneNumberId,
+      WHATSAPP_LINE_HANDLE: input.env.whatsappLineHandle,
+    });
+    if (!config || config.phoneNumberId !== whatsapp.phoneNumberId)
+      throw new Error("WhatsApp delivery is not configured for this number.");
+    return createWhatsappDelivery({
+      config,
+      inbound: whatsapp,
+      turnId: input.turn.id,
+      conversationId: input.session.chatSessionId,
+      userWorkosId: input.turn.userWorkosId,
+      workspaceId: input.session.workspaceId!,
+      signal: input.signal,
+    });
+  }
   const inbound = readImessageInboundSettings(input.turn.settings as Record<string, unknown>);
   if (!inbound) return null;
   const config = imessageConfig({
@@ -354,12 +372,17 @@ async function resolveDelivery(input: {
     userWorkosId: input.turn.userWorkosId,
   });
   if (!binding?.handle || binding.handle !== inbound.sender) return null;
-  return createImessageDelivery({
+  const delivery = createImessageDelivery({
     config,
     handle: binding.handle,
     inbound,
     signal: input.signal,
   });
+  return {
+    ...delivery,
+    hasReply: delivery.delivered,
+    systemBlock: imessageSystemBlock({ inboundMessageId: inbound.messageId }),
+  };
 }
 
 async function resolvePersonalAgentRuntime(input: {
@@ -370,7 +393,7 @@ async function resolvePersonalAgentRuntime(input: {
   signal: AbortSignal;
   prelistedActionSourceIds: readonly string[];
   prelistedSkillIds: readonly string[];
-  delivery: ImessageDelivery | null;
+  delivery: PersonalAgentDelivery | null;
 }) {
   const { turn, session, env, signal } = input;
   const model = session.model as AgentModelId;
@@ -461,13 +484,7 @@ async function resolvePersonalAgentRuntime(input: {
           }
         : {}),
     }),
-    input.delivery
-      ? imessageSystemBlock({
-          inboundMessageId:
-            readImessageInboundSettings(turn.settings as Record<string, unknown>)?.messageId ??
-            null,
-        })
-      : WEB_VIEW_BLOCK,
+    input.delivery?.systemBlock ?? WEB_VIEW_BLOCK,
   ].join("\n\n");
   return {
     model,
