@@ -129,6 +129,14 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         featureFlag: "imessage",
         isActive: (pathname) => pathname === "/settings/imessage",
       },
+      {
+        href: "/settings/whatsapp",
+        icon: Smartphone,
+        label: "WhatsApp",
+        badge: "Beta",
+        featureFlag: "whatsapp",
+        isActive: (pathname) => pathname === "/settings/whatsapp",
+      },
     ],
   },
 ];

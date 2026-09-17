@@ -836,6 +836,7 @@ function initialData(): AppInitialData {
       sidebarProjects: false,
       subagents: false,
       imessage: false,
+      whatsapp: false,
     },
     codexConnected: false,
     claudeCodeConnected: false,

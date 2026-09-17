@@ -213,6 +213,7 @@ import {
   UpdateWorkspaceSkillBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WhatsappSettingsEnvelopeSchema,
   WikiAccessEnvelopeSchema,
   WikiIngestActivityListEnvelopeSchema,
   WikiListEnvelopeSchema,
@@ -3274,6 +3275,48 @@ export const unlinkImessageRoute = createRoute({
   },
 });
 
+export const getWhatsappSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/me/whatsapp",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's WhatsApp assistant channel state.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startWhatsappLinkRoute = createRoute({
+  method: "post",
+  path: "/v1/me/whatsapp/link",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "A fresh link code the user texts to the opencompany line.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const unlinkWhatsappRoute = createRoute({
+  method: "delete",
+  path: "/v1/me/whatsapp",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The phone is unlinked; the Conversation and its history remain.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getMcpSetupRoute = createRoute({
   method: "get",
   path: "/v1/me/mcp-setup",
@@ -4442,8 +4485,11 @@ export type V1RouteHandlers = {
   getMcpSetup: RouteHandler<typeof getMcpSetupRoute>;
   updateMcpSetup: RouteHandler<typeof updateMcpSetupRoute>;
   getImessageSettings: RouteHandler<typeof getImessageSettingsRoute>;
+  getWhatsappSettings: RouteHandler<typeof getWhatsappSettingsRoute>;
   startImessageLink: RouteHandler<typeof startImessageLinkRoute>;
+  startWhatsappLink: RouteHandler<typeof startWhatsappLinkRoute>;
   unlinkImessage: RouteHandler<typeof unlinkImessageRoute>;
+  unlinkWhatsapp: RouteHandler<typeof unlinkWhatsappRoute>;
   submitFeedback: RouteHandler<typeof submitFeedbackRoute>;
   listRepoConfigs: RouteHandler<typeof listRepoConfigsRoute>;
   setRepoConfigEnv: RouteHandler<typeof setRepoConfigEnvRoute>;
@@ -4665,8 +4711,11 @@ export function createV1Router(
       .openapi(getMcpSetupRoute, handlers.getMcpSetup)
       .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
       .openapi(getImessageSettingsRoute, handlers.getImessageSettings)
+      .openapi(getWhatsappSettingsRoute, handlers.getWhatsappSettings)
       .openapi(startImessageLinkRoute, handlers.startImessageLink)
+      .openapi(startWhatsappLinkRoute, handlers.startWhatsappLink)
       .openapi(unlinkImessageRoute, handlers.unlinkImessage)
+      .openapi(unlinkWhatsappRoute, handlers.unlinkWhatsapp)
       .openapi(submitFeedbackRoute, handlers.submitFeedback)
       .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
       .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
@@ -6028,6 +6077,12 @@ const contractDocumentHandlers: V1RouteHandlers = {
   startImessageLink: (c) =>
     c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
   unlinkImessage: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  getWhatsappSettings: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  startWhatsappLink: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  unlinkWhatsapp: (c) =>
     c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
   getMcpSetup: (c) =>
     c.json({ data: { preferredClient: null, complete: false, completedAt: null }, meta }, 200),

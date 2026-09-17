@@ -790,6 +790,7 @@ export const users = productSchema.table(
     pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
     // Opt-in to the iMessage personal assistant channel (Settings → Channels → iMessage).
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
+    whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -7760,6 +7761,45 @@ export const imessageBindings = productSchema.table(
 export type ImessageBindingStatus = "pending" | "linked";
 export type ImessageBinding = typeof imessageBindings.$inferSelect;
 
+export const whatsappBindings = productSchema.table(
+  "whatsapp_bindings",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // pending → linked. A pending row holds the code the member must text; a linked row holds the
+    // handle that texted it and the Conversation its texts route into.
+    status: text("status").$type<WhatsappBindingStatus>().notNull().default("pending"),
+    linkCode: text("link_code"),
+    linkCodeExpiresAt: timestamp("link_code_expires_at", { withTimezone: true }),
+    // The paired WhatsApp sender normalized to an E.164 phone number.
+    handle: text("handle"),
+    conversationId: text("conversation_id").references(() => chatSessions.id, {
+      onDelete: "set null",
+    }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("whatsapp_bindings_user_idx").on(table.userWorkosId),
+    uniqueIndex("whatsapp_bindings_handle_idx")
+      .on(table.handle)
+      .where(sql`${table.handle} IS NOT NULL`),
+    uniqueIndex("whatsapp_bindings_link_code_idx")
+      .on(table.linkCode)
+      .where(sql`${table.linkCode} IS NOT NULL`),
+    check("whatsapp_bindings_status_check", sql`${table.status} IN ('pending', 'linked')`),
+  ],
+);
+export type WhatsappBindingStatus = "pending" | "linked";
+export type WhatsappBinding = typeof whatsappBindings.$inferSelect;
+
 // Durable inbox for direct messages sent to the workspace Slack bot. Ingress persists the message
 // before acknowledging Slack; the runner resolves the sender to an opencompany account and opens
 // the Task that answers in the message's thread.
@@ -7791,3 +7831,27 @@ export const slackDirectMessages = productSchema.table(
     ),
   ],
 );
+
+// A durable claim per reply slot prevents duplicate sends after an ambiguous provider timeout.
+export const whatsappSendAttempts = productSchema.table(
+  "whatsapp_send_attempts",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").$type<"pending" | "accepted" | "failed">().notNull(),
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "whatsapp_send_attempts_status_check",
+      sql`${table.status} IN ('pending', 'accepted', 'failed')`,
+    ),
+  ],
+);
+
+// Committed with pairing/unlink changes, so a redelivered control message has no second effect.
+export const whatsappIngressReceipts = productSchema.table("whatsapp_ingress_receipts", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

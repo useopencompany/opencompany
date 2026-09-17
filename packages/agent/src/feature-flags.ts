@@ -7,6 +7,7 @@ export type FeatureFlags = {
   subagents: boolean;
   pastSessionAccess?: boolean;
   imessage: boolean;
+  whatsapp: boolean;
 };
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
@@ -18,6 +19,7 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   subagents: false,
   pastSessionAccess: false,
   imessage: false,
+  whatsapp: false,
 };
 
 export function featureFlagsFromUser(input: {
@@ -29,6 +31,7 @@ export function featureFlagsFromUser(input: {
   pastSessionAccessEnabled?: boolean | null | undefined;
   subagentsEnabled?: boolean | null | undefined;
   imessageEnabled?: boolean | null | undefined;
+  whatsappEnabled?: boolean | null | undefined;
 }): FeatureFlags {
   return {
     bots: input.botsEnabled === true,
@@ -39,5 +42,6 @@ export function featureFlagsFromUser(input: {
     subagents: input.subagentsEnabled === true,
     pastSessionAccess: input.pastSessionAccessEnabled === true,
     imessage: input.imessageEnabled === true,
+    whatsapp: input.whatsappEnabled === true,
   };
 }

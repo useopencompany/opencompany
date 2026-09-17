@@ -121,6 +121,7 @@ import {
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
+  updateWhatsappAction,
 } from "@/lib/user-preferences";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
@@ -366,6 +367,13 @@ export function PreferencesSettingsRoute() {
           description="Text a personal assistant from your phone. Link your number under Channels → iMessage. It answers with web search, the Wiki, Skills and your connected plugins."
           checked={featureFlags.imessage}
           update={updateImessageAction}
+        />
+        <BetaFeatureSwitch
+          icon={Smartphone}
+          label="WhatsApp assistant"
+          description="Text a personal assistant from a German or other EEA number. Link your number under Channels → WhatsApp. It answers with web search, the Wiki, Skills and your connected plugins."
+          checked={featureFlags.whatsapp}
+          update={updateWhatsappAction}
         />
       </section>
     </PageContent>
