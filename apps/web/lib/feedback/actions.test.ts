@@ -80,6 +80,24 @@ describe("submitFeedback", () => {
     });
   });
 
+  it("passes uploaded screenshot ids to the feedback command", async () => {
+    const requests = stubApi(() =>
+      Response.json({
+        data: { submitted: true },
+        meta: { apiVersion: "v1", protocolVersion: "1.0.0" },
+      }),
+    );
+    const data = form({ kind: "bug", message: "The modal clips the screenshot." });
+    data.append("attachmentId", "attachment_1");
+    data.append("attachmentId", "attachment_2");
+
+    await submitFeedback(null, data);
+
+    await expect((requests[0] as Request).json()).resolves.toMatchObject({
+      attachmentIds: ["attachment_1", "attachment_2"],
+    });
+  });
+
   it("omits context for paths that are not a session", async () => {
     const requests = stubApi(() =>
       Response.json({

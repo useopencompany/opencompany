@@ -1,6 +1,13 @@
 import { getAppUrl } from "@opencompany/agent/app-url";
+import { downloadChatAttachment } from "@opencompany/agent/chat-attachment-storage";
 import type { Actor } from "@opencompany/core";
-import { chatSessions, tasks, users, workspaces } from "@opencompany/db/product-schema";
+import {
+  type ChatMessageAttachment,
+  chatSessions,
+  tasks,
+  users,
+  workspaces,
+} from "@opencompany/db/product-schema";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { ApiError } from "./errors";
 
@@ -16,7 +23,12 @@ export type FeedbackContext = { kind: "chat" | "task"; id: string };
 export type FeedbackService = {
   submit(
     actor: Actor,
-    command: { kind: FeedbackKind; message: string; context?: FeedbackContext },
+    command: {
+      kind: FeedbackKind;
+      message: string;
+      context?: FeedbackContext;
+      attachmentIds?: string[];
+    },
   ): Promise<void>;
 };
 
@@ -52,6 +64,17 @@ type LinearLabelCreateResponse = {
   } | null;
 };
 
+type LinearFileUploadResponse = {
+  fileUpload?: {
+    success: boolean;
+    uploadFile?: {
+      uploadUrl: string;
+      assetUrl: string;
+      headers: Array<{ key: string; value: string }>;
+    } | null;
+  } | null;
+};
+
 const KIND_LABELS: Record<FeedbackKind, string> = {
   bug: "bug",
   feedback: "feedback",
@@ -68,8 +91,14 @@ const LABEL_COLORS: Record<string, string> = {
 export function createFeedbackService(input: {
   db: DbLike;
   fetch?: typeof globalThis.fetch;
+  resolveAttachments?: (input: {
+    actor: Actor;
+    attachmentIds: readonly string[];
+  }) => Promise<{ attachments: readonly ChatMessageAttachment[] }>;
+  downloadAttachment?: (blobUrl: string) => Promise<Buffer>;
 }): FeedbackService {
   const fetchImpl = input.fetch ?? globalThis.fetch;
+  const downloadAttachment = input.downloadAttachment ?? downloadChatAttachment;
 
   return {
     async submit(actor, command) {
@@ -98,16 +127,34 @@ export function createFeedbackService(input: {
         ? await resolveContext(input.db, actor, command.context)
         : null;
 
-      const title = titleFromMessage(command.kind, command.message);
-      const description = buildDescription({
-        message: command.message,
-        kind: command.kind,
-        user,
-        workspace,
-        reference,
-      });
+      const attachmentIds = command.attachmentIds ?? [];
+      if (attachmentIds.length > 5 || new Set(attachmentIds).size !== attachmentIds.length) {
+        throw new ApiError(400, "invalid_request", "Select up to five unique screenshots.");
+      }
+      const attachments = attachmentIds.length
+        ? await resolveFeedbackAttachments(input.resolveAttachments, actor, attachmentIds)
+        : [];
 
       try {
+        const screenshots = await Promise.all(
+          attachments.map(async (attachment) => ({
+            filename: attachment.filename,
+            assetUrl: await uploadScreenshotToLinear(
+              fetchImpl,
+              attachment,
+              await downloadAttachment(attachment.blobUrl),
+            ),
+          })),
+        );
+        const title = titleFromMessage(command.kind, command.message);
+        const description = buildDescription({
+          message: command.message,
+          kind: command.kind,
+          user,
+          workspace,
+          reference,
+          screenshots,
+        });
         await createLinearIssue(fetchImpl, { title, description, kind: command.kind });
       } catch (error) {
         // Delivery failures surface to the widget with the upstream message,
@@ -123,6 +170,29 @@ export function createFeedbackService(input: {
       }
     },
   };
+}
+
+async function resolveFeedbackAttachments(
+  resolver:
+    | ((input: {
+        actor: Actor;
+        attachmentIds: readonly string[];
+      }) => Promise<{ attachments: readonly ChatMessageAttachment[] }>)
+    | undefined,
+  actor: Actor,
+  attachmentIds: readonly string[],
+) {
+  if (!resolver) {
+    throw new ApiError(503, "unavailable", "Feedback attachments are not configured.", true);
+  }
+  const { attachments } = await resolver({ actor, attachmentIds });
+  if (
+    attachments.length !== attachmentIds.length ||
+    attachments.some((item) => item.kind !== "image")
+  ) {
+    throw new ApiError(400, "invalid_request", "Feedback attachments must be screenshots.");
+  }
+  return attachments;
 }
 
 function splitEnvList(value: string | undefined) {
@@ -236,18 +306,30 @@ function buildDescription({
   user,
   workspace,
   reference,
+  screenshots,
 }: {
   message: string;
   kind: FeedbackKind;
   user: { email: string; firstName?: string | null; lastName?: string | null };
   workspace: { id: string; name: string };
   reference: FeedbackReference | null;
+  screenshots: Array<{ filename: string; assetUrl: string }>;
 }) {
   const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
   const submittedBy = name ? `${name} <${user.email}>` : user.email;
 
   return [
     message,
+    ...(screenshots.length
+      ? [
+          "",
+          "### Screenshots",
+          ...screenshots.map(
+            (screenshot) =>
+              `![${escapeMarkdownAltText(screenshot.filename)}](${screenshot.assetUrl})`,
+          ),
+        ]
+      : []),
     "",
     "---",
     "Submitted from: opencompany app",
@@ -257,6 +339,10 @@ function buildDescription({
     `Type: ${kind}`,
     ...(reference ? referenceLines(reference) : []),
   ].join("\n");
+}
+
+function escapeMarkdownAltText(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
 }
 
 async function linearGraphql<T>(
@@ -296,6 +382,74 @@ async function linearGraphql<T>(
     throw new Error("Linear returned an empty response.");
   }
   return payload.data;
+}
+
+async function uploadScreenshotToLinear(
+  fetchImpl: typeof globalThis.fetch,
+  attachment: ChatMessageAttachment,
+  bytes: Buffer,
+) {
+  if (bytes.byteLength !== attachment.sizeBytes) {
+    throw new Error("The screenshot size changed before delivery.");
+  }
+  const data = await linearGraphql<LinearFileUploadResponse>(
+    fetchImpl,
+    `
+      mutation FeedbackFileUpload($filename: String!, $contentType: String!, $size: Int!) {
+        fileUpload(filename: $filename, contentType: $contentType, size: $size) {
+          success
+          uploadFile {
+            uploadUrl
+            assetUrl
+            headers {
+              key
+              value
+            }
+          }
+        }
+      }
+    `,
+    {
+      filename: attachment.filename,
+      contentType: attachment.mediaType,
+      size: bytes.byteLength,
+    },
+  );
+  const upload = data.fileUpload?.uploadFile;
+  if (!data.fileUpload?.success || !upload) {
+    throw new Error("Linear did not prepare the screenshot upload.");
+  }
+
+  const uploadUrl = httpsUrl(upload.uploadUrl, "upload");
+  const assetUrl = httpsUrl(upload.assetUrl, "asset");
+  const headers = new Headers({
+    "Cache-Control": "public, max-age=31536000",
+    "Content-Type": attachment.mediaType,
+  });
+  for (const header of upload.headers) headers.set(header.key, header.value);
+
+  const response = await fetchImpl(uploadUrl, {
+    method: "PUT",
+    headers,
+    body: new Uint8Array(bytes),
+  });
+  if (!response.ok) {
+    throw new Error(`Linear screenshot upload failed with status ${response.status}.`);
+  }
+  return assetUrl;
+}
+
+function httpsUrl(value: string, label: string) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`Linear returned an invalid ${label} URL.`);
+  }
+  if (url.protocol !== "https:") {
+    throw new Error(`Linear returned an invalid ${label} URL.`);
+  }
+  return url.toString();
 }
 
 // The team's Triage workflow state, present only when Triage is enabled for the

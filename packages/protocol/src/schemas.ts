@@ -4079,6 +4079,7 @@ export const SubmitFeedbackBodySchema = z
     kind: FeedbackKindSchema,
     message: z.string().trim().min(3).max(4_000),
     context: FeedbackContextSchema.optional(),
+    attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
   })
   .strict()
   .openapi("SubmitFeedbackBody");
