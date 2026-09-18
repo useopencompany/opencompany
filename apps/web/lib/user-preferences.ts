@@ -15,6 +15,7 @@ type UserPreferences = {
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
@@ -112,4 +113,11 @@ export async function updateWhatsappAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.whatsappEnabled } as const;
+}
+
+export async function updateApproveForMeAction(enabled: boolean) {
+  const preferences = await patchPreferences({ approveForMeEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.approveForMeEnabled } as const;
 }

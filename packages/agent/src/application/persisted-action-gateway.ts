@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSIONS,
   type ActionGatewayRequest,
@@ -5,14 +6,18 @@ import {
   type ActionHostGatewayRequest,
   CHAT_HOST_TOOL_CONTRACT_VERSIONS,
 } from "@opencompany/agent-runtime";
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import {
   claimActionAsyncRun,
   claimActionInvocation,
+  finishAutomaticApprovalReview,
+  getActionApproval,
   getActionCapabilityTurnState,
   recordActionSourceDiscovery,
   registerActionApproval,
   releaseActionAsyncRun,
   releaseActionCapabilityQuote,
+  revokeAutomaticApproval,
   storeActionCapabilityQuote,
 } from "@opencompany/db/action-governance";
 import { getDb } from "@opencompany/db/client";
@@ -27,6 +32,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "../actions/catalog";
 import { executeAction } from "../actions/execute";
 import type { CapabilityQuote, CapabilityTurnState } from "../actions/types";
+import { APPROVAL_REVIEW_MODEL, APPROVAL_REVIEW_POLICY, reviewAction } from "../approval-review";
 import {
   isImageGenerationActionSpec,
   MANAGED_CAPABILITY_ACTIONS_BY_ID,
@@ -62,8 +68,7 @@ const defaultDependencies: ActionGatewayServiceDependencies = {
     recordActionSourceDiscovery({ turn: actionTurnRef(run), sourceId }),
   claimInvocation: ({ run, ...input }) =>
     claimActionInvocation({ turn: actionTurnRef(run), ...input }),
-  registerApproval: ({ run, ...input }) =>
-    registerActionApproval({ turn: actionTurnRef(run), ...input }),
+  registerApproval: registerReviewedApproval,
   evaluateApproval: evaluateActionApproval,
   now: () => new Date(),
 };
@@ -284,4 +289,102 @@ function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceR
 function actionServiceRequest(request: ActionHostGatewayRequest): ActionServiceRequest {
   const { turnId, ...input } = request;
   return { ...input, runId: turnId } as ActionServiceRequest;
+}
+
+export async function registerReviewedApproval(
+  {
+    run,
+    action,
+    signal,
+    ...input
+  }: Parameters<ActionGatewayServiceDependencies["registerApproval"]>[0],
+  dependencies: {
+    db: any;
+    review: typeof reviewAction;
+    capture: typeof captureProductServerEvent;
+  } = { db: getDb(), review: reviewAction, capture: captureProductServerEvent },
+) {
+  const { db } = dependencies;
+  const turn = actionTurnRef(run);
+  // Read intent from the authenticated turn, never from the action's model-supplied rationale.
+  const [owner] = await db
+    .select({ enabled: users.approveForMeEnabled, prompt: codexChatTurns.prompt })
+    .from(codexChatTurns)
+    .innerJoin(users, eq(users.workosUserId, codexChatTurns.userWorkosId))
+    .where(
+      and(
+        eq(codexChatTurns.id, run.runId),
+        eq(codexChatTurns.userWorkosId, run.actorId),
+        eq(codexChatTurns.codexChatSessionId, run.sessionId),
+        eq(codexChatTurns.status, "running"),
+        isNull(codexChatTurns.interruptRequestedAt),
+      ),
+    )
+    .limit(1);
+  const token = owner?.enabled && action && input.decision !== "denied" ? randomUUID() : undefined;
+  const record = await registerActionApproval({
+    db,
+    turn,
+    ...input,
+    ...(token ? { reviewToken: token } : {}),
+  });
+  if (!record) return null;
+  if (
+    record.status === "approved" &&
+    record.automaticReview?.outcome === "auto_approved" &&
+    !owner?.enabled
+  ) {
+    await revokeAutomaticApproval({ db, turn, invocationId: input.invocationId });
+    return getActionApproval({ db, turn, invocationId: input.invocationId });
+  }
+  if (
+    !token ||
+    record.status !== "pending" ||
+    record.automaticReview ||
+    !record.reviewToken ||
+    !action ||
+    !owner
+  )
+    return record;
+  // A parallel check must not present a request that a competing review can later release.
+  // Resolve competing checks to manual approval; only the winning completion emits an event.
+  const review =
+    record.reviewToken !== token
+      ? {
+          outcome: "requires_approval" as const,
+          reason: "unavailable" as const,
+          model: APPROVAL_REVIEW_MODEL,
+          policy: APPROVAL_REVIEW_POLICY,
+          durationMs: 0,
+        }
+      : await dependencies.review({
+          action,
+          params: input.params,
+          userRequest: owner.prompt,
+          apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY,
+          ...(signal ? { signal } : {}),
+        });
+  if (signal?.aborted) return record;
+  const resolved = await finishAutomaticApprovalReview({
+    db,
+    turn,
+    invocationId: input.invocationId,
+    reviewToken: record.reviewToken,
+    inputHash: record.inputHash,
+    review,
+  });
+  if (resolved)
+    await dependencies.capture("action_approval_reviewed", run.actorId, {
+      workspace_id: run.workspaceId,
+      run_id: run.runId,
+      request_id: input.invocationId,
+      action_id: action.id,
+      surface: run.policy === "headless" ? "task" : "chat",
+      outcome: review.outcome,
+      reason: review.reason,
+      model: review.model,
+      policy_version: review.policy,
+      duration_ms: review.durationMs,
+    });
+  return resolved ?? getActionApproval({ db, turn, invocationId: input.invocationId });
 }

@@ -44,6 +44,7 @@ const localUser = {
   botsEnabled: false,
   taskSpawningEnabled: true,
   autoModelRoutingEnabled: false,
+  approveForMeEnabled: false,
   chatCapabilitiesBetaEnabled: false,
   reviewInboxEnabled: false,
   sidebarProjectsEnabled: false,

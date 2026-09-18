@@ -2383,3 +2383,28 @@ describe("getVisibleBrainCitationCount", () => {
     ).toBe(1);
   });
 });
+
+it("shows automatic approval on the action row and explains it in details", async () => {
+  const message: ChatUiMessage = {
+    id: "automatic-example",
+    role: "assistant",
+    parts: [
+      {
+        type: USE_ACTION_TOOL_PART_TYPE,
+        toolCallId: "call",
+        state: "output-available",
+        input: { action: "plugin:linear:linear.get_issue", params: { id: "ENG-1" } },
+        output: {
+          ok: true,
+          action: "plugin:linear:linear.get_issue",
+          result: { title: "Example" },
+          automaticApproval: { reason: "routine_action" },
+        },
+      } as never,
+    ],
+  };
+  render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+  expect(screen.getByText("Automatically approved")).toBeVisible();
+  await userEvent.click(screen.getByText("Automatically approved"));
+  expect(screen.getByText("Approved as a routine action within your request.")).toBeVisible();
+});

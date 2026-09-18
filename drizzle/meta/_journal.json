@@ -2108,6 +2108,13 @@
       "when": 1790100400021,
       "tag": "0300_whatsapp_personal_agent",
       "breakpoints": true
+    },
+    {
+      "idx": 301,
+      "version": "7",
+      "when": 1790100400022,
+      "tag": "0301_approve_for_me",
+      "breakpoints": true
     }
   ]
 }

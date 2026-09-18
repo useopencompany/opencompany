@@ -41,6 +41,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  ShieldCheck,
   Smartphone,
   Sparkles,
   Sun,
@@ -114,6 +115,7 @@ import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
+  updateApproveForMeAction,
   updateAutoModelRoutingAction,
   updateBotsAction,
   updateImessageAction,
@@ -308,6 +310,19 @@ export function PreferencesSettingsRoute() {
 
   return (
     <PageContent title="Preferences" description="Experimental features and app behavior.">
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Permissions
+        </h2>
+        <BetaFeatureSwitch
+          icon={ShieldCheck}
+          label="Approve for me"
+          description="Let AI approve routine plugin actions in your chats and tasks. Important or uncertain actions still ask you."
+          checked={featureFlags.approveForMe === true}
+          update={updateApproveForMeAction}
+        />
+      </section>
+
       <section className="flex flex-col gap-2">
         <h2 className="mb-1 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Appearance
