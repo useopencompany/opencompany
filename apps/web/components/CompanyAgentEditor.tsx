@@ -42,7 +42,7 @@ import type { WorkflowEventProviderOption } from "@/lib/workflow-event-triggers"
 
 const AUTOSAVE_DELAY_MS = 1200;
 
-type AgentDraft = {
+export type AgentDraft = {
   name: string;
   description: string;
   instructions: string;
@@ -443,21 +443,23 @@ function AgentStatusPicker({
   );
 }
 
-// A step patch may clear the cloud-runtime fields by setting them to undefined. Under
-// `exactOptionalPropertyTypes` that has to be an explicit delete rather than a spread.
-function agentDraftWithPatch(current: AgentDraft, patch: WorkflowStepPatch): AgentDraft {
-  const next: AgentDraft = { ...current };
-  if (patch.instructions !== undefined) next.instructions = patch.instructions;
-  if (patch.model !== undefined) next.model = patch.model;
-  if ("runtimeModel" in patch) {
-    if (patch.runtimeModel === undefined) delete next.runtimeModel;
-    else next.runtimeModel = patch.runtimeModel;
-  }
-  if ("reasoningEffort" in patch) {
-    if (patch.reasoningEffort === undefined) delete next.reasoningEffort;
-    else next.reasoningEffort = patch.reasoningEffort;
-  }
-  return next;
+// Switching away from a cloud coding runtime clears `runtimeModel` and `reasoningEffort`, so the
+// patch has to drop them rather than carry `undefined` through. Rebuilt the same way the Workflow
+// editor rebuilds a step, which is also what `exactOptionalPropertyTypes` requires.
+export function agentDraftWithPatch(current: AgentDraft, patch: WorkflowStepPatch): AgentDraft {
+  const next = { ...current, ...patch };
+  return {
+    name: next.name,
+    description: next.description,
+    instructions: next.instructions,
+    photoUrl: next.photoUrl,
+    model: next.model,
+    status: next.status,
+    slackEnabled: next.slackEnabled,
+    triggers: next.triggers,
+    ...(next.runtimeModel ? { runtimeModel: next.runtimeModel } : {}),
+    ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+  };
 }
 
 function agentDraft(agent: CompanyAgentDto): AgentDraft {
