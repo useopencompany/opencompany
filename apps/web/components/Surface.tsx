@@ -119,6 +119,7 @@ import {
 } from "@/components/ModelPickerParts";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { useContextReferenceCatalog } from "@/components/useContextReferenceCatalog";
+import { useConversationTabTitle } from "@/components/useConversationTabTitle";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -1432,6 +1433,13 @@ export function Surface({
     : null;
   const activeChatVisibility =
     activeChatSummary ?? (initialChat?.id === chatSessionId ? initialChat : null);
+  useConversationTabTitle({
+    active: isActivePane && mode === "chat" && Boolean(chatSessionId),
+    completedUnseen:
+      !isAgentWorking &&
+      activeChatVisibility?.activityState === "idle" &&
+      activeChatVisibility.hasUnseen === true,
+  });
   useEffect(() => {
     if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
     const state = isAgentWorking ? "working" : null;
