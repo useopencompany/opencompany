@@ -37,9 +37,14 @@ function linearOk<T>(data: T) {
 
 // The service fires up to three requests: team states (triage lookup), team
 // labels, then issueCreate. Route each mocked response by the operation name.
-function routeLinear(overrides: { issue?: unknown } = {}) {
+function routeLinear(overrides: { issue?: unknown; upload?: unknown } = {}) {
   const calls: Array<{ query: string; variables: Record<string, unknown> }> = [];
+  const uploads: RequestInit[] = [];
   const fetchImpl = vi.fn(async (_url: URL | RequestInfo, init?: RequestInit) => {
+    if (init?.method === "PUT") {
+      uploads.push(init);
+      return new Response(null, { status: 200 });
+    }
     const body = JSON.parse(String(init?.body)) as {
       query: string;
       variables: Record<string, unknown>;
@@ -63,13 +68,27 @@ function routeLinear(overrides: { issue?: unknown } = {}) {
     if (body.query.includes("FeedbackCreateLabel")) {
       return linearOk({ issueLabelCreate: { success: false, issueLabel: null } });
     }
+    if (body.query.includes("FeedbackFileUpload")) {
+      return linearOk(
+        overrides.upload ?? {
+          fileUpload: {
+            success: true,
+            uploadFile: {
+              uploadUrl: "https://uploads.linear.app/signed-upload",
+              assetUrl: "https://uploads.linear.app/asset_1",
+              headers: [{ key: "x-upload-token", value: "signed" }],
+            },
+          },
+        },
+      );
+    }
     return linearOk(
       overrides.issue ?? {
         issueCreate: { success: true, issue: { id: "iss_1", identifier: "opencompany-1" } },
       },
     );
   });
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, uploads };
 }
 
 function descriptionOf(calls: Array<{ query: string; variables: Record<string, unknown> }>) {
@@ -152,6 +171,83 @@ describe("feedback service", () => {
     const description = descriptionOf(calls);
     expect(description).toContain("Session: ses_9");
     expect(description).toContain("Link: https://my.opencompany.chat/chat/ses_9");
+  });
+
+  it("copies owned screenshots into Linear and embeds them in the issue", async () => {
+    const { fetchImpl, calls, uploads } = routeLinear();
+    const resolveAttachments = vi.fn(async () => ({
+      attachments: [
+        {
+          id: "attachment_1",
+          kind: "image" as const,
+          mediaType: "image/png",
+          filename: "broken-[modal].png",
+          sizeBytes: 3,
+          blobPathname: "private/attachment_1",
+          blobUrl: "https://blob.example.test/attachment_1",
+        },
+      ],
+    }));
+    const downloadAttachment = vi.fn(async () => Buffer.from([1, 2, 3]));
+    const service = createFeedbackService({
+      db: fakeDb(),
+      fetch: fetchImpl,
+      resolveAttachments,
+      downloadAttachment,
+    });
+
+    await service.submit(actor, {
+      kind: "bug",
+      message: "The feedback modal clips screenshots.",
+      attachmentIds: ["attachment_1"],
+    });
+
+    expect(resolveAttachments).toHaveBeenCalledWith({
+      actor,
+      attachmentIds: ["attachment_1"],
+    });
+    expect(downloadAttachment).toHaveBeenCalledWith("https://blob.example.test/attachment_1");
+    expect(uploads).toHaveLength(1);
+    expect(new Headers(uploads[0]?.headers).get("x-upload-token")).toBe("signed");
+    expect(Array.from(uploads[0]?.body as Uint8Array)).toEqual([1, 2, 3]);
+    expect(descriptionOf(calls)).toContain("### Screenshots");
+    expect(descriptionOf(calls)).toContain(
+      "![broken-\\[modal\\].png](https://uploads.linear.app/asset_1)",
+    );
+  });
+
+  it("rejects non-image attachments before delivery", async () => {
+    const { fetchImpl } = routeLinear();
+    const service = createFeedbackService({
+      db: fakeDb(),
+      fetch: fetchImpl,
+      resolveAttachments: async () => ({
+        attachments: [
+          {
+            id: "attachment_1",
+            kind: "pdf",
+            mediaType: "application/pdf",
+            filename: "report.pdf",
+            sizeBytes: 3,
+            blobPathname: "private/attachment_1",
+            blobUrl: "https://blob.example.test/attachment_1",
+          },
+        ],
+      }),
+    });
+
+    await expect(
+      service.submit(actor, {
+        kind: "bug",
+        message: "The modal clips attachments.",
+        attachmentIds: ["attachment_1"],
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_request",
+      message: "Feedback attachments must be screenshots.",
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("omits the session line for a task that never started one", async () => {
