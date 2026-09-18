@@ -4,6 +4,8 @@ import { captureException } from "@opencompany/observability";
 import {
   type CreateMessageBody,
   createApiClient,
+  decodeEventCursor,
+  decodePresentationCursor,
   type MessageEngine,
   MessageEngineSchema,
   PROTOCOL_VERSION,
@@ -551,12 +553,15 @@ function readRunState(chatId: string): HeadlessRunState | null {
     if (!runId || !conversationId || !assistantMessageId || !status) return null;
 
     const activeToolCalls = toolCallCheckpoint(value.activeToolCalls);
+    const storedCursor = stringValue(value.cursor);
+    const storedPresentationCursor = stringValue(value.presentationCursor);
     const currentCheckpoint =
-      value.checkpointVersion === CHECKPOINT_VERSION && activeToolCalls !== null;
-    const cursor = currentCheckpoint ? stringValue(value.cursor) : undefined;
-    const presentationCursor = currentCheckpoint
-      ? stringValue(value.presentationCursor)
-      : undefined;
+      value.checkpointVersion === CHECKPOINT_VERSION &&
+      activeToolCalls !== null &&
+      isDecodableCursor("durable", storedCursor) &&
+      isDecodableCursor("presentation", storedPresentationCursor);
+    const cursor = currentCheckpoint ? storedCursor : undefined;
+    const presentationCursor = currentCheckpoint ? storedPresentationCursor : undefined;
     return {
       checkpointVersion: CHECKPOINT_VERSION,
       runId,
@@ -572,6 +577,21 @@ function readRunState(chatId: string): HeadlessRunState | null {
     };
   } catch {
     return null;
+  }
+}
+
+// `streamRunEvents` throws `RunEventCursorError` for a cursor it cannot decode, and a persisted
+// cursor can outlive the encoding that wrote it without `CHECKPOINT_VERSION` changing. Because the
+// bad value stays in `sessionStorage`, an unguarded cursor wedges that tab's chat stream on every
+// reconnect rather than degrading. Treat it as a stale checkpoint so the run replays from the start.
+function isDecodableCursor(kind: "durable" | "presentation", cursor: string | undefined) {
+  if (!cursor) return true;
+  try {
+    if (kind === "durable") decodeEventCursor(cursor);
+    else decodePresentationCursor(cursor);
+    return true;
+  } catch {
+    return false;
   }
 }
 

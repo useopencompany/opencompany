@@ -3545,6 +3545,8 @@ export const ResolveApprovalBodySchema = z
   )
   .openapi("ResolveApprovalBody");
 
+export type ResolveApprovalBody = z.input<typeof ResolveApprovalBodySchema>;
+
 export const ResolveApprovalEnvelopeSchema = z
   .object({
     data: z
@@ -5019,6 +5021,7 @@ export const DopplerAuthFlowEnvelopeSchema = z
 export type ConversationDto = z.infer<typeof ConversationSchema>;
 export type SessionPullRequestDto = z.infer<typeof SessionPullRequestSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
+export type AttachmentDto = z.infer<typeof AttachmentSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
 export type PublicChatMessageDto = z.infer<typeof PublicChatMessageSchema>;
 export type PublicChatShareDto = z.infer<typeof PublicChatShareSchema>;
@@ -5214,6 +5217,8 @@ export type OnboardingEmailClaimDto = {
 export type ErrorEnvelope = z.infer<typeof ErrorEnvelopeSchema>;
 export type TaskViewMode = z.infer<typeof TaskViewModeSchema>;
 export type McpClient = z.infer<typeof McpClientSchema>;
+export type IdentityUserDto = z.infer<typeof IdentityUserSchema>;
+export type IdentityWorkspaceDto = z.infer<typeof IdentityWorkspaceSchema>;
 export type IdentityDto = z.infer<typeof IdentitySchema>;
 export type UserPreferencesDto = z.infer<typeof UserPreferencesSchema>;
 export type UpdateUserPreferencesBody = z.infer<typeof UpdateUserPreferencesBodySchema>;
