@@ -271,26 +271,51 @@ jobs:
           if [[ "$RESOLVED_SCOPE" == "affected" ]]; then scope_args+=(--affected); fi
           bun --bun turbo run build --concurrency=2 "${scope_args[@]}"
 
-      - name: Smoke test document extraction in the runner image
+      - name: Build production Docker images
         run: |
-          if git diff --quiet "$TURBO_SCM_BASE" "$TURBO_SCM_HEAD" -- Dockerfile.runner packages/file-extract; then
-            echo "Runner image document extraction is unaffected."
+          docker_inputs=(
+            .dockerignore
+            Dockerfile.api
+            Dockerfile.runner
+            bun.lock
+            package.json
+            patches
+          )
+          file_extract_inputs=(packages/file-extract)
+
+          build_api=false
+          build_runner=false
+          if ! git diff --quiet "$TURBO_SCM_BASE" "$TURBO_SCM_HEAD" -- "${docker_inputs[@]}"; then
+            build_api=true
+            build_runner=true
+          elif ! git diff --quiet "$TURBO_SCM_BASE" "$TURBO_SCM_HEAD" -- "${file_extract_inputs[@]}"; then
+            build_runner=true
+          fi
+
+          if [[ "$build_api" == "false" && "$build_runner" == "false" ]]; then
+            echo "Production Docker images are unaffected."
             exit 0
           fi
 
-          image="opencompany-runner-verify:${TURBO_SCM_HEAD}"
-          docker build --file Dockerfile.runner --tag "$image" .
-          docker run --rm --entrypoint bun "$image" -e '
-            import { readFileSync } from "node:fs";
-            import { extractDocumentMarkdown } from "./packages/file-extract/src/index.ts";
+          if [[ "$build_api" == "true" ]]; then
+            docker build --file Dockerfile.api --tag "opencompany-api-verify:${TURBO_SCM_HEAD}" .
+          fi
 
-            const bytes = readFileSync("packages/file-extract/src/fixtures/sample.pptx");
-            const result = await extractDocumentMarkdown({ bytes, filename: "sample.pptx" });
-            if (result.format !== "pptx" || result.markdown.trim().length === 0) {
-              throw new Error("Runner image document extraction smoke test returned no content.");
-            }
-            console.log("Runner image document extraction smoke test passed.");
-          '
+          if [[ "$build_runner" == "true" ]]; then
+            image="opencompany-runner-verify:${TURBO_SCM_HEAD}"
+            docker build --file Dockerfile.runner --tag "$image" .
+            docker run --rm --entrypoint bun "$image" -e '
+              import { readFileSync } from "node:fs";
+              import { extractDocumentMarkdown } from "./packages/file-extract/src/index.ts";
+
+              const bytes = readFileSync("packages/file-extract/src/fixtures/sample.pptx");
+              const result = await extractDocumentMarkdown({ bytes, filename: "sample.pptx" });
+              if (result.format !== "pptx" || result.markdown.trim().length === 0) {
+                throw new Error("Runner image document extraction smoke test returned no content.");
+              }
+              console.log("Runner image document extraction smoke test passed.");
+            '
+          fi
 
       - name: Save trusted build caches
         if: ${{ success() && inputs.cache_write && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}

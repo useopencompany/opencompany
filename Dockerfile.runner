@@ -3,6 +3,7 @@ FROM oven/bun:1.4.2
 WORKDIR /app
 
 COPY package.json bun.lock turbo.json tsconfig.base.json ./
+COPY patches ./patches
 COPY apps ./apps
 COPY packages ./packages
 COPY drizzle ./drizzle
