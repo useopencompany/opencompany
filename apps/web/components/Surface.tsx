@@ -196,8 +196,13 @@ import {
   isCloudCodingEngine,
   normalizeClaudeChatModelId,
   normalizeCodexChatModelId,
-  statusPresenter,
+  sandboxStatusPresenter,
 } from "@/lib/engine-registry";
+import {
+  currentEngineSandboxStatus,
+  type EngineSandboxState,
+  PENDING_ENGINE_SANDBOX_STATE,
+} from "@/lib/engine-sandbox-state";
 import {
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
@@ -626,7 +631,10 @@ export function Surface({
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
     initialCodexComposerUiState.goalTokenBudget,
   );
-  const [codingSandboxStatus, setCodingSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
+  const [codingSandboxState, setCodingSandboxState] = useState<EngineSandboxState>(
+    PENDING_ENGINE_SANDBOX_STATE,
+  );
+  const codingSandboxStatus = currentEngineSandboxStatus(codingSandboxState);
   const [syncedConversationRuntime, setConversationRuntime] =
     useState<ConversationRuntimeView | null>(initialChat?.runtime ?? null);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
@@ -1609,7 +1617,7 @@ export function Surface({
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
       applyCodexComposerUiState(nextCodexComposerState);
-      setCodingSandboxStatus(null);
+      setCodingSandboxState(PENDING_ENGINE_SANDBOX_STATE);
       setConversationRuntime(chat?.runtime ?? null);
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
@@ -3261,7 +3269,7 @@ export function Surface({
                                 ? "running"
                                 : null
                           }
-                          sandboxStatus={codingSandboxStatus}
+                          sandboxState={codingSandboxState}
                         />
                         <Tooltip>
                           <TooltipTrigger
@@ -3362,7 +3370,7 @@ export function Surface({
           {mode === "chat" && chatSessionId ? (
             <ConversationRuntimeSync
               conversationId={chatSessionId}
-              setSandboxStatus={setCodingSandboxStatus}
+              setSandboxState={setCodingSandboxState}
               setRuntime={setConversationRuntime}
               pollSandbox={Boolean(activeEngineChat)}
             />
@@ -6250,15 +6258,15 @@ function CodingSessionStatusIndicator({
   runtime,
   stopping,
   optimisticStatus,
-  sandboxStatus,
+  sandboxState,
 }: {
   engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
   stopping: boolean;
   optimisticStatus: "starting" | "running" | null;
-  sandboxStatus: EngineRuntimeStatus | null;
+  sandboxState: EngineSandboxState;
 }) {
-  let meta = statusPresenter(
+  let meta = sandboxStatusPresenter(
     engine,
     optimisticStatus
       ? {
@@ -6268,7 +6276,10 @@ function CodingSessionStatusIndicator({
           updatedAt: runtime?.updatedAt ?? "",
         }
       : runtime,
+    sandboxState,
   );
+  // An interrupt in flight is the one agent-side transition the pill still owns: E2B keeps
+  // reporting the sandbox as running throughout, so only the logical state shows the stop landing.
   if (stopping) {
     meta = {
       ...meta,
@@ -6278,31 +6289,15 @@ function CodingSessionStatusIndicator({
       textClass: "text-ink-muted",
     };
   }
-  // A ready session whose sandbox has paused shows as asleep so the green dot never reads as
-  // "still running" hours after the last turn. A deleted sandbox stays "Ready": nothing exists
-  // anymore and a fresh one starts on the next message.
-  if (meta.kind === "ready" && sandboxStatus === "sleeping") {
-    meta = {
-      ...meta,
-      kind: "asleep",
-      label: "Asleep",
-      dotClass: "bg-ink/30",
-      textClass: "text-ink-subtle",
-    };
-  }
-  const sandboxDetail =
-    sandboxStatus === "sleeping"
-      ? " The sandbox is sleeping and will wake automatically on the next message."
-      : sandboxStatus === "deleted"
-        ? " The previous sandbox expired; a new one will start on the next message."
-        : "";
-  const title = `${meta.engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const title = stopping
+    ? `${meta.engineLabel} is stopping the current turn.`
+    : `${meta.engineLabel} sandbox is ${meta.label.toLowerCase()}.${meta.detail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`${meta.engineLabel} status: ${meta.label}`}
+      aria-label={`${meta.engineLabel} sandbox status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>

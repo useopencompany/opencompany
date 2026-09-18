@@ -752,7 +752,9 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
   });
 
@@ -796,7 +798,7 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
 
     expect(screen.getByRole("button", { name: "Stopping Codex" })).toBeDisabled();
-    expect(screen.getByLabelText("Codex status: Stopping")).toHaveTextContent("Stopping");
+    expect(screen.getByLabelText("Codex sandbox status: Stopping")).toHaveTextContent("Stopping");
     expect(screen.getByText("Stopping response…")).toBeInTheDocument();
     expect(headlessChatCommandMocks.waitForSettlement).toHaveBeenCalledWith(
       "run_codex_stale",
@@ -806,7 +808,7 @@ describe("Surface chat streaming UI", () => {
     act(() => confirmSettlement?.({ id: "run_codex_stale", status: "canceled" }));
 
     await waitFor(() =>
-      expect(screen.getByLabelText("Codex status: Stopped")).toHaveTextContent("Stopped"),
+      expect(screen.getByLabelText("Codex sandbox status: Stopped")).toHaveTextContent("Stopped"),
     );
     expect(screen.queryByText("Stopping response…")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
@@ -933,7 +935,9 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
     expect(screen.getByRole("status", { name: "Claude Code is working" })).toBeInTheDocument();
     const stop = screen.getByRole("button", { name: "Interrupt Claude Code" });
 
@@ -3469,7 +3473,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
     expect(screen.queryByText("Sleeping")).not.toBeInTheDocument();
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
@@ -3501,8 +3505,8 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Working")).toHaveTextContent("Working");
-    expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Codex sandbox status: Working")).toHaveTextContent("Working");
+    expect(screen.queryByLabelText("Codex sandbox status: Connecting")).not.toBeInTheDocument();
   });
 
   it("does not keep a settled Task working on a stale engine session projection", () => {
@@ -3532,7 +3536,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
     expect(screen.queryByRole("status", { name: /is working/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
   });
@@ -3611,7 +3615,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Queued")).toHaveTextContent("Queued");
+    expect(screen.getByLabelText("Codex sandbox status: Queued")).toHaveTextContent("Queued");
   });
 
   it("opens new chats on the reasoning effort last picked for each engine", async () => {

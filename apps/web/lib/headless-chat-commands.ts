@@ -120,6 +120,9 @@ export async function getEngineRuntimeStatus(
   const response = await client.v1.conversations[":conversationId"]["engine-session"].runtime.$get({
     param: { conversationId },
   });
+  // A Conversation that never opened an engine session has no sandbox to report on. That is a
+  // settled answer, not a failed lifecycle check, so callers must not show it as "unknown".
+  if (response.status === 404) return null;
   if (!response.ok) throw await responseError(response);
   return (await response.json()).data.status;
 }
