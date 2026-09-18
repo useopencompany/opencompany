@@ -46,12 +46,15 @@ const appDataMock = vi.hoisted(() => ({
 
 const userPreferencesMock = vi.hoisted(() => ({
   updateBotsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateApproveForMeAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateAutoModelRoutingAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateImessageAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateWhatsappAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateReviewInboxAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updatePastSessionAccessAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateCompanyAgentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -171,10 +174,13 @@ vi.mock("@/components/SandboxSettingsPanel", () => ({
 vi.mock("@/lib/user-preferences", () => ({
   updateBotsAction: userPreferencesMock.updateBotsAction,
   updateAutoModelRoutingAction: userPreferencesMock.updateAutoModelRoutingAction,
+  updateApproveForMeAction: userPreferencesMock.updateApproveForMeAction,
   updateImessageAction: userPreferencesMock.updateImessageAction,
+  updateWhatsappAction: userPreferencesMock.updateWhatsappAction,
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
   updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
+  updateCompanyAgentsAction: userPreferencesMock.updateCompanyAgentsAction,
   updatePastSessionAccessAction: userPreferencesMock.updatePastSessionAccessAction,
 }));
 
@@ -1118,3 +1124,13 @@ function workflowListItem(overrides: Record<string, unknown> & { model?: string 
     ...workflowOverrides,
   };
 }
+
+it("enables automatic approval from personal preferences", async () => {
+  render(<PreferencesSettingsRoute />);
+  const toggle = screen.getByRole("switch", { name: "Approve for me" });
+  expect(toggle).not.toBeChecked();
+  await userEvent.click(toggle);
+  await waitFor(() =>
+    expect(userPreferencesMock.updateApproveForMeAction).toHaveBeenCalledWith(true),
+  );
+});

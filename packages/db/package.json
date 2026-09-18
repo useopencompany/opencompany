@@ -227,6 +227,10 @@
     "./session-pull-requests": {
       "types": "./src/session-pull-requests.ts",
       "default": "./src/session-pull-requests.ts"
+    },
+    "./whatsapp": {
+      "types": "./src/whatsapp.ts",
+      "default": "./src/whatsapp.ts"
     }
   },
   "scripts": {

@@ -96,6 +96,21 @@ Saving a scheduled draft clears its next run and prepared execution plan. There 
 workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
 Plugin event setup, delivery guarantees, and Wiki ingestion retirement are documented in
 [Plugin events and workflows](plugin-events.md).
+
+Company agents (internal beta, behind the per-user Preferences toggle) are a second product surface
+over the same automation row, discriminated by `workflows.kind`. Each repository instance is pinned
+to one kind, so an agent is unreachable through the Workflows API and a workflow is unreachable
+through the agents API. Reusing the row is what gives agents triggers, scheduling, event routing,
+Slack display identity, and thread/session continuation for free.
+
+What an agent adds is a split between ownership and execution authority. `workflows.owner_workos_id`
+names the one member whose authorized connections do the work; only that member can configure the
+agent, and the Core builds the run's actor from the agent row rather than from the caller, so a
+teammate pressing Run now never silently switches execution onto their own credentials. An owner who
+leaves the workspace reads back as inactive, which blocks runs instead of falling through to someone
+else. Runs carry `tasks.agent_id`: the work belongs to the agent, stays out of every personal Task
+list, and is read back under See runs, which also shows provider events that were dropped before any
+work started.
 Scheduled and event runs follow the step instructions. The editor does not author extra run
 context; the trigger prompt saved with a workflow is only the run's opening request and stays
 editable through the headless Workflow API.
@@ -244,3 +259,19 @@ share IDs remain independent, unguessable capabilities. New share links require 
 and web validators; deploy those readers before enabling new writers in a staggered release, and
 retain reader compatibility when rolling back. Physical database names, storage roots, provider
 contracts, and deterministic ingestion IDs retain their existing names.
+
+### Chat context checkpoints
+
+The runner budgets hydrated model input before generation in both product chat and personal-agent
+turns. Image payloads remain typed vision inputs: local raster dimensions and documented model/detail
+rules determine their estimated context cost, independently of base64 size. Unreadable or remote
+image dimensions reserve the known model maximum; unverified models use a conservative 40k allowance.
+These are estimates, not provider billing counts. The model catalog remains the application budget.
+
+Compaction retains complete recent turns and the current request, then summarizes older text and
+actual images in bounded rolling requests. Each summary call records its own usage (including calls
+before a later failure), avoiding artificial long-context pricing from aggregated input counts.
+A checkpoint is persisted only after every batch and final-context validation succeeds. The original
+transcript is unchanged. Image count and encoded payload size are bounded separately from tokens:
+at most 20 images and 16 MiB of image transport data per active request or summary batch. Older
+images can age into a checkpoint; an oversized current request needs fewer or smaller attachments.

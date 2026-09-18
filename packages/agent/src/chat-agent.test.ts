@@ -3,6 +3,7 @@ import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { generateText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
+import type { StartedTask } from "./chat-agent";
 import {
   CHAT_MAX_STEPS,
   createProductChatToolContext,
@@ -10,6 +11,7 @@ import {
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
+import { MAX_WORKFLOW_STARTS_PER_TURN } from "./chat-limits";
 import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
@@ -455,7 +457,7 @@ describe("start_workflow tool", () => {
         prompt: "Synthesize the Acme interview using the confirmed pricing concern.",
       },
     ]);
-    expect(context.getStartedTask()?.id).toBe("task_1");
+    expect(context.getStartedTasks().map((task) => task.id)).toEqual(["task_1"]);
   });
 
   it("rejects workflow ids outside the injected workspace catalog", async () => {
@@ -480,41 +482,117 @@ describe("start_workflow tool", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("refuses a second, different workflow in the same turn instead of replaying the first", async () => {
-    const workflowExecute = vi.fn(async () => ({
-      id: "task_1",
-      displayId: "TASK-1",
-      name: "Customer interview synthesis",
-      prompt: "Synthesize the Acme interview.",
+  it("starts several distinct workflows in the same turn up to the per-turn cap", async () => {
+    const extraWorkflows = Array.from({ length: MAX_WORKFLOW_STARTS_PER_TURN }, (_, index) => ({
+      id: `digest-${index}`,
+      name: `Digest ${index}`,
+      description: "Summarize something.",
+    }));
+    const workflowExecute = vi.fn(async ({ workflowId }: { workflowId: string }) => ({
+      id: `task_${workflowId}`,
+      displayId: `TASK-${workflowId}`,
+      name: workflowId,
+      prompt: "Run it.",
     }));
     const context = createProductChatToolContext({
       model,
-      workflows: {
-        catalog: [
-          ...workflowCatalog,
-          { id: "weekly-digest", name: "Weekly digest", description: "Summarize the week." },
-        ],
-        execute: workflowExecute,
-      },
+      workflows: { catalog: extraWorkflows, execute: workflowExecute },
     });
     const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
       execute: (args: unknown) => Promise<unknown>;
     };
 
-    await expect(
-      startWorkflow.execute({
-        workflowId: "customer-interview-synthesis",
-        prompt: "Synthesize the Acme interview.",
-      }),
-    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
-    await expect(
-      startWorkflow.execute({ workflowId: "weekly-digest", prompt: "Summarize the week." }),
-    ).rejects.toThrow("Only one workflow can start per chat turn");
-    expect(workflowExecute).toHaveBeenCalledTimes(1);
-    expect(context.getStartedTask()?.id).toBe("task_1");
+    for (const workflow of extraWorkflows) {
+      await expect(
+        startWorkflow.execute({ workflowId: workflow.id, prompt: "Run it." }),
+      ).resolves.toMatchObject({ taskId: `task_${workflow.id}`, status: "queued" });
+    }
+
+    expect(workflowExecute).toHaveBeenCalledTimes(MAX_WORKFLOW_STARTS_PER_TURN);
+    expect(context.getStartedTasks().map((task) => task.id)).toEqual(
+      extraWorkflows.map((workflow) => `task_${workflow.id}`),
+    );
   });
 
-  it("starts at most one workflow task per turn", async () => {
+  it("refuses a workflow past the per-turn cap instead of replaying an earlier one", async () => {
+    const catalog = Array.from({ length: MAX_WORKFLOW_STARTS_PER_TURN + 1 }, (_, index) => ({
+      id: `digest-${index}`,
+      name: `Digest ${index}`,
+      description: "Summarize something.",
+    }));
+    const workflowExecute = vi.fn(async ({ workflowId }: { workflowId: string }) => ({
+      id: `task_${workflowId}`,
+      displayId: `TASK-${workflowId}`,
+      name: workflowId,
+      prompt: "Run it.",
+    }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog, execute: workflowExecute },
+    });
+    const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    for (const workflow of catalog.slice(0, MAX_WORKFLOW_STARTS_PER_TURN)) {
+      await startWorkflow.execute({ workflowId: workflow.id, prompt: "Run it." });
+    }
+
+    await expect(
+      startWorkflow.execute({ workflowId: catalog.at(-1)!.id, prompt: "Run it." }),
+    ).rejects.toThrow(`Only ${MAX_WORKFLOW_STARTS_PER_TURN} workflows can start per chat turn`);
+    expect(workflowExecute).toHaveBeenCalledTimes(MAX_WORKFLOW_STARTS_PER_TURN);
+    // The rejected workflow must not consume a slot, so a repeat of an accepted one still replays.
+    await expect(
+      startWorkflow.execute({ workflowId: catalog[0]!.id, prompt: "Run it." }),
+    ).resolves.toMatchObject({ taskId: `task_${catalog[0]!.id}`, status: "already_started" });
+  });
+
+  it("counts in-flight starts against the cap when the model fans out in one step", async () => {
+    const catalog = Array.from({ length: MAX_WORKFLOW_STARTS_PER_TURN + 1 }, (_, index) => ({
+      id: `digest-${index}`,
+      name: `Digest ${index}`,
+      description: "Summarize something.",
+    }));
+    const release: Array<() => void> = [];
+    const workflowExecute = vi.fn(
+      ({ workflowId }: { workflowId: string }) =>
+        new Promise<StartedTask>((resolve) => {
+          release.push(() =>
+            resolve({
+              id: `task_${workflowId}`,
+              displayId: `TASK-${workflowId}`,
+              name: workflowId,
+              prompt: "Run it.",
+            }),
+          );
+        }),
+    );
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog, execute: workflowExecute },
+    });
+    const startWorkflow = context.tools[START_WORKFLOW_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+
+    const calls = catalog.map((workflow) =>
+      startWorkflow.execute({ workflowId: workflow.id, prompt: "Run it." }),
+    );
+    const overflow = calls.at(-1)!;
+    // The overflowing call is rejected before any start resolves, so it never reaches the executor.
+    await expect(overflow).rejects.toThrow(
+      `Only ${MAX_WORKFLOW_STARTS_PER_TURN} workflows can start per chat turn`,
+    );
+    expect(workflowExecute).toHaveBeenCalledTimes(MAX_WORKFLOW_STARTS_PER_TURN);
+
+    for (const resolve of release) resolve();
+    await expect(Promise.all(calls.slice(0, MAX_WORKFLOW_STARTS_PER_TURN))).resolves.toHaveLength(
+      MAX_WORKFLOW_STARTS_PER_TURN,
+    );
+  });
+
+  it("replays the in-flight task when the same workflow is requested twice at once", async () => {
     let releaseTask!: (task: {
       id: string;
       displayId: string;
@@ -770,5 +848,63 @@ describe("action discovery tools", () => {
         { toolCallId: "reused" },
       ),
     ).resolves.toMatchObject({ ok: true });
+  });
+});
+
+describe("consolidated workflow tool", () => {
+  it("authors with an empty catalog, forwards the tool-call identity, and hides the overlapping run tool", async () => {
+    const manage = vi.fn(async () => ({ ok: true }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog: [], manage, execute: vi.fn() },
+    });
+    expect(context.tools).toHaveProperty("workflows");
+    expect(context.tools).not.toHaveProperty("start_workflow");
+    expect(context.tools.workflows).toMatchObject({ strict: false });
+    const execute = context.tools.workflows!.execute!;
+    await execute(
+      { command: "create", workflow: { name: "Draft" } },
+      { toolCallId: "call_1", messages: [], context: {} },
+    );
+    expect(manage).toHaveBeenCalledWith(
+      { command: "create", name: "Draft" },
+      { toolCallId: "call_1" },
+    );
+  });
+  it("runs a just-created workflow from live readback and replays a repeat run in the turn", async () => {
+    const run = vi.fn(async () => ({
+      id: "task_1",
+      displayId: "TASK-1",
+      name: "New monitor",
+      prompt: "Run",
+    }));
+    const manage = vi.fn(async (args: { workflowId?: string | undefined }) => ({
+      ok: true,
+      workflow: { slug: args.workflowId, status: "active" },
+    }));
+    const context = createProductChatToolContext({
+      model,
+      workflows: { catalog: [], manage, execute: run },
+    });
+    const execute = context.tools.workflows!.execute!;
+    await expect(
+      execute(
+        { command: "run", workflowId: "new-monitor", prompt: "Run" },
+        { toolCallId: "run_1", messages: [], context: {} },
+      ),
+    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    await expect(
+      execute(
+        { command: "run", workflowId: "new-monitor", prompt: "Run" },
+        { toolCallId: "run_2", messages: [], context: {} },
+      ),
+    ).resolves.toMatchObject({ status: "already_started" });
+    await expect(
+      execute(
+        { command: "run", workflowId: "other", prompt: "Run" },
+        { toolCallId: "run_3", messages: [], context: {} },
+      ),
+    ).resolves.toMatchObject({ taskId: "task_1", status: "queued" });
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });

@@ -22,6 +22,7 @@ import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/g
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
+import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -37,6 +38,9 @@ import {
   type Actor,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
+  type CompanyAgent,
+  type CompanyAgentApplicationService,
+  type CompanyAgentRun,
   CoreError,
   type KnowledgeApplicationService,
   type LegacyTask,
@@ -118,8 +122,11 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WhatsappIngressService } from "./whatsapp-ingress";
+import type { WhatsappSettingsService } from "./whatsapp-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
 import type { WorkflowAvatarService } from "./workflow-avatars";
+import { executeWorkflowCommand } from "./workflow-commands";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -155,6 +162,8 @@ export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
+  agents: CompanyAgentApplicationService;
+  agentPhotos: WorkflowAvatarService;
   knowledge: KnowledgeApplicationService;
   // Executes the `wiki` agent tool command contract for internal callers
   // (the runner over HTTP, the API-hosted MCP tool in-process).
@@ -209,6 +218,7 @@ export type CreateApiAppInput = {
   integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
   imessageSettings?: ImessageSettingsService;
+  whatsappSettings?: WhatsappSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleAdminMcp?: GoogleAdminMcpService;
@@ -238,6 +248,7 @@ export type CreateApiAppInput = {
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
   imessageIngress?: ImessageIngressService;
+  whatsappIngress?: WhatsappIngressService;
   stripeIngress?: StripeIngressService;
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
@@ -550,6 +561,102 @@ export function createApiApp(input: CreateApiAppInput) {
         file: c.req.valid("form").file,
       });
       return c.json({ data: result, meta }, 201);
+    },
+    listCompanyAgents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.agents.listAgents(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.agents.map(companyAgentDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.agents.createAgent(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        name: body.name,
+        ...(body.description !== undefined ? { description: body.description } : {}),
+      });
+      return c.json(
+        {
+          data: {
+            agent: companyAgentDto(result.agent),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const agent = await input.agents.getAgent(actor, c.req.valid("param").agentId);
+      return c.json({ data: companyAgentDto(agent), meta }, 200);
+    },
+    updateCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agents.updateAgent(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { agent: companyAgentDto(result.agent), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agents.archiveAgent(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    runCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.agents.runAgentNow(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    listCompanyAgentRuns: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const runs = await input.agents.listAgentRuns(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("query").limit,
+      );
+      return c.json({ data: runs.map(companyAgentRunDto), meta }, 200);
+    },
+    uploadCompanyAgentPhoto: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agentPhotos.upload({
+        actor,
+        workflowId: c.req.valid("param").agentId,
+        file: c.req.valid("form").file,
+      });
+      return c.json({ data: { photoUrl: result.avatarUrl }, meta }, 201);
     },
     listBrowserProfiles: async (c) => {
       const actor = actorFrom(c);
@@ -1895,6 +2002,13 @@ export function createApiApp(input: CreateApiAppInput) {
         approvalId: params.approvalId,
         ...c.req.valid("json"),
       });
+      if (!result.idempotentReplay)
+        await captureProductServerEvent("run_approval_resolved", actor.userId, {
+          workspace_id: actor.workspaceId,
+          run_id: result.runId,
+          approval_id: result.approvalId,
+          resolution: result.resolution,
+        });
       return c.json(
         {
           data: {
@@ -2067,6 +2181,24 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "write", 30);
       if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
       return c.json({ data: await input.imessageSettings.unlink(actor), meta }, 200);
+    },
+    getWhatsappSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.get(actor), meta }, 200);
+    },
+    startWhatsappLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.startLink(actor), meta }, 200);
+    },
+    unlinkWhatsapp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.unlink(actor), meta }, 200);
     },
     updateMcpSetup: async (c) => {
       const actor = actorFrom(c);
@@ -2735,10 +2867,33 @@ export function createApiApp(input: CreateApiAppInput) {
     const skipped = await input.onboardingEmails.unsubscribe(email);
     return c.json({ data: { skipped }, meta }, 200);
   });
-  // Internal runner→API entrypoint for the `wiki` agent tool. The API owns the
+  // Internal runner→API entrypoints for workflow and wiki tools. The API owns the
   // whole boundary: bearer auth, body validation, server-side actor
   // reauthorization, command-aware rate limits, and command execution against
-  // Postgres. The runner never touches the wiki database directly.
+  // Postgres. The runner never touches these domain tables directly.
+  app.post("/internal/workflows/commands", async (c) => {
+    authorizeInternalBearer(
+      c.req.raw,
+      input.wikiCommandsInternalSecret,
+      "Workflow command execution is unavailable.",
+    );
+    const idempotencyKey = boundedString(c.req.header("idempotency-key"), 200);
+    if (!idempotencyKey)
+      throw new ApiError(400, "invalid_request", "An Idempotency-Key header is required.");
+    const body = InternalWorkflowCommandRequestSchema.safeParse(await internalJsonBody(c.req.raw));
+    if (!body.success)
+      throw new ApiError(400, "invalid_request", "A valid workflow command is required.");
+    const actor = await input.resolveWikiServiceActor(body.data);
+    const isRead = ["list", "read"].includes(String(body.data.command.command));
+    await enforceRateLimit(rateLimiter, actor, isRead ? "read" : "write", 60);
+    const output = await executeWorkflowCommand({
+      actor,
+      command: body.data.command,
+      idempotencyKey,
+      workflows: input.workflows,
+    });
+    return c.json({ data: output, meta }, 200);
+  });
   app.post("/internal/wiki/commands", async (c) => {
     authorizeInternalBearer(
       c.req.raw,
@@ -2889,6 +3044,11 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.imessageIngress;
     app.use("/webhooks/imessage/events", ingressBodyLimit(256 * 1024));
     app.post("/webhooks/imessage/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.whatsappIngress) {
+    const ingress = input.whatsappIngress;
+    app.use("/webhooks/whatsapp/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/whatsapp/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
@@ -3324,6 +3484,32 @@ function workflowDto(workflow: Workflow) {
     archivedAt: workflow.archivedAt?.toISOString() ?? null,
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),
+  };
+}
+
+function companyAgentDto(agent: CompanyAgent) {
+  return {
+    ...agent,
+    triggers: agent.triggers.map((trigger) =>
+      trigger.type === "schedule"
+        ? {
+            ...trigger,
+            lastRunAt: trigger.lastRunAt?.toISOString() ?? null,
+            nextRunAt: trigger.nextRunAt?.toISOString() ?? null,
+          }
+        : trigger,
+    ),
+    lastRunAt: agent.lastRunAt?.toISOString() ?? null,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+  };
+}
+
+function companyAgentRunDto(run: CompanyAgentRun) {
+  return {
+    ...run,
+    createdAt: run.createdAt.toISOString(),
+    updatedAt: run.updatedAt.toISOString(),
   };
 }
 

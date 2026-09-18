@@ -137,7 +137,10 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         AND ((event.status = 'delivering' AND EXISTS (SELECT 1 FROM goat.channel_deliveries delivery WHERE delivery.id = 'subscription_reply_' || event.id::text AND delivery.status IN ('sent', 'canceled'))) OR (
           task.status IN ('waiting', 'succeeded', 'failed', 'canceled') AND NOT EXISTS (
             SELECT 1 FROM goat.codex_chat_turns active WHERE active.chat_session_id = subscription.session_id
-              AND active.status IN ('queued', 'running', 'paused')
+              -- A paused turn has yielded the runtime and may be the reason this Slack reply
+              -- exists. Task comments resume settled Tasks by creating a sibling Run, which is
+              -- also how an in-product reply continues a Task whose earlier turn is paused.
+              AND active.status IN ('queued', 'running')
           )
         ))
       ORDER BY event.id FOR UPDATE OF task, event SKIP LOCKED LIMIT 1

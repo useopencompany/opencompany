@@ -2,7 +2,7 @@ import type { ActionDescriptor } from "@opencompany/agent-runtime";
 import type { ModelMessage } from "ai";
 import type { ProductChatAgentDebugTrace } from "../src/chat-agent";
 
-export type Variant = "v4" | "v5";
+export type Variant = "v4" | "v5" | "workflow-flat" | "workflow-grouped" | "workflow-describe";
 export type Budgets = {
   steps: number;
   toolCalls: number;
@@ -31,6 +31,7 @@ export type Evidence = {
   approvals: { executionsBeforeApproval: number; count: number }[];
 };
 export type Scenario = {
+  workflows?: boolean;
   id: string;
   tags: string[];
   prompt: string;

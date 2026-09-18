@@ -112,6 +112,7 @@ export class PostgresTaskRepository implements TaskRepository {
         ON conversation.id = task.session_id
        AND conversation.kind = 'task'
       WHERE ${taskAccessPredicate(input.actor)}
+        AND task.agent_id IS NULL
         AND CASE WHEN ${input.archived}::boolean
           THEN task.archived_at IS NOT NULL
           ELSE task.archived_at IS NULL
@@ -542,7 +543,7 @@ export class PostgresTaskRepository implements TaskRepository {
         created_task AS MATERIALIZED (
           INSERT INTO goat.tasks (
             id, name, user_workos_id, workspace_id, prompt, source, model, session_id,
-            schedule_id, scheduled_for, workflow_id,
+            schedule_id, scheduled_for, workflow_id, agent_id,
             status, stage, next_run_at,
             harness_spec, created_at, updated_at
           )
@@ -551,6 +552,7 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
             ${model}, conversation.id, NULL,
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
+            ${input.command.agentId ?? null},
             'queued', 'queued', ${now},
             CASE WHEN ${stringifyPostgresJson(harness)}::jsonb ? 'workflow'
               THEN jsonb_set(

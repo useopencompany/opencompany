@@ -10,6 +10,7 @@ import {
   type Actor,
   ChatApplicationService,
   type ChatRepository,
+  CompanyAgentApplicationService,
   CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
@@ -322,6 +323,7 @@ describe("canonical Hono API", () => {
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
       workflowAvatars: fakeWorkflowAvatars(),
+      agentPhotos: fakeWorkflowAvatars(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
       projects: fakeProjects(),
@@ -3013,11 +3015,14 @@ describe("canonical Hono API", () => {
             taskViewMode: "list",
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
+            approveForMeEnabled: false,
             reviewInboxEnabled: false,
             sidebarProjectsEnabled: false,
             subagentsEnabled: false,
+            companyAgentsEnabled: false,
             pastSessionAccessEnabled: false,
             imessageEnabled: false,
+            whatsappEnabled: false,
           }),
         },
       });
@@ -3081,11 +3086,14 @@ describe("canonical Hono API", () => {
         taskViewMode: "board" as const,
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
+        approveForMeEnabled: false,
         reviewInboxEnabled: false,
         sidebarProjectsEnabled: false,
         subagentsEnabled: false,
+        companyAgentsEnabled: false,
         pastSessionAccessEnabled: false,
         imessageEnabled: false,
+        whatsappEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3112,11 +3120,14 @@ describe("canonical Hono API", () => {
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
+      approveForMeEnabled: false,
       reviewInboxEnabled: false,
       sidebarProjectsEnabled: false,
       subagentsEnabled: false,
+      companyAgentsEnabled: false,
       pastSessionAccessEnabled: false,
       imessageEnabled: false,
+      whatsappEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3134,6 +3145,7 @@ describe("canonical Hono API", () => {
         taskViewMode: "list",
         taskTimeRange: "24h",
         autoModelRoutingEnabled: true,
+        approveForMeEnabled: false,
       },
       meta: { apiVersion: "v1" },
     });
@@ -3269,6 +3281,7 @@ describe("canonical Hono API", () => {
         kind: "bug",
         message: "The run stalled halfway.",
         context: { kind: "task", id: "tsk_1" },
+        attachmentIds: ["attachment_1"],
       }),
     });
     expect(withContext.status).toBe(200);
@@ -3276,6 +3289,7 @@ describe("canonical Hono API", () => {
       kind: "bug",
       message: "The run stalled halfway.",
       context: { kind: "task", id: "tsk_1" },
+      attachmentIds: ["attachment_1"],
     });
 
     const tooShort = await app.request("/v1/feedback", {
@@ -4620,6 +4634,7 @@ function testApp(
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
     workflowAvatars: fakeWorkflowAvatars(),
+    agentPhotos: fakeWorkflowAvatars(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
     projects: fakeProjects(),
@@ -4805,6 +4820,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       timezone: "UTC",
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
+      approveForMeEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       taskViewMode: "board" as const,
       taskTimeRange: "7d" as const,
@@ -5472,6 +5488,7 @@ function fakeAutomationServices() {
     },
     updateWorkflow: async () => ({ status: "not_found" }),
     archiveWorkflow: async () => ({ status: "not_found" }),
+    listRuns: async () => [],
     recordRunNow: async () => undefined,
     getWorkflowMemory: async () => null,
     setWorkflowMemoryEnabled: async () => null,
@@ -5504,8 +5521,12 @@ function fakeAutomationServices() {
       },
     },
   };
+  const workflows = new WorkflowApplicationService(workflowRepository, options);
   return {
-    workflows: new WorkflowApplicationService(workflowRepository, options),
+    workflows,
+    agents: new CompanyAgentApplicationService(
+      new WorkflowApplicationService(workflowRepository, { ...options, kind: "agent" }),
+    ),
   };
 }
 
@@ -5513,6 +5534,7 @@ function populatedAutomationServices() {
   let workflow: Workflow = {
     id: "workflow_1",
     slug: "weekly-research",
+    kind: "workflow",
     name: "Weekly research",
     description: "Track changes",
     steps: [
@@ -5527,6 +5549,9 @@ function populatedAutomationServices() {
     scope: "company",
     slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
+    ownerUserId: null,
+    ownerActive: false,
+    lastRunAt: null,
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,
@@ -5582,6 +5607,7 @@ function populatedAutomationServices() {
       value: { workflowId: workflow.id, version: workflow.version + 1 },
       transactionId: "53",
     }),
+    listRuns: async () => [],
     recordRunNow: async () => undefined,
     getWorkflowMemory: async ({ workflowId }) =>
       workflowId === workflow.id || workflowId === workflow.slug ? memory : null,
@@ -6003,3 +6029,53 @@ function fakeIntegrationResourceOptions(): Parameters<
     },
   };
 }
+
+describe("POST /internal/workflows/commands", () => {
+  const request = (command: unknown, token = "workflow-test-token") => ({
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "Idempotency-Key": "workflow:turn:call",
+    },
+    body: JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command }),
+  });
+  it("requires the internal credential before resolving the actor", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }, "wrong")))
+        .status,
+    ).toBe(401);
+    expect(resolveWikiServiceActor).not.toHaveBeenCalled();
+  });
+  it("reauthorizes workspace membership and rejects malformed commands", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    const read = await app.request("/internal/workflows/commands", request({ command: "list" }));
+    expect(read.status).toBe(200);
+    expect(resolveWikiServiceActor).toHaveBeenCalledWith(
+      expect.objectContaining({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
+    );
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "oops" }))).status,
+    ).toBe(400);
+  });
+  it("does not grant access to a caller-supplied workspace", async () => {
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor: async () => {
+        throw new ApiError(403, "forbidden", "Not a workspace member");
+      },
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }))).status,
+    ).toBe(403);
+  });
+});

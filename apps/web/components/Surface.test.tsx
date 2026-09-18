@@ -5,7 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
-import { persistLastChatSelection, readLastChatSelection } from "@/lib/chat-composer-selection";
+import {
+  persistLastChatSelection,
+  persistLastEngineModel,
+  persistLastReasoningEffort,
+  readLastChatSelection,
+  readLastEngineModel,
+  readLastReasoningEffort,
+} from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
   HOME_NAVIGATION_EVENT,
@@ -206,7 +213,8 @@ const headlessChatMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatCommandMocks = vi.hoisted(() => ({
-  cancel: vi.fn(async () => ({})),
+  cancel: vi.fn(async (runId: string) => ({ runId, status: "canceled", replayed: false })),
+  waitForSettlement: vi.fn(async (runId: string) => ({ id: runId, status: "canceled" })),
   steer: vi.fn(async () => ({ runId: "run_queued", targetRunId: "run_active" })),
   getRuntimeStatus: vi.fn(async () => null),
   resolveQuestions: vi.fn(async () => ({})),
@@ -237,6 +245,7 @@ vi.mock("@/lib/headless-chat-commands", () => ({
   getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
   resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
   updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
+  waitForHeadlessChatRunSettlement: headlessChatCommandMocks.waitForSettlement,
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -519,6 +528,7 @@ describe("Surface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.waitForSettlement.mockClear();
     headlessChatCommandMocks.steer.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
@@ -680,7 +690,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const transportCancel = vi
       .spyOn(HeadlessChatTransport.prototype, "cancel")
-      .mockResolvedValue(false);
+      .mockResolvedValue(null);
 
     render(
       <Surface
@@ -741,8 +751,66 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
+  it("shows Stop immediately and confirms settlement even when Electric stays stale", async () => {
+    const user = userEvent.setup();
+    let confirmSettlement: ((value: { id: string; status: "canceled" }) => void) | undefined;
+    headlessChatCommandMocks.cancel.mockResolvedValueOnce({
+      runId: "run_codex_stale",
+      status: "running",
+      replayed: false,
+    });
+    headlessChatCommandMocks.waitForSettlement.mockReturnValueOnce(
+      new Promise((resolve) => {
+        confirmSettlement = resolve;
+      }),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_stale",
+          title: "Stale cancellation projection",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_stale",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(screen.getByRole("button", { name: "Stopping Codex" })).toBeDisabled();
+    expect(screen.getByLabelText("Codex sandbox status: Stopping")).toHaveTextContent("Stopping");
+    expect(screen.getByText("Stopping response…")).toBeInTheDocument();
+    expect(headlessChatCommandMocks.waitForSettlement).toHaveBeenCalledWith(
+      "run_codex_stale",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    act(() => confirmSettlement?.({ id: "run_codex_stale", status: "canceled" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Codex sandbox status: Stopped")).toHaveTextContent("Stopped"),
+    );
+    expect(screen.queryByText("Stopping response…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
   });
 
   it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
@@ -773,7 +841,8 @@ describe("Surface chat streaming UI", () => {
 
     // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
-    const send = screen.getByRole("button", { name: "Send message" });
+    expect(screen.getByPlaceholderText("Queue a follow-up...")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Queue message" });
     expect(send).toBeDisabled();
 
     await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
@@ -840,7 +909,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const transportCancel = vi
       .spyOn(HeadlessChatTransport.prototype, "cancel")
-      .mockResolvedValue(true);
+      .mockResolvedValue({ runId: "run_claude_syncing", status: "canceled", replayed: false });
 
     render(
       <Surface
@@ -865,7 +934,9 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
     expect(screen.getByRole("status", { name: "Claude Code is working" })).toBeInTheDocument();
     const stop = screen.getByRole("button", { name: "Interrupt Claude Code" });
 
@@ -1258,7 +1329,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
 
     await user.type(textarea, "& summarize the release notes");
@@ -1307,7 +1378,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "& @codex refactor the parser");
@@ -1401,7 +1472,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "#");
@@ -3236,6 +3307,7 @@ describe("Surface chat streaming UI", () => {
   it("posts an interactive Codex question answer to its durable interaction", async () => {
     const user = userEvent.setup();
     const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-426614174000";
+    const questionRunId = "goat_codex_chat_turn_question";
 
     render(
       <Surface
@@ -3257,7 +3329,10 @@ describe("Surface chat streaming UI", () => {
             {
               id: "assistant_question",
               role: "assistant",
-              metadata: { sessionId: "goat_chat_codex_1" },
+              metadata: {
+                sessionId: "goat_chat_codex_1",
+                runId: questionRunId,
+              },
               parts: [
                 {
                   type: "dynamic-tool",
@@ -3289,7 +3364,7 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() =>
       expect(headlessChatCommandMocks.resolveQuestions).toHaveBeenCalledWith(
-        "goat_codex_chat_turn_1",
+        questionRunId,
         interactionId,
         { scope: { answers: ["Foundational"] } },
       ),
@@ -3401,7 +3476,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
     expect(screen.queryByText("Sleeping")).not.toBeInTheDocument();
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
@@ -3433,8 +3508,40 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Working")).toHaveTextContent("Working");
-    expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Codex sandbox status: Working")).toHaveTextContent("Working");
+    expect(screen.queryByLabelText("Codex sandbox status: Connecting")).not.toBeInTheDocument();
+  });
+
+  it("does not keep a settled Task working on a stale engine session projection", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "conversation_task_codex_settled",
+          title: "Codex task",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_codex_settled",
+          status: "succeeded",
+          startedAtMs: Date.now() - 200_000,
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
+    expect(screen.queryByRole("status", { name: /is working/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
   });
 
   it("shows the context token usage in a tooltip", async () => {
@@ -3511,7 +3618,250 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Queued")).toHaveTextContent("Queued");
+    expect(screen.getByLabelText("Codex sandbox status: Queued")).toHaveTextContent("Queued");
+  });
+
+  it("opens new chats on the reasoning effort last picked for each engine", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        codexConnected
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    // Each engine keeps its own level: Codex dropping to Low must not pull Claude off its default.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("low");
+    expect(readLastReasoningEffort("user_1", "claude_code")).toBe("xhigh");
+  });
+
+  it("opens new chats on the model last picked for each engine", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              sessionId: requestChatSessionId(init, "conversation_engine_model_1"),
+              userMessageId: "message_engine_model_user",
+              assistantMessageId: "message_engine_model_assistant",
+              mode: "started",
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        codexConnected
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" }));
+    await user.click(screen.getByText("GPT 5.6 Terra"));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
+
+    // Each engine keeps its own model: choosing a Codex one must not touch Claude's.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Fable 5.1" }),
+    ).toBeInTheDocument();
+
+    expect(readLastEngineModel("user_1", "codex")).toBe("openai/gpt-5.6-terra");
+    expect(readLastEngineModel("user_1", "claude_code")).toBe("anthropic/claude-fable-5.1");
+
+    // The picker reading right is not enough: the send has to carry the remembered model.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      model: "openai/gpt-5.6-terra",
+      engine: { type: "codex", schemaVersion: 1 },
+    });
+  });
+
+  it("keeps a saved chat's own model ahead of the remembered one", () => {
+    persistLastEngineModel("user_1", "codex", "openai/gpt-5.6-terra");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        userWorkosId="user_1"
+        codexConnected
+        initialChat={{
+          id: "conversation_codex_model_1",
+          title: "Codex chat",
+          model: "openai/gpt-5.6-sol",
+          engine: "codex" as const,
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+  });
+
+  it("reads but does not move the remembered model from the quick composer", async () => {
+    const user = userEvent.setup();
+    persistLastEngineModel("user_1", "codex", "openai/gpt-5.6-terra");
+    persistLastChatSelection("user_1", "codex");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Codex model: GPT 5.6 Terra" }));
+    // The model listbox portals out of the dialog.
+    await user.click(screen.getByText("GPT 5.6 Sol"));
+    expect(
+      within(dialog).getByRole("button", { name: "Codex model: GPT 5.6 Sol" }),
+    ).toBeInTheDocument();
+    expect(readLastEngineModel("user_1", "codex")).toBe("openai/gpt-5.6-terra");
+  });
+
+  it("keeps a saved chat's own reasoning effort ahead of the remembered one", () => {
+    persistLastReasoningEffort("user_1", "codex", "low");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        userWorkosId="user_1"
+        codexConnected
+        initialChat={{
+          id: "conversation_codex_preference_1",
+          title: "Codex chat",
+          model: DEFAULT_MODEL,
+          engine: "codex" as const,
+          codexComposerSettings: {
+            reasoningEffort: "medium" as const,
+            planModeEnabled: false,
+            goalMode: null,
+          },
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reads but does not move the remembered reasoning effort from the quick composer", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+    persistLastChatSelection("user_1", "codex");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Codex reasoning effort: Medium (click to cycle)",
+      }),
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("medium");
   });
 
   it("restores Codex composer controls when returning to a Codex chat", async () => {
@@ -5492,7 +5842,7 @@ describe("Surface chat streaming UI", () => {
     expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
-  it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
+  it("settles a finalized turn when stream and runtime state are stale", () => {
     chatMock.status = "streaming";
 
     render(
@@ -5503,7 +5853,7 @@ describe("Surface chat streaming UI", () => {
           id: "chat_completed_1",
           title: "Completed chat",
           model: DEFAULT_MODEL,
-          engine: "opencompany",
+          engine: "codex",
           runtime: {
             status: "running",
             activeRunId: "run_completed_1",
@@ -5521,17 +5871,32 @@ describe("Surface chat streaming UI", () => {
                 runId: "run_completed_1",
                 timing: { durationMs: 40_795 },
               },
-              parts: [{ type: "text", text: "Finished answer" }],
+              parts: [
+                { type: "text", text: "I’ll inspect the implementation." },
+                {
+                  type: "dynamic-tool",
+                  toolCallId: "tool_completed_1",
+                  toolName: "use_action",
+                  state: "output-available",
+                  input: { action: "plugin:linear:linear.get_issue" },
+                  output: { status: "completed" },
+                },
+                { type: "text", text: "Finished answer" },
+              ],
             },
           ],
         }}
+        codexConnected
       />,
     );
 
     expect(screen.getByLabelText("Turn completed in 40.8s")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("status", { name: "opencompany is working" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("I’ll inspect the implementation.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Codex is working" })).not.toBeInTheDocument();
   });
 
   it("renders assistant text from UI message parts", () => {
@@ -5716,7 +6081,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
   });
 
-  it("renders a task card from start_workflow tool output", () => {
+  it("renders a saved workflow result in the chat transcript", () => {
     render(
       <Surface
         tasks={[]}
@@ -5729,39 +6094,22 @@ describe("Surface chat streaming UI", () => {
             {
               id: "assistant_1",
               role: "assistant",
-              metadata: { sessionId: "chat_1" },
               parts: [
-                { type: "text", text: "Started that workflow as a Task." },
                 {
-                  type: START_WORKFLOW_TOOL_PART_TYPE,
-                  toolCallId: "tool_1",
+                  type: "tool-workflows",
+                  toolCallId: "workflow_1",
                   state: "output-available",
-                  input: {
-                    workflowId: "customer-interview-synthesis",
-                    prompt: "Synthesize the Acme interview.",
-                  },
+                  input: { command: "create", name: "Weekly investor update" },
                   output: {
-                    taskId: "task_1",
-                    taskDisplayId: "TASK-42",
-                    taskName: "Customer interview synthesis",
-                    status: "queued",
-                    prompt: "Synthesize the Acme interview.",
-                  },
-                },
-                {
-                  type: START_TASK_TOOL_PART_TYPE,
-                  toolCallId: "tool_2",
-                  state: "output-available",
-                  input: {
-                    name: "Fallback task",
-                    prompt: "Synthesize the Acme interview.",
-                  },
-                  output: {
-                    taskId: "task_1",
-                    taskDisplayId: "TASK-42",
-                    taskName: "Customer interview synthesis",
-                    status: "already_started",
-                    prompt: "Synthesize the Acme interview.",
+                    ok: true,
+                    workflow: {
+                      slug: "weekly-investor-update",
+                      name: "Weekly investor update",
+                      status: "draft",
+                      scope: "personal",
+                      memory: { enabled: false },
+                      activationBlockers: ["Add instructions before activating."],
+                    },
                   },
                 },
               ],
@@ -5770,12 +6118,76 @@ describe("Surface chat streaming UI", () => {
         }}
       />,
     );
-
-    expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
-    expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
-    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
-    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Weekly investor update" })).toHaveAttribute(
+      "href",
+      "/workflows/weekly-investor-update",
+    );
+    expect(screen.getByText("Add instructions before activating.")).toBeInTheDocument();
   });
+
+  it.each([START_WORKFLOW_TOOL_PART_TYPE, "tool-workflows"])(
+    "renders a task card from %s output",
+    (workflowPartType) => {
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_1",
+            title: "Chat",
+            model: DEFAULT_MODEL,
+            messages: [
+              {
+                id: "assistant_1",
+                role: "assistant",
+                metadata: { sessionId: "chat_1" },
+                parts: [
+                  { type: "text", text: "Started that workflow as a Task." },
+                  {
+                    type: workflowPartType,
+                    toolCallId: "tool_1",
+                    state: "output-available",
+                    input: {
+                      workflowId: "customer-interview-synthesis",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                    output: {
+                      taskId: "task_1",
+                      taskDisplayId: "TASK-42",
+                      taskName: "Customer interview synthesis",
+                      status: "queued",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                  },
+                  {
+                    type: START_TASK_TOOL_PART_TYPE,
+                    toolCallId: "tool_2",
+                    state: "output-available",
+                    input: {
+                      name: "Fallback task",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                    output: {
+                      taskId: "task_1",
+                      taskDisplayId: "TASK-42",
+                      taskName: "Customer interview synthesis",
+                      status: "already_started",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                  },
+                ],
+              } as unknown as ChatUiMessage,
+            ],
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
+      expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
+      expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+      expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
+    },
+  );
 
   it("renders current task status from task state instead of start_task output", () => {
     render(

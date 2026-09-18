@@ -1,11 +1,14 @@
 "use client";
 
 import { toast } from "@opencompany/ui/components/sonner";
-import { MessageSquarePlus, Send, X } from "lucide-react";
+import { ImagePlus, MessageSquarePlus, Send, X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { ComposerAttachments } from "@/components/chat/ChatComposerAttachments";
+import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { submitFeedback } from "@/lib/feedback/actions";
 import { feedbackContextFromPathname, feedbackContextLabel } from "@/lib/feedback/context";
+import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 
 // Feedback sits in the middle and is the default, so the most common report is the
 // resting state and one tap reaches Bug or Idea.
@@ -17,6 +20,7 @@ const KIND_OPTIONS = [
 
 type FeedbackKind = (typeof KIND_OPTIONS)[number]["value"];
 const DEFAULT_KIND: FeedbackKind = "feedback";
+const SCREENSHOT_KINDS = ["image"] as const;
 
 // Sends the report the dialog has already optimistically confirmed. Runs
 // fire-and-forget: by the time this resolves the dialog is gone, so a failure
@@ -42,9 +46,17 @@ async function sendFeedbackInBackground(formData: FormData) {
 function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const pathname = usePathname();
   const context = feedbackContextFromPathname(pathname);
+  const formRef = useRef<HTMLFormElement>(null);
   const messageRef = useRef<HTMLTextAreaElement>(null);
+  const screenshotInputRef = useRef<HTMLInputElement>(null);
   const [kind, setKind] = useState<FeedbackKind>(DEFAULT_KIND);
   const [error, setError] = useState<string | null>(null);
+  const screenshots = useChatAttachments({
+    modelName: "feedback",
+    capabilities: { images: true, pdf: false },
+    allowedKinds: SCREENSHOT_KINDS,
+    upload: ({ file, pendingId }) => uploadHeadlessChatAttachment({ file, pendingId }),
+  });
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => messageRef.current?.focus());
@@ -71,6 +83,14 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
         setError("Keep feedback under 4,000 characters.");
         return;
       }
+      if (screenshots.isUploading) {
+        setError("Wait for screenshots to finish uploading.");
+        return;
+      }
+      if (screenshots.hasFailed) {
+        setError("Remove screenshots that failed to upload.");
+        return;
+      }
       // Snapshot the form before this dialog unmounts, then hand it off. The
       // toast (rooted at the app shell) survives to report the outcome.
       const formData = new FormData(event.currentTarget);
@@ -78,7 +98,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
       void sendFeedbackInBackground(formData);
       onClose();
     },
-    [onClose],
+    [onClose, screenshots.hasFailed, screenshots.isUploading],
   );
 
   return (
@@ -92,6 +112,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
       }}
     >
       <form
+        ref={formRef}
         onSubmit={handleSubmit}
         className="w-full max-w-[460px] overflow-hidden rounded-lg border border-border bg-surface shadow-[0_24px_64px_rgba(0,0,0,0.2),0_4px_14px_rgba(0,0,0,0.1)]"
       >
@@ -155,10 +176,64 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
               minLength={3}
               maxLength={4000}
               onChange={() => setError(null)}
+              onPaste={(event) => {
+                screenshots.handlePasteFiles(event);
+              }}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  (event.metaKey || event.ctrlKey) &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  formRef.current?.requestSubmit();
+                }
+              }}
               placeholder="Tell us what happened, what you expected, or what you'd like to see."
               className="min-h-[140px] resize-y rounded-md border border-border bg-surface px-2.5 py-2 text-[13px] leading-5 text-ink outline-none transition-colors placeholder:text-ink/35 focus:border-ink/30 focus:ring-1 focus:ring-ink/15"
             />
           </label>
+
+          <div className="flex flex-col gap-2">
+            <input
+              ref={screenshotInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              multiple
+              className="hidden"
+              aria-label="Choose screenshots"
+              onChange={(event) => {
+                screenshots.acceptFiles(Array.from(event.currentTarget.files ?? []));
+                event.currentTarget.value = "";
+                setError(null);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => screenshotInputRef.current?.click()}
+              className="inline-flex w-fit items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1.5 text-[12.5px] font-medium text-ink-muted transition-colors hover:bg-surface-muted hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            >
+              <ImagePlus size={14} strokeWidth={1.8} />
+              Add screenshots
+            </button>
+            <p className="text-[11.5px] text-ink-subtle">
+              PNG, JPEG, or WebP up to 5 MB each. You can also paste a screenshot.
+            </p>
+            <ComposerAttachments
+              attachments={screenshots.attachments}
+              onRemove={screenshots.removeAttachment}
+            />
+            {screenshots.attachments
+              .filter((attachment) => attachment.status === "ready")
+              .map((attachment) => (
+                <input
+                  key={attachment.id}
+                  type="hidden"
+                  name="attachmentId"
+                  value={attachment.id}
+                />
+              ))}
+          </div>
 
           {context ? (
             // Reports from a chat or task carry that reference so triage can open
@@ -185,10 +260,11 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
           </button>
           <button
             type="submit"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+            disabled={screenshots.isUploading || screenshots.hasFailed}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-ink px-3 text-[12.5px] font-medium text-canvas shadow-[0_1px_2px_rgba(0,0,0,0.18)] transition-colors hover:bg-ink/85 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-45"
           >
             <Send size={13} strokeWidth={1.9} />
-            Send
+            {screenshots.isUploading ? "Uploading…" : "Send"}
           </button>
         </div>
       </form>

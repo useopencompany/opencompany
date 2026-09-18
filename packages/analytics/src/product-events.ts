@@ -19,6 +19,24 @@ export type ProductOnboardingStep =
 export type ProductPluginKind = "skills" | "mcp" | "hybrid" | "empty";
 
 export type ProductAnalyticsEventPropertiesByName = {
+  action_approval_reviewed: {
+    workspace_id: string;
+    run_id: string;
+    request_id: string;
+    action_id: string;
+    surface: "chat" | "task";
+    outcome: "auto_approved" | "requires_approval";
+    reason: string;
+    model: string;
+    policy_version: string;
+    duration_ms: number;
+  };
+  run_approval_resolved: {
+    workspace_id: string;
+    run_id: string;
+    approval_id: string;
+    resolution: string;
+  };
   app_opened: {
     workspace_id: string;
   };
@@ -200,6 +218,28 @@ type ProductAnalyticsEventDefinition<EventName extends ProductAnalyticsEventName
 };
 
 export const productAnalyticsEvents = {
+  action_approval_reviewed: {
+    name: "action_approval_reviewed",
+    description:
+      "One automatic review of a new Ask action; requires_approval means automatic approval was declined, not that the action was denied by the user.",
+    safeProperties: [
+      "workspace_id",
+      "run_id",
+      "request_id",
+      "action_id",
+      "surface",
+      "outcome",
+      "reason",
+      "model",
+      "policy_version",
+      "duration_ms",
+    ],
+  },
+  run_approval_resolved: {
+    name: "run_approval_resolved",
+    description: "A user's approval decision, emitted only for a new resolution.",
+    safeProperties: ["workspace_id", "run_id", "approval_id", "resolution"],
+  },
   app_opened: {
     name: "app_opened",
     description: "A signed-in user opened opencompany.",

@@ -160,6 +160,7 @@ export const SUBAGENT_WITHHELD_TOOL_NAMES: readonly string[] = [
   WORKSPACE_SKILLS_TOOL_NAME,
   // Spawning durable work, which would escape the turn that authorized it.
   START_WORKFLOW_TOOL_NAME,
+  "workflows",
   // Reports the status of the parent task run, which is not the subagent's to report. Spelled out
   // because it is declared in chat-agent.ts, which imports this module.
   "update_task_status",

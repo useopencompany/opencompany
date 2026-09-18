@@ -535,6 +535,35 @@ describe("durable Slack subscriptions", () => {
     expect((await pg.query("SELECT id FROM goat.codex_chat_turns")).rows).toHaveLength(2);
     expect((await pg.query("SELECT id FROM goat.tasks")).rows).toHaveLength(1);
   });
+  it("resumes a settled Task whose earlier turn is paused for input", async () => {
+    await pg.exec(`
+      INSERT INTO goat.chat_messages (id, session_id, role, content, task_id)
+      VALUES ('paused_user','session','user','Confirm the rollout','task'),
+        ('paused_assistant','session','assistant','','task');
+      INSERT INTO goat.codex_chat_turns
+        (id,user_workos_id,codex_chat_session_id,chat_session_id,user_message_id,
+          assistant_message_id,status,prompt)
+      VALUES ('paused_run','owner','runtime','session','paused_user','paused_assistant',
+        'paused','Confirm the rollout');
+    `);
+    await enqueueSlackThreadReply(execute, reply);
+
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (
+        await pg.query(
+          "SELECT status, count(*)::int AS count FROM goat.codex_chat_turns GROUP BY status ORDER BY status",
+        )
+      ).rows,
+    ).toEqual([
+      { status: "paused", count: 1 },
+      { status: "queued", count: 1 },
+    ]);
+    expect(
+      (await pg.query("SELECT status, run_id IS NOT NULL AS resumed FROM goat.subscription_events"))
+        .rows,
+    ).toEqual([{ status: "running", resumed: true }]);
+  });
   it("does not copy a completed assistant turn into Slack when the reply tool was not used", async () => {
     await enqueueSlackThreadReply(execute, reply);
     await processNextSubscriptionEvent(deps);

@@ -51,6 +51,7 @@ import {
   MAX_BROWSER_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
+  MAX_WORKFLOW_STARTS_PER_TURN,
 } from "./chat-limits";
 import {
   BROWSER_USE_PROFILE_TOOL_NAME,
@@ -154,6 +155,13 @@ import {
   type UpdateWorkflowMemoryToolInput,
   type UpdateWorkflowMemoryToolOutput,
 } from "./workflow-memory";
+import {
+  parseWorkflowToolInput,
+  WORKFLOWS_INPUT_SCHEMA,
+  WORKFLOWS_TOOL_DESCRIPTION,
+  type WorkflowCommand,
+  type WorkflowToolInput,
+} from "./workflow-tool";
 import {
   WORKSPACE_SKILL_AUTHORING_INPUT_SCHEMA,
   WORKSPACE_SKILL_EDIT_INPUT_SCHEMA,
@@ -293,6 +301,7 @@ export type SkillDispatcher = {
 };
 
 export type WorkflowDispatcher = {
+  manage?: (input: WorkflowCommand, context: { toolCallId: string }) => Promise<unknown>;
   catalog: readonly ChatWorkflowCatalogItem[];
   execute: (input: StartWorkflowToolInput) => Promise<StartedTask>;
 };
@@ -319,7 +328,7 @@ export type ProductChatAgentDebugTrace = {
 
 export type ProductChatAgentResult = {
   content: string;
-  task: StartedTask | null;
+  tasks: readonly StartedTask[];
   debugTrace: ProductChatAgentDebugTrace;
   // Full-turn usage across all steps (unlike debugTrace.usage, which is the
   // last step only as a context-fullness proxy). Headless surfaces need this
@@ -513,13 +522,13 @@ export async function runProductChatAgent(input: {
     await flushLatitude();
   }
 
-  const startedTask = toolContext.getStartedTask();
-  const content = normalizeAgentText(result.text, startedTask);
+  const startedTasks = toolContext.getStartedTasks();
+  const content = normalizeAgentText(result.text, startedTasks);
   const finishReason = stringifyFinishReason(result.finishReason);
 
   return {
     content,
-    task: startedTask,
+    tasks: startedTasks,
     debugTrace: createProductChatDebugTrace({
       model: input.model,
       steps: result.steps,
@@ -575,9 +584,8 @@ export function createProductChatToolContext(input: {
   const webFetchCap = input.limits?.webFetchCallsPerTurn ?? MAX_WEB_FETCH_CALLS_PER_TURN;
   const actionCap = MAX_ACTION_CALLS_PER_TURN;
   let actionCallsExhausted = false;
-  let startedTask: StartedTask | null = null;
-  let startedTaskInFlight: Promise<StartedTask> | null = null;
-  let startedWorkflowId: string | null = null;
+  const startedWorkflowTasks = new Map<string, StartedTask>();
+  const startedWorkflowTasksInFlight = new Map<string, Promise<StartedTask>>();
   let visibleToolActivity = false;
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
@@ -597,36 +605,73 @@ export function createProductChatToolContext(input: {
 
   const tools: ToolSet = {};
 
-  // One Task per turn: the assistant message carries a single Task card, and the workflow Task's
-  // idempotency key is the turn id. Re-requesting the same workflow replays that Task; asking for a
-  // different one has to fail loudly, or the model would report a workflow as started when the
-  // first one's Task came back instead.
+  // A turn may start up to MAX_WORKFLOW_STARTS_PER_TURN distinct workflows, and the assistant
+  // message renders one Task card per run. Each workflow's Task is keyed on the turn id plus the
+  // workflow id, so a repeat request for one already started this turn replays that Task instead of
+  // spawning a second one. Going past the cap has to fail loudly, or the model would report a
+  // workflow as started when an earlier one's Task came back instead. The cap counts in-flight
+  // starts too: the model can emit several start_workflow calls in a single step, and the slot is
+  // taken before the first await so those parallel calls cannot all pass the same check.
   const startWorkflowTask = async (
     workflowId: string,
     create: () => Promise<StartedTask>,
   ): Promise<StartWorkflowToolOutput> => {
-    if (startedTaskInFlight) startedTask ??= await startedTaskInFlight;
-    if (startedTask) {
-      if (startedWorkflowId !== workflowId) {
-        throw new Error(
-          `Only one workflow can start per chat turn, and "${startedWorkflowId}" already started. Tell the user that "${workflowId}" has not started and ask whether to run it next.`,
-        );
-      }
-      return toStartTaskToolOutput(startedTask, "already_started");
+    const started = startedWorkflowTasks.get(workflowId);
+    if (started) return toStartTaskToolOutput(started, "already_started");
+
+    const inFlight = startedWorkflowTasksInFlight.get(workflowId);
+    if (inFlight) return toStartTaskToolOutput(await inFlight, "already_started");
+
+    const claimed = [...startedWorkflowTasks.keys(), ...startedWorkflowTasksInFlight.keys()];
+    if (claimed.length >= MAX_WORKFLOW_STARTS_PER_TURN) {
+      throw new Error(
+        `Only ${MAX_WORKFLOW_STARTS_PER_TURN} workflows can start per chat turn, and ${claimed.join(", ")} already took those slots. Tell the user that "${workflowId}" has not started and ask whether to run it next.`,
+      );
     }
 
-    startedWorkflowId = workflowId;
+    const pending = create();
+    startedWorkflowTasksInFlight.set(workflowId, pending);
+    let task: StartedTask;
     try {
-      startedTaskInFlight = create();
-      startedTask = await startedTaskInFlight;
+      task = await pending;
     } finally {
-      startedTaskInFlight = null;
+      // A failed start frees its slot, so the model can retry it or run a different workflow.
+      startedWorkflowTasksInFlight.delete(workflowId);
     }
-    return toStartTaskToolOutput(startedTask, "queued");
+    startedWorkflowTasks.set(workflowId, task);
+    return toStartTaskToolOutput(task, "queued");
   };
 
   const workflows = input.workflows;
-  if (workflows && workflows.catalog.length > 0) {
+  if (workflows?.manage) {
+    tools.workflows = tool<WorkflowToolInput, unknown, Record<string, unknown>>({
+      description: WORKFLOWS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WorkflowToolInput>(WORKFLOWS_INPUT_SCHEMA),
+      // This command schema intentionally has optional, operation-specific fields. The
+      // Codex backend otherwise treats every property as required and invents placeholders.
+      strict: false,
+      execute: async (raw, context) => {
+        visibleToolActivity = true;
+        const args = parseWorkflowToolInput(raw);
+        if (args.command === "run") {
+          if (!args.workflowId || !args.prompt)
+            throw new Error("Run requires workflowId and prompt.");
+          // Resolve through the live service, so a workflow created this turn is runnable.
+          const read = await workflows.manage!(
+            { command: "read", workflowId: args.workflowId },
+            { toolCallId: context.toolCallId },
+          );
+          const current = (read as { workflow?: { slug: string; status: string } }).workflow;
+          if (!current || current.status !== "active")
+            throw new Error("Only an active workflow can be run.");
+          return startWorkflowTask(current.slug, () =>
+            workflows.execute({ workflowId: current.slug, prompt: args.prompt! }),
+          );
+        }
+        return workflows.manage!(args, { toolCallId: context.toolCallId });
+      },
+    });
+  } else if (workflows && workflows.catalog.length > 0) {
     const workflowIds = workflows.catalog.map((workflow) => workflow.id);
     tools[START_WORKFLOW_TOOL_NAME] = tool<
       StartWorkflowToolInput,
@@ -1417,7 +1462,7 @@ export function createProductChatToolContext(input: {
   return {
     areActionCallsExhausted: () => actionCallsExhausted,
     getSelectedWikiContext: () => selectedWikiContext,
-    getStartedTask: () => startedTask,
+    getStartedTasks: (): readonly StartedTask[] => [...startedWorkflowTasks.values()],
     hasVisibleToolActivity: () => visibleToolActivity,
     subagentBudget,
     repairToolCall,
@@ -1497,12 +1542,15 @@ export function createProductChatDebugTrace(input: {
   };
 }
 
-export function normalizeAgentText(text: string, startedTask: StartedTask | null) {
+export function normalizeAgentText(text: string, startedTasks: readonly StartedTask[]) {
   const trimmed = text.trim();
   if (trimmed) return trimmed;
-  // A started task can now only come from start_workflow, so name the workflow run.
-  if (startedTask) {
+  // A started task can now only come from start_workflow, so name the workflow runs.
+  if (startedTasks.length === 1) {
     return "I've started that workflow. It's running in Tasks.";
+  }
+  if (startedTasks.length > 1) {
+    return `I've started those ${startedTasks.length} workflows. They're running in Tasks.`;
   }
   return "I could not produce a response. Try sending that again.";
 }

@@ -130,6 +130,7 @@ export function buildCodexConfig(input: { baseUrl: string; apiKeyEnvVar: string 
     "",
     "[features]",
     "goals = true",
+    "default_mode_request_user_input = true",
     "",
     "[sandbox_workspace_write]",
     "network_access = true",
@@ -151,6 +152,7 @@ export function buildCodexSubscriptionConfig() {
     "",
     "[features]",
     "goals = true",
+    "default_mode_request_user_input = true",
     "",
     "[sandbox_workspace_write]",
     "network_access = true",
@@ -172,7 +174,7 @@ export function buildCodexJsonConfigForAuth(
 ): Record<string, unknown> {
   const common = {
     model_verbosity: "medium",
-    features: { goals: true },
+    features: { goals: true, default_mode_request_user_input: true },
     sandbox_workspace_write: { network_access: true },
     ...(mcp ? codexAcpToolsConfig(mcp) : {}),
   };

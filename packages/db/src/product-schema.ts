@@ -86,6 +86,8 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowScope = "personal" | "company";
+// Workflows and Company agents are two product surfaces over one automation row.
+export type WorkflowKind = "workflow" | "agent";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
   provider: string;
@@ -322,6 +324,10 @@ export type HarnessSpec = {
     // The workspace-scoped workflow slug that spawned this task.
     id: string;
     workspaceId: string;
+    // Company workflows may only use Company standalone Skills. Personal workflows execute as
+    // their owner and may also use that actor's Personal Skills. Optional for persisted harnesses
+    // created before this authorization decision became part of the immutable contract.
+    skillAccess?: "company" | "actor";
     skillIds: string[];
     skillBundleIds: string[];
     pluginIds: string[];
@@ -635,14 +641,17 @@ export const users = productSchema.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     botsEnabled: boolean("bots_enabled").notNull().default(false),
+    approveForMeEnabled: boolean("approve_for_me_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     subagentsEnabled: boolean("subagents_enabled").notNull().default(false),
+    companyAgentsEnabled: boolean("company_agents_enabled").notNull().default(false),
     pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
     // Opt-in to the iMessage personal assistant channel (Settings → Channels → iMessage).
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
+    whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -2002,6 +2011,11 @@ export const workflows = productSchema.table(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
+    // Company agents share this table because they reuse every automation mechanic a workflow
+    // already has: triggers, schedules, event routing, Slack identity, and session continuation.
+    // `kind` is the hard boundary between the two product surfaces — each repository instance is
+    // pinned to one kind, so an agent can never be read or mutated through the Workflows API.
+    kind: text("kind").$type<WorkflowKind>().notNull().default("workflow"),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     instructions: text("instructions").notNull().default(""),
@@ -2045,6 +2059,13 @@ export const workflows = productSchema.table(
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
+    // A company agent's owner: the single human whose authorized connections execute its runs and
+    // who alone may configure it. Null on every workflow row, and on an agent whose owner left the
+    // workspace — readers treat an ownerless agent as unrunnable rather than falling back to the
+    // caller's own credentials.
+    ownerWorkosId: text("owner_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -2066,7 +2087,17 @@ export const workflows = productSchema.table(
       .where(
         sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
       ),
+    workspaceKindUpdatedIdx: index("opencompany_workflows_workspace_kind_updated_idx").on(
+      table.workspaceId,
+      table.kind,
+      table.archivedAt,
+      table.updatedAt,
+    ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+    kindCheck: check(
+      "opencompany_workflows_kind_check",
+      sql`${table.kind} IN ('workflow', 'agent')`,
+    ),
     // created_by_workos_id is cleared when a user row is deleted, so the owner cannot be required
     // here. Readers treat a personal row without an owner as visible to nobody.
     scopeCheck: check(
@@ -2625,6 +2656,10 @@ export const tasks = productSchema.table(
     result: text("result"),
     error: text("error"),
     workflowId: text("workflow_id"),
+    // Set when a Company agent produced this run. The run still executes with the agent owner's
+    // authority (`user_workos_id`), but the work belongs to the agent, so it stays out of every
+    // personal Task list and is read back through the agent's run history instead.
+    agentId: text("agent_id").references(() => workflows.id, { onDelete: "set null" }),
     reportedOutcome: text("reported_outcome").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<HarnessSpec>().notNull().default(sql`'{}'::jsonb`),
@@ -2662,6 +2697,9 @@ export const tasks = productSchema.table(
     ),
     leaseExpiresAtIdx: index("goat_tasks_lease_expires_at_idx").on(table.leaseExpiresAt),
     scheduleIdx: index("goat_tasks_schedule_idx").on(table.scheduleId, table.scheduledFor),
+    agentCreatedAtIdx: index("opencompany_tasks_agent_created_at_idx")
+      .on(table.agentId, table.createdAt)
+      .where(sql`${table.agentId} IS NOT NULL`),
     sessionIdx: uniqueIndex("goat_tasks_session_idx")
       .on(table.sessionId)
       .where(sql`${table.sessionId} IS NOT NULL`),
@@ -4491,6 +4529,9 @@ export const taskReadModelV1 = productSchema.table(
     engine: text("engine").$type<ChatEngine>().notNull(),
     model: text("model").notNull(),
     workflowId: text("workflow_id"),
+    // Mirrors `tasks.agent_id` so the personal Task list can exclude Company agent runs in the
+    // synced shape's WHERE clause without a join.
+    agentId: text("agent_id"),
     scheduleId: text("schedule_id"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
     result: text("result"),
@@ -6223,6 +6264,45 @@ export const imessageBindings = productSchema.table(
 export type ImessageBindingStatus = "pending" | "linked";
 export type ImessageBinding = typeof imessageBindings.$inferSelect;
 
+export const whatsappBindings = productSchema.table(
+  "whatsapp_bindings",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // pending → linked. A pending row holds the code the member must text; a linked row holds the
+    // handle that texted it and the Conversation its texts route into.
+    status: text("status").$type<WhatsappBindingStatus>().notNull().default("pending"),
+    linkCode: text("link_code"),
+    linkCodeExpiresAt: timestamp("link_code_expires_at", { withTimezone: true }),
+    // The paired WhatsApp sender normalized to an E.164 phone number.
+    handle: text("handle"),
+    conversationId: text("conversation_id").references(() => chatSessions.id, {
+      onDelete: "set null",
+    }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("whatsapp_bindings_user_idx").on(table.userWorkosId),
+    uniqueIndex("whatsapp_bindings_handle_idx")
+      .on(table.handle)
+      .where(sql`${table.handle} IS NOT NULL`),
+    uniqueIndex("whatsapp_bindings_link_code_idx")
+      .on(table.linkCode)
+      .where(sql`${table.linkCode} IS NOT NULL`),
+    check("whatsapp_bindings_status_check", sql`${table.status} IN ('pending', 'linked')`),
+  ],
+);
+export type WhatsappBindingStatus = "pending" | "linked";
+export type WhatsappBinding = typeof whatsappBindings.$inferSelect;
+
 // Durable inbox for direct messages sent to the workspace Slack bot. Ingress persists the message
 // before acknowledging Slack; the runner resolves the sender to an opencompany account and opens
 // the Task that answers in the message's thread.
@@ -6254,3 +6334,27 @@ export const slackDirectMessages = productSchema.table(
     ),
   ],
 );
+
+// A durable claim per reply slot prevents duplicate sends after an ambiguous provider timeout.
+export const whatsappSendAttempts = productSchema.table(
+  "whatsapp_send_attempts",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").$type<"pending" | "accepted" | "failed">().notNull(),
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "whatsapp_send_attempts_status_check",
+      sql`${table.status} IN ('pending', 'accepted', 'failed')`,
+    ),
+  ],
+);
+
+// Committed with pairing/unlink changes, so a redelivered control message has no second effect.
+export const whatsappIngressReceipts = productSchema.table("whatsapp_ingress_receipts", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

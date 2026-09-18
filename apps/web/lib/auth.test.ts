@@ -51,6 +51,7 @@ const identity = {
     avatarUrl: null,
     timezone: "Europe/London",
     autoModelRoutingEnabled: false,
+    approveForMeEnabled: false,
     chatCapabilitiesBetaEnabled: false,
     wikiEnabled: true as const,
     taskViewMode: "board" as const,

@@ -212,7 +212,9 @@ function collectRenderItems(
       continue;
     }
     if (
-      (part.type === START_TASK_TOOL_PART_TYPE || part.type === START_WORKFLOW_TOOL_PART_TYPE) &&
+      (part.type === START_TASK_TOOL_PART_TYPE ||
+        part.type === START_WORKFLOW_TOOL_PART_TYPE ||
+        part.type === "tool-workflows") &&
       part.state === "output-available" &&
       isStartTaskToolOutput(part.output)
     ) {
@@ -289,6 +291,8 @@ export function toolCallViewFromPart(
     output.error.code === "approval_required";
   const approvalDeclined =
     state === "approval-responded" && isRecord(part.approval) && part.approval.approved === false;
+  const failedWorkflow =
+    name === "workflows" && state === "output-available" && isRecord(output) && output.ok === false;
   const failedPublicWebTool =
     (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
     state === "output-available" &&
@@ -307,7 +311,7 @@ export function toolCallViewFromPart(
       : null;
   const status = approvalDeclined
     ? "failed"
-    : failedAction
+    : failedAction || failedWorkflow
       ? "failed"
       : failedSkill
         ? "failed"
@@ -426,7 +430,7 @@ export function toolLabel(name: string) {
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
   if (name === CODEX_SUBAGENT_TOOL_NAME || name === SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
-  if (name === START_WORKFLOW_TOOL_NAME) return "Workflow";
+  if (name === START_WORKFLOW_TOOL_NAME || name === "workflows") return "Workflow";
   if (name === RETIRED_SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
   if (name === RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
   if (name === RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
@@ -474,6 +478,15 @@ export function toolDetail(name: string, part: Record<string, unknown> & { type:
     return truncateToolPreview(part.errorText);
   }
 
+  if (name === "workflows") {
+    const output = isRecord(part.output) ? part.output : null;
+    const workflow = output && isRecord(output.workflow) ? output.workflow : null;
+    if (workflow && typeof workflow.name === "string")
+      return `${workflow.name} · ${output?.ok === false ? "Needs attention" : workflow.archived ? "Archived" : workflow.status === "active" ? "Active" : "Draft"}`;
+    return isRecord(part.input) && typeof part.input.command === "string"
+      ? part.input.command
+      : null;
+  }
   if (name === START_TASK_TOOL_NAME || name === START_WORKFLOW_TOOL_NAME) {
     return startTaskToolDetail(part);
   }

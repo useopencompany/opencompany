@@ -15,11 +15,14 @@ type UserPreferences = {
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  companyAgentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -84,6 +87,13 @@ export async function updateSubagentsAction(enabled: boolean) {
   return { ok: true, enabled: preferences.subagentsEnabled } as const;
 }
 
+export async function updateCompanyAgentsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ companyAgentsEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.companyAgentsEnabled } as const;
+}
+
 export async function updatePastSessionAccessAction(enabled: boolean) {
   const preferences = await patchPreferences({ pastSessionAccessEnabled: enabled === true });
   revalidatePath("/");
@@ -104,4 +114,18 @@ export async function updateImessageAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.imessageEnabled } as const;
+}
+
+export async function updateWhatsappAction(enabled: boolean) {
+  const preferences = await patchPreferences({ whatsappEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.whatsappEnabled } as const;
+}
+
+export async function updateApproveForMeAction(enabled: boolean) {
+  const preferences = await patchPreferences({ approveForMeEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.approveForMeEnabled } as const;
 }

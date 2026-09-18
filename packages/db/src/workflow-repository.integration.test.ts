@@ -13,7 +13,9 @@ import {
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveLegacyWorkflowSkillAccess } from "./harness";
 import { snapshotPGliteSchema } from "./test-schema-snapshot";
 import { PostgresWorkflowRepository } from "./workflow-repository";
 
@@ -26,6 +28,7 @@ const migrationPaths = [
   "drizzle/0291_workflow_slack_channel.sql",
   "drizzle/0294_workflow_slack_avatar.sql",
   "drizzle/0295_workflow_schedule_authorization.sql",
+  "drizzle/0302_company_agents.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -303,6 +306,40 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         [first.workflow.id],
       ),
     ).resolves.toMatchObject({ rows: [{ count: 1 }] });
+  });
+
+  it("grants legacy Personal workflow Skill access only to the current owner member", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "personal-workflow-skill-access",
+      name: "Private report",
+      description: "Use private material",
+      scope: "personal",
+    });
+    const db = drizzle(database);
+
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_1",
+      }),
+    ).resolves.toBe("actor");
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_teammate",
+      }),
+    ).resolves.toBe("company");
+
+    await database.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'user_1'");
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_1",
+      }),
+    ).resolves.toBe("company");
   });
 
   it("gives a new Workflow the Slack channel every existing row already had, and persists edits", async () => {

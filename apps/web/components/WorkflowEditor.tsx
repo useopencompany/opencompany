@@ -87,8 +87,8 @@ const AUTOSAVE_DELAY_MS = 1200;
 const NO_EVENT_PROVIDERS: WorkflowEventProviderOption[] = [];
 
 type WorkflowStatus = WorkflowDetail["status"];
-type WorkflowStep = WorkflowDetail["steps"][number];
-type WorkflowTriggerDraft =
+export type WorkflowStep = WorkflowDetail["steps"][number];
+export type WorkflowTriggerDraft =
   | {
       id: string;
       type: "event";
@@ -551,16 +551,19 @@ function StatusPicker({
   );
 }
 
-function TriggerSection({
+export function TriggerSection({
   triggers,
   canEdit,
   eventProviders,
   onChange,
+  emptyLabel = "This workflow only runs when you test it manually.",
 }: {
   triggers: WorkflowTriggerDraft[];
   canEdit: boolean;
   eventProviders: WorkflowEventProviderOption[];
   onChange: (triggers: WorkflowTriggerDraft[]) => void;
+  /** Company agents share this editor but are not workflows, so they name themselves. */
+  emptyLabel?: string;
 }) {
   return (
     <section className="flex flex-col gap-3">
@@ -569,7 +572,7 @@ function TriggerSection({
         {triggers.length === 0 ? (
           <div className="flex items-center gap-3 px-4 py-4 text-[13px] text-ink-subtle">
             <Clock size={16} strokeWidth={1.8} />
-            This workflow only runs when you test it manually.
+            {emptyLabel}
           </div>
         ) : (
           <div className="divide-y divide-border">
@@ -1403,7 +1406,7 @@ function defaultSchedulePreset(
   return { kind, hour, minute };
 }
 
-function StepCard({
+export function StepCard({
   index,
   step,
   canEdit,
@@ -1651,16 +1654,21 @@ function ChannelSection({
   );
 }
 
-function SlackAvatarField({
+export function SlackAvatarField({
   workflowId,
   avatarUrl,
   canEdit,
   onChange,
+  upload: uploadImage = uploadWorkflowSlackAvatar,
+  hint = "PNG, JPEG, or WebP up to 1 MB. Square images look best.",
 }: {
   workflowId: string;
   avatarUrl: string;
   canEdit: boolean;
   onChange: (avatarUrl: string) => void;
+  /** Company agents store the same bytes behind their own owner-only upload endpoint. */
+  upload?: (input: { workflowId: string; file: File }) => Promise<string>;
+  hint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -1671,7 +1679,7 @@ function SlackAvatarField({
     setError(null);
     setUploading(true);
     try {
-      onChange(await uploadWorkflowSlackAvatar({ workflowId, file }));
+      onChange(await uploadImage({ workflowId, file }));
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "The avatar upload failed.");
     } finally {
@@ -1751,9 +1759,7 @@ function SlackAvatarField({
           {error}
         </p>
       ) : (
-        <p className="text-[12px] leading-4 text-ink-subtle">
-          PNG, JPEG, or WebP up to 1 MB. Square images look best.
-        </p>
+        <p className="text-[12px] leading-4 text-ink-subtle">{hint}</p>
       )}
     </div>
   );
@@ -1816,7 +1822,7 @@ function slackAvatarPreviewUrl(value: string) {
   }
 }
 
-function SectionLabel({ children }: { children: ReactNode }) {
+export function SectionLabel({ children }: { children: ReactNode }) {
   return (
     <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-subtle">
       {children}
@@ -1863,7 +1869,7 @@ function workflowDraft(workflow: WorkflowDetail): WorkflowDraft {
   };
 }
 
-function workflowTriggerInput(trigger: WorkflowTriggerDraft) {
+export function workflowTriggerInput(trigger: WorkflowTriggerDraft) {
   return trigger.type === "schedule"
     ? {
         id: trigger.id,
@@ -1944,7 +1950,7 @@ function workflowDraftReadyToSave(
   });
 }
 
-function newWorkflowTriggerId() {
+export function newWorkflowTriggerId() {
   return `trigger-${globalThis.crypto.randomUUID()}`;
 }
 

@@ -422,6 +422,7 @@ type BrowserChatTools = {
 };
 
 export type ChatTools = {
+  workflows: { input: import("./workflow-tool").WorkflowToolInput; output: unknown };
   // Main chat can no longer create a one-off task, but stored transcripts still hold
   // `start_task` parts. Keep the shape so old conversations keep rendering their Task card.
   start_task: {

@@ -2106,7 +2106,35 @@
       "idx": 300,
       "version": "7",
       "when": 1790100400021,
-      "tag": "0300_retire_legacy_brain",
+      "tag": "0300_whatsapp_personal_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 301,
+      "version": "7",
+      "when": 1790100400022,
+      "tag": "0301_approve_for_me",
+      "breakpoints": true
+    },
+    {
+      "idx": 302,
+      "version": "7",
+      "when": 1790100400023,
+      "tag": "0302_company_agents",
+      "breakpoints": true
+    },
+    {
+      "idx": 303,
+      "version": "7",
+      "when": 1790100400024,
+      "tag": "0303_company_agent_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 304,
+      "version": "7",
+      "when": 1790100400025,
+      "tag": "0304_retire_legacy_brain",
       "breakpoints": true
     }
   ]

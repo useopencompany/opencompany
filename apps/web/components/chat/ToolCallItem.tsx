@@ -38,6 +38,7 @@ import {
   HistoricalPresentationDetailStatus,
   useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
+import { WorkflowToolCard } from "./WorkflowToolCard";
 
 // Recurring Tasks were removed; saved transcripts still contain their tool calls, so the icon
 // treatment stays keyed off the retired names.
@@ -52,6 +53,7 @@ export type CodexToolAction =
   | { type: "continue-plan" }
   | {
       type: "answer-question";
+      runId?: string;
       interactionId: string;
       answers: Record<string, { answers: string[] }>;
     };
@@ -67,6 +69,7 @@ export type ActionApprovalRequest = {
 
 export function ToolCallItem({
   tool,
+  runId,
   onCodexAction,
   allowCodexPlanActions = false,
   onActionApproval,
@@ -75,6 +78,7 @@ export function ToolCallItem({
   detail,
 }: {
   tool: ToolCallView;
+  runId?: string | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
@@ -92,9 +96,15 @@ export function ToolCallItem({
       allowActionApproval &&
       onActionApproval,
   );
-  // Summary params can omit recipients or truncate message bodies. Fetch the complete request
-  // automatically, keeping the decision card visible while approval waits for that detail.
-  useHistoricalPresentationDetail(expanded || pendingApproval, detail);
+  const pendingQuestion = Boolean(
+    !readOnly &&
+      tool.name === CODEX_QUESTION_TOOL_NAME &&
+      tool.status === "waiting" &&
+      onCodexAction,
+  );
+  // Summary params can omit recipients, question choices, or message bodies. Fetch the complete
+  // request automatically, keeping the blocking card visible while it waits for that detail.
+  useHistoricalPresentationDetail(expanded || pendingApproval || pendingQuestion, detail);
   const disclosure: ToolCallDisclosure = {
     expanded,
     onToggle: () => {
@@ -104,6 +114,16 @@ export function ToolCallItem({
     },
   };
 
+  if (
+    tool.name === "workflows" &&
+    tool.state === "output-available" &&
+    isRecord(tool.output) &&
+    isRecord(tool.output.workflow) &&
+    typeof tool.output.workflow.name === "string" &&
+    typeof tool.output.workflow.slug === "string"
+  ) {
+    return <WorkflowToolCard output={tool.output} />;
+  }
   if (pendingApproval && onActionApproval) {
     if (tool.name === USE_ACTION_TOOL_NAME && managedCapabilityActionFromTool(tool)) {
       return (
@@ -124,6 +144,9 @@ export function ToolCallItem({
         detail={detail}
       />
     );
+  }
+  if (pendingQuestion && detail && detail.state !== "loaded") {
+    return <PendingCodexQuestionCard detail={detail} />;
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -150,7 +173,14 @@ export function ToolCallItem({
     );
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
-    return <CodexQuestionRow tool={tool} onAction={onCodexAction} disclosure={disclosure} />;
+    return (
+      <CodexQuestionRow
+        tool={tool}
+        runId={runId}
+        onAction={onCodexAction}
+        disclosure={disclosure}
+      />
+    );
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
@@ -561,12 +591,28 @@ type CodexQuestion = {
   options: Array<{ label: string; description: string }>;
 };
 
+function PendingCodexQuestionCard({ detail }: { detail: HistoricalPresentationDetailController }) {
+  return (
+    <div
+      data-testid="chat-codex-question"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">The coding engine needs your input</div>
+      <div className="mt-2">
+        <HistoricalPresentationDetailStatus detail={detail} />
+      </div>
+    </div>
+  );
+}
+
 function CodexQuestionRow({
   tool,
+  runId,
   disclosure,
   onAction,
 }: {
   tool: ToolCallView;
+  runId?: string | undefined;
   disclosure: ToolCallDisclosure;
   onAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
 }) {
@@ -619,6 +665,7 @@ function CodexQuestionRow({
     setSubmitting(true);
     void onAction({
       type: "answer-question",
+      ...(runId ? { runId } : {}),
       interactionId: input.interactionId,
       answers,
     })
@@ -795,6 +842,10 @@ function ToolCallRow({
   const showStatusText =
     tool.statusText !== "Done" && (mark !== null || tool.statusText !== "Failed");
   const hasOutput = tool.output !== undefined;
+  const automaticallyApproved =
+    isRecord(tool.output) &&
+    isRecord(tool.output.automaticApproval) &&
+    tool.output.automaticApproval.reason === "routine_action";
   const screenshotUrl = browserScreenshotUrl(tool.output);
   const browserProfileLiveView = browserProfileLiveViewFromTool(tool);
   const detailChips =
@@ -834,6 +885,9 @@ function ToolCallRow({
           <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
             {tool.label}
           </span>
+          {automaticallyApproved ? (
+            <span className="shrink-0 text-[10.5px] text-ink-subtle">Automatically approved</span>
+          ) : null}
           {detailChips.map((detail, index) => (
             <ToolDetailChip key={`${detail}-${index}`} detail={detail} />
           ))}
@@ -850,6 +904,11 @@ function ToolCallRow({
             <HistoricalPresentationDetailStatus detail={detail} />
           ) : (
             <>
+              {automaticallyApproved ? (
+                <p className="mb-2 text-[11px] text-ink-muted">
+                  Approved as a routine action within your request.
+                </p>
+              ) : null}
               <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
               {hasOutput ? (
                 <ToolPreviewBlock

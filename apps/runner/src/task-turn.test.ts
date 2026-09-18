@@ -956,6 +956,7 @@ function task(harnessSpec: HarnessSpec): Task {
     source: "workflow",
     model: harnessSpec.model,
     sessionId: TASK_CONVERSATION_ID,
+    agentId: null,
     scheduleId: null,
     scheduledFor: null,
     status: "running",

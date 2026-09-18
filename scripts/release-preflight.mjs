@@ -114,6 +114,11 @@ const groups = {
       "MESSAGES_API_KEY",
       "MESSAGES_WEBHOOK_SECRET",
       "MESSAGES_LINE_HANDLE",
+      // WhatsApp personal assistant: Kapso ingress and pairing replies.
+      "KAPSO_API_KEY",
+      "KAPSO_PHONE_NUMBER_ID",
+      "KAPSO_WEBHOOK_SECRET",
+      "WHATSAPP_LINE_HANDLE",
       // Engine auth control calls use the runner's internal transport. The
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
@@ -206,6 +211,10 @@ const groups = {
       // iMessage personal assistant sends from the runner (messages.dev).
       "MESSAGES_API_KEY",
       "MESSAGES_LINE_HANDLE",
+      // WhatsApp personal assistant sends through Kapso.
+      "KAPSO_API_KEY",
+      "KAPSO_PHONE_NUMBER_ID",
+      "WHATSAPP_LINE_HANDLE",
       // Runner→API canonical origin and bearer for the internal wiki command
       // endpoint. Agent wiki writes fail closed if either is missing.
       "OPENCOMPANY_API_ORIGIN",

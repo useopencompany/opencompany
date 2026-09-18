@@ -1,4 +1,6 @@
-import type { ConversationRuntimeStatus, RunStatus } from "@opencompany/core";
+import type { ConversationRuntimeStatus, RunStatus, TaskStatus } from "@opencompany/core";
+import type { ConversationRuntimeView } from "@/lib/chat-ui";
+import { isTerminalTaskStatus } from "@/lib/task-conversation-activity";
 
 export type ActiveChatTurn = {
   conversationId: string;
@@ -47,8 +49,48 @@ export function isChatTurnWorking(phase: ChatTurnPhase) {
   return phase === "submitting" || phase === "queued" || phase === "running";
 }
 
+// A conversation can already have moved to its next durable Run while the foreground turn
+// projection still describes the one that just settled. The session runtime owns that handoff and
+// drives the header status, so interactive controls must also keep treating the conversation as
+// active until the runtime becomes idle.
+export function isChatConversationWorking(phase: ChatTurnPhase, engineRuntimeActive: boolean) {
+  return isChatTurnWorking(phase) || engineRuntimeActive;
+}
+
 export function isChatTurnTerminal(
   phase: ChatTurnPhase,
 ): phase is Extract<ChatTurnPhase, "completed" | "failed" | "canceled"> {
   return phase === "completed" || phase === "failed" || phase === "canceled";
+}
+
+// The engine runtime and the Task row arrive on separate Electric shapes. The runner parks the
+// runtime in the same transaction that settles the Task, and a follow-up reopens the Task before
+// the runtime starts again, so a terminal Task never has a live runtime. A runtime projection that
+// still reports one is a stale stream; presenting it would keep the header on "Working" and the
+// run timer ticking after the Task has finished.
+export function reconcileRuntimeWithTaskStatus(
+  runtime: ConversationRuntimeView | null,
+  taskStatus: TaskStatus | null,
+): ConversationRuntimeView | null {
+  if (!runtime || taskStatus === null || !isTerminalTaskStatus(taskStatus)) return runtime;
+  const liveStatus =
+    runtime.status === "queued" || runtime.status === "starting" || runtime.status === "running";
+  if (!liveStatus && runtime.activeRunId === null) return runtime;
+  return { ...runtime, status: liveStatus ? "idle" : runtime.status, activeRunId: null };
+}
+
+// A directly confirmed Run may settle while Electric still holds the previous runtime row. Park
+// only that exact Run so a newer queued follow-up remains authoritative.
+export function reconcileRuntimeWithSettledRun(
+  runtime: ConversationRuntimeView | null,
+  runId: string | null,
+  runStatus: TerminalChatTurnPhase | null,
+): ConversationRuntimeView | null {
+  if (!runtime || !runId || !runStatus || runtime.activeRunId !== runId) return runtime;
+  return {
+    ...runtime,
+    status: runStatus === "failed" ? "failed" : runStatus === "canceled" ? "interrupted" : "idle",
+    activeRunId: null,
+    hasError: runStatus === "failed" ? true : runtime.hasError,
+  };
 }

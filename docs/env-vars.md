@@ -17,6 +17,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
+| `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials plus public mobile configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
@@ -77,6 +78,11 @@ dedicated AuthKit application in the same WorkOS environment as `WORKOS_CLIENT_I
 and organizations to remain shared while the API selects a fixed mobile session-token verifier.
 Future mobile builds expose the same value as `EXPO_PUBLIC_WORKOS_CLIENT_ID`; neither variable is a
 client secret. Do not copy the mobile client ID into the web runtime unless web gains a real reader.
+
+Mobile builds also require `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, a fully qualified `http` or `https`
+origin for the canonical API. Local Expo builds normally use `http://localhost:3001`; hosted builds
+use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
+query parameters, or a fragment.
 
 `OPENCOMPANY_AGENT_USER_EMAIL` and `OPENCOMPANY_AGENT_USER_PASSWORD` identify the shared agent dev
 user in the non-production WorkOS environment. They live in Infisical `dev` `/web` only and are
@@ -180,6 +186,21 @@ the messages.dev dashboard for `${OPENCOMPANY_API_ORIGIN}/webhooks/imessage/even
 switch in Preferences, so a missing value only surfaces as "not available on this deployment" on
 the Channels → iMessage page; release preflight still requires the variables so the channel cannot
 silently disappear from a release.
+
+## WhatsApp personal assistant
+
+The Kapso-backed beta uses `KAPSO_API_KEY`, `KAPSO_PHONE_NUMBER_ID`,
+`KAPSO_WEBHOOK_SECRET`, and `WHATSAPP_LINE_HANDLE` in Infisical `prod` `/api`.
+The runner needs the same API key, phone number ID, and line handle in `prod` `/runner`.
+For local development use `dev` `/web` and `dev` `/runner`; setup keeps these server-only.
+The ID is Meta's numeric phone-number ID, not the displayed phone number. The line handle
+is the displayed E.164 number including `+`. The webhook secret is the Kapso webhook's
+signing secret, not a Meta verification token.
+
+Release preflight requires these values in both hosted services. See
+[WhatsApp setup and launch verification](./whatsapp-channel.md) before enabling the beta.
+An enabled member sees “not available on this deployment” when the API configuration is
+incomplete. Configuration presence does not establish provider account eligibility or delivery.
 
 ## Local generated values
 

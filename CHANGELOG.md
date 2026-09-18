@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<!-- Hold #1924 here until the live WhatsApp pairing, reply, and STOP test is confirmed. -->
+
+### Added
+- try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
+
+## [1.31.0] - 2026-09-18
+
+### Added
+- turn on approve for me in preferences → permissions to let routine plugin actions continue without waiting for you. it can approve searches, document edits, and requested messages that help with your task. destructive, paid, high-risk, or uncertain actions still ask when set to ask; your saved tool permissions stay the same (#1944, #1945) — @louis.
+- try the company agents beta in preferences to give recurring work to a named agent. set its instructions, triggers, and slack identity, then follow its work in a shared run history. teammates can run it and read results; only its owner can change it, and runs use the owner's connected accounts (#1951) — @louis.
+- attach or paste up to five screenshots when sending feedback. review the previews, then send with cmd/ctrl+enter (#1948) — @louis.
+- see when a reply is ready without reopening the app. the browser tab shows done when your open conversation finishes while you are in another tab (#1947) — @louis.
+
+### Changed
+- ask chat to run up to four different workflows in one message, with a separate task for each. name the workflows in your request; the composer still accepts one workflow mention at a time (#1938) — @louis.
+- dark mode now uses charcoal gray backgrounds instead of green-tinted ones (#1942) — @louis.
+
+### Fixed
+- completed coding chats now clear their working indicator, timer, and stop button without a page reload. finished tool activity also collapses so the answer is easier to read (#1946, #1949) — @louis.
+- stopping a chat now shows stopping immediately and clears the working state once the run ends (#1939) — @louis.
+- keep line breaks added with shift+enter when you continue typing in the composer (#1943) — @louis.
+- continue long chats and tasks more reliably, including after sharing screenshots. older images can now inform the conversation summary instead of causing follow-ups to fail (#1927, #1932) — @louis.
+- ask codex to read a saved workflow's instructions and settings again without the request failing (#1928) — @louis.
+- coding tasks now show the model they actually used. the sandbox badge reports whether the machine is running, asleep, or deleted, and shows unknown if its status cannot be checked (#1936, #1941) — @louis.
+
+## [1.30.0] - 2026-09-17
+
+### Added
+- workspace admins can now create and manage workflows from chat. describe the work and when it should run, then ask to edit, pause, run, or archive it. create one-step workflows with a schedule or manual start; use the editor for more steps, event triggers, model choices, and channels (#1926) — @louis.
+
+### Changed
+- new coding chats remember your last model and reasoning effort in this browser, separately for codex and claude code. existing chats keep their own choices (#1920, #1923) — @louis.
+- connecting a codex subscription as a workspace admin now turns on sharing with your team automatically (#1911) — @louis.
+- plugin and repository mentions are easier to read, with service icons and colors, clearer contrast in sent messages, and labels that line up with the surrounding text (#1910, #1915, #1918) — @louis.
+- the composer now says queue a follow-up while a coding agent works, so it is clear your next message will wait for the current turn (#1922) — @louis.
+- the optional connect mcp prompt no longer appears in the sidebar. find the setup guide in settings → mcp when you need it (#1931) — @louis.
+
+### Fixed
+- finished tasks now stop showing a working indicator and running timer, even when part of the page is slow to update (#1933) — @louis.
+- codex can now ask questions with suggested answers during normal coding chats and tasks. pending questions open automatically so you can answer and let work continue (#1930, #1935) — @louis.
+- replying in a slack thread now resumes a paused task instead of leaving your reply waiting indefinitely (#1925) — @louis.
+- personal workflows can use your personal skills again, including scheduled runs that previously failed before returning a result (#1917) — @louis.
+- connecting a plugin during signup now installs it and opens its account connection in one click (#1916) — @louis.
+- github access in active coding sessions no longer breaks when another session refreshes the shared connection (#1913) — @louis.
+- use your mac's two-finger swipe to go back and forward in the app again (#1929) — @louis.
+
 ## [1.29.0] - 2026-09-16
 
 ### Added

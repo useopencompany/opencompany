@@ -23,11 +23,14 @@ export type UserPreferenceSet = {
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  companyAgentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export type UpdateUserPreferencesCommand = Partial<
@@ -58,11 +61,14 @@ const PREFERENCE_COLUMNS = {
   taskViewMode: users.taskViewMode,
   taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
+  approveForMeEnabled: users.approveForMeEnabled,
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
+  companyAgentsEnabled: users.companyAgentsEnabled,
   pastSessionAccessEnabled: users.pastSessionAccessEnabled,
   imessageEnabled: users.imessageEnabled,
+  whatsappEnabled: users.whatsappEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -82,11 +88,14 @@ export function createUserSettingsService(input: {
       for (const field of [
         "botsEnabled",
         "autoModelRoutingEnabled",
+        "approveForMeEnabled",
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
         "subagentsEnabled",
+        "companyAgentsEnabled",
         "pastSessionAccessEnabled",
         "imessageEnabled",
+        "whatsappEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;

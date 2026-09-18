@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fastify/rate-limit": "11.2.0",
+    "@fumari/image-size": "0.1.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
@@ -26,7 +27,7 @@
     "@opencompany/observability": "workspace:*",
     "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.8.0",
-    "ai": "^7.0.92",
+    "ai": "^7.0.106",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "e2b": "^2.49.0",

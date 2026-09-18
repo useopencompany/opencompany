@@ -125,6 +125,23 @@ describe("useChatAttachments", () => {
     });
   });
 
+  it("rejects formats excluded by a narrower upload surface", async () => {
+    const upload = vi.fn(async () => ({ id: "stored" }));
+    const { result } = renderHook(() =>
+      useChatAttachments({
+        modelName: "feedback",
+        upload,
+        capabilities: { images: true, pdf: false },
+        allowedKinds: ["image"],
+      }),
+    );
+
+    act(() => result.current.acceptFiles([textFile("notes.txt")]));
+
+    expect(result.current.attachments).toHaveLength(0);
+    expect(upload).not.toHaveBeenCalled();
+  });
+
   it("revokes the preview URL of a removed image attachment", async () => {
     const upload = vi.fn(async () => ({ id: "stored" }));
     const { result } = renderHook(() =>

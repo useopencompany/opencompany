@@ -32,6 +32,10 @@
       "types": "./src/wiki-commands.ts",
       "default": "./src/wiki-commands.ts"
     },
+    "./attachments": {
+      "types": "./src/attachments.ts",
+      "default": "./src/attachments.ts"
+    },
     "./sandbox-sizes": {
       "types": "./src/sandbox-sizes.ts",
       "default": "./src/sandbox-sizes.ts"

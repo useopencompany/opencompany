@@ -11,6 +11,7 @@ import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { imessageConfig } from "@opencompany/agent/integrations/imessage";
+import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -89,6 +90,8 @@ import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWhatsappIngress } from "./whatsapp-ingress";
+import { createWhatsappSettingsService } from "./whatsapp-settings";
 import { createWikiControlService } from "./wiki-control";
 import { createWorkflowAvatarService } from "./workflow-avatars";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
@@ -172,6 +175,15 @@ const app = createApiApp({
   pluginImports,
   customMcp: createCustomMcpService(database.db),
   workflowAvatars: createWorkflowAvatarService({ workflows: automations.workflows }),
+  agents: automations.agents,
+  // Agent photos reuse the workflow avatar store: same bytes, same public download route, and
+  // Slack downloads the URL the same way. Only the authorization differs — owner-only.
+  agentPhotos: createWorkflowAvatarService({
+    workflows: {
+      authorizeWorkflowWrite: (actor, agentId) =>
+        automations.agents.authorizeAgentWrite(actor, agentId),
+    },
+  }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({
@@ -211,7 +223,10 @@ const app = createApiApp({
   }),
   projects: createProjectService({ db: database.db }),
   userSettings: createUserSettingsService({ db: database.db }),
-  feedback: createFeedbackService({ db: database.db }),
+  feedback: createFeedbackService({
+    db: database.db,
+    resolveAttachments: (input) => attachmentRepository.resolve(input),
+  }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   sessionPullRequests: (actor) => listSessionPullRequestStatuses({ userWorkosId: actor.userId }),
   integrationResourceOptions: new IntegrationResourceOptionsService(database.db),
@@ -237,6 +252,11 @@ const app = createApiApp({
   imessageSettings: createImessageSettingsService({
     db: database.db,
     lineHandle: () => imessageConfig()?.lineHandle ?? null,
+  }),
+  whatsappSettings: createWhatsappSettingsService({
+    db: database.db,
+    lineHandle: () =>
+      process.env.KAPSO_WEBHOOK_SECRET?.trim() ? (whatsappConfig()?.lineHandle ?? null) : null,
   }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
@@ -385,6 +405,11 @@ const app = createApiApp({
     runner: runnerClient,
   }),
   imessageIngress: createImessageIngress({
+    db: database.db,
+    chat,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+  }),
+  whatsappIngress: createWhatsappIngress({
     db: database.db,
     chat,
     defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",

@@ -6,9 +6,31 @@ description: Turn a repeatable job into ordered steps and run it manually, on a 
 A Workflow defines a reusable job. Each step has instructions and a model configuration, and can
 use installed Skills. Every invocation creates a Task with its own progress and result.
 
-Enable **Tasks & Workflows** under **Settings → Preferences → Beta features** to use this surface.
+Open **Workflows** from the sidebar, or create a simple Workflow directly in Chat.
 
-## Create a Workflow
+## Create and manage from Chat
+
+Workflow tools in Chat are currently available to workspace admins. Describe the job and when it should run:
+
+> Every Friday at 09:00 Europe/Berlin, check Dia’s changelog for accessibility API changes.
+> Remember which releases have already been checked.
+
+Chat creates a personal Workflow, enables memory for the cross-run state, and confirms its status,
+schedule, next run, and link. A clear request for scheduled or recurring work activates it once
+the timing is complete. If you only say “weekly,” the agent asks for the missing day and time.
+Ask for a draft when you want to save an idea without turning it on.
+
+You can also ask Chat to inspect, rename, edit, activate, pause, run, or archive a Workflow.
+Pausing preserves its definition and history. Turning memory off preserves its contents;
+clearing memory requires a separate explicit request. New Workflows are personal unless you
+ask to share them with the company.
+
+Chat initially authors one-step Workflows with a manual trigger or one schedule. Use the editor
+for multiple steps, event triggers, model settings, and Slack channel controls. Chat preserves
+those settings when making other edits to existing Workflows. Background Tasks cannot author
+or start other Workflows.
+
+## Create in the editor
 
 1. Open **Workflows** and select **New workflow**.
 2. Give it a name and description that identify the job, such as `release-review`.
@@ -56,8 +78,8 @@ routine. A scheduled Workflow also has **Run now** so you can test it immediatel
 Set the Workflow back to **Draft** to stop automatic invocation while you revise it. Previously
 created Tasks keep their own status and history.
 
-For a recurring prompt that doesn't need multiple steps, you can also ask the agent to create a
-recurring Task. Specify the timezone and have it confirm the schedule it created.
+You can also create a scheduled Workflow in Chat. Specify the day, time, and timezone, and
+check the confirmed next run. Scheduled work uses the same Workflows you see in the editor.
 
 ## Run from a Plugin event
 

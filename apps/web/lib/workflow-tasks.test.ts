@@ -489,6 +489,8 @@ describe("createTaskFromWorkflow", () => {
 
     expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
       workspaceId: "ws_1",
+      userId: "user_1",
+      skillAccess: "company",
       mentions: [
         { id: "skill_installation_research" },
         { id: "writing" },
@@ -521,6 +523,56 @@ describe("createTaskFromWorkflow", () => {
         }),
         attachments: [attachment],
         attachmentTexts: { [attachment.id]: "Extracted report text." },
+      }),
+    );
+  });
+
+  it("preserves the owner's Personal Skill access in a Personal workflow harness", async () => {
+    mocks.resolveWorkflowMention.mockResolvedValue({
+      id: "personal-report",
+      name: "Personal report",
+      description: "",
+      scope: "personal",
+      createdByUserId: "user_1",
+      steps: [
+        {
+          id: "step-1",
+          title: "Write",
+          model: "kimi-k2.6",
+          instructions: "Use @skill/private-notes.",
+        },
+      ],
+    });
+    mocks.resolveSkillMentions.mockResolvedValue([
+      {
+        id: "private-notes",
+        bundleId: "skill_bundle_private_v1",
+        name: "Private notes",
+        description: "",
+        instructions: "Use the owner's notes.",
+        sourceKind: "standalone",
+        scope: "personal",
+      },
+    ]);
+    mocks.createTaskForUser.mockResolvedValue({ id: "task_1" });
+
+    await createTaskFromWorkflow({
+      userWorkosId: "user_1",
+      workspaceId: "ws_1",
+      mention: { id: "personal-report" },
+      description: "Run it",
+    });
+
+    expect(mocks.resolveSkillMentions).toHaveBeenCalledWith({
+      workspaceId: "ws_1",
+      userId: "user_1",
+      mentions: [{ id: "private-notes" }],
+    });
+    expect(mocks.createTaskForUser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        harnessSpec: expect.objectContaining({
+          workflow: expect.objectContaining({ skillAccess: "actor" }),
+        }),
       }),
     );
   });

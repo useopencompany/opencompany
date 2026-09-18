@@ -1,10 +1,15 @@
 "use client";
 
-import type { EngineRuntimeStatus } from "@opencompany/protocol";
 import { useLiveQuery } from "@tanstack/react-db";
 import { type Dispatch, type SetStateAction, useEffect, useMemo } from "react";
 import { useHydrated } from "@/components/useHydrated";
 import type { ConversationRuntimeView } from "@/lib/chat-ui";
+import {
+  type EngineSandboxState,
+  PENDING_ENGINE_SANDBOX_STATE,
+  resolvedEngineSandboxState,
+  unavailableEngineSandboxState,
+} from "@/lib/engine-sandbox-state";
 import {
   getHeadlessChatEngineSession,
   type HeadlessChatEngineSessionReadModel,
@@ -15,12 +20,12 @@ const SANDBOX_STATUS_POLL_INTERVAL_MS = 30_000;
 
 export function ConversationRuntimeSync({
   conversationId,
-  setSandboxStatus,
+  setSandboxState,
   setRuntime,
   pollSandbox,
 }: {
   conversationId: string;
-  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
+  setSandboxState: Dispatch<SetStateAction<EngineSandboxState>>;
   setRuntime: Dispatch<SetStateAction<ConversationRuntimeView | null>>;
   pollSandbox: boolean;
 }) {
@@ -29,7 +34,7 @@ export function ConversationRuntimeSync({
   return (
     <ConversationRuntimeSubscriber
       conversationId={conversationId}
-      setSandboxStatus={setSandboxStatus}
+      setSandboxState={setSandboxState}
       setRuntime={setRuntime}
       pollSandbox={pollSandbox}
     />
@@ -38,12 +43,12 @@ export function ConversationRuntimeSync({
 
 function ConversationRuntimeSubscriber({
   conversationId,
-  setSandboxStatus,
+  setSandboxState,
   setRuntime,
   pollSandbox,
 }: {
   conversationId: string;
-  setSandboxStatus: Dispatch<SetStateAction<EngineRuntimeStatus | null>>;
+  setSandboxState: Dispatch<SetStateAction<EngineSandboxState>>;
   setRuntime: Dispatch<SetStateAction<ConversationRuntimeView | null>>;
   pollSandbox: boolean;
 }) {
@@ -63,7 +68,6 @@ function ConversationRuntimeSubscriber({
     ((rows ?? []) as HeadlessChatEngineSessionReadModel[]).find(
       (candidate) => candidate.conversationId === conversationId,
     ) ?? null;
-  const status = row?.status ?? null;
   const runtime = useMemo<ConversationRuntimeView | null>(
     () =>
       row
@@ -94,26 +98,32 @@ function ConversationRuntimeSubscriber({
   }, [isError, isLoading, row, runtime, setRuntime]);
 
   useEffect(() => {
-    if (!pollSandbox || !status) {
-      setSandboxStatus(null);
+    if (!pollSandbox) {
+      setSandboxState(PENDING_ENGINE_SANDBOX_STATE);
       return;
     }
 
     const controller = new AbortController();
     let active = true;
+    let requestPending = false;
 
     const loadStatus = async () => {
+      if (requestPending) return;
+      requestPending = true;
       try {
         const runtimeStatus = await getEngineRuntimeStatus(conversationId, {
           fetch: (input, init) => fetch(input, { ...init, signal: controller.signal }),
         });
         if (!active) return;
-        setSandboxStatus(runtimeStatus);
+        setSandboxState((previous) =>
+          previous.kind === "resolved" && previous.status === runtimeStatus
+            ? previous
+            : resolvedEngineSandboxState(runtimeStatus),
+        );
       } catch {
-        // Logical runtime still owns turn status when sandbox lifecycle polling is unavailable.
-        if (active && (status === "starting" || status === "running")) {
-          setSandboxStatus("running");
-        }
+        if (active) setSandboxState(unavailableEngineSandboxState);
+      } finally {
+        requestPending = false;
       }
     };
 
@@ -121,12 +131,17 @@ function ConversationRuntimeSubscriber({
     const interval = setInterval(() => {
       void loadStatus();
     }, SANDBOX_STATUS_POLL_INTERVAL_MS);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadStatus();
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       active = false;
       controller.abort();
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
-  }, [conversationId, pollSandbox, setSandboxStatus, status]);
+  }, [conversationId, pollSandbox, setSandboxState]);
 
   return null;
 }

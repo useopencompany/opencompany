@@ -11,7 +11,8 @@ import {
   type HeadlessChatRunReadModel,
 } from "@/lib/headless-chat-collections";
 import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
-import { normalizeModel } from "@/lib/model-options";
+import { normalizeConversationModel } from "@/lib/model-options";
+import { selectActiveTaskRun } from "@/lib/task-conversation-activity";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
 // Pane contract, forwarded to Surface: an embedded host (the review queue) detaches this view
@@ -71,17 +72,12 @@ function LiveCanonicalTaskDetailPanel({
     (query) => query.from({ run: runsCollection }),
     [runsCollection],
   );
-  // A message the user queued behind the live turn is a newer Run, but it is not what the Task is
-  // doing. Stop, the run timer, and the working state all follow the Run that is actually working,
-  // and fall back to a queued one only when nothing is.
-  const activeRun = useMemo(() => {
-    const rows = (runRows ?? []) as HeadlessChatRunReadModel[];
-    const newestWith = (statuses: readonly string[]) =>
-      rows
-        .filter((candidate) => statuses.includes(candidate.status))
-        .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
-    return newestWith(["running", "paused"]) ?? newestWith(["queued"]);
-  }, [runRows]);
+  const data = useAppData();
+  const liveTask = data.tasks?.find((task) => task.id === run.task.id);
+  const activeRun = useMemo(
+    () => selectActiveTaskRun(liveTask ?? run.task, (runRows ?? []) as HeadlessChatRunReadModel[]),
+    [liveTask, run.task, runRows],
+  );
 
   return (
     <CanonicalTaskDetailView
@@ -109,7 +105,7 @@ function CanonicalTaskDetailView({
     () => ({
       id: conversationId,
       title: liveTask?.name.trim() || taskDetailTitle(run),
-      model: normalizeModel(run.task.model),
+      model: normalizeConversationModel(run.task.engine, run.task.model),
       engine: run.task.engine,
       messages: run.chat?.messages ?? [],
     }),
@@ -154,7 +150,7 @@ function LegacyTaskDetailPanel({
   const initialChat: ChatSessionView = {
     id: initialRun.task.id,
     title,
-    model: normalizeModel(initialRun.task.model),
+    model: normalizeConversationModel("opencompany", initialRun.task.model),
     engine: "opencompany",
     messages: legacyHarnessRunToChatMessages(initialRun),
   };

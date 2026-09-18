@@ -64,6 +64,7 @@ describe("v1 protocol contract", () => {
 
   it("bounds the public engine-session error contract", () => {
     const session = {
+      id: "runtime_1",
       conversationId: "conversation_1",
       engine: "codex",
       status: "failed",
@@ -202,6 +203,12 @@ describe("v1 protocol contract", () => {
       "/v1/workflows/{workflowId}/run-now",
       "/v1/workflows/{workflowId}/memory",
       "/v1/workflows/{workflowId}/slack-avatar",
+      "/v1/agents",
+      "/v1/agents/{agentId}",
+      "/v1/agents/{agentId}/archive",
+      "/v1/agents/{agentId}/run",
+      "/v1/agents/{agentId}/runs",
+      "/v1/agents/{agentId}/photo",
       "/v1/browser-profiles",
       "/v1/browser-profiles/{profileId}",
       "/v1/browser-profiles/{profileId}/login-sessions",
@@ -286,7 +293,9 @@ describe("v1 protocol contract", () => {
       "/v1/me/preferences",
       "/v1/me/mcp-setup",
       "/v1/me/imessage",
+      "/v1/me/whatsapp",
       "/v1/me/imessage/link",
+      "/v1/me/whatsapp/link",
       "/v1/feedback",
       "/v1/repo-configs",
       "/v1/repo-configs/{repositoryExternalId}/env",

@@ -40,6 +40,7 @@ export type ExternalEngineToolAuthorityState = {
 
 export type ExternalEngineToolAuthorizedContext = {
   taskConversation?: boolean;
+  automationToolsEnabled?: boolean;
   slackChannelEnabled: boolean;
   skillToolsEnabled: boolean;
   actorId: string;
@@ -90,6 +91,7 @@ export function authorizeExternalEngineToolCapability(input: {
   }
   return {
     taskConversation: state.conversationKind === "task",
+    automationToolsEnabled: state.workspaceRole === "admin" && state.conversationKind !== "task",
     slackChannelEnabled: state.conversationKind === "task" && state.slackChannelEnabled === true,
     skillToolsEnabled: true,
     actorId: state.actorId,

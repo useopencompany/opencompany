@@ -102,7 +102,21 @@ describe("Codex backend language model", () => {
   it("streams function calls through the Responses adapter", async () => {
     const fetchImpl = vi.fn(async (_request: RequestInfo | URL, init?: RequestInit) => {
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        tools: [expect.objectContaining({ type: "function", name: "lookup_weather" })],
+        tools: [
+          expect.objectContaining({
+            type: "function",
+            name: "lookup_weather",
+            strict: false,
+            parameters: expect.objectContaining({
+              type: "object",
+              required: ["command"],
+              properties: {
+                command: { type: "string" },
+                optionalDetail: { type: "string" },
+              },
+            }),
+          }),
+        ],
         stream: true,
       });
       return functionCallStream();
@@ -121,11 +135,15 @@ describe("Codex backend language model", () => {
           type: "function",
           name: "lookup_weather",
           description: "Look up weather.",
+          strict: false,
           inputSchema: {
             type: "object",
             additionalProperties: false,
-            properties: { city: { type: "string" } },
-            required: ["city"],
+            properties: {
+              command: { type: "string" },
+              optionalDetail: { type: "string" },
+            },
+            required: ["command"],
           },
         },
       ],

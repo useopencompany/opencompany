@@ -6,14 +6,17 @@ import {
   type CloudCodingEngine,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
+  isClaudeCodeModelId,
   isCloudCodingEngine,
+  isCodexModelId,
 } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AnthropicIcon, type LucideIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import {
   DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
   DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 } from "@/lib/codex-chat-settings";
+import type { EngineSandboxState } from "@/lib/engine-sandbox-state";
 import {
   CLAUDE_CODE_MODELS,
   CODEX_MODELS,
@@ -42,6 +45,30 @@ export function normalizeCodexChatModelId(value: unknown): CodexChatModelId {
 
 export function normalizeClaudeChatModelId(value: unknown): ClaudeChatModelId {
   return normalizeConversationModel("claude_code", value);
+}
+
+export type EngineChatModelId = CodexChatModelId | ClaudeChatModelId;
+
+// The model a chat pins for one engine, or null when it pins none: a Codex chat says nothing
+// about which Claude model to use, and an opencompany chat says nothing about either. Distinct
+// from normalizeModelId, which answers the same question with the engine default and so cannot
+// tell "this chat chose the default" apart from "this chat chose nothing".
+export function engineChatModelIdForChat(engine: "codex", value: unknown): CodexChatModelId | null;
+export function engineChatModelIdForChat(
+  engine: "claude_code",
+  value: unknown,
+): ClaudeChatModelId | null;
+export function engineChatModelIdForChat(
+  engine: EngineChatKind,
+  value: unknown,
+): EngineChatModelId | null;
+export function engineChatModelIdForChat(
+  engine: EngineChatKind,
+  value: unknown,
+): AgentModelId | null {
+  if (typeof value !== "string") return null;
+  if (engine === "codex") return isCodexModelId(value) ? value : null;
+  return isClaudeCodeModelId(value) ? value : null;
 }
 
 // A cloud coding engine's client-side presentation and model catalog. Adding an engine is a
@@ -177,6 +204,83 @@ export function statusPresenter(
   runtime: ConversationRuntimeView | null,
 ): EngineStatusPresentation {
   return { ...conversationRuntimeMeta(runtime), engineLabel: engineLabel(engine) };
+}
+
+export type SandboxStatusPresentation = ConversationRuntimeMeta & {
+  engineLabel: string;
+  detail: string;
+};
+
+// The header pill describes the E2B sandbox, so a completed control-plane check owns its label.
+// Conversation runtime is only a pre-check fallback and extra detail; it must never turn an E2B
+// "running", "sleeping", or "deleted" result into a different sandbox state.
+export function sandboxStatusPresenter(
+  engine: EngineChatKind,
+  runtime: ConversationRuntimeView | null,
+  sandboxState: EngineSandboxState,
+): SandboxStatusPresentation {
+  const logical = statusPresenter(engine, runtime);
+  const agentDetail = ` Agent status: ${logical.label.toLowerCase()}.`;
+
+  if (sandboxState.kind === "pending") {
+    return {
+      ...logical,
+      detail: " Checking the sandbox state.",
+    };
+  }
+  if (sandboxState.kind === "unavailable") {
+    return {
+      ...logical,
+      kind: "connecting",
+      label: "Unknown",
+      dotClass: "bg-ink/25",
+      textClass: "text-ink-subtle",
+      detail: " The sandbox state is temporarily unavailable.",
+    };
+  }
+  if (sandboxState.status === "running") {
+    return {
+      ...logical,
+      kind: "ready",
+      label: "Running",
+      dotClass: "bg-success",
+      textClass: "text-success",
+      detail: agentDetail,
+    };
+  }
+  if (sandboxState.status === "sleeping") {
+    return {
+      ...logical,
+      kind: "asleep",
+      label: "Asleep",
+      dotClass: "bg-ink/30",
+      textClass: "text-ink-subtle",
+      detail: " The sandbox will wake automatically on the next message." + agentDetail,
+    };
+  }
+  if (sandboxState.status === "deleted") {
+    return {
+      ...logical,
+      kind: "stopped",
+      label: "Deleted",
+      dotClass: "bg-ink/30",
+      textClass: "text-ink-subtle",
+      detail: " A new sandbox will start on the next message." + agentDetail,
+    };
+  }
+
+  // A Conversation reports an active turn before its sandbox id is recorded, so a queued,
+  // starting, or working agent means a sandbox is coming up — never one that never started.
+  const starting =
+    logical.kind === "queued" || logical.kind === "starting" || logical.kind === "working";
+  return {
+    ...logical,
+    kind: starting ? "starting" : "stopped",
+    label: starting ? "Starting" : "Not started",
+    dotClass: starting ? "animate-pulse bg-warning" : "bg-ink/30",
+    textClass: starting ? "text-warning" : "text-ink-subtle",
+    detail: agentDetail,
+  };
 }
 
 export { isCloudCodingEngine };

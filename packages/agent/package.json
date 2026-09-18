@@ -25,7 +25,8 @@
     "./workflows": {
       "types": "./src/workflows.ts",
       "default": "./src/workflows.ts"
-    }
+    },
+    "./integrations/whatsapp": "./src/integrations/whatsapp.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit --project tsconfig.json",
@@ -51,7 +52,7 @@
     "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.8.0",
     "@vercel/sandbox": "^3.2.1",
-    "ai": "^7.0.92",
+    "ai": "^7.0.106",
     "ajv": "8.20.0",
     "convex": "1.45.0",
     "drizzle-orm": "^0.45.2",

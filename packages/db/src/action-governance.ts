@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { stringifyPostgresJson } from "./postgres-json";
-import { actionTurns } from "./product-schema";
+import { actionTurns, codexChatTurns, users } from "./product-schema";
 
 type DbLike = any;
 
@@ -26,6 +26,15 @@ export type ActionCapabilityQuoteRecord = {
 };
 
 export type ActionApprovalRecord = {
+  reviewToken?: string;
+  automaticReview?: {
+    actionContext?: string;
+    outcome: "auto_approved" | "requires_approval";
+    reason: string;
+    model: string;
+    policy: string;
+    durationMs: number;
+  };
   paramsHash?: string;
   actionId: string;
   sourceId: string;
@@ -46,6 +55,7 @@ export async function registerActionApproval(input: {
   capabilityId: string;
   params: Record<string, unknown>;
   decision?: "pending" | "denied";
+  reviewToken?: string;
   approvalContext?: string;
   now?: Date;
   db?: DbLike;
@@ -54,6 +64,7 @@ export async function registerActionApproval(input: {
   await ensureActionTurn(input.turn, db);
   const now = input.now ?? new Date();
   const record: ActionApprovalRecord = {
+    ...(input.reviewToken ? { reviewToken: input.reviewToken } : {}),
     actionId: input.actionId,
     sourceId: input.sourceId,
     capabilityId: input.capabilityId,
@@ -478,6 +489,10 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
     return null;
   }
   return {
+    ...(typeof record.reviewToken === "string" ? { reviewToken: record.reviewToken } : {}),
+    ...(isAutomaticReview(record.automaticReview)
+      ? { automaticReview: record.automaticReview }
+      : {}),
     actionId: record.actionId,
     sourceId: record.sourceId,
     capabilityId: record.capabilityId,
@@ -489,11 +504,96 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
   };
 }
 
-function stableJson(value: unknown): string {
+// Postgres reorders jsonb object keys, so any comparison against a stored jsonb value has to be
+// key-order independent.
+export function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   return `{${Object.entries(value as Record<string, unknown>)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
     .join(",")}}`;
+}
+
+function isAutomaticReview(
+  value: unknown,
+): value is NonNullable<ActionApprovalRecord["automaticReview"]> {
+  if (!value || typeof value !== "object") return false;
+  const r = value as Record<string, unknown>;
+  return (
+    (r.outcome === "auto_approved" || r.outcome === "requires_approval") &&
+    typeof r.reason === "string" &&
+    typeof r.model === "string" &&
+    typeof r.policy === "string" &&
+    typeof r.durationMs === "number"
+  );
+}
+
+// A single claimant may resolve a new request. Existing/presented requests and human decisions
+// cannot be re-reviewed. The preference is checked in the same statement as the approval write.
+export async function finishAutomaticApprovalReview(input: {
+  turn: ActionTurnRef;
+  requestPromptHash: string;
+  invocationId: string;
+  reviewToken: string;
+  inputHash: string;
+  review: NonNullable<ActionApprovalRecord["automaticReview"]>;
+  db?: DbLike;
+}): Promise<ActionApprovalRecord | null> {
+  const db = input.db ?? getDb();
+  const [row] = await db
+    .update(actionTurns)
+    .set({
+      approvalRecords: sql`jsonb_set(${actionTurns.approvalRecords}, ARRAY[${input.invocationId}]::text[],
+      (${actionTurns.approvalRecords} -> ${input.invocationId}) ||
+      jsonb_build_object('automaticReview', ${stringifyPostgresJson(input.review)}::jsonb,
+        'status', CASE WHEN ${input.review.outcome === "auto_approved"}::boolean THEN 'approved' ELSE 'pending' END) ||
+      CASE WHEN ${input.review.outcome === "auto_approved"}::boolean
+        THEN jsonb_build_object('resolvedAt', ${new Date().toISOString()}::text) ELSE '{}'::jsonb END)`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        actionTurnMatches(input.turn),
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'status' = 'pending'`,
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'reviewToken' = ${input.reviewToken}`,
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'inputHash' = ${input.inputHash}`,
+        sql`NOT (${actionTurns.approvalRecords} -> ${input.invocationId} ? 'automaticReview')`,
+        sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.workosUserId} = ${input.turn.userWorkosId} AND ${users.approveForMeEnabled} = true)`,
+        sql`EXISTS (SELECT 1 FROM ${codexChatTurns}
+          WHERE ${codexChatTurns.id} = ${input.turn.turnId}
+            AND ${codexChatTurns.userWorkosId} = ${input.turn.userWorkosId}
+            AND ${codexChatTurns.codexChatSessionId} = ${input.turn.sessionId}
+            AND ${codexChatTurns.status} = 'running'
+            AND ${codexChatTurns.interruptRequestedAt} IS NULL
+            AND encode(sha256(convert_to(${codexChatTurns.prompt}, 'UTF8')), 'hex') = ${input.requestPromptHash})`,
+      ),
+    )
+    .returning({ approvalRecords: actionTurns.approvalRecords });
+  return actionApprovalRecord(row?.approvalRecords?.[input.invocationId]);
+}
+
+export async function revokeAutomaticApproval(input: {
+  turn: ActionTurnRef;
+  invocationId: string;
+  reason: "preference_disabled" | "policy_changed" | "action_changed";
+  db?: DbLike;
+}) {
+  const db = input.db ?? getDb();
+  await db
+    .update(actionTurns)
+    .set({
+      approvalRecords: sql`jsonb_set(${actionTurns.approvalRecords}, ARRAY[${input.invocationId}]::text[],
+      ((${actionTurns.approvalRecords} -> ${input.invocationId}) - 'resolvedAt') || jsonb_build_object('status', 'pending'::text,
+        'automaticReview', (${actionTurns.approvalRecords} -> ${input.invocationId} -> 'automaticReview') ||
+          jsonb_build_object('outcome', 'requires_approval'::text, 'reason', ${input.reason}::text)))`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        actionTurnMatches(input.turn),
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'status' = 'approved'`,
+        sql`${actionTurns.approvalRecords} -> ${input.invocationId} -> 'automaticReview' ->> 'outcome' = 'auto_approved'`,
+      ),
+    );
 }

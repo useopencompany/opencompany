@@ -69,7 +69,8 @@ export function parseCli(args: string[]) {
       throw new Error(`Unknown model catalog id: ${model}`);
   const variants = values.variant ? split(values.variant) : ["v5"];
   for (const variant of variants)
-    if (!["v4", "v5"].includes(variant)) throw new Error(`Unknown variant: ${variant}`);
+    if (!["v4", "v5", "workflow-flat", "workflow-grouped", "workflow-describe"].includes(variant))
+      throw new Error(`Unknown variant: ${variant}`);
   return {
     list: values.list,
     help: values.help,
@@ -89,7 +90,7 @@ export const HELP = `Harness bench (metered; all integration executions are fixt
   bun run bench [--list] [--scenarios id,id|tag:safety] [--models id,id]
     [--k 4] [--variant v4,v5] [--budget-usd 5] [--concurrency 1]
     [--save-baseline [path]] [--compare [path]] [--resume path]
-Defaults: all 9 scenarios, router answer models + Sonnet, v5, k=4.
+Defaults: all 12 scenarios, router answer models + Sonnet, v5, k=4.
 Reports and default baseline: .context/bench/ (repository root).
 Resume inherits the saved configuration; --budget-usd is the cumulative cap.
 Gateway charges arrive after responses: in-flight calls may cross the cap.

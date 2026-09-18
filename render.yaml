@@ -155,7 +155,15 @@ services:
       - key: OPENCOMPANY_SLACK_BOT_STATE_SECRET
         sync: false
       # iMessage personal assistant (messages.dev): webhook ingress and pairing replies.
+      - key: KAPSO_API_KEY
+        sync: false
+      - key: KAPSO_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_LINE_HANDLE
+        sync: false
       - key: MESSAGES_API_KEY
+        sync: false
+      - key: KAPSO_WEBHOOK_SECRET
         sync: false
       - key: MESSAGES_WEBHOOK_SECRET
         sync: false
@@ -383,6 +391,12 @@ services:
       - key: EXA_API_KEY
         sync: false
       # iMessage personal assistant sends from the runner (messages.dev).
+      - key: KAPSO_API_KEY
+        sync: false
+      - key: KAPSO_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_LINE_HANDLE
+        sync: false
       - key: MESSAGES_API_KEY
         sync: false
       - key: MESSAGES_LINE_HANDLE

@@ -37,7 +37,9 @@ export function skillManagementPermission(actor: Actor) {
 }
 
 // A pinned Chat keeps what its owner already received. Arbitrary bundle IDs never grant access.
-// Workflows restrict standalone Skills to company scope and authorize plugin revisions as their actor.
+// Company workflows restrict standalone Skills to Company scope. Personal workflows authorize
+// their owner's Personal Skills by omitting skillAccess after persisting that decision in the
+// immutable harness. Plugin revisions are always authorized as the workflow actor.
 export function skillBundleAccess(input: SkillReader & { chatSessionId?: string }) {
   return and(
     eq(skillBundles.workspaceId, input.workspaceId),

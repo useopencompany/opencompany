@@ -219,6 +219,7 @@ function AssistantTurn({
       <ToolCallItem
         key={item.key}
         tool={item.tool}
+        runId={resolvedMessage.metadata?.runId}
         onCodexAction={onCodexAction}
         allowCodexPlanActions={allowCodexPlanActions}
         onActionApproval={onActionApproval}

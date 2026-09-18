@@ -41,6 +41,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  ShieldCheck,
   Smartphone,
   Sparkles,
   Sun,
@@ -111,13 +112,16 @@ import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
+  updateApproveForMeAction,
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateCompanyAgentsAction,
   updateImessageAction,
   updatePastSessionAccessAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
+  updateWhatsappAction,
 } from "@/lib/user-preferences";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
 import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
@@ -303,6 +307,19 @@ export function PreferencesSettingsRoute() {
 
   return (
     <PageContent title="Preferences" description="Experimental features and app behavior.">
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Permissions
+        </h2>
+        <BetaFeatureSwitch
+          icon={ShieldCheck}
+          label="Approve for me"
+          description="Let AI approve low-risk plugin actions that help complete your chats and tasks. High-risk actions still ask you."
+          checked={featureFlags.approveForMe === true}
+          update={updateApproveForMeAction}
+        />
+      </section>
+
       <section className="flex flex-col gap-2">
         <h2 className="mb-1 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Appearance
@@ -357,11 +374,25 @@ export function PreferencesSettingsRoute() {
           update={updateSubagentsAction}
         />
         <BetaFeatureSwitch
+          icon={Bot}
+          label="Company agents"
+          description="Give a recurring job to a named agent instead of a workflow. It has its own name and photo, an owner whose connected accounts it works with, and a run history the whole workspace can read."
+          checked={featureFlags.companyAgents}
+          update={updateCompanyAgentsAction}
+        />
+        <BetaFeatureSwitch
           icon={Smartphone}
           label="iMessage assistant"
           description="Text a personal assistant from your phone. Link your number under Channels → iMessage. It answers with web search, the Wiki, Skills and your connected plugins."
           checked={featureFlags.imessage}
           update={updateImessageAction}
+        />
+        <BetaFeatureSwitch
+          icon={Smartphone}
+          label="WhatsApp assistant"
+          description="Text a personal assistant from a German or other EEA number. Link your number under Channels → WhatsApp. It answers with web search, the Wiki, Skills and your connected plugins."
+          checked={featureFlags.whatsapp}
+          update={updateWhatsappAction}
         />
       </section>
     </PageContent>

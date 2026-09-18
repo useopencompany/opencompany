@@ -302,8 +302,9 @@ function readModelShape(input: {
         "updated_at",
       ]);
     case "engine-sessions-v1": {
-      // Electric requires every physical primary-key column even when the public projection
-      // deliberately omits that implementation id.
+      // Electric keys every change on the physical primary key, and a partial update carries
+      // only that key plus the changed columns, so the public row keeps `id` for the client to
+      // match updates against.
       const columns = [
         "id",
         "chat_session_id",
@@ -356,7 +357,11 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
+        // Company agent runs belong to the agent, not to any member's Task list. They are read
+        // back through the agent's own run history instead.
+        where:
+          `("workspace_id" = $2 OR ("workspace_id" IS NULL AND "actor_id" = $1))` +
+          ` AND "agent_id" IS NULL`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
     case "task-activities-v1":
@@ -558,12 +563,9 @@ function electricDeleteIdentity(readModel: ReadModel, row: Record<string, unknow
   const columnNames = READ_MODEL_COLUMN_NAMES[
     readModel as keyof typeof READ_MODEL_COLUMN_NAMES
   ] as Record<string, string>;
-  // Engine sessions deliberately hide their physical primary key and collections key them by
-  // Conversation instead. Every other read model exposes its physical `id` as the public `id`.
-  const publicIdentity = readModel === "engine-sessions-v1" ? "conversationId" : "id";
+  // Every read model exposes its physical primary key as the public `id`.
   const identityColumn = Object.entries(columnNames).find(
-    ([physicalName, publicName]) =>
-      publicName === publicIdentity && Object.hasOwn(row, physicalName),
+    ([physicalName, publicName]) => publicName === "id" && Object.hasOwn(row, physicalName),
   );
   return identityColumn ? { [identityColumn[0]]: row[identityColumn[0]] } : {};
 }
@@ -903,7 +905,7 @@ const READ_MODEL_COLUMN_NAMES = {
     updated_at: "updatedAt",
   },
   "engine-sessions-v1": {
-    id: "",
+    id: "id",
     chat_session_id: "conversationId",
     engine: "engine",
     status: "status",

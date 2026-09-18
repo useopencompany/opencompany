@@ -119,6 +119,7 @@ import {
 } from "@/components/ModelPickerParts";
 import { ModelProviderIcon } from "@/components/ModelProviderIcon";
 import { useContextReferenceCatalog } from "@/components/useContextReferenceCatalog";
+import { useConversationTabTitle } from "@/components/useConversationTabTitle";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -139,8 +140,14 @@ import {
 import {
   type ChatModelSelection,
   persistLastChatSelection,
+  persistLastEngineModel,
+  persistLastReasoningEffort,
   readLastChatSelection,
+  readLastEngineModel,
+  readLastReasoningEffort,
   subscribeLastChatSelection,
+  subscribeLastEngineModel,
+  subscribeLastReasoningEffort,
 } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
@@ -153,8 +160,10 @@ import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ActiveChatTurn,
   deriveChatTurnPhase,
+  isChatConversationWorking,
   isChatTurnTerminal,
-  isChatTurnWorking,
+  reconcileRuntimeWithSettledRun,
+  reconcileRuntimeWithTaskStatus,
 } from "@/lib/chat-turn-lifecycle";
 import {
   type ChatMention,
@@ -169,11 +178,7 @@ import {
   USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
-import {
-  type CodexComposerSettingsView,
-  DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
-  DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-} from "@/lib/codex-chat-settings";
+import type { CodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import {
   type ContextReferenceOption,
   filterContextReferences,
@@ -188,11 +193,17 @@ import {
   type CodexChatModelId,
   ENGINE_REGISTRY,
   type EngineChatKind,
+  engineChatModelIdForChat,
   isCloudCodingEngine,
   normalizeClaudeChatModelId,
   normalizeCodexChatModelId,
-  statusPresenter,
+  sandboxStatusPresenter,
 } from "@/lib/engine-registry";
+import {
+  currentEngineSandboxStatus,
+  type EngineSandboxState,
+  PENDING_ENGINE_SANDBOX_STATE,
+} from "@/lib/engine-sandbox-state";
 import {
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
@@ -205,6 +216,7 @@ import {
   resolveEngineQuestions,
   steerHeadlessChatRun,
   updateHeadlessChatConversation,
+  waitForHeadlessChatRunSettlement,
 } from "@/lib/headless-chat-commands";
 import {
   enqueueHeadlessChatMessage,
@@ -323,7 +335,9 @@ type EngineComposerSettings = {
   goalMode?: CodexComposerSettings["goalMode"];
 };
 type CodexComposerUiState = {
-  reasoningEffort: CodexReasoningEffort;
+  // null means "no explicit choice for this chat", so the composer falls back to the user's
+  // last-used level for the active engine. Only an effort the user actually picked is stored.
+  reasoningEffort: CodexReasoningEffort | null;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
@@ -564,17 +578,18 @@ export function Surface({
   const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const initialCodexComposerUiState = initialChat
     ? codexComposerUiStateForChat(initialChat)
-    : defaultCodexComposerUiState(
-        baseChatModel === CLAUDE_PICKER_VALUE
-          ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
-          : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-      );
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(initialChat?.model),
+    : defaultCodexComposerUiState();
+  // The model the open chat pins for each engine. Null means the chat pins none, so the picker
+  // shows the model last used with that engine.
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(() =>
+    engineChatModelIdForChat("codex", initialChat?.model),
   );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(initialChat?.model),
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(() =>
+    engineChatModelIdForChat("claude_code", initialChat?.model),
   );
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   // The selected model for each engine, keyed so a send reads the active engine's model
   // without a per-engine branch (a third engine reads its own model, not Claude's).
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
@@ -601,9 +616,10 @@ export function Surface({
   const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
     CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
   );
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
-    initialCodexComposerUiState.reasoningEffort,
-  );
+  // The effort the user explicitly picked for the open chat. Null means "follow my last-used
+  // level for this engine", resolved below once the composer's engine is known.
+  const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
+    useState<CodexReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
     initialCodexComposerUiState.planModeEnabled,
   );
@@ -616,16 +632,25 @@ export function Surface({
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
     initialCodexComposerUiState.goalTokenBudget,
   );
-  const [codingSandboxStatus, setCodingSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
-  const [conversationRuntime, setConversationRuntime] = useState<ConversationRuntimeView | null>(
-    initialChat?.runtime ?? null,
+  const [codingSandboxState, setCodingSandboxState] = useState<EngineSandboxState>(
+    PENDING_ENGINE_SANDBOX_STATE,
   );
-  const conversationRunning = isChatRuntimeActive(conversationRuntime);
+  const codingSandboxStatus = currentEngineSandboxStatus(codingSandboxState);
+  const [syncedConversationRuntime, setConversationRuntime] =
+    useState<ConversationRuntimeView | null>(initialChat?.runtime ?? null);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
   const [queuedMessageSubmitting, setQueuedMessageSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  const [stoppingChatRun, setStoppingChatRun] = useState<{
+    conversationId: string;
+    runId: string | null;
+  } | null>(null);
+  const [locallySettledRunStatuses, setLocallySettledRunStatuses] = useState<
+    ReadonlyMap<string, "completed" | "failed" | "canceled">
+  >(() => new Map());
+  const chatStopConfirmationControllerRef = useRef<AbortController | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -645,6 +670,19 @@ export function Surface({
   const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
+  const conversationRuntime = useMemo(() => {
+    const taskReconciled = reconcileRuntimeWithTaskStatus(
+      syncedConversationRuntime,
+      activeTaskConversation?.status ?? null,
+    );
+    const activeRunId = taskReconciled?.activeRunId ?? null;
+    return reconcileRuntimeWithSettledRun(
+      taskReconciled,
+      activeRunId,
+      activeRunId ? (locallySettledRunStatuses.get(activeRunId) ?? null) : null,
+    );
+  }, [activeTaskConversation?.status, locallySettledRunStatuses, syncedConversationRuntime]);
+  const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled = !activeTaskConversation;
@@ -918,6 +956,10 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
+  // Resolved every render rather than frozen at mount, so switching engines (or the remembered
+  // model arriving after hydration) lands on that engine's own last-used level.
+  const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
+  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
   // A running turn gates nothing: the message becomes a queued turn the user can steer into the
   // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
   // leave a note on. Background sends keep their own dispatch rules.
@@ -1208,31 +1250,60 @@ export function Surface({
   const foregroundRun = foregroundTurn?.runId
     ? (liveChat.runsById.get(foregroundTurn.runId) ?? null)
     : null;
+  const locallySettledForegroundStatus = foregroundTurn?.runId
+    ? (locallySettledRunStatuses.get(foregroundTurn.runId) ?? null)
+    : null;
   const foregroundAssistantMessageId =
     foregroundTurn?.assistantMessageId ?? foregroundRun?.assistantMessageId ?? null;
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
+  const runtimeMatchesForegroundTurn = Boolean(
+    foregroundTurn &&
+      isChatRuntimeActive(conversationRuntime) &&
+      (!conversationRuntime?.activeRunId ||
+        !foregroundTurn.runId ||
+        conversationRuntime.activeRunId === foregroundTurn.runId),
+  );
+  const runtimeNamesForegroundTurn = Boolean(
+    conversationRuntime?.activeRunId &&
+      foregroundTurn?.runId &&
+      conversationRuntime.activeRunId === foregroundTurn.runId,
+  );
   const chatTurnPhase = deriveChatTurnPhase({
-    runStatus: foregroundRun?.status ?? null,
+    runStatus: locallySettledForegroundStatus ?? foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
-    runtimeMatchesTurn: Boolean(
-      foregroundTurn &&
-        isChatRuntimeActive(conversationRuntime) &&
-        (!conversationRuntime?.activeRunId ||
-          !foregroundTurn.runId ||
-          conversationRuntime.activeRunId === foregroundTurn.runId),
-    ),
+    runtimeMatchesTurn: runtimeMatchesForegroundTurn,
     transportStatus: status,
     submitting: engineSubmitting,
   });
-  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
+  // The runtime remains authoritative when the conversation has moved to another Run. A finalized
+  // assistant message wins when both projections describe the same Run, otherwise a stale runtime
+  // leaves the composer working and the completed trace expanded indefinitely.
+  const isForegroundTurnWorking = isChatConversationWorking(
+    chatTurnPhase,
+    Boolean(
+      activeEngineChat &&
+        conversationRunning &&
+        !(isChatTurnTerminal(chatTurnPhase) && runtimeNamesForegroundTurn),
+    ),
+  );
+  const isChatConversationStopping = Boolean(
+    stoppingChatRun &&
+      stoppingChatRun.conversationId === chatSessionId &&
+      (!stoppingChatRun.runId ||
+        stoppingChatRun.runId === foregroundTurn?.runId ||
+        stoppingChatRun.runId === syncedConversationRuntime?.activeRunId),
+  );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
       activeTaskConversation &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  const composerQueuesMessage = Boolean(
+    !activeTaskConversation && isForegroundTurnWorking && canQueueWhileWorking,
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -1246,12 +1317,13 @@ export function Surface({
   // while work is in flight without one (task runs, transports without a run id yet), protect the
   // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
   // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
-  const activeAssistantMessageId =
-    foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
-      ? foregroundAssistantMessageId
-      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
-        ? latestAssistantMessageId
-        : null;
+  const activeAssistantMessageId = foregroundAssistantMessageId
+    ? isChatTurnTerminal(chatTurnPhase)
+      ? null
+      : foregroundAssistantMessageId
+    : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
+      ? latestAssistantMessageId
+      : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const activeTurnTimerStartedAtMs =
     foregroundTurn?.startedAtMs ??
@@ -1299,6 +1371,7 @@ export function Surface({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      chatStopConfirmationControllerRef.current?.abort();
       releaseAllOptimisticAttachmentPreviews();
     };
   }, [releaseAllOptimisticAttachmentPreviews]);
@@ -1371,6 +1444,13 @@ export function Surface({
     : null;
   const activeChatVisibility =
     activeChatSummary ?? (initialChat?.id === chatSessionId ? initialChat : null);
+  useConversationTabTitle({
+    active: isActivePane && mode === "chat" && Boolean(chatSessionId),
+    completedUnseen:
+      !isAgentWorking &&
+      activeChatVisibility?.activityState === "idle" &&
+      activeChatVisibility.hasUnseen === true,
+  });
   useEffect(() => {
     if (!chatSessionId || persistedChatSessionId !== chatSessionId) return;
     const state = isAgentWorking ? "working" : null;
@@ -1436,7 +1516,7 @@ export function Surface({
 
   const applyCodexComposerUiState = useCallback(
     (state: CodexComposerUiState) => {
-      setCodexReasoningEffort(state.reasoningEffort);
+      setCodexReasoningEffortOverride(state.reasoningEffort);
       setCodexPlanModeEnabled(state.planModeEnabled);
       setCodexGoalModeEnabled(state.goalModeEnabled);
       setCodexGoalObjective(state.goalObjective);
@@ -1447,7 +1527,7 @@ export function Surface({
       setCodexGoalObjective,
       setCodexGoalTokenBudget,
       setCodexPlanModeEnabled,
-      setCodexReasoningEffort,
+      setCodexReasoningEffortOverride,
     ],
   );
 
@@ -1516,7 +1596,9 @@ export function Surface({
       cancelChatFirstOutputMeasurement();
       if (chatSessionId && isEngineChat) {
         const currentComposerState = currentCodexComposerUiState({
-          reasoningEffort: codexReasoningEffort,
+          // The override, not the resolved level: a chat the user never dialled keeps
+          // following the last-used preference when they come back to it.
+          reasoningEffort: codexReasoningEffortOverride,
           planModeEnabled: codexPlanModeEnabled,
           goalModeEnabled: codexGoalModeEnabled,
           goalObjective: codexGoalObjective,
@@ -1548,13 +1630,13 @@ export function Surface({
               ? normalizeModel(chat.model)
               : null,
       );
-      setCodexModel(normalizeCodexChatModelId(chat?.model));
-      setClaudeModel(normalizeClaudeChatModelId(chat?.model));
+      setCodexModelOverride(engineChatModelIdForChat("codex", chat?.model));
+      setClaudeModelOverride(engineChatModelIdForChat("claude_code", chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
       applyCodexComposerUiState(nextCodexComposerState);
-      setCodingSandboxStatus(null);
+      setCodingSandboxState(PENDING_ENGINE_SANDBOX_STATE);
       setConversationRuntime(chat?.runtime ?? null);
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
@@ -1583,15 +1665,15 @@ export function Surface({
       codexGoalObjective,
       codexGoalTokenBudget,
       codexPlanModeEnabled,
-      codexReasoningEffort,
+      codexReasoningEffortOverride,
       input,
       isEngineChat,
       onOpenChat,
       releaseAllOptimisticAttachmentPreviews,
       saveComposerDraft,
       setChatModelOverride,
-      setClaudeModel,
-      setCodexModel,
+      setClaudeModelOverride,
+      setCodexModelOverride,
       setMessages,
       setInput,
       setSelectedMentions,
@@ -2093,7 +2175,7 @@ export function Surface({
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: chatSessionId ? ENGINE_REGISTRY[engine].defaultModelId : engineChatModel[engine],
+          model: chatSessionId ? rememberedEngineModel[engine] : engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -2339,6 +2421,9 @@ export function Surface({
       if (activeSessionId) {
         setEngineChatSession({ engine: activeEngine, chatSessionId: activeSessionId });
         if (engineSettings) {
+          // A sent chat stops following the preference: its composer keeps the level the turn
+          // actually ran at, so a preference change in another tab cannot move it.
+          setCodexReasoningEffortOverride(engineSettings.reasoningEffort);
           setCodexComposerStateByChatId((current) => {
             const next = new Map(current);
             next.set(activeSessionId, codexComposerUiStateFromSettings(engineSettings));
@@ -2518,7 +2603,10 @@ export function Surface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const runId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
+      // The interaction belongs to the Run that emitted its question card. A locally retained
+      // foreground turn can lag behind the runtime after a Task is resumed, so using it here can
+      // post the answer to an already-completed Run and leave the real interaction waiting.
+      const runId = action.runId ?? foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
       if (!runId) throw new Error("The active coding Run is no longer available.");
       await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;
@@ -2554,6 +2642,7 @@ export function Surface({
     setEngineSubmitting(true);
     try {
       setCodexPlanModeEnabled(false);
+      setCodexReasoningEffortOverride(settings.reasoningEffort);
       setCodexComposerStateByChatId((current) => {
         const next = new Map(current);
         next.set(sessionId, codexComposerUiStateFromSettings(settings));
@@ -2655,18 +2744,69 @@ export function Surface({
     }
 
     if (chatSessionId) {
+      if (isChatConversationStopping) return;
       const activeRunId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId ?? null;
+      const assistantMessageId = foregroundAssistantMessageId;
+      setStoppingChatRun({ conversationId: chatSessionId, runId: activeRunId });
       clearLocalActiveTurnState(chatSessionId);
-      const cancel = activeRunId
-        ? cancelHeadlessChatRun(activeRunId)
-        : headlessTransport.cancel(chatInstanceKey);
-      void cancel.catch(() => {
-        const label = activeEngineChat
-          ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
-          : "stop that response";
-        toast.error(`Could not ${label}.`);
-      });
+      chatStopConfirmationControllerRef.current?.abort();
+      const confirmationController = new AbortController();
+      chatStopConfirmationControllerRef.current = confirmationController;
       void stop();
+      void (async () => {
+        let accepted = false;
+        try {
+          const result = activeRunId
+            ? await cancelHeadlessChatRun(activeRunId)
+            : await headlessTransport.cancel(chatInstanceKey);
+          if (!result) throw new Error("The active Run is no longer available.");
+          accepted = true;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId
+              ? { ...current, runId: result.runId }
+              : current,
+          );
+          const settled =
+            result.status === "completed" ||
+            result.status === "failed" ||
+            result.status === "canceled"
+              ? result
+              : await waitForHeadlessChatRunSettlement(result.runId, {
+                  signal: confirmationController.signal,
+                });
+          if (!mountedRef.current || confirmationController.signal.aborted) return;
+          setLocallySettledRunStatuses((current) => {
+            const next = new Map(current);
+            next.set(result.runId, settled.status);
+            return next;
+          });
+          if (settled.status === "canceled" && assistantMessageId) {
+            setLocallyStoppedAssistantMessageIds((current) =>
+              new Set(current).add(assistantMessageId),
+            );
+          }
+          if (activeTurnRef.current?.runId === result.runId) clearActiveTurn();
+          setStoppingChatRun((current) => (current?.runId === result.runId ? null : current));
+        } catch (error) {
+          if (confirmationController.signal.aborted || !mountedRef.current || accepted) return;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId ? null : current,
+          );
+          void resumeStream();
+          const label = activeEngineChat
+            ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
+            : "stop that response";
+          toast.error(
+            error instanceof Error && error.message
+              ? `${error.message} The response is still running.`
+              : `Could not ${label}.`,
+          );
+        } finally {
+          if (chatStopConfirmationControllerRef.current === confirmationController) {
+            chatStopConfirmationControllerRef.current = null;
+          }
+        }
+      })();
       return;
     }
 
@@ -2688,10 +2828,14 @@ export function Surface({
     cancelChatFirstOutputMeasurement,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
+    clearActiveTurn,
     foregroundTurn?.runId,
+    foregroundAssistantMessageId,
+    isChatConversationStopping,
     isTaskConversationStopping,
     headlessTransport,
     messages,
+    resumeStream,
     stop,
   ]);
 
@@ -2881,9 +3025,9 @@ export function Surface({
       if (option.mention.kind === "engine") {
         const modelSelection = chatModelSelectionFromEngineMention(option.mention);
         if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
         } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -3139,6 +3283,7 @@ export function Surface({
                         <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
                           runtime={conversationRuntime}
+                          stopping={isChatConversationStopping}
                           optimisticStatus={
                             engineSubmitting
                               ? "starting"
@@ -3146,7 +3291,7 @@ export function Surface({
                                 ? "running"
                                 : null
                           }
-                          sandboxStatus={codingSandboxStatus}
+                          sandboxState={codingSandboxState}
                         />
                         <Tooltip>
                           <TooltipTrigger
@@ -3217,6 +3362,8 @@ export function Surface({
                   ))}
                   {isTaskConversationStopping ? (
                     <PendingActivityIndicator label="Stopping task…" />
+                  ) : isChatConversationStopping ? (
+                    <PendingActivityIndicator label="Stopping response…" />
                   ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
@@ -3245,7 +3392,7 @@ export function Surface({
           {mode === "chat" && chatSessionId ? (
             <ConversationRuntimeSync
               conversationId={chatSessionId}
-              setSandboxStatus={setCodingSandboxStatus}
+              setSandboxState={setCodingSandboxState}
               setRuntime={setConversationRuntime}
               pollSandbox={Boolean(activeEngineChat)}
             />
@@ -3451,9 +3598,11 @@ export function Surface({
                       id="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation || mode === "chat"
-                          ? "Reply..."
-                          : "Ask a question or describe a task..."
+                        composerQueuesMessage
+                          ? "Queue a follow-up..."
+                          : activeTaskConversation || mode === "chat"
+                            ? "Reply..."
+                            : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
@@ -3473,9 +3622,12 @@ export function Surface({
                         onStop={stopGeneration}
                       />
                     ) : null
-                  ) : activeEngine && isForegroundTurnWorking && !backgroundChatDirective ? (
+                  ) : activeEngine &&
+                    (isForegroundTurnWorking || isChatConversationStopping) &&
+                    !backgroundChatDirective ? (
                     <EngineStopButton
                       label={ENGINE_REGISTRY[activeEngine].label}
+                      stopping={isChatConversationStopping}
                       onStop={stopGeneration}
                     />
                   ) : null}
@@ -3506,6 +3658,8 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
+                    stopping={isChatConversationStopping}
+                    queuesMessage={composerQueuesMessage}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
@@ -3600,12 +3754,12 @@ export function Surface({
                             setChatModelOverride(model);
                             persistLastChatSelection(userWorkosId, model);
                             if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                              setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                              setCodexReasoningEffortOverride(null);
                             } else if (
                               model === CLAUDE_PICKER_VALUE &&
                               model !== composerChatModel
                             ) {
-                              setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                              setCodexReasoningEffortOverride(null);
                               setCodexPlanModeEnabled(false);
                               setCodexGoalModeEnabled(false);
                               setCodexGoalObjective("");
@@ -3636,12 +3790,22 @@ export function Surface({
                         <EngineComposerControls
                           model={
                             composerEngine === "codex"
-                              ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                              ? {
+                                  engine: "codex",
+                                  value: codexModel,
+                                  onChange: (model) => {
+                                    setCodexModelOverride(model);
+                                    persistLastEngineModel(userWorkosId, "codex", model);
+                                  },
+                                }
                               : composerEngine === "claude_code"
                                 ? {
                                     engine: "claude_code",
                                     value: claudeModel,
-                                    onChange: setClaudeModel,
+                                    onChange: (model) => {
+                                      setClaudeModelOverride(model);
+                                      persistLastEngineModel(userWorkosId, "claude_code", model);
+                                    },
                                   }
                                 : null
                           }
@@ -3664,7 +3828,14 @@ export function Surface({
                             readOnly ||
                             voiceDictation.isActive
                           }
-                          onReasoningEffortChange={setCodexReasoningEffort}
+                          onReasoningEffortChange={(effort) => {
+                            setCodexReasoningEffortOverride(effort);
+                            // Last level picked for this engine is the level the next chat
+                            // with it opens on, matching how the model picker is remembered.
+                            if (composerEngine) {
+                              persistLastReasoningEffort(userWorkosId, composerEngine, effort);
+                            }
+                          }}
                           onPlanModeEnabledChange={setCodexPlanModeEnabled}
                           onGoalModeEnabledChange={setCodexGoalModeEnabled}
                           onGoalObjectiveChange={setCodexGoalObjective}
@@ -3769,19 +3940,17 @@ export function QuickChatComposer({
   );
   const [chatModelOverride, setChatModelOverride] = useState<ChatModelSelection | null>(null);
   const baseChatModel = chatModelOverride ?? rememberedChatModel;
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(undefined),
-  );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(undefined),
-  );
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(null);
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(null);
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
     codex: codexModel,
     claude_code: claudeModel,
   };
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
-    DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-  );
+  const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
+    useState<CodexReasoningEffort | null>(null);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
   const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
@@ -3818,6 +3987,8 @@ export function QuickChatComposer({
   const composerEngine = parsedBackgroundChatDirective
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
+  const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
+  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
   const isEngineChat = composerEngine !== null;
   const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
@@ -3982,9 +4153,9 @@ export function QuickChatComposer({
       if (option.mention.kind === "engine") {
         const modelSelection = chatModelSelectionFromEngineMention(option.mention);
         if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
         } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -4594,9 +4765,9 @@ export function QuickChatComposer({
                   );
                   setChatModelOverride(model);
                   if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                    setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                    setCodexReasoningEffortOverride(null);
                   } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                    setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                    setCodexReasoningEffortOverride(null);
                     setCodexPlanModeEnabled(false);
                     setCodexGoalModeEnabled(false);
                     setCodexGoalObjective("");
@@ -4619,9 +4790,13 @@ export function QuickChatComposer({
               <EngineComposerControls
                 model={
                   composerEngine === "codex"
-                    ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                    ? { engine: "codex", value: codexModel, onChange: setCodexModelOverride }
                     : composerEngine === "claude_code"
-                      ? { engine: "claude_code", value: claudeModel, onChange: setClaudeModel }
+                      ? {
+                          engine: "claude_code",
+                          value: claudeModel,
+                          onChange: setClaudeModelOverride,
+                        }
                       : null
                 }
                 engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
@@ -4638,7 +4813,9 @@ export function QuickChatComposer({
                 goalTokenBudget={codexGoalTokenBudget}
                 disabled={isSubmitting}
                 modelDisabled={isSubmitting}
-                onReasoningEffortChange={setCodexReasoningEffort}
+                // Not persisted, for the same reason this composer's model picker is not:
+                // a quick-compose chat sets its own level without moving the app-wide default.
+                onReasoningEffortChange={setCodexReasoningEffortOverride}
                 onPlanModeEnabledChange={setCodexPlanModeEnabled}
                 onGoalModeEnabledChange={setCodexGoalModeEnabled}
                 onGoalObjectiveChange={setCodexGoalObjective}
@@ -5094,11 +5271,45 @@ function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   return null;
 }
 
-function defaultCodexComposerUiState(
-  reasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-): CodexComposerUiState {
+// The level a composer shows when the open chat carries no explicit choice: the user's
+// last-used level for that engine, falling back to the engine default. Subscribed rather than
+// read once so it survives hydration and stays in step across tabs. A null engine renders no
+// reasoning control, so the Codex entry is only a placeholder for the unused read.
+function useRememberedReasoningEffort(
+  userWorkosId: string,
+  engine: EngineChatKind | null,
+): CodexReasoningEffort {
+  const effortEngine = engine ?? CODEX_PICKER_VALUE;
+  return useSyncExternalStore(
+    subscribeLastReasoningEffort,
+    () => readLastReasoningEffort(userWorkosId, effortEngine),
+    () => ENGINE_REGISTRY[effortEngine].defaultReasoningEffort,
+  );
+}
+
+// The model each engine's picker shows when the open chat pins none: the model last used with
+// that engine, falling back to the engine default. Both engines are read on every render so a
+// picker never lags the engine the composer just switched to.
+function useRememberedEngineModels(userWorkosId: string): {
+  codex: CodexChatModelId;
+  claude_code: ClaudeChatModelId;
+} {
+  const codex = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "codex"),
+    () => CODEX_CHAT_DEFAULT_MODEL_ID,
+  );
+  const claudeCode = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "claude_code"),
+    () => CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  );
+  return { codex, claude_code: claudeCode };
+}
+
+function defaultCodexComposerUiState(): CodexComposerUiState {
   return {
-    reasoningEffort,
+    reasoningEffort: null,
     planModeEnabled: false,
     goalModeEnabled: false,
     goalObjective: "",
@@ -5121,20 +5332,14 @@ function codexComposerUiStateForChat(
     const saved = savedByChatId?.get(chat.id);
     if (saved) return saved;
   }
-  return codexComposerUiStateFromSettings(
-    chat?.codexComposerSettings ?? null,
-    isCloudCodingEngine(chat?.engine)
-      ? ENGINE_REGISTRY[chat.engine].defaultReasoningEffort
-      : undefined,
-  );
+  return codexComposerUiStateFromSettings(chat?.codexComposerSettings ?? null);
 }
 
 function codexComposerUiStateFromSettings(
   settings: EngineComposerSettings | null | undefined,
-  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): CodexComposerUiState {
   if (!settings) {
-    return defaultCodexComposerUiState(defaultReasoningEffort);
+    return defaultCodexComposerUiState();
   }
   const goalMode = settings.goalMode ?? null;
   return {
@@ -6073,15 +6278,17 @@ function formatCompactTokens(value: number): string {
 function CodingSessionStatusIndicator({
   engine,
   runtime,
+  stopping,
   optimisticStatus,
-  sandboxStatus,
+  sandboxState,
 }: {
   engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
+  stopping: boolean;
   optimisticStatus: "starting" | "running" | null;
-  sandboxStatus: EngineRuntimeStatus | null;
+  sandboxState: EngineSandboxState;
 }) {
-  let meta = statusPresenter(
+  let meta = sandboxStatusPresenter(
     engine,
     optimisticStatus
       ? {
@@ -6091,32 +6298,28 @@ function CodingSessionStatusIndicator({
           updatedAt: runtime?.updatedAt ?? "",
         }
       : runtime,
+    sandboxState,
   );
-  // A ready session whose sandbox has paused shows as asleep so the green dot never reads as
-  // "still running" hours after the last turn. A deleted sandbox stays "Ready": nothing exists
-  // anymore and a fresh one starts on the next message.
-  if (meta.kind === "ready" && sandboxStatus === "sleeping") {
+  // An interrupt in flight is the one agent-side transition the pill still owns: E2B keeps
+  // reporting the sandbox as running throughout, so only the logical state shows the stop landing.
+  if (stopping) {
     meta = {
       ...meta,
-      kind: "asleep",
-      label: "Asleep",
-      dotClass: "bg-ink/30",
-      textClass: "text-ink-subtle",
+      kind: "working",
+      label: "Stopping",
+      dotClass: "bg-warning animate-pulse",
+      textClass: "text-ink-muted",
     };
   }
-  const sandboxDetail =
-    sandboxStatus === "sleeping"
-      ? " The sandbox is sleeping and will wake automatically on the next message."
-      : sandboxStatus === "deleted"
-        ? " The previous sandbox expired; a new one will start on the next message."
-        : "";
-  const title = `${meta.engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const title = stopping
+    ? `${meta.engineLabel} is stopping the current turn.`
+    : `${meta.engineLabel} sandbox is ${meta.label.toLowerCase()}.${meta.detail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`${meta.engineLabel} status: ${meta.label}`}
+      aria-label={`${meta.engineLabel} sandbox status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>
@@ -6385,11 +6588,15 @@ function findModel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  stopping = false,
+  queuesMessage = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  stopping?: boolean;
+  queuesMessage?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
@@ -6399,19 +6606,25 @@ function SubmitButton({
         type="button"
         aria-label="Stop response"
         title="Stop response"
+        disabled={stopping}
         onClick={onStop}
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none"
+        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-60"
       >
-        <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        {stopping ? (
+          <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+        ) : (
+          <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        )}
       </button>
     );
   }
 
+  const action = startsTask ? "Start task" : queuesMessage ? "Queue message" : "Send message";
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={action}
+      title={startsTask || queuesMessage ? action : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
@@ -6424,8 +6637,8 @@ function SubmitButton({
   );
 }
 
-// Sits beside the composer so Send stays free to queue a message into the turn that is still
-// working. `stopping` covers the gap between asking to interrupt and the runner settling it.
+// Sits beside the composer so its message action stays available while the turn is working.
+// `stopping` covers the gap between asking to interrupt and the runner settling it.
 function EngineStopButton({
   label,
   stopping = false,

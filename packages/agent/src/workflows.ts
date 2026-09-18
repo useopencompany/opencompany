@@ -113,6 +113,8 @@ export type WorkspaceWorkflow = {
   name: string;
   description: string;
   steps: WorkflowStep[];
+  scope?: WorkflowScope;
+  createdByUserId?: string | null;
 };
 
 export type WorkflowListItem = {
@@ -167,9 +169,14 @@ export function readWorkflowMentionRef(
 
 // `userId` is the reader: company workflows belong to the workspace, personal ones only to their
 // creator. Callers that cannot name a reader have no business seeing personal workflows.
+//
+// Company agents live in this table too, and every one of these readers ultimately runs a row as
+// the caller. An agent must run as its owner instead, so the kind filter keeps agents out of the
+// chat catalog, the `#` mention resolver, and every other workflow-run path.
 export function visibleWorkflows(workspaceId: string, userId: string) {
   return and(
     eq(workflows.workspaceId, workspaceId),
+    eq(workflows.kind, "workflow"),
     or(eq(workflows.scope, "company"), eq(workflows.createdByWorkosId, userId)),
   );
 }
@@ -262,6 +269,8 @@ export async function getWorkflow(
       scheduleLastRunAt: workflows.scheduleLastRunAt,
       scheduleNextRunAt: workflows.scheduleNextRunAt,
       status: workflows.status,
+      scope: workflows.scope,
+      createdByUserId: workflows.createdByWorkosId,
     })
     .from(workflows)
     .where(
@@ -278,6 +287,8 @@ export async function getWorkflow(
     name: row.name,
     description: row.description,
     steps: workflowStepsWithLegacyFallback(row),
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
     status: row.status,
     trigger: workflowTriggerFromRow(row),
   };

@@ -251,6 +251,20 @@ function hostToolPresentation(
       return presentation(actionRowLabel(action), errorChips, "tool", actionSource(action));
     }
   }
+  if (mcpTarget.tool === "workflows") {
+    const args = nestedRecord(inputRecord, "arguments");
+    const command = firstString(compactRecords([args]), ["command"]);
+    const target = firstString(compactRecords([nestedRecord(args, "workflow"), args]), [
+      "name",
+      "workflowId",
+    ]);
+    return presentation(
+      "Workflow",
+      errorChips.length
+        ? errorChips
+        : [command, target].filter((value): value is string => Boolean(value)),
+    );
+  }
   const label = HOST_TOOL_LABELS[mcpTarget.tool] ?? sentenceCase(mcpTarget.tool);
   return presentation(label, errorChips);
 }

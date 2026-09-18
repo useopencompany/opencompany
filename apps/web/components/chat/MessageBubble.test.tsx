@@ -453,6 +453,123 @@ describe("MessageBubble historical presentation details", () => {
     expect(presentationMocks.load).toHaveBeenCalledOnce();
   });
 
+  it("keeps a summary-backed pending question expanded while loading its full request", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const summaryMessage = {
+      id: "assistant_pending_question_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-17T16:00:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            detail: "Which coding agent should we test first?",
+          },
+        },
+      ],
+    } as ChatUiMessage;
+    const fullMessage = {
+      ...summaryMessage,
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            interactionId: "interaction_123",
+            question: "Which coding agent should we test first?",
+            questions: [
+              {
+                id: "target",
+                header: "Test target",
+                question: "Which coding agent should we test first?",
+                options: [{ label: "Codex", description: "Test Codex first." }],
+              },
+            ],
+          },
+        },
+      ],
+    } as ChatUiMessage;
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    presentationMocks.load.mockReturnValueOnce(
+      new Promise<ChatUiMessage>((resolve) => {
+        resolvePresentation = resolve;
+      }),
+    );
+
+    render(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-codex-question")).toBeVisible();
+    expect(screen.getByText("The coding engine needs your input")).toBeVisible();
+    expect(screen.getByText("Loading details…")).toBeVisible();
+    expect(
+      screen.queryByTestId(`chat-tool-call-${CODEX_QUESTION_TOOL_NAME}`),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(presentationMocks.load).toHaveBeenCalledOnce());
+
+    await act(async () => resolvePresentation(fullMessage));
+
+    expect(await screen.findByRole("radio", { name: /Codex/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeEnabled();
+  });
+
+  it("leaves a resolved summary-backed question compact", () => {
+    const message = {
+      id: "assistant_resolved_question_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-17T16:01:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "output-available",
+          input: {
+            label: "Question",
+            detail: "Which coding agent should we test first?",
+          },
+          output: { status: "answered" },
+        },
+      ],
+    } as ChatUiMessage;
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-codex-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId(`chat-tool-call-${CODEX_QUESTION_TOOL_NAME}`)).toBeVisible();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
+  });
+
   it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
     const user = userEvent.setup();
     const summaryMessage = {
@@ -2105,4 +2222,28 @@ describe("MessageBubble Codex interactions", () => {
       }),
     );
   });
+});
+it("shows automatic approval on the action row and explains it in details", async () => {
+  const message: ChatUiMessage = {
+    id: "automatic-example",
+    role: "assistant",
+    parts: [
+      {
+        type: USE_ACTION_TOOL_PART_TYPE,
+        toolCallId: "call",
+        state: "output-available",
+        input: { action: "plugin:linear:linear.get_issue", params: { id: "ENG-1" } },
+        output: {
+          ok: true,
+          action: "plugin:linear:linear.get_issue",
+          result: { title: "Example" },
+          automaticApproval: { reason: "routine_action" },
+        },
+      } as never,
+    ],
+  };
+  render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+  expect(screen.getByText("Automatically approved")).toBeVisible();
+  await userEvent.click(screen.getByText("Automatically approved"));
+  expect(screen.getByText("Approved as a routine action within your request.")).toBeVisible();
 });

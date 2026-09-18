@@ -26,13 +26,13 @@ describe("Granola polling through the durable workflow event inbox", () => {
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
       CREATE TABLE goat.integrations (id text PRIMARY KEY, provider text, workspace_id text, user_workos_id text, status text, external_id text);
       CREATE TABLE goat.plugins (workspace_id text, owner_user_id text, name text, status text, archived_at timestamptz, events jsonb, event_modes jsonb);
-      CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text, slug text, name text, trigger text, status text, archived_at timestamptz, event_user_workos_id text, event_config jsonb, event_harness_spec jsonb, event_activated_at timestamptz, automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb);
+      CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text, slug text, name text, trigger text, status text, archived_at timestamptz, event_user_workos_id text, event_config jsonb, event_harness_spec jsonb, event_activated_at timestamptz, automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb, kind text NOT NULL DEFAULT 'workflow');
       CREATE TABLE goat.granola_sync_state (
         integration_id text PRIMARY KEY, user_workos_id text, updated_after_cursor timestamptz,
         page_cursor text, pending_updated_after_cursor timestamptz, last_polled_at timestamptz,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now()
       );
-      CREATE TABLE goat.tasks (id text PRIMARY KEY);
+      CREATE TABLE goat.tasks (id text PRIMARY KEY, agent_id text);
       CREATE TABLE goat.workflow_event_runs (
         id text PRIMARY KEY, workflow_id text REFERENCES goat.workflows(id), trigger_id text NOT NULL DEFAULT 'legacy', workspace_id text, user_workos_id text,
         workflow_slug text, workflow_name text, provider text, event_type text, delivery_id text, goal text, harness_spec jsonb, event_at timestamptz,

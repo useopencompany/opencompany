@@ -465,6 +465,22 @@ describe("createExternalEngineProjector", () => {
     );
   });
 
+  it("cancels the backing approval when a pending ACP question is abandoned", async () => {
+    mocks.execute.mockResolvedValue({ rows: [] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
+      redact: (value) => value,
+    });
+
+    await projector.cancelPendingInteractions();
+
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toContainEqual(
+      expect.stringMatching(
+        /UPDATE goat\.run_approvals AS approval[\s\S]*approval\.kind IN \('acp_permission', 'engine_questions'\)/,
+      ),
+    );
+  });
+
   it("persists and resolves an ACP permission through run_approvals", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const normalizer = createAcpEventNormalizer();

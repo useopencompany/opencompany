@@ -276,7 +276,7 @@ export type ActionExecutionResponse<
         availableSources?: Source[];
       };
     }
-) & { budget?: ActionCallBudget };
+) & { budget?: ActionCallBudget; automaticApproval?: { reason: string } };
 
 export type ActionGatewayResponse = (
   | {
@@ -312,7 +312,7 @@ export type ActionGatewayResponse = (
         availableSources?: string[];
       };
     }
-) & { budget?: ActionCallBudget };
+) & { budget?: ActionCallBudget; automaticApproval?: { reason: string } };
 
 // Compatibility exports for rolling deploys and older callers. New shared
 // action code uses the harness-neutral names above.

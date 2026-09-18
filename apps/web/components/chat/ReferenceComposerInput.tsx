@@ -37,6 +37,7 @@ export type ComposerHighlight = {
 
 function nodeText(node: ProseMirrorNode): string {
   if (node.isText) return node.text ?? "";
+  if (node.type.name === "hardBreak") return "\n";
   if (node.type.name === "contextReference")
     return node.attrs.raw ?? referenceMarkdown(node.attrs as { href: string; label: string });
   let text = "";
@@ -46,19 +47,26 @@ function nodeText(node: ProseMirrorNode): string {
   return text;
 }
 
+function appendText(content: JSONContent[], value: string) {
+  const lines = value.split("\n");
+  lines.forEach((line, index) => {
+    if (index > 0) content.push({ type: "hardBreak" });
+    if (line) content.push({ type: "text", text: line });
+  });
+}
+
 export function composerDocument(value: string): JSONContent {
   const content: JSONContent[] = [];
   let offset = 0;
   for (const reference of contextReferenceRanges(value)) {
-    if (reference.start > offset)
-      content.push({ type: "text", text: value.slice(offset, reference.start) });
+    if (reference.start > offset) appendText(content, value.slice(offset, reference.start));
     content.push({
       type: "contextReference",
       attrs: { href: reference.href, label: reference.label, raw: reference.raw },
     });
     offset = reference.end;
   }
-  if (offset < value.length) content.push({ type: "text", text: value.slice(offset) });
+  if (offset < value.length) appendText(content, value.slice(offset));
   return { type: "doc", content };
 }
 
@@ -85,6 +93,14 @@ function editorPosition(doc: ProseMirrorNode, offset: number) {
 }
 
 const COMPOSER_HIGHLIGHTS = new PluginKey<ComposerHighlight[]>("composerHighlights");
+const ComposerHardBreak = TiptapNode.create({
+  name: "hardBreak",
+  group: "inline",
+  inline: true,
+  selectable: false,
+  parseHTML: () => [{ tag: "br" }],
+  renderHTML: () => ["br"],
+});
 const ComposerBehavior = Extension.create({
   name: "composerBehavior",
   addProseMirrorPlugins() {
@@ -151,6 +167,7 @@ export function ReferenceComposerInput({
       extensions: [
         TiptapNode.create({ name: "doc", topNode: true, content: "inline*" }),
         TiptapNode.create({ name: "text", group: "inline" }),
+        ComposerHardBreak,
         ContextReferenceNode,
         UndoRedo,
         ComposerBehavior,
@@ -168,7 +185,11 @@ export function ReferenceComposerInput({
         },
         handleKeyDown(view, event) {
           if (event.key === "Enter" && event.shiftKey && !event.isComposing) {
-            view.dispatch(view.state.tr.insertText("\n"));
+            view.dispatch(
+              view.state.tr
+                .replaceSelectionWith(view.state.schema.node("hardBreak"))
+                .scrollIntoView(),
+            );
             return true;
           }
           return false;

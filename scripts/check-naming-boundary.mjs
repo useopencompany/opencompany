@@ -32,9 +32,10 @@ const protectedCompatibilityTokens = [
   // 870 = 1185 - the goat_brain_*, goat_gmail_message_events, goat_linear_issue_events,
   // goat_hubspot_object_events, goat_attio_object_events, goat_slack_message_events,
   // goat_github_pull_request_events, goat_fathom_* and goat_google_drive_* identifiers that left
-  // with the legacy Brain and its ingestion spine (drizzle/0300_retire_legacy_brain.sql).
+  // with the legacy Brain and its ingestion spine (drizzle/0304_retire_legacy_brain.sql).
   ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 870],
-  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
+  // Includes the composer's remembered reasoning-effort and per-engine model storage keys.
+  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 28],
   // 4 = the retained source-provider check constraint plus its three stored-value call sites; the
   // rest were Brain capture and import paths.
   ["chat source-provider values", /["']goat-chat["']/gu, 4],
@@ -195,11 +196,17 @@ const addedEnvKeys = [
   "MESSAGES_API_KEY",
   "MESSAGES_LINE_HANDLE",
   "MESSAGES_WEBHOOK_SECRET",
+  "KAPSO_API_KEY",
+  "KAPSO_PHONE_NUMBER_ID",
+  "KAPSO_WEBHOOK_SECRET",
+  "WHATSAPP_LINE_HANDLE",
   "BUN_CONFIG_MAX_HTTP_REQUESTS",
   "DOCS_VERCEL_PROJECT_ID",
   "ELECTRIC_AUTH_MODE",
   "ELECTRIC_REPLICATION_STREAM_ID",
   "ELECTRIC_STORAGE_DIR",
+  "EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN",
+  "EXPO_PUBLIC_WORKOS_CLIENT_ID",
   "GITHUB_USER_APP_CLIENT_ID",
   "GITHUB_USER_APP_CLIENT_SECRET",
   "GITHUB_USER_APP_SLUG",

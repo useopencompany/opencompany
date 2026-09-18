@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^2.0.44",
-    "@ai-sdk/react": "4.0.95",
+    "@ai-sdk/react": "4.0.109",
     "@browserbasehq/sdk": "^2.19.1",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/lang-css": "^6.3.1",
@@ -63,7 +63,7 @@
     "@workos-inc/node": "^10.13.0",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "ai": "^7.0.92",
+    "ai": "^7.0.106",
     "codemirror": "^6.0.2",
     "cron-parser": "^5.10.0",
     "dotenv": "^17.4.2",

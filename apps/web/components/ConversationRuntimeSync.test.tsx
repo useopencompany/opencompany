@@ -1,5 +1,7 @@
+import type { EngineRuntimeStatus } from "@opencompany/protocol";
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { EngineSandboxState } from "@/lib/engine-sandbox-state";
 import { ConversationRuntimeSync } from "./ConversationRuntimeSync";
 
 const mocks = vi.hoisted(() => ({
@@ -11,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   },
   collection: {},
   getEngineSession: vi.fn(),
-  getRuntimeStatus: vi.fn(async () => null),
+  getRuntimeStatus: vi.fn<() => Promise<EngineRuntimeStatus | null>>(async () => null),
 }));
 
 vi.mock("@tanstack/react-db", () => ({
@@ -38,11 +40,12 @@ describe("ConversationRuntimeSync", () => {
     mocks.liveQuery.isLoading = false;
     mocks.liveQuery.isError = false;
     mocks.getEngineSession.mockReturnValue(mocks.collection);
+    mocks.getRuntimeStatus.mockResolvedValue(null);
   });
 
   it("live-syncs only the viewed Conversation runtime through completion", async () => {
     const setRuntime = vi.fn();
-    const setSandboxStatus = vi.fn();
+    const setSandboxState = vi.fn();
     const lastSyncedRuntime = () => {
       const update = setRuntime.mock.lastCall?.[0];
       return typeof update === "function" ? update(null) : update;
@@ -62,7 +65,7 @@ describe("ConversationRuntimeSync", () => {
       <ConversationRuntimeSync
         conversationId="conversation_1"
         setRuntime={setRuntime}
-        setSandboxStatus={setSandboxStatus}
+        setSandboxState={setSandboxState}
         pollSandbox={false}
       />,
     );
@@ -91,7 +94,7 @@ describe("ConversationRuntimeSync", () => {
       <ConversationRuntimeSync
         conversationId="conversation_1"
         setRuntime={setRuntime}
-        setSandboxStatus={setSandboxStatus}
+        setSandboxState={setSandboxState}
         pollSandbox={false}
       />,
     );
@@ -114,11 +117,56 @@ describe("ConversationRuntimeSync", () => {
       <ConversationRuntimeSync
         conversationId="conversation_1"
         setRuntime={setRuntime}
-        setSandboxStatus={vi.fn()}
+        setSandboxState={vi.fn()}
         pollSandbox={false}
       />,
     );
 
     expect(setRuntime).not.toHaveBeenCalled();
+  });
+
+  it("polls E2B without waiting for the Electric runtime projection", async () => {
+    mocks.getRuntimeStatus.mockResolvedValue("running");
+    const setSandboxState = vi.fn();
+
+    render(
+      <ConversationRuntimeSync
+        conversationId="conversation_1"
+        setRuntime={vi.fn()}
+        setSandboxState={setSandboxState}
+        pollSandbox
+      />,
+    );
+
+    await waitFor(() =>
+      expect(mocks.getRuntimeStatus).toHaveBeenCalledWith("conversation_1", expect.anything()),
+    );
+    const update = setSandboxState.mock.lastCall?.[0] as (
+      previous: EngineSandboxState,
+    ) => EngineSandboxState;
+    expect(update({ kind: "pending" })).toEqual({ kind: "resolved", status: "running" });
+  });
+
+  it("reports an unavailable check instead of inventing a running sandbox", async () => {
+    mocks.getRuntimeStatus.mockRejectedValue(new Error("runner unavailable"));
+    const setSandboxState = vi.fn();
+
+    render(
+      <ConversationRuntimeSync
+        conversationId="conversation_1"
+        setRuntime={vi.fn()}
+        setSandboxState={setSandboxState}
+        pollSandbox
+      />,
+    );
+
+    await waitFor(() => expect(setSandboxState).toHaveBeenCalled());
+    const update = setSandboxState.mock.lastCall?.[0] as (
+      previous: EngineSandboxState,
+    ) => EngineSandboxState;
+    expect(update({ kind: "resolved", status: "sleeping" })).toEqual({
+      kind: "unavailable",
+      lastKnownStatus: "sleeping",
+    });
   });
 });

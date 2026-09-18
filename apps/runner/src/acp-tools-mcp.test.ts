@@ -241,6 +241,51 @@ describe("runner ACP tools MCP", () => {
     },
   );
 
+  it("dispatches an automatically approved task using its reviewed invocation", async () => {
+    const deps = {
+      executeAction: vi.fn(async () => ({
+        ok: true as const,
+        action: "plugin:gmail:gmail.create_draft",
+        result: { draftId: "draft" },
+      })),
+      evaluateApproval: vi.fn(async () => ({
+        ok: true as const,
+        needsApproval: false,
+        automaticApproval: { reason: "routine_action" },
+      })),
+      requestApproval: vi.fn(),
+      waitForApproval: vi.fn(),
+      resolveApproval: vi.fn(),
+      taskActions: { requests: vi.fn(async () => []), stage: vi.fn(async () => true) },
+    };
+    await executeExternalActionWithApproval({
+      request: {
+        operation: "execute",
+        sessionId: capability.codexChatSessionId,
+        turnId: capability.codexChatTurnId,
+        invocationId: "http-request",
+        action: "plugin:gmail:gmail.create_draft",
+        params: { subject: "Ready" },
+      },
+      signal: new AbortController().signal,
+      capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+      authorizedContext: { ...authorized, taskConversation: true },
+      authorizeOperation: async () => authorized,
+      dependencies: deps,
+    });
+    const checked = deps.evaluateApproval.mock.calls[0] as unknown as [
+      { request: { invocationId: string } },
+    ];
+    expect(deps.executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ invocationId: checked[0].request.invocationId }),
+      }),
+    );
+    expect(checked[0].request.invocationId).toMatch(/^task_action_/);
+    expect(deps.taskActions.stage).not.toHaveBeenCalled();
+    expect(deps.waitForApproval).not.toHaveBeenCalled();
+  });
+
   it("rejects a missing sandbox capability", async () => {
     const app = Fastify();
     apps.push(app);
@@ -868,4 +913,74 @@ describe("runner ACP tools MCP", () => {
       await client.close();
     }
   });
+});
+
+describe("workflow authoring over MCP", () => {
+  it.each([
+    [false, true],
+    [true, true],
+    [false, false],
+  ])(
+    "only exposes authoring in authorized interactive chat (task=%s, allowed=%s)",
+    async (taskConversation, automationToolsEnabled) => {
+      let currentTask = taskConversation;
+      let currentAllowed = automationToolsEnabled;
+      const executeWorkflowCommand = vi.fn(async () => ({ ok: true, operation: "created" }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize: async () => ({
+          ...authorized,
+          taskConversation: currentTask,
+          automationToolsEnabled: currentAllowed,
+        }),
+        executeWorkflowCommand,
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP server");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "workflow-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.some((tool) => tool.name === "workflows")).toBe(
+          !taskConversation && automationToolsEnabled,
+        );
+        if (!taskConversation && automationToolsEnabled) {
+          const result = await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Draft" } },
+          });
+          expect(result.isError).not.toBe(true);
+          expect(executeWorkflowCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+              actorId: "user_1",
+              workspaceId: "workspace_1",
+              toolInput: { command: "create", name: "Draft" },
+              idempotencyKey: expect.stringMatching(/^agent-workflow:/),
+            }),
+          );
+          currentAllowed = false;
+          await client.callTool({ name: "workflows", arguments: { command: "list" } });
+          expect(executeWorkflowCommand).toHaveBeenCalledOnce();
+          currentAllowed = true;
+          currentTask = true;
+          await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Blocked" } },
+          });
+          expect(executeWorkflowCommand).toHaveBeenCalledOnce();
+        }
+      } finally {
+        await client.close();
+      }
+    },
+  );
 });

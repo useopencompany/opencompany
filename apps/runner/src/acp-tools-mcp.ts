@@ -8,7 +8,10 @@ import {
   mcpInputSchema,
   registerExternalEngineServiceTools,
 } from "@opencompany/agent/application/external-engine-tools";
-import { workspaceSkillIdempotencyKey } from "@opencompany/agent/application/host-tools";
+import {
+  workflowCommandIdempotencyKey,
+  workspaceSkillIdempotencyKey,
+} from "@opencompany/agent/application/host-tools";
 import {
   executeActionGateway,
   executeActionHostGateway,
@@ -24,6 +27,11 @@ import {
 import { mcpInvocationId } from "@opencompany/agent/mcp-invocation";
 import { registerWikiTool } from "@opencompany/agent/mcp-server";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
+import {
+  parseWorkflowToolInput,
+  WORKFLOWS_INPUT_SCHEMA,
+  WORKFLOWS_TOOL_DESCRIPTION,
+} from "@opencompany/agent/workflow-tool";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
@@ -48,6 +56,7 @@ import { createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { executeApiWikiCommand } from "./api-wiki-client";
+import { executeApiWorkflowCommand } from "./api-workflow-client";
 import { publishExternalEngineChatArtifact } from "./chat-artifacts";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
@@ -80,6 +89,7 @@ type AcpToolsMcpDependencies = {
   executeSkillTool: (
     input: Omit<Parameters<typeof executeWorkspaceSkillToolForActor>[0], "db">,
   ) => ReturnType<typeof executeWorkspaceSkillToolForActor>;
+  executeWorkflowCommand: typeof executeApiWorkflowCommand;
   executeWikiCommand: typeof executeApiWikiCommand;
   rateLimitMax: number;
 };
@@ -99,6 +109,7 @@ const defaultDependencies: AcpToolsMcpDependencies = {
   resolveApproval: (input) => resolveActionApproval({ ...input, db: getDb() }),
   publishArtifact: publishExternalEngineChatArtifact,
   executeSkillTool: (input) => executeWorkspaceSkillToolForActor({ ...input, db: getDb() }),
+  executeWorkflowCommand: executeApiWorkflowCommand,
   executeWikiCommand: executeApiWikiCommand,
   rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
 };
@@ -205,6 +216,42 @@ export function registerAcpToolsMcpRoute(
               },
               (query) => getDb().execute(query),
             );
+            return { content: [{ type: "text", text: JSON.stringify(result) }] };
+          },
+        );
+      }
+      if (
+        authorizedContext.taskConversation === false &&
+        authorizedContext.automationToolsEnabled
+      ) {
+        server.registerTool(
+          "workflows",
+          {
+            description: WORKFLOWS_TOOL_DESCRIPTION,
+            inputSchema: mcpInputSchema(WORKFLOWS_INPUT_SCHEMA),
+          },
+          async (raw, extra) => {
+            const current = await authorizeOperation();
+            if (!current || current.taskConversation !== false || !current.automationToolsEnabled)
+              throw new Error(
+                "Workflow management is only available to workspace admins in main chat.",
+              );
+            const args = parseWorkflowToolInput(raw);
+            const invocation = mcpInvocationId("workflows", extra.sessionId, extra.requestId);
+            const result = await resolved.executeWorkflowCommand({
+              origin: env.apiOrigin,
+              token: env.apiInternalToken,
+              actorId: current.actorId,
+              workspaceId: current.workspaceId,
+              toolInput: args,
+              // One durable run reservation per turn, even across MCP reconnects. The
+              // canonical task service rejects a second workflow with the same key.
+              idempotencyKey:
+                args.command === "run"
+                  ? `workflow-run:${capability.codexChatTurnId}`
+                  : workflowCommandIdempotencyKey(capability.codexChatTurnId, invocation, args),
+              signal: request.signal,
+            });
             return { content: [{ type: "text", text: JSON.stringify(result) }] };
           },
         );
@@ -380,7 +427,7 @@ export async function executeExternalActionWithApproval(input: {
   if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
   if (!approval.needsApproval) {
-    input.request = originalRequest;
+    if (!approval.automaticApproval) input.request = originalRequest;
     return dispatch();
   }
 

@@ -6,6 +6,7 @@ out
 .neon
 *.log
 *.tsbuildinfo
+packages/protocol/dist/
 coverage
 playwright-report
 test-results

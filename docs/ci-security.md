@@ -145,6 +145,14 @@ release tooling. The Policy job runs the same audit for PRs and production verif
 for any reported advisory or an unavailable advisory service. Dependency review separately rejects
 new high- and critical-severity vulnerabilities. Neither check replaces the other.
 
+`scripts/audit-dependencies.mjs` wraps `bun audit` so a transitive advisory with no safe upgrade
+cannot force the whole gate off. Each exception is a single GHSA recorded in that script with the
+reason it cannot be fixed, the condition that lifts it, and an expiry date; an expired exception
+fails the audit, and so does an exception whose advisory has stopped being reported, so a fixed
+dependency cannot leave a silent hole behind. Prefer an override or an upstream upgrade. Add an
+exception only when no released version is both patched and compatible, and record why in the
+script rather than in a commit message.
+
 Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
 These overrides update vulnerable transitive copies while preserving compatible major versions for
 other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;
@@ -154,5 +162,12 @@ The Rolldown override keeps Vite's resolved bundler within its declared version 
 dependency graph is re-resolved. Compatibility tests check that range and the telemetry SDK's
 core dependency, along with the affected desktop and Vercel APIs.
 
-Keep the audit free of blanket ignores. When an upstream release removes a vulnerable pin, remove
-the corresponding override after verifying the full audit and affected CLI/runtime behavior.
+Keep the audit free of blanket ignores; the only permitted suppressions are the per-GHSA exceptions
+described above. When an upstream release removes a vulnerable pin, remove the corresponding
+override or exception after verifying the full audit and affected CLI/runtime behavior.
+
+Check that an override is actually loadable before reaching for one. `bun audit fix` will happily
+select a patched release whose module format the dependent cannot consume: `decode-uri-component`
+is patched only in 0.5.0, which is ESM-only, while `expo-router`'s `query-string@7` is CommonJS and
+`require()`s it. That override type-checks and audits clean, then breaks URL parsing at runtime in a
+job no CI step boots. Cases like that belong in the exception list, not in `overrides`.
