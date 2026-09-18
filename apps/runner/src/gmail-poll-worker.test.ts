@@ -8,8 +8,6 @@ const workerMocks = vi.hoisted(() => ({
   ensureSyncState: vi.fn(),
   claimSyncState: vi.fn(),
   updateSyncCursor: vi.fn(),
-  insertMessageEvents: vi.fn(),
-  listBrainRoutes: vi.fn(),
   listWorkflowEventTriggerRoutes: vi.fn(),
   enqueueWorkflowEventRuns: vi.fn(),
   fetchProfile: vi.fn(),
@@ -25,8 +23,6 @@ vi.mock("@opencompany/db/gmail", async (importOriginal) => ({
   ensureGmailSyncState: workerMocks.ensureSyncState,
   claimGmailSyncState: workerMocks.claimSyncState,
   updateGmailSyncCursor: workerMocks.updateSyncCursor,
-  insertGmailMessageEvents: workerMocks.insertMessageEvents,
-  listEnabledGmailBrainSourceRoutes: workerMocks.listBrainRoutes,
 }));
 vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -105,10 +101,8 @@ beforeEach(() => {
     emailAddress: candidate.accountEmail,
     historyId: "100",
   });
-  workerMocks.listBrainRoutes.mockResolvedValue([]);
   workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([]);
   workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
-  workerMocks.insertMessageEvents.mockResolvedValue(0);
   workerMocks.fetchBodyText.mockResolvedValue("Can we move to annual billing?");
   workerMocks.listHistory.mockResolvedValue({
     messages: [{ id: "msg_1", threadId: "thread_1", labelIds: ["INBOX"] }],
@@ -119,7 +113,7 @@ beforeEach(() => {
 });
 
 describe("Gmail polling routes", () => {
-  it("polls Brain targets without retired Wiki sources", async () => {
+  it("polls accounts whose workflow event trigger is active", async () => {
     let query: SQL | undefined;
     const db = {
       execute: vi.fn(async (value: SQL) => {
@@ -131,9 +125,9 @@ describe("Gmail polling routes", () => {
     await expect(listGmailPollCandidates(db as never)).resolves.toEqual([]);
 
     const compiled = new PgDialect().sqlToQuery(query!);
-    expect(compiled.sql).toContain("FROM goat.brain_sources bs");
+    expect(compiled.sql).not.toContain("goat.brain_sources");
     expect(compiled.sql).not.toContain("goat.wiki_sources");
-    expect(compiled.sql).toContain("bs.enabled = true");
+    expect(compiled.sql).toContain("FROM goat.workflows w");
   });
 
   it("also polls an account whose only consumer is an active event trigger", async () => {
@@ -161,7 +155,7 @@ describe("Gmail workflow event routing", () => {
   it("starts one run per matching route and carries the body into the goal context", async () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([route()]);
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 1 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 1 });
 
     const enqueued = workerMocks.enqueueWorkflowEventRuns.mock.calls[0]![0];
     expect(enqueued.deliveryId).toBe("message:integration_1:msg_1");
@@ -173,7 +167,7 @@ describe("Gmail workflow event routing", () => {
   it("ignores a route bound to a different Gmail event", async () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([route({ event: "email.sent" })]);
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
@@ -181,7 +175,7 @@ describe("Gmail workflow event routing", () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([route()]);
     workerMocks.fetchMetadata.mockResolvedValue(metadata({ labelIds: ["SENT", "INBOX"] }));
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
@@ -190,12 +184,12 @@ describe("Gmail workflow event routing", () => {
       route({ filters: { label: { id: "Label_2" } } }),
     ]);
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
 
     workerMocks.fetchMetadata.mockResolvedValue(
       metadata({ labelIds: ["INBOX", "Label_2", "UNREAD"] }),
     );
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 1 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 1 });
   });
 
   it("does not replay a backlog older than a day", async () => {
@@ -204,7 +198,7 @@ describe("Gmail workflow event routing", () => {
       metadata({ internalDate: new Date("2026-09-14T12:00:00.000Z") }),
     );
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
@@ -223,7 +217,7 @@ describe("Gmail workflow event routing", () => {
       metadata({ id: messageId }),
     );
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 25 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 25 });
     expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledTimes(25);
     // The cursor still advances, because ingestion shares it.
     expect(workerMocks.updateSyncCursor).toHaveBeenCalledWith(
@@ -239,10 +233,9 @@ describe("Gmail workflow event routing", () => {
       expired: false,
     });
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
 
     expect(workerMocks.listWorkflowEventTriggerRoutes).not.toHaveBeenCalled();
-    expect(workerMocks.listBrainRoutes).not.toHaveBeenCalled();
     // The cursor still advances past the empty window.
     expect(workerMocks.updateSyncCursor).toHaveBeenCalledWith(
       expect.objectContaining({ historyId: "200" }),
@@ -252,7 +245,7 @@ describe("Gmail workflow event routing", () => {
 
   it("reads no message metadata once the consumer that asked for the poll is gone", async () => {
     // Both reads return nothing: the trigger or source the candidate query matched was removed.
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 0 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 0 });
 
     expect(workerMocks.fetchMetadata).not.toHaveBeenCalled();
     expect(workerMocks.updateSyncCursor).toHaveBeenCalledWith(
@@ -274,30 +267,8 @@ describe("Gmail workflow event routing", () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([route()]);
     workerMocks.fetchBodyText.mockResolvedValue(null);
 
-    await expect(poll()).resolves.toEqual({ buffered: 0, workflowRuns: 1 });
+    await expect(poll()).resolves.toEqual({ workflowRuns: 1 });
     const enqueued = workerMocks.enqueueWorkflowEventRuns.mock.calls[0]![0];
     expect(enqueued.context.lines.join("\n")).toContain("Can we move to annual");
-  });
-});
-
-describe("Gmail ingestion buffering", () => {
-  it("buffers nothing for an event-only account with no enabled brain source", async () => {
-    workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([route()]);
-
-    await poll();
-
-    expect(workerMocks.insertMessageEvents).toHaveBeenCalledWith([], expect.anything());
-  });
-
-  it("still buffers for ingestion when a brain source is enabled", async () => {
-    workerMocks.listBrainRoutes.mockResolvedValue([
-      { integrationId: candidate.integrationId, brainRef: "brain_1", config: {} },
-    ]);
-    workerMocks.insertMessageEvents.mockResolvedValue(1);
-
-    await expect(poll()).resolves.toEqual({ buffered: 1, workflowRuns: 0 });
-    const inserts = workerMocks.insertMessageEvents.mock.calls[0]![0];
-    expect(inserts).toHaveLength(1);
-    expect(inserts[0]).toMatchObject({ messageId: "msg_1", direction: "received" });
   });
 });

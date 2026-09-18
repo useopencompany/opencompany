@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import {
-  brainSources,
-  type GmailMessageDirection,
-  gmailMessageEvents,
-  gmailSyncState,
-} from "./product-schema";
+import { type GmailMessageDirection, gmailMessageEvents, gmailSyncState } from "./product-schema";
 import type { WorkflowEventContext } from "./workflow-event-routes";
 
 type DbLike = any;
@@ -21,29 +16,13 @@ export type GmailEventRef = {
 
 export const GMAIL_INSTRUCTIONS_MAX_LENGTH = 2000;
 
-// The routing contract between the source editor, the poll worker, and the
-// flush worker: buffered messages are ingested into a brain only when their
-// direction matches the enabled brain-source event selection; `instructions`
-// is the owner's free-form tuning prompt the ingest agent applies when judging
-// what is brain-worthy.
-export type GmailBrainSourceConfig = {
-  events?: GmailEventRef[];
-  instructions?: string;
-};
-
-export type GmailBrainSourceRoute = {
-  integrationId: string;
-  brainRef: string;
-  config: GmailBrainSourceConfig;
-};
-
 export type GmailMessageEventInsert = {
   integrationId: string;
   userWorkosId: string;
   threadId: string;
   messageId: string;
-  // RFC822 Message-ID header — the cross-mailbox identity used for
-  // cross-member brain dedup; null when the header is absent.
+  // RFC822 Message-ID header — the cross-mailbox identity; null when the
+  // header is absent.
   rfc822MessageId?: string | null;
   direction: GmailMessageDirection;
   subject?: string | null;
@@ -61,88 +40,6 @@ export type GmailSyncStateRow = {
 
 export function gmailEventTypeForDirection(direction: GmailMessageDirection): GmailEventType {
   return direction === "sent" ? "email_sent" : "email_received";
-}
-
-export function parseGmailBrainSourceConfig(value: unknown): GmailBrainSourceConfig {
-  return parseGmailSourceConfig(value);
-}
-
-function parseGmailSourceConfig(value: unknown): GmailBrainSourceConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  const record = value as Record<string, unknown>;
-  const events = parseEventRefs(record.events);
-  const instructions = sanitizeGmailInstructions(record.instructions);
-  return {
-    ...(events ? { events } : {}),
-    ...(instructions ? { instructions } : {}),
-  };
-}
-
-export function sanitizeGmailInstructions(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  return trimmed.slice(0, GMAIL_INSTRUCTIONS_MAX_LENGTH);
-}
-
-export function gmailSelectedEventTypes(
-  config: GmailBrainSourceConfig,
-): Set<GmailEventType> | null {
-  if (!config.events) return null;
-  return new Set(config.events.map((ref) => ref.id));
-}
-
-export function gmailRouteMatchesEvent(config: GmailBrainSourceConfig, eventType: GmailEventType) {
-  const selected = gmailSelectedEventTypes(config);
-  return selected === null || selected.has(eventType);
-}
-
-export async function listEnabledGmailBrainSourceRoutes(
-  integrationIds: readonly string[],
-  db: DbLike = getDb(),
-): Promise<GmailBrainSourceRoute[]> {
-  if (integrationIds.length === 0) return [];
-  const rows = await db
-    .select({
-      integrationId: brainSources.integrationId,
-      brainRef: brainSources.brainId,
-      config: brainSources.config,
-    })
-    .from(brainSources)
-    .where(
-      and(
-        eq(brainSources.provider, "gmail"),
-        eq(brainSources.enabled, true),
-        inArray(brainSources.integrationId, [...integrationIds]),
-      ),
-    );
-
-  return rows.map((row: { integrationId: string; brainRef: string; config: unknown }) => ({
-    integrationId: row.integrationId,
-    brainRef: row.brainRef,
-    config: parseGmailBrainSourceConfig(row.config),
-  }));
-}
-
-// Live lookup at ingest time so instruction edits apply to already-queued jobs
-// (the job content hash covers only the normalized item, never instructions).
-export async function getGmailBrainSourceInstructions(
-  input: { integrationId: string; brainRef: string },
-  db: DbLike = getDb(),
-): Promise<string | null> {
-  const rows = await db
-    .select({ config: brainSources.config })
-    .from(brainSources)
-    .where(
-      and(
-        eq(brainSources.provider, "gmail"),
-        eq(brainSources.brainId, input.brainRef),
-        eq(brainSources.integrationId, input.integrationId),
-      ),
-    )
-    .limit(1);
-  if (rows.length === 0) return null;
-  return parseGmailBrainSourceConfig(rows[0]?.config).instructions ?? null;
 }
 
 export async function insertGmailMessageEvents(

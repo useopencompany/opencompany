@@ -64,8 +64,6 @@ export type TaskToolName =
   | "github_shell"
   | "github_status"
   | "github_open_pull_request"
-  | "goat_brain"
-  | "save_to_brain"
   | "web_search"
   | "web_fetch"
   | "list_actions"
@@ -99,7 +97,7 @@ export type HarnessSpec = {
   tools: TaskToolName[];
   skills: TaskSkillId[];
   maxModelSteps: number;
-  resultMode: "assistant_final" | "brain_markdown_report";
+  resultMode: "assistant_final";
   systemBlocks?: string[];
   workflow?: {
     id: string;

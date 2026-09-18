@@ -53,7 +53,6 @@ const serverApiErrorMessageMock = vi.mocked(serverApiErrorMessage);
 const activation = {
   workspaceId: "goat_ws_new",
   organizationId: "org_new",
-  brainId: null,
   createdByCaller: true,
 };
 
@@ -74,7 +73,6 @@ describe("opencompany onboarding API adapters", () => {
     const state = {
       onboarding: null,
       workspace: null,
-      activeBrainId: null,
     };
     mocks.getState.mockResolvedValue(Response.json({ data: state }));
     await expect(getOnboardingState()).resolves.toEqual(state);
@@ -94,7 +92,6 @@ describe("opencompany onboarding API adapters", () => {
     await expect(saveOnboardingWorkspaceAction({ name: "  Analytical Co  " })).resolves.toEqual({
       ok: true,
       workspaceId: "goat_ws_new",
-      brainRef: null,
     });
     expect(mocks.saveWorkspace).toHaveBeenCalledWith({
       json: {
@@ -106,7 +103,6 @@ describe("opencompany onboarding API adapters", () => {
     expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
-      brainId: null,
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
   });

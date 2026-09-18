@@ -23,7 +23,7 @@ export const MAX_TOP_UP_USD_CENTS = 100_000;
 // credits manually after reviewing spend.
 export const AUTO_REFILL_MONTHLY_MAX_USD_CENTS = 100_000;
 
-// Billing v6 charges usage at real cost. Brain ingestion is now only the model,
+// Billing v6 charges usage at real cost. Ingestion is now only the model,
 // capability, and sandbox COGS recorded elsewhere; no flat per-item platform
 // fee is added.
 export const INGEST_ITEM_FEE_USD_MICROS = 0;
@@ -54,7 +54,7 @@ export function calendarMonthWindow(now: Date) {
 
 export const WIKI_INGEST_MODEL = "deepseek/deepseek-v4-flash";
 
-// Brain ingestion model tiers: both are metered (model cost + fee); "frontier"
+// Ingestion model tiers: both are metered (model cost + fee); "frontier"
 // just runs a more expensive model.
 //
 // Basic is Haiku 4.5, not an open-source model: kimi-k2.6's per-token discount

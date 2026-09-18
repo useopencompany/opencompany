@@ -37,7 +37,7 @@ export type GmailMessageMetadata = {
   to: string | null;
   cc: string | null;
   // RFC822 Message-ID header — the cross-mailbox identity used for
-  // cross-member brain dedup.
+  // cross-member dedup.
   rfc822MessageId: string | null;
   snippet: string | null;
   internalDate: Date | null;

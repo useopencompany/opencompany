@@ -1,18 +1,6 @@
 "use client";
 
 import {
-  type BrainDocumentReadModel,
-  BrainDocumentReadModelSchema,
-  type BrainEdgeReadModel,
-  BrainEdgeReadModelSchema,
-  type BrainFolderReadModel,
-  BrainFolderReadModelSchema,
-  type BrainImportProviderSummary,
-  BrainImportRunReadModelSchema,
-  type BrainImportRunStatus,
-  BrainIngestJobReadModelSchema,
-  type BrainTimelineReadModel,
-  BrainTimelineReadModelSchema,
   type WikiPageReadModel,
   WikiPageReadModelSchema,
   type WikiTimelineReadModel,
@@ -33,82 +21,15 @@ import {
   updateWikiPageRequest,
 } from "./headless-knowledge-wiki-api";
 
-const brainsById = new Map<string, ReturnType<typeof createBrainCollections>>();
 const wikisById = new Map<string, ReturnType<typeof createWikiCollections>>();
-const wikiImportRunsByWorkspace = new Map<
-  string,
-  ReturnType<typeof createWikiImportRunCollection>
->();
-
-function shapeOptions(readModel: string, resourceId?: { brainId: string } | { wikiId: string }) {
-  const query = !resourceId
-    ? ""
-    : "brainId" in resourceId
-      ? `?brainId=${encodeURIComponent(resourceId.brainId)}`
-      : `?wikiId=${encodeURIComponent(resourceId.wikiId)}`;
+function shapeOptions(readModel: string, resourceId?: { wikiId: string }) {
+  const query = resourceId ? `?wikiId=${encodeURIComponent(resourceId.wikiId)}` : "";
   return {
     url: `${headlessChatApiBaseUrl()}/v1/read-models/${readModel}${query}`,
     fetchClient: createHeadlessChatApiFetch(),
   };
 }
 
-function createBrainCollections(brainId: string) {
-  const scope = encodeURIComponent(brainId);
-  return {
-    folders: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-folders:v1:${scope}`,
-        schema: BrainFolderReadModelSchema,
-        shapeOptions: shapeOptions("brain-folders-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-    documents: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-documents:v1:${scope}`,
-        schema: BrainDocumentReadModelSchema,
-        shapeOptions: shapeOptions("brain-documents-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-    timeline: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-timeline:v1:${scope}`,
-        schema: BrainTimelineReadModelSchema,
-        shapeOptions: shapeOptions("brain-timeline-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-    edges: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-edges:v1:${scope}`,
-        schema: BrainEdgeReadModelSchema,
-        shapeOptions: shapeOptions("brain-edges-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-    ingestJobs: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-ingest-jobs:v1:${scope}`,
-        schema: BrainIngestJobReadModelSchema,
-        shapeOptions: shapeOptions("brain-ingest-jobs-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-    importRuns: createCollection(
-      electricCollectionOptions({
-        id: `headless-brain-import-runs:v1:${scope}`,
-        schema: BrainImportRunReadModelSchema,
-        shapeOptions: shapeOptions("brain-import-runs-v1", { brainId }),
-        getKey: (row) => row.id,
-      }),
-    ),
-  };
-}
-
-// Keyed by wiki, not workspace: a workspace can hold a restricted wiki, so the
-// page and timeline shapes stream exactly one wiki and the browser never holds
-// rows from a wiki the viewer is not a member of.
 function createWikiCollections(wikiId: string) {
   const scope = encodeURIComponent(wikiId);
   const pages = createCollection(
@@ -177,19 +98,6 @@ function createWikiCollections(wikiId: string) {
     }),
   );
   return { pages, timeline };
-}
-
-// Company import runs live on goat.brain_import_runs and are workspace-level, so
-// they are not part of a wiki's collections.
-function createWikiImportRunCollection(workspaceId: string) {
-  return createCollection(
-    electricCollectionOptions({
-      id: `headless-wiki-import-runs:v1:${encodeURIComponent(workspaceId)}`,
-      schema: BrainImportRunReadModelSchema,
-      shapeOptions: shapeOptions("wiki-import-runs-v1"),
-      getKey: (row) => row.id,
-    }),
-  );
 }
 
 const wikiPageWriteChains = new Map<string, Promise<unknown>>();
@@ -262,28 +170,12 @@ function wikiDeleteRoots(mutations: Array<{ original: WikiPageReadModel }>): Wik
     });
 }
 
-export function getHeadlessBrainCollections(brainId: string) {
-  const cached = brainsById.get(brainId);
-  if (cached) return cached;
-  const collections = createBrainCollections(brainId);
-  brainsById.set(brainId, collections);
-  return collections;
-}
-
 export function getHeadlessWikiCollections(wikiId: string) {
   const cached = wikisById.get(wikiId);
   if (cached) return cached;
   const collections = createWikiCollections(wikiId);
   wikisById.set(wikiId, collections);
   return collections;
-}
-
-export function getHeadlessWikiImportRuns(workspaceId: string) {
-  const cached = wikiImportRunsByWorkspace.get(workspaceId);
-  if (cached) return cached;
-  const collection = createWikiImportRunCollection(workspaceId);
-  wikiImportRunsByWorkspace.set(workspaceId, collection);
-  return collection;
 }
 
 export type HeadlessWikiCollections = ReturnType<typeof createWikiCollections>;
@@ -305,26 +197,5 @@ export async function awaitHeadlessWikiTransactions(
   );
 }
 
-export type HeadlessBrainFolderReadModel = BrainFolderReadModel;
-export type HeadlessBrainDocumentReadModel = BrainDocumentReadModel;
-export type HeadlessBrainTimelineReadModel = BrainTimelineReadModel;
-export type HeadlessBrainEdgeReadModel = BrainEdgeReadModel;
-// Spelled out instead of z.infer because the protocol's OpenAPI-wrapped record schemas lose
-// their value types when inferred across the package boundary in this app's TS setup.
-export type HeadlessBrainImportRunReadModel = {
-  id: string;
-  status: BrainImportRunStatus;
-  companyUrl: string;
-  companyName: string | null;
-  focus: string | null;
-  sourceSelection: Record<string, { enabled: boolean }>;
-  discoverySummary: Record<string, BrainImportProviderSummary>;
-  lastError: string | null;
-  confirmedAt: string | null;
-  completedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-export type HeadlessWikiImportRunReadModel = HeadlessBrainImportRunReadModel;
 export type HeadlessWikiPageReadModel = WikiPageReadModel;
 export type HeadlessWikiTimelineReadModel = WikiTimelineReadModel;

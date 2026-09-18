@@ -101,7 +101,7 @@ export function renderCheckinEmail(input: OnboardingEmailRenderInput) {
       greeting(input.firstName),
       p("quick check-in — how are you finding it so far? any questions i can answer?"),
       p(
-        "one thing worth doing early: the brain gets a lot more useful once it has real context. two quick wins — first, connect the sources that actually matter to you (slack, gmail, linear, your docs). second, bring the opencompany mcp into wherever you already work (claude, cursor, your editor) so the brain is right there in your flow instead of a separate tab.",
+        "one thing worth doing early: the wiki gets a lot more useful once it has real context. two quick wins — first, connect the plugins that actually matter to you (slack, gmail, linear, your docs). second, bring the opencompany mcp into wherever you already work (claude, cursor, your editor) so the wiki is right there in your flow instead of a separate tab.",
       ),
       p("want a hand with either? just reply — happy to walk through it with you."),
     ],

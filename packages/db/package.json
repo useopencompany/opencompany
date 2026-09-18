@@ -104,26 +104,6 @@
       "types": "./src/repo-configs.ts",
       "default": "./src/repo-configs.ts"
     },
-    "./brain-files": {
-      "types": "./src/brain-files.ts",
-      "default": "./src/brain-files.ts"
-    },
-    "./brain-ingest": {
-      "types": "./src/brain-ingest.ts",
-      "default": "./src/brain-ingest.ts"
-    },
-    "./brain-import": {
-      "types": "./src/brain-import.ts",
-      "default": "./src/brain-import.ts"
-    },
-    "./brain-ingest-trace": {
-      "types": "./src/brain-ingest-trace.ts",
-      "default": "./src/brain-ingest-trace.ts"
-    },
-    "./brain-read": {
-      "types": "./src/brain-read.ts",
-      "default": "./src/brain-read.ts"
-    },
     "./wiki": {
       "types": "./src/wiki.ts",
       "default": "./src/wiki.ts"
@@ -140,21 +120,9 @@
       "types": "./src/test-pglite.ts",
       "default": "./src/test-pglite.ts"
     },
-    "./wiki-migrate": {
-      "types": "./src/wiki-migrate.ts",
-      "default": "./src/wiki-migrate.ts"
-    },
     "./wiki-backfill": {
       "types": "./src/wiki-backfill.ts",
       "default": "./src/wiki-backfill.ts"
-    },
-    "./brain-sources": {
-      "types": "./src/brain-sources.ts",
-      "default": "./src/brain-sources.ts"
-    },
-    "./brain-event-claims": {
-      "types": "./src/brain-event-claims.ts",
-      "default": "./src/brain-event-claims.ts"
     },
     "./harness": {
       "types": "./src/harness.ts",
@@ -191,14 +159,6 @@
     "./fathom": {
       "types": "./src/fathom.ts",
       "default": "./src/fathom.ts"
-    },
-    "./google-drive": {
-      "types": "./src/google-drive.ts",
-      "default": "./src/google-drive.ts"
-    },
-    "./hubspot": {
-      "types": "./src/hubspot.ts",
-      "default": "./src/hubspot.ts"
     },
     "./attio": {
       "types": "./src/attio.ts",
@@ -248,10 +208,6 @@
       "types": "./src/pool.ts",
       "default": "./src/pool.ts"
     },
-    "./worker-admission": {
-      "types": "./src/worker-admission.ts",
-      "default": "./src/worker-admission.ts"
-    },
     "./custom-mcp-repository": {
       "types": "./src/custom-mcp-repository.ts",
       "default": "./src/custom-mcp-repository.ts"
@@ -288,7 +244,6 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",
-    "@opencompany/brain": "workspace:*",
     "@opencompany/wiki": "workspace:*",
     "@vercel/blob": "^2.8.0",
     "dotenv": "^17.4.2",

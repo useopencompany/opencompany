@@ -114,7 +114,6 @@ function CanonicalTaskDetailView({
 
   return (
     <Surface
-      key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
       defaultModel={initialChat.model}
@@ -158,7 +157,6 @@ function LegacyTaskDetailPanel({
 
   return (
     <Surface
-      key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
       defaultModel={initialChat.model}

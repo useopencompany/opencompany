@@ -1,4 +1,4 @@
-import { isValidBrainId } from "@opencompany/brain";
+import { isValidWorkflowSlug } from "@opencompany/agent/workflows";
 import { createApiClient, type ErrorEnvelope } from "@opencompany/protocol";
 
 // Temporary compatibility adapter for the pre-/v1 browser URL. The first-party web client no
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     !isRecord(body) ||
     !isRecord(body.workflow) ||
     typeof body.workflow.id !== "string" ||
-    !isValidBrainId(body.workflow.id)
+    !isValidWorkflowSlug(body.workflow.id)
   ) {
     return Response.json({ error: "A workflow is required." }, { status: 400 });
   }
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
       (mention) =>
         isRecord(mention) &&
         mention.kind === "skill" &&
-        (typeof mention.id !== "string" || !isValidBrainId(mention.id)),
+        (typeof mention.id !== "string" || !isValidWorkflowSlug(mention.id)),
     )
   ) {
     return Response.json({ error: "Invalid skill mention." }, { status: 400 });
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     isRecord(mention) &&
     mention.kind === "skill" &&
     typeof mention.id === "string" &&
-    isValidBrainId(mention.id)
+    isValidWorkflowSlug(mention.id)
       ? [mention.id]
       : [],
   );

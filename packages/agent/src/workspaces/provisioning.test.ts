@@ -1,6 +1,5 @@
 import {
   createWorkspaceForUser,
-  listAccessibleBrains,
   listWorkspacesForUser,
   newWorkspaceId,
 } from "@opencompany/db/workspaces";
@@ -10,14 +9,11 @@ import type { WorkOSClientLike } from "./workos";
 
 vi.mock("@opencompany/db/workspaces", () => ({
   createWorkspaceForUser: vi.fn(),
-  DEFAULT_BRAIN_SLUG: "general",
-  listAccessibleBrains: vi.fn(),
   listWorkspacesForUser: vi.fn(),
   newWorkspaceId: vi.fn(),
 }));
 
 const createWorkspaceForUserMock = vi.mocked(createWorkspaceForUser);
-const listAccessibleBrainsMock = vi.mocked(listAccessibleBrains);
 const listWorkspacesForUserMock = vi.mocked(listWorkspacesForUser);
 const newWorkspaceIdMock = vi.mocked(newWorkspaceId);
 
@@ -41,14 +37,12 @@ describe("provisionWorkspace", () => {
     deleteOrganization.mockResolvedValue(undefined);
     listOrganizationMemberships.mockResolvedValue({ data: [] });
     listWorkspacesForUserMock.mockResolvedValue([]);
-    listAccessibleBrainsMock.mockResolvedValue([]);
     createWorkspaceForUserMock.mockResolvedValue({
       workspace: {
         id: "goat_ws_new",
         name: "Analytical Co",
         workosOrganizationId: "org_new",
       },
-      brain: null,
     } as never);
   });
 
@@ -68,7 +62,6 @@ describe("provisionWorkspace", () => {
         id: "goat_ws_new",
         workosOrganizationId: "org_new",
       },
-      brain: null,
     });
 
     expect(createOrganization).toHaveBeenCalledWith(
@@ -108,7 +101,6 @@ describe("provisionWorkspace", () => {
         role: "admin",
       },
     ] as never);
-    listAccessibleBrainsMock.mockResolvedValue([{ id: "brain_general", slug: "general" }] as never);
 
     await expect(
       provisionWorkspace(
@@ -122,39 +114,6 @@ describe("provisionWorkspace", () => {
       ),
     ).resolves.toMatchObject({
       workspace: { id: "goat_ws_replay", workosOrganizationId: "org_existing" },
-      brain: { id: "brain_general" },
-    });
-    expect(createOrganization).not.toHaveBeenCalled();
-    expect(createWorkspaceForUserMock).not.toHaveBeenCalled();
-  });
-
-  it("replays a completed wiki workspace that has no Brain", async () => {
-    const replayWorkspaceId = "goat_ws_replay";
-    listWorkspacesForUserMock.mockResolvedValue([
-      {
-        workspace: {
-          id: replayWorkspaceId,
-          name: "Analytical Co",
-          workosOrganizationId: "org_existing",
-        },
-        role: "admin",
-      },
-    ] as never);
-    listAccessibleBrainsMock.mockResolvedValue([]);
-
-    await expect(
-      provisionWorkspace(
-        {
-          authUserId: "user_123",
-          userWorkosId: "user_123",
-          workspaceId: replayWorkspaceId,
-          name: "Analytical Co",
-        },
-        { workos, db },
-      ),
-    ).resolves.toMatchObject({
-      workspace: { id: replayWorkspaceId, workosOrganizationId: "org_existing" },
-      brain: null,
     });
     expect(createOrganization).not.toHaveBeenCalled();
     expect(createWorkspaceForUserMock).not.toHaveBeenCalled();

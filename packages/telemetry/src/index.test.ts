@@ -50,11 +50,10 @@ describe("@opencompany/telemetry", () => {
         "goat.failure_category": "tool",
         "goat.task_id": "goat_task_1",
         "goat.chat_session_id": "goat_chat_1",
-        "goat.brain_ingest_job_id": "goat_brain_ingest_1",
         "goat.user_id_hash": "abc123",
         "goat.stage": "running",
         "goat.signup_source": "user_sync",
-        "goat.cost_source": "brain_query",
+        "goat.cost_source": "web_search",
         "goat.table": "codex_chat_turns",
         "goat.budget_exhausted": true,
         "goat.budget_accounting_complete": true,
@@ -67,7 +66,7 @@ describe("@opencompany/telemetry", () => {
       "goat.failure_category": "tool",
       "goat.stage": "running",
       "goat.signup_source": "user_sync",
-      "goat.cost_source": "brain_query",
+      "goat.cost_source": "web_search",
       "goat.table": "codex_chat_turns",
       "goat.budget_exhausted": true,
       "goat.budget_accounting_complete": true,
@@ -90,7 +89,6 @@ describe("@opencompany/telemetry", () => {
       chatSessionId: "CHAT_SESSION_123",
       taskId: "task_123",
       ingestJobId: "ingest_123",
-      brainRef: "brain_123",
       tags: [
         "owner:louis@example.com",
         "custom:One",
@@ -113,17 +111,17 @@ describe("@opencompany/telemetry", () => {
       "chat:chat_session_123",
       "task:task_123",
       "ingest:ingest_123",
-      "brain:brain_123",
       "custom:one",
       "custom:two",
       "custom:three",
+      "custom:four",
     ]);
   });
 
   it("formats Gateway provider options and HTTP reporting headers", () => {
     const attribution = createGatewayAttribution({
       userWorkosId: "user_123",
-      feature: "brain-query",
+      feature: "wiki-ingest",
       env: "production",
       tags: ["Bad Tag With Spaces"],
     });
@@ -137,13 +135,13 @@ describe("@opencompany/telemetry", () => {
       gateway: {
         caching: "auto",
         user: attribution.user,
-        tags: ["app:goat", "env:production", "feature:brain-query", "bad-tag-with-spaces"],
+        tags: ["app:goat", "env:production", "feature:wiki-ingest", "bad-tag-with-spaces"],
       },
       anthropic: { thinking: { type: "enabled" } },
     });
     expect(gatewayReportingHeaders(attribution)).toEqual({
       "ai-reporting-user": attribution.user,
-      "ai-reporting-tags": "app:goat,env:production,feature:brain-query,bad-tag-with-spaces",
+      "ai-reporting-tags": "app:goat,env:production,feature:wiki-ingest,bad-tag-with-spaces",
     });
   });
 
@@ -153,9 +151,7 @@ describe("@opencompany/telemetry", () => {
     ).toBe("lease_lost");
     expect(categorizeFailure(new Error("VERCEL_AI_GATEWAY_API_KEY is required."))).toBe("auth");
     expect(categorizeFailure(new Error("Gmail integration needs reauth."))).toBe("integration");
-    expect(categorizeFailure(new Error("opencompany Brain ingestion budget exhausted."))).toBe(
-      "budget",
-    );
+    expect(categorizeFailure(new Error("opencompany ingestion budget exhausted."))).toBe("budget");
     expect(categorizeFailure(new TypeError("Cannot read properties of undefined"))).toBe("bug");
     expect(
       categorizeFailure(
@@ -183,10 +179,10 @@ describe("@opencompany/telemetry", () => {
     expect(() => recordSignup({ source: "user_sync" })).not.toThrow();
     expect(() =>
       recordRunOutcome({
-        surface: "brain_ingest",
+        surface: "task",
         durationMs: 1,
         outcome: "success",
-        attributes: { "goat.brain_ingest_job_id": "job" },
+        attributes: { "goat.task_id": "task" },
       }),
     ).not.toThrow();
     const span = startSpan("goat.test", { "goat.task_id": "task" });

@@ -8,12 +8,12 @@ opencompany is a modular monolith with three product composition roots: `web` pr
 - `apps/web` owns the Next.js UI, Server Component composition, optimistic browser state, WorkOS
   browser-authentication routes, `activateWorkspace`, health/static delivery, and narrow
   same-origin or provider-URL continuity proxies. It owns no product persistence or execution.
-- `apps/api` owns authenticated `/v1` resources for Chat, Tasks, Workflows, schedules, Brain, Wiki,
+- `apps/api` owns authenticated `/v1` resources for Chat, Tasks, Workflows, schedules, Wiki,
   Skills, integrations, workspace/identity settings, onboarding, billing, usage, feedback, and MCP.
   It also owns authorization, OpenAPI, semantic SSE, fixed Electric read models, and provider OAuth
   and webhook processing behind any retained URL relay.
-- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process capabilities, Brain
-  ingestion/import, integration polling/flush, due schedules, dictation transport, usage settlement,
+- `apps/runner` owns durable chat/task turns, cloud coding sandboxes, in-process capabilities, Wiki
+  ingestion, integration polling, due schedules, dictation transport, usage settlement,
   and the LLM broker. It composes repositories directly and does not depend on web availability.
 - `apps/stripe-webhooks` is a local-only Stripe CLI process that forwards test billing events.
 - `apps/marketing` is released independently from the product.
@@ -72,18 +72,16 @@ heartbeat while executing, persist Messages, Events, artifacts, approvals, and u
 projection transactionally. opencompany, Codex, and Claude Code are engines on the same canonical
 Conversation/Message/Run protocol.
 
-Brain import, Brain ingestion, Google Drive sync, polling, and schedules follow the same admission
+Wiki ingestion, polling, and schedules follow the same admission
 principle: database state is authoritative, notifications reduce latency, and fenced claims provide
 recovery. The runner never calls the public API for execution persistence.
 
 ## Wiki ingestion
 
 Provider ingress validates and normalizes source events before polling providers or buffering
-activity windows. The Wiki is the default knowledge system and its source rows drive new ingestion.
-The retained Brain pipeline is a reversible legacy path: workspace UI, agent tools, source routing,
-enqueueing, and worker claims require `workspaces.legacy_brain_enabled`. Source configuration stays
-separate so an intentional rollback can restore it, while operations disable legacy `brain_sources`
-after cutover to stop provider polling. A leased runner worker then cheaply triages Gmail items
+activity windows. The Wiki is the knowledge system and its source rows drive ingestion; the legacy
+Brain pipeline, its tables, and `workspaces.legacy_brain_enabled` were retired in `0300`. A leased
+runner worker cheaply triages Gmail items
 before the librarian applies page mutations through the same authorized Wiki tool used by
 interactive agents; job results retain the outcome and touched page paths for ingestion activity.
 
@@ -103,8 +101,8 @@ available while a durable snapshot references them.
 Installing a Plugin never grants execution. An admin separately approves the exact package
 integrity before its stdio MCP servers can run, and MCP is available only in Codex and Claude coding
 sandboxes. Writable `PLUGIN_DATA` is archived per workspace and Plugin name so it survives sandbox
-and Plugin replacement. Brain's historical `skills/` pages and the dropped `goat.skills` tables are
-not compatibility inputs or replay sources.
+and Plugin replacement. The historical `skills/` knowledge pages and the dropped `goat.skills`
+tables are not compatibility inputs or replay sources.
 
 ## Integrations and security
 

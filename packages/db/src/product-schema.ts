@@ -84,7 +84,6 @@ const bytea = customType<{ data: Buffer }>({
 
 export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
 
-// Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowScope = "personal" | "company";
 // Workflows and Company agents are two product surfaces over one automation row.
@@ -102,13 +101,7 @@ export type WorkflowEventConfig = {
 };
 export type WorkflowEventRunStatus = "pending" | "created" | "ignored" | "failed";
 export type AutomationCommandOperation = "workflow.create" | "task_schedule.create";
-export type KnowledgeCommandOperation =
-  | "brain_document.create"
-  | "brain_asset.create"
-  | "brain_asset.replace"
-  | "wiki_page.create"
-  | "wiki_timeline.create"
-  | "brain_import.start";
+export type KnowledgeCommandOperation = "wiki_page.create" | "wiki_timeline.create";
 export type BillingCommandOperation =
   | "credit_topup.create"
   | "subscription_checkout.create"
@@ -231,48 +224,6 @@ export type IntegrationResourceStatus =
   | "permission_lost"
   | "archived"
   | "sync_failed";
-export type BrainSourceProvider =
-  | "jamie"
-  | "goat-chat"
-  | "goat-import"
-  | "upload"
-  | "slack"
-  | "linear"
-  | "github"
-  | "gmail"
-  | "google_drive"
-  | "hubspot"
-  | "granola"
-  | "fathom"
-  | "attio";
-// The persisted source unions still include retired Slack and GitHub ingestion
-// providers so historical rows remain readable. Active API schemas and workers
-// exclude them.
-// "slack_bot" rows are answer *destinations* (which channels a brain answers
-// in via the Slack bot), not ingestion sources; no ingestion path reads them.
-export type BrainSourceConfigProvider =
-  | "jamie"
-  | "gmail"
-  | "google_drive"
-  | "github"
-  | "slack"
-  | "linear"
-  | "slack_bot"
-  | "hubspot"
-  | "granola"
-  | "fathom"
-  | "attio";
-export type BrainSourceType =
-  | "meeting"
-  | "run"
-  | "capture"
-  | "pointer"
-  | "asset"
-  | "conversation"
-  | "issue"
-  | "activity"
-  | "thread"
-  | "document";
 export type GoogleDriveWatchChannelStatus = "creating" | "active" | "stopped";
 export type GmailMessageDirection = "sent" | "received";
 export type SlackChannelType = "channel" | "group" | "im" | "mpim";
@@ -286,62 +237,13 @@ export type HubspotObjectType = "contact" | "company" | "deal";
 export type HubspotEventAction = "create" | "update";
 export type AttioObjectType = "person" | "company" | "deal";
 export type AttioEventAction = "create" | "update" | "note";
-export type BrainSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
-export type BrainIngestJobKind =
-  | "brain_source_item_ingest"
-  | "brain_agent_ingest"
-  | "brain_pointer_hydrate";
-export type BrainIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
 export type WikiSourceProvider = "gmail" | "slack" | "jamie" | "granola" | "linear" | "github";
 export type WikiSourceType = "meeting" | "conversation" | "issue" | "activity" | "thread";
 export type WikiIngestSourceProvider = WikiSourceProvider | "opencompany-import";
 export type WikiIngestSourceType = WikiSourceType | "run";
-export type IngestionReservationSourceProvider = BrainSourceProvider | WikiIngestSourceProvider;
+export type IngestionReservationSourceProvider = WikiIngestSourceProvider;
 export type WikiSourceItemIngestStatus = "pending" | "succeeded" | "failed" | "skipped";
 export type WikiIngestJobStatus = "queued" | "running" | "succeeded" | "failed" | "skipped";
-export type BrainImportStatus =
-  | "discovering"
-  | "awaiting_confirmation"
-  | "ingesting"
-  | "finalizing"
-  | "succeeded"
-  | "partial"
-  | "failed"
-  | "canceled";
-export type BrainImportProvider =
-  | "public_web"
-  | "github"
-  | "jamie"
-  | "granola"
-  | "fathom"
-  | "gmail"
-  | "slack"
-  | "linear";
-export type BrainImportSourceSelection = Partial<
-  Record<
-    BrainImportProvider,
-    {
-      enabled: boolean;
-      integrationId?: string;
-      config?: Record<string, unknown>;
-    }
-  >
->;
-export type BrainImportProviderSummary = {
-  status: "pending" | "ready" | "failed" | "unavailable";
-  discoveredEntries: number;
-  eligibleEntries: number;
-  alreadyKnownEntries: number;
-  selectedEntries: number;
-  plannedRuns: number;
-  searchCount?: number;
-  resultCount?: number;
-  error?: string;
-};
-export type BrainImportDiscoverySummary = Partial<
-  Record<BrainImportProvider, BrainImportProviderSummary>
->;
-
 export type TaskToolName =
   | "exa_search"
   | "browser_open"
@@ -378,8 +280,6 @@ export type TaskToolName =
   | "github_open_pull_request"
   // Shared main-chat tools, used by opencompany-engine task runs (tasks are a
   // hidden main-chat run). Persisted to goat.task_messages.tool_name (text).
-  | "goat_brain"
-  | "save_to_brain"
   | "web_search"
   | "web_fetch"
   | "list_actions"
@@ -415,7 +315,7 @@ export type HarnessSpec = {
   tools: TaskToolName[];
   skills: TaskSkillId[];
   maxModelSteps: number;
-  resultMode: "assistant_final" | "brain_markdown_report";
+  resultMode: "assistant_final";
   // Extra system-prompt blocks appended after the shared chat system prompt for
   // opencompany-engine task runs (e.g. compiled workflow instructions + skills).
   // The runner's chat loop feeds these as extraSystemBlocks.
@@ -467,7 +367,6 @@ export type StripeSubscriptionStatus =
   | "unpaid"
   | "paused";
 export type IngestionReservationStatus = "pending" | "consumed";
-export type BrainIntelligence = "basic" | "frontier";
 // "frontier_ingest" and "ingest_overage" are legacy v3 sources kept for
 // historical rows; v4 writes "ingest_model_usage" (per attempt, all tiers)
 // and "ingest_fee" (flat per-item fee at reservation admission).
@@ -509,57 +408,7 @@ export type CapabilityRunStatus =
   | "stopped"
   | "timed_out";
 export type CheckoutSessionStatus = "pending" | "open" | "fulfilled" | "failed";
-export type BrainVisibility = "workspace" | "restricted";
-export type BrainFolderSource = "system" | "custom";
-export type BrainEntityType =
-  | "person"
-  | "company"
-  | "project"
-  | "meeting"
-  | "concept"
-  | "source"
-  | "analysis"
-  | "note";
-export type BrainKind = "page" | "evidence";
-export type BrainRelation = {
-  type: string;
-  to: string;
-};
-export type BrainEdgeSourceKind = "relation" | "wiki_link";
-export type BrainSource = {
-  ref: string;
-  title?: string;
-  capturedAt?: string;
-};
-export type BrainDocumentFormat =
-  | "markdown"
-  | "pdf"
-  | "docx"
-  | "xlsx"
-  | "srt"
-  | "csv"
-  | "tsv"
-  | "json"
-  | "text"
-  | "image";
-export type BrainStatus = "draft" | "active" | "archived" | "merged";
-export type BrainFrontmatterProjection = Record<string, unknown>;
-export type BrainTimelineEntry = {
-  evidenceId: string;
-  at: string;
-  body: string;
-};
-export type BrainTimelineEntryRow = {
-  evidenceId: string;
-  at: string;
-  summary: string;
-  detail: string;
-  sourceRef: string;
-  sourceTitle?: string | null;
-};
-export type BrainDocumentVersionOperation = "overwrite" | "delete";
-
-// Wiki (brain v2): a workspace holds many named wikis, each a tree of pages. A
+// A workspace holds many named wikis, each a tree of pages. A
 // page's `slug` is its stable identity ([[wiki-links]] target slugs); `path` is
 // its position as the slug chain of its ancestors plus itself, unique per wiki.
 // Mirrors @opencompany/wiki.
@@ -570,7 +419,17 @@ export type BrainDocumentVersionOperation = "overwrite" | "delete";
 export type WikiAccessLevel = "workspace" | "restricted";
 export type WikiKind = "project" | "person" | "company" | "research" | "meeting" | "other";
 export type WikiNodeType = "page" | "folder";
-export type WikiPageFormat = BrainDocumentFormat;
+export type WikiPageFormat =
+  | "markdown"
+  | "pdf"
+  | "docx"
+  | "xlsx"
+  | "srt"
+  | "csv"
+  | "tsv"
+  | "json"
+  | "text"
+  | "image";
 export type WikiPageVersionOperation = "write" | "move" | "delete";
 export type WikiLinkKind = "page" | "source";
 
@@ -769,8 +628,6 @@ export type ProductChatContextCompactionState = {
   estimatedTokensAfter: number;
 };
 
-export type BrainToolRunTrace = Record<string, unknown>;
-
 export const productSchema = pgSchema("goat");
 export const taskDisplayIdSequence = productSchema.sequence("task_display_id_seq");
 
@@ -841,9 +698,7 @@ export const workspaces = productSchema.table(
     capabilitySessionBudgetUsdMicros: bigint("capability_session_budget_usd_micros", {
       mode: "number",
     }),
-    // Reversible cutover switch for the retired Brain UI and agent tools.
     // Wiki is the default knowledge system for every workspace.
-    legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
     // Machine size new cloud coding sandboxes start on. Workspace admins own it;
     // a session pins the value it was created with (codexChatSessions.sandboxSize).
     sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
@@ -876,7 +731,7 @@ export const onboarding = productSchema.table("onboarding", {
   }),
   referralSource: text("referral_source"),
   // Self-reported profile captured on the first onboarding step. `role` is one
-  // of the ROLE_PROFILES ids in the wizard and seeds the tailored brain folders.
+  // of the ROLE_PROFILES ids in the wizard and seeds the tailored wiki folders.
   role: text("role"),
   // Legacy free-text field retained for existing rows. New opencompany onboarding
   // stores the normalized hostname in companyDomain and the homepage URL in
@@ -1163,9 +1018,6 @@ export const creditLedger = productSchema.table(
     chatSessionId: text("chat_session_id").references(() => chatSessions.id, {
       onDelete: "set null",
     }),
-    ingestJobId: text("ingest_job_id").references(() => brainIngestJobs.id, {
-      onDelete: "set null",
-    }),
     reservationId: text("reservation_id").references(() => workspaceIngestionReservations.id, {
       onDelete: "set null",
     }),
@@ -1203,461 +1055,6 @@ export const creditLedger = productSchema.table(
   }),
 );
 
-// Naming convention: on the brain content tables below, `brain_id` is the
-// DOCUMENT slug (legacy name, e.g. "alice-smith"), while `brain_ref` is the
-// FK to `goat.brains.id` — the brain a row belongs to.
-export const brains = productSchema.table(
-  "brains",
-  {
-    id: text("id").primaryKey(),
-    workspaceId: text("workspace_id")
-      .notNull()
-      .references(() => workspaces.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    slug: text("slug").notNull(),
-    description: text("description"),
-    visibility: text("visibility").$type<BrainVisibility>().notNull().default("workspace"),
-    // When true, the ingestion agent may use web search to enrich confidently
-    // identified people, companies, and projects. Owner escape-hatch; the real
-    // safety is the identity gate + per-ingest search cap in the runner.
-    enrichmentEnabled: boolean("enrichment_enabled").notNull().default(true),
-    // Which model tier the ingestion agent runs for this brain. "basic"
-    // (open-source model) is included in the plan; "frontier" (Claude Sonnet)
-    // passes model cost through to the workspace's credit balance.
-    intelligence: text("intelligence").$type<BrainIntelligence>().notNull().default("basic"),
-    createdByWorkosId: text("created_by_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "restrict" }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    workspaceSlugIdx: uniqueIndex("goat_brains_workspace_slug_idx").on(
-      table.workspaceId,
-      table.slug,
-    ),
-    workspaceIdx: index("goat_brains_workspace_idx").on(table.workspaceId),
-    visibilityCheck: check(
-      "goat_brains_visibility_check",
-      sql`${table.visibility} IN ('workspace', 'restricted')`,
-    ),
-    intelligenceCheck: check(
-      "goat_brains_intelligence_check",
-      sql`${table.intelligence} IN ('basic', 'frontier')`,
-    ),
-  }),
-);
-
-export const brainImportRuns = productSchema.table(
-  "brain_import_runs",
-  {
-    id: text("id").primaryKey(),
-    brainRef: text("brain_ref").references(() => brains.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
-    workspaceId: text("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    companyUrl: text("company_url").notNull(),
-    companyDomain: text("company_domain").notNull(),
-    companyName: text("company_name"),
-    focus: text("focus"),
-    historyStartAt: timestamp("history_start_at", {
-      withTimezone: true,
-    }).notNull(),
-    historyEndAt: timestamp("history_end_at", { withTimezone: true }).notNull(),
-    sourceSelection: jsonb("source_selection")
-      .$type<BrainImportSourceSelection>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
-    discoverySummary: jsonb("discovery_summary")
-      .$type<BrainImportDiscoverySummary>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
-    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    status: text("status").$type<BrainImportStatus>().notNull().default("discovering"),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
-    leaseId: text("lease_id"),
-    leaseOwner: text("lease_owner"),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    lastError: text("last_error"),
-    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    activeBrainIdx: uniqueIndex("goat_brain_import_runs_active_brain_idx")
-      .on(table.brainRef)
-      .where(
-        sql`${table.brainRef} IS NOT NULL AND ${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
-      ),
-    activeWorkspaceIdx: uniqueIndex("opencompany_brain_import_runs_active_workspace_idx")
-      .on(table.workspaceId)
-      .where(
-        sql`${table.workspaceId} IS NOT NULL AND ${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing')`,
-      ),
-    statusNextRunIdx: index("goat_brain_import_runs_status_next_run_idx").on(
-      table.status,
-      table.nextRunAt,
-    ),
-    leaseExpiresAtIdx: index("goat_brain_import_runs_lease_expires_at_idx").on(
-      table.leaseExpiresAt,
-    ),
-    brainCreatedIdx: index("goat_brain_import_runs_brain_created_idx").on(
-      table.brainRef,
-      table.createdAt,
-    ),
-    workspaceCreatedIdx: index("opencompany_brain_import_runs_workspace_created_idx").on(
-      table.workspaceId,
-      table.createdAt,
-    ),
-    targetCheck: check(
-      "opencompany_brain_import_runs_target_check",
-      sql`(${table.brainRef} IS NOT NULL AND ${table.workspaceId} IS NULL) OR (${table.brainRef} IS NULL AND ${table.workspaceId} IS NOT NULL)`,
-    ),
-    statusCheck: check(
-      "goat_brain_import_runs_status_check",
-      sql`${table.status} IN ('discovering', 'awaiting_confirmation', 'ingesting', 'finalizing', 'succeeded', 'partial', 'failed', 'canceled')`,
-    ),
-    historyWindowCheck: check(
-      "goat_brain_import_runs_history_window_check",
-      sql`${table.historyStartAt} < ${table.historyEndAt}`,
-    ),
-  }),
-);
-
-export const brainMembers = productSchema.table(
-  "brain_members",
-  {
-    id: text("id").primaryKey(),
-    brainId: text("brain_id")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    addedByWorkosId: text("added_by_workos_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainUserIdx: uniqueIndex("goat_brain_members_brain_user_idx").on(
-      table.brainId,
-      table.userWorkosId,
-    ),
-    userIdx: index("goat_brain_members_user_idx").on(table.userWorkosId),
-  }),
-);
-
-export const brainFolders = productSchema.table(
-  "brain_folders",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    path: text("path").notNull(),
-    source: text("source").$type<BrainFolderSource>().notNull().default("custom"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainRefPathIdx: uniqueIndex("goat_brain_folders_brain_ref_path_idx").on(
-      table.brainRef,
-      table.path,
-    ),
-    brainRefIdx: index("goat_brain_folders_brain_ref_idx").on(table.brainRef),
-    sourceCheck: check(
-      "goat_brain_folders_source_check",
-      sql`${table.source} IN ('system', 'custom')`,
-    ),
-  }),
-);
-
-export const brainDocuments = productSchema.table(
-  "brain_documents",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    // Who originally put this document in the brain (set once at insert, never
-    // on update — unlike userWorkosId, which tracks the last actor). Null when
-    // no human originated it, e.g. externally authored source ingestion: the
-    // integration owner connected the source but did not author its content.
-    createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
-      onDelete: "set null",
-    }),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    brainId: text("brain_id").notNull(),
-    folderPath: text("folder_path").notNull(),
-    title: text("title"),
-    content: text("content").notNull().default(""),
-    body: text("body").notNull().default(""),
-    timeline: jsonb("timeline").$type<BrainTimelineEntry[]>().notNull().default(sql`'[]'::jsonb`),
-    format: text("format").$type<BrainDocumentFormat>().notNull().default("markdown"),
-    mimeType: text("mime_type"),
-    originalFileName: text("original_file_name"),
-    assetStorageKey: text("asset_storage_key"),
-    // Machine-extracted text of the binary asset (search + agent context);
-    // regenerated by ingestion, never user-edited. Null for markdown rows.
-    assetExtractedText: text("asset_extracted_text"),
-    // sha256 + size of the blob bytes (the contentHash/sizeBytes columns
-    // describe the markdown projection in `content`, not the asset).
-    assetContentHash: text("asset_content_hash"),
-    assetSizeBytes: integer("asset_size_bytes"),
-    relations: jsonb("relations").$type<BrainRelation[]>().notNull().default(sql`'[]'::jsonb`),
-    sources: jsonb("sources").$type<BrainSource[]>().notNull().default(sql`'[]'::jsonb`),
-    kind: text("kind").$type<BrainKind>().notNull(),
-    entityType: text("entity_type").$type<BrainEntityType>().notNull(),
-    status: text("status").$type<BrainStatus>().notNull().default("draft"),
-    aliases: jsonb("aliases").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
-    contentHash: text("content_hash").notNull(),
-    sizeBytes: integer("size_bytes").notNull(),
-    // Retrieval projections: `search_text` (title + aliases + compiled truth + timeline + relation
-    // text) feeds the generated FTS vector; `name_text` (title + aliases) feeds trigram entity
-    // lookup. Both are composed in documentValues() (brain-files.ts).
-    searchText: text("search_text").notNull().default(""),
-    nameText: text("name_text").notNull().default(""),
-    // asset_extracted_text is folded in directly (not via search_text) so PDF/DOCX extraction
-    // updates — which touch only that column — reindex without recomposing search_text.
-    searchTsv: tsvector("search_tsv").generatedAlwaysAs(
-      (): SQL =>
-        sql`to_tsvector('english', coalesce("search_text", '') || ' ' || coalesce("asset_extracted_text", ''))`,
-    ),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainRefBrainIdIdx: uniqueIndex("goat_brain_documents_brain_ref_brain_id_idx").on(
-      table.brainRef,
-      table.brainId,
-    ),
-    brainRefFolderBrainIdx: uniqueIndex("goat_brain_documents_brain_ref_folder_brain_idx").on(
-      table.brainRef,
-      table.folderPath,
-      table.brainId,
-    ),
-    brainRefFolderUpdatedIdx: index("goat_brain_documents_brain_ref_folder_updated_idx").on(
-      table.brainRef,
-      table.folderPath,
-      table.updatedAt,
-    ),
-    brainRefUpdatedIdx: index("goat_brain_documents_brain_ref_updated_idx").on(
-      table.brainRef,
-      table.updatedAt,
-    ),
-    // Retrieval: keyword relevance (FTS) and typo/fuzzy entity lookup (trigram) — both GIN.
-    searchTsvIdx: index("goat_brain_documents_search_tsv_idx").using("gin", table.searchTsv),
-    nameTrgmIdx: index("goat_brain_documents_name_trgm_idx").using(
-      "gin",
-      table.nameText.op("gin_trgm_ops"),
-    ),
-    formatCheck: check(
-      "goat_brain_documents_format_check",
-      sql`${table.format} IN ('markdown', 'pdf', 'docx', 'xlsx', 'srt', 'csv', 'tsv', 'json', 'text', 'image')`,
-    ),
-    statusCheck: check(
-      "goat_brain_documents_status_check",
-      sql`${table.status} IN ('draft', 'active', 'archived', 'merged')`,
-    ),
-    kindCheck: check("goat_brain_documents_kind_check", sql`${table.kind} IN ('page', 'evidence')`),
-    entityTypeCheck: check(
-      "goat_brain_documents_entity_type_check",
-      sql`${table.entityType} IN ('person', 'company', 'project', 'meeting', 'concept', 'source', 'analysis', 'note')`,
-    ),
-    kindZoneCheck: check(
-      "goat_brain_documents_kind_zone_check",
-      sql`(
-        (${table.kind} = 'evidence' AND (${table.folderPath} = 'evidence' OR ${table.folderPath} LIKE 'evidence/%')) OR
-        (${table.kind} = 'page' AND ${table.folderPath} <> 'evidence' AND ${table.folderPath} NOT LIKE 'evidence/%')
-      )`,
-    ),
-  }),
-);
-
-export const brainTimelineEntries = productSchema.table(
-  "brain_timeline_entries",
-  {
-    id: serial("id").primaryKey(),
-    documentId: text("document_id")
-      .notNull()
-      .references(() => brainDocuments.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    brainId: text("brain_id").notNull(),
-    evidenceId: text("evidence_id").notNull(),
-    at: timestamp("at", { withTimezone: true }).notNull(),
-    sourceRef: text("source_ref").notNull().default(""),
-    sourceTitle: text("source_title"),
-    summary: text("summary").notNull(),
-    detail: text("detail").notNull().default(""),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainRefBrainAtIdx: index("goat_brain_timeline_entries_brain_ref_brain_at_idx").on(
-      table.brainRef,
-      table.brainId,
-      table.at,
-    ),
-    documentAtIdx: index("goat_brain_timeline_entries_document_at_idx").on(
-      table.documentId,
-      table.at,
-    ),
-    dedupIdx: uniqueIndex("goat_brain_timeline_entries_dedup_idx").on(
-      table.documentId,
-      table.evidenceId,
-    ),
-  }),
-);
-
-export const brainEdges = productSchema.table(
-  "brain_edges",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    documentId: text("document_id")
-      .notNull()
-      .references(() => brainDocuments.id, { onDelete: "cascade" }),
-    fromBrainId: text("from_brain_id").notNull(),
-    toBrainId: text("to_brain_id").notNull(),
-    relationType: text("relation_type").notNull(),
-    sourceKind: text("source_kind").$type<BrainEdgeSourceKind>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    documentIdx: index("goat_brain_edges_document_idx").on(table.documentId),
-    brainRefFromIdx: index("goat_brain_edges_brain_ref_from_idx").on(
-      table.brainRef,
-      table.fromBrainId,
-    ),
-    brainRefToIdx: index("goat_brain_edges_brain_ref_to_idx").on(table.brainRef, table.toBrainId),
-    brainRefRelationIdx: index("goat_brain_edges_brain_ref_relation_idx").on(
-      table.brainRef,
-      table.relationType,
-    ),
-    uniqueEdgeIdx: uniqueIndex("goat_brain_edges_unique_idx").on(
-      table.brainRef,
-      table.documentId,
-      table.fromBrainId,
-      table.toBrainId,
-      table.relationType,
-      table.sourceKind,
-    ),
-    sourceKindCheck: check(
-      "goat_brain_edges_source_kind_check",
-      sql`${table.sourceKind} IN ('relation', 'wiki_link')`,
-    ),
-  }),
-);
-
-// One embedding per document over its retrieval text. `content_hash` mirrors the document's
-// content_hash at embed time and `model` records the embedding model, so staleness is a plain SQL
-// join predicate (e.content_hash = d.content_hash AND e.model = $model); stale or missing rows are
-// re-embedded write-through at query time (brain-read.ts). Rebuildable projection — safe to
-// truncate.
-export const brainDocumentEmbeddings = productSchema.table(
-  "brain_document_embeddings",
-  {
-    documentId: text("document_id")
-      .primaryKey()
-      .references(() => brainDocuments.id, { onDelete: "cascade" }),
-    brainRef: text("brain_ref")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    contentHash: text("content_hash").notNull(),
-    model: text("model").notNull(),
-    embedding: vector("embedding").notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainRefIdx: index("goat_brain_document_embeddings_brain_ref_idx").on(table.brainRef),
-  }),
-);
-
-export const brainDocumentVersions = productSchema.table(
-  "brain_document_versions",
-  {
-    id: serial("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    brainRef: text("brain_ref").references(() => brains.id, {
-      onDelete: "set null",
-      onUpdate: "cascade",
-    }),
-    documentId: text("document_id").references(() => brainDocuments.id, {
-      onDelete: "set null",
-    }),
-    taskId: text("task_id"),
-    importRunId: text("import_run_id").references(() => brainImportRuns.id, {
-      onDelete: "set null",
-    }),
-    brainId: text("brain_id").notNull(),
-    folderPath: text("folder_path").notNull(),
-    content: text("content").notNull().default(""),
-    contentHash: text("content_hash").notNull(),
-    sizeBytes: integer("size_bytes").notNull(),
-    operation: text("operation").$type<BrainDocumentVersionOperation>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    userDocumentCreatedIdx: index("goat_brain_document_versions_user_document_created_idx").on(
-      table.userWorkosId,
-      table.documentId,
-      table.createdAt,
-    ),
-    userTaskCreatedIdx: index("goat_brain_document_versions_user_task_created_idx").on(
-      table.userWorkosId,
-      table.taskId,
-      table.createdAt,
-    ),
-    importRunCreatedIdx: index("goat_brain_document_versions_import_run_created_idx").on(
-      table.importRunId,
-      table.createdAt,
-    ),
-    operationCheck: check(
-      "goat_brain_document_versions_operation_check",
-      sql`${table.operation} IN ('overwrite', 'delete')`,
-    ),
-  }),
-);
-
 export const integrations = productSchema.table(
   "integrations",
   {
@@ -1675,7 +1072,7 @@ export const integrations = productSchema.table(
       onDelete: "cascade",
     }),
     // Foundation for offering a personal integration to workspace admins as a
-    // brain-source option without transferring ownership. No UI yet.
+    // ingestion-source option without transferring ownership. No UI yet.
     sharedWithWorkspace: boolean("shared_with_workspace").notNull().default(false),
     provider: text("provider").$type<IntegrationProvider>().notNull(),
     externalId: text("external_id").notNull(),
@@ -1729,7 +1126,7 @@ export const integrations = productSchema.table(
       .on(table.workspaceId, table.provider, table.externalId)
       .where(sql`${table.workspaceId} IS NOT NULL`),
     // The answer bot is a single workspace-level destination. Reinstalling it
-    // for another Slack team updates the existing row so its brain routes stay
+    // for another Slack team updates the existing row so its routes stay
     // manageable instead of leaving a hidden installation active.
     slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
       .on(table.workspaceId, table.provider)
@@ -1855,239 +1252,9 @@ export const integrationResources = productSchema.table(
   }),
 );
 
-// Per-brain source configuration: which integration feeds which brain.
-export const brainSources = productSchema.table(
-  "brain_sources",
-  {
-    id: text("id").primaryKey(),
-    brainId: text("brain_id")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    provider: text("provider").$type<BrainSourceConfigProvider>().notNull(),
-    integrationId: text("integration_id").notNull(),
-    // user_workos_id of the referenced integration row (its owner for personal
-    // integrations, the connecting admin for workspace-owned ones). Part of the
-    // composite FK below, so it must mirror the integration row exactly.
-    userWorkosId: text("user_workos_id").notNull(),
-    createdByWorkosId: text("created_by_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    enabled: boolean("enabled").notNull().default(true),
-    config: jsonb("config").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainIntegrationIdx: uniqueIndex("goat_brain_sources_brain_integration_idx").on(
-      table.brainId,
-      table.integrationId,
-    ),
-    integrationIdx: index("goat_brain_sources_integration_idx").on(table.integrationId),
-    brainIdx: index("goat_brain_sources_brain_idx").on(table.brainId),
-    integrationUserProviderFk: foreignKey({
-      name: "goat_brain_sources_integration_user_provider_fk",
-      columns: [table.integrationId, table.userWorkosId, table.provider],
-      foreignColumns: [integrations.id, integrations.userWorkosId, integrations.provider],
-    }).onDelete("cascade"),
-    providerCheck: check(
-      "goat_brain_sources_provider_check",
-      sql`${table.provider} IN ('jamie', 'gmail', 'google_drive', 'github', 'slack', 'linear', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio')`,
-    ),
-  }),
-);
-
-// Cross-member ingest dedup: a claim records that a brain has already ingested
-// a provider-native event (Slack team:channel:ts, Gmail RFC822 Message-ID,
-// Linear org:issue:delivery), regardless of which member's integration
-// delivered it. Flush workers only enqueue an ingest job for a brain when at
-// least one event in the window is newly claimed. source_item_id is SET NULL
-// so the dedup guarantee outlives the raw evidence row.
-export const brainSourceEventClaims = productSchema.table(
-  "brain_source_event_claims",
-  {
-    id: text("id").primaryKey(),
-    brainId: text("brain_id")
-      .notNull()
-      .references(() => brains.id, {
-        onDelete: "cascade",
-        onUpdate: "cascade",
-      }),
-    sourceProvider: text("source_provider").notNull(),
-    eventKey: text("event_key").notNull(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainProviderKeyIdx: uniqueIndex("goat_brain_source_event_claims_brain_provider_key_idx").on(
-      table.brainId,
-      table.sourceProvider,
-      table.eventKey,
-    ),
-  }),
-);
-
-export const brainSourceItems = productSchema.table(
-  "brain_source_items",
-  {
-    id: text("id").primaryKey(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    sourceProvider: text("source_provider").$type<BrainSourceProvider>().notNull(),
-    sourceConnectionId: text("source_connection_id").notNull(),
-    integrationId: text("integration_id"),
-    sourceType: text("source_type").$type<BrainSourceType>().notNull(),
-    externalId: text("external_id").notNull(),
-    sourceRef: text("source_ref").notNull(),
-    title: text("title"),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
-    contentHash: text("content_hash").notNull(),
-    rawPayload: jsonb("raw_payload").$type<unknown>().notNull(),
-    normalizedPayload: jsonb("normalized_payload").$type<unknown>().notNull(),
-    // Number of selected provider events represented by this normalized item.
-    // Direct webhooks, captures, and uploads are one; buffered windows pass the
-    // exact number of claimed source rows.
-    rawEventCount: integer("raw_event_count").notNull().default(1),
-    lastIngestJobId: text("last_ingest_job_id"),
-    lastIngestStatus: text("last_ingest_status").$type<BrainSourceItemIngestStatus>(),
-    lastIngestedAt: timestamp("last_ingested_at", { withTimezone: true }),
-    lastIngestError: text("last_ingest_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    sourceConnectionExternalHashIdx: uniqueIndex(
-      "goat_brain_source_items_connection_external_hash_idx",
-    ).on(
-      table.userWorkosId,
-      table.sourceProvider,
-      table.sourceConnectionId,
-      table.sourceType,
-      table.externalId,
-      table.contentHash,
-    ),
-    userSourceProviderOccurredIdx: index("goat_brain_source_items_user_provider_occurred_idx").on(
-      table.userWorkosId,
-      table.sourceProvider,
-      table.occurredAt,
-    ),
-    userUpdatedIdx: index("goat_brain_source_items_user_updated_idx").on(
-      table.userWorkosId,
-      table.updatedAt,
-    ),
-    lastIngestStatusIdx: index("goat_brain_source_items_last_ingest_status_idx").on(
-      table.lastIngestStatus,
-      table.updatedAt,
-    ),
-    integrationUserProviderFk: foreignKey({
-      name: "goat_brain_source_items_integration_user_provider_fk",
-      columns: [table.integrationId, table.userWorkosId, table.sourceProvider],
-      foreignColumns: [integrations.id, integrations.userWorkosId, integrations.provider],
-    }).onDelete("cascade"),
-    sourceProviderCheck: check(
-      "goat_brain_source_items_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom', 'attio')`,
-    ),
-    sourceTypeCheck: check(
-      "goat_brain_source_items_source_type_check",
-      sql`${table.sourceType} IN ('meeting', 'run', 'capture', 'pointer', 'asset', 'conversation', 'issue', 'activity', 'thread', 'document')`,
-    ),
-    lastIngestStatusCheck: check(
-      "goat_brain_source_items_last_ingest_status_check",
-      sql`${table.lastIngestStatus} IS NULL OR ${table.lastIngestStatus} IN ('pending', 'succeeded', 'failed', 'skipped')`,
-    ),
-  }),
-);
-
-export const brainIngestJobs = productSchema.table(
-  "brain_ingest_jobs",
-  {
-    id: text("id").primaryKey(),
-    sourceItemId: text("source_item_id")
-      .notNull()
-      .references(() => brainSourceItems.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    sourceProvider: text("source_provider").$type<BrainSourceProvider>().notNull(),
-    sourceConnectionId: text("source_connection_id").notNull(),
-    integrationId: text("integration_id"),
-    workspaceId: text("workspace_id").references(() => workspaces.id, {
-      onDelete: "cascade",
-    }),
-    importRunId: text("import_run_id").references(() => brainImportRuns.id, {
-      onDelete: "set null",
-    }),
-    // Target brain for the job (principle: ingestion is per-brain). Null means
-    // the handler resolves the user's default brain at run time.
-    brainRef: text("brain_ref").references(() => brains.id, {
-      onDelete: "set null",
-      onUpdate: "cascade",
-    }),
-    kind: text("kind").$type<BrainIngestJobKind>().notNull(),
-    contentHash: text("content_hash").notNull(),
-    status: text("status").$type<BrainIngestJobStatus>().notNull().default("queued"),
-    planPaused: boolean("plan_paused").notNull().default(false),
-    attempts: integer("attempts").notNull().default(0),
-    nextRunAt: timestamp("next_run_at", { withTimezone: true }).notNull().defaultNow(),
-    leaseId: text("lease_id"),
-    leaseOwner: text("lease_owner"),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    lastError: text("last_error"),
-    result: jsonb("result").$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    // Dedup is per target brain: one source item may fan out to several brains,
-    // but repeated deliveries must not enqueue duplicate jobs for the same brain.
-    sourceItemHashKindBrainIdx: uniqueIndex("goat_brain_ingest_jobs_item_hash_kind_brain_idx")
-      .on(table.sourceItemId, table.contentHash, table.kind, table.brainRef)
-      .where(sql`${table.brainRef} IS NOT NULL`),
-    sourceItemHashKindNoBrainIdx: uniqueIndex("goat_brain_ingest_jobs_item_hash_kind_nobrain_idx")
-      .on(table.sourceItemId, table.contentHash, table.kind)
-      .where(sql`${table.brainRef} IS NULL`),
-    statusNextRunIdx: index("goat_brain_ingest_jobs_status_next_run_idx").on(
-      table.status,
-      table.nextRunAt,
-    ),
-    leaseExpiresAtIdx: index("goat_brain_ingest_jobs_lease_expires_at_idx").on(
-      table.leaseExpiresAt,
-    ),
-    userCreatedIdx: index("goat_brain_ingest_jobs_user_created_idx").on(
-      table.userWorkosId,
-      table.createdAt,
-    ),
-    workspaceCreatedIdx: index("goat_brain_ingest_jobs_workspace_created_idx").on(
-      table.workspaceId,
-      table.createdAt,
-    ),
-    importRunIdx: index("goat_brain_ingest_jobs_import_run_idx").on(table.importRunId),
-    sourceProviderCheck: check(
-      "goat_brain_ingest_jobs_source_provider_check",
-      sql`${table.sourceProvider} IN ('jamie', 'goat-chat', 'goat-import', 'upload', 'slack', 'linear', 'github', 'gmail', 'google_drive', 'hubspot', 'granola', 'fathom', 'attio')`,
-    ),
-    kindCheck: check(
-      "goat_brain_ingest_jobs_kind_check",
-      sql`${table.kind} IN ('brain_source_item_ingest', 'brain_agent_ingest', 'brain_pointer_hydrate')`,
-    ),
-    statusCheck: check(
-      "goat_brain_ingest_jobs_status_check",
-      sql`${table.status} IN ('queued', 'running', 'succeeded', 'failed', 'skipped')`,
-    ),
-  }),
-);
-
-// One reservation per normalized source item and workspace. Brain and wiki
-// items use separate nullable FKs so both pipelines share admission accounting
-// without giving up source-item cascade cleanup.
+// One reservation per normalized wiki source item and workspace, so ingestion
+// admission accounting keeps source-item cascade cleanup. Rows retired with the
+// legacy Brain keep their consumed billing history with a null source pointer.
 export const workspaceIngestionReservations = productSchema.table(
   "workspace_ingestion_reservations",
   {
@@ -2095,9 +1262,6 @@ export const workspaceIngestionReservations = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "cascade",
-    }),
     wikiSourceItemId: text("wiki_source_item_id").references(() => wikiSourceItems.id, {
       onDelete: "cascade",
     }),
@@ -2115,10 +1279,6 @@ export const workspaceIngestionReservations = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    workspaceSourceIdx: uniqueIndex("goat_ingestion_reservations_workspace_source_idx").on(
-      table.workspaceId,
-      table.sourceItemId,
-    ),
     workspaceWikiSourceIdx: uniqueIndex(
       "opencompany_ingestion_reservations_workspace_wiki_source_idx",
     )
@@ -2162,58 +1322,11 @@ export const workspaceIngestionReservations = productSchema.table(
       "goat_ingestion_reservations_consumption_state_check",
       sql`(${table.status} = 'consumed' AND ${table.consumedAt} IS NOT NULL) OR (${table.status} = 'pending' AND ${table.consumedAt} IS NULL)`,
     ),
-    sourceKindCheck: check(
-      "opencompany_ingestion_reservations_source_kind_check",
-      sql`(${table.sourceItemId} IS NOT NULL AND ${table.wikiSourceItemId} IS NULL) OR (${table.sourceItemId} IS NULL AND ${table.wikiSourceItemId} IS NOT NULL)`,
-    ),
-  }),
-);
-
-export const brainImportCandidates = productSchema.table(
-  "brain_import_candidates",
-  {
-    id: text("id").primaryKey(),
-    importRunId: text("import_run_id")
-      .notNull()
-      .references(() => brainImportRuns.id, { onDelete: "cascade" }),
-    provider: text("provider").$type<BrainImportProvider>().notNull(),
-    sourceItemId: text("source_item_id")
-      .notNull()
-      .references(() => brainSourceItems.id, { onDelete: "cascade" }),
-    ingestJobId: text("ingest_job_id").references(() => brainIngestJobs.id, {
-      onDelete: "set null",
-    }),
-    // wiki_ingest_jobs is declared later in this file; migration 0244 adds
-    // the database-level FK for this cross-pipeline progress marker.
-    wikiIngestJobId: text("wiki_ingest_job_id"),
-    entryCount: integer("entry_count").notNull().default(1),
-    rank: integer("rank").notNull().default(0),
-    selected: boolean("selected").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    runSourceIdx: uniqueIndex("goat_brain_import_candidates_run_source_idx").on(
-      table.importRunId,
-      table.sourceItemId,
-    ),
-    runProviderRankIdx: index("goat_brain_import_candidates_run_provider_rank_idx").on(
-      table.importRunId,
-      table.provider,
-      table.rank,
-    ),
-    wikiIngestJobIdx: index("opencompany_brain_import_candidates_wiki_ingest_job_idx").on(
-      table.wikiIngestJobId,
-    ),
-    providerCheck: check(
-      "goat_brain_import_candidates_provider_check",
-      sql`${table.provider} IN ('public_web', 'github', 'jamie', 'granola', 'fathom', 'gmail', 'slack', 'linear')`,
-    ),
   }),
 );
 
 // ---------------------------------------------------------------------------
-// Wiki (brain v2). A workspace holds many wikis; each is an independent tree of
+// A workspace holds many wikis; each is an independent tree of
 // folder and page nodes whose paths are unique per wiki. See packages/wiki for
 // the domain rules these tables store.
 // ---------------------------------------------------------------------------
@@ -2329,7 +1442,7 @@ export const wikiSources = productSchema.table(
   }),
 );
 
-// Normalized provider windows. The workspace replaces brain/user targeting in
+// Normalized provider windows. The workspace replaces per-user targeting in
 // the v1 ingestion key, so overlapping member connections deduplicate before
 // the target wiki is mutated. `wiki_id` names that target; the dedup key stays
 // workspace-global deliberately, because sources are configured per workspace
@@ -2428,9 +1541,6 @@ export const wikiIngestJobs = productSchema.table(
     sourceProvider: text("source_provider").$type<WikiIngestSourceProvider>().notNull(),
     sourceConnectionId: text("source_connection_id").notNull(),
     integrationId: text("integration_id"),
-    importRunId: text("import_run_id").references(() => brainImportRuns.id, {
-      onDelete: "cascade",
-    }),
     contentHash: text("content_hash").notNull(),
     status: text("status").$type<WikiIngestJobStatus>().notNull().default("queued"),
     attempts: integer("attempts").notNull().default(0),
@@ -2469,7 +1579,6 @@ export const wikiIngestJobs = productSchema.table(
     workspaceIntegrationStatusIdx: index(
       "opencompany_wiki_ingest_jobs_workspace_integration_status_idx",
     ).on(table.workspaceId, table.integrationId, table.status),
-    importRunIdx: index("opencompany_wiki_ingest_jobs_import_run_idx").on(table.importRunId),
     wikiIdx: index("opencompany_wiki_ingest_jobs_wiki_idx").on(table.wikiId),
     sourceProviderCheck: check(
       "opencompany_wiki_ingest_jobs_source_provider_check",
@@ -2477,7 +1586,7 @@ export const wikiIngestJobs = productSchema.table(
     ),
     importTargetCheck: check(
       "opencompany_wiki_ingest_jobs_import_target_check",
-      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL AND ${table.importRunId} IS NOT NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL AND ${table.importRunId} IS NULL)`,
+      sql`(${table.sourceProvider} = 'opencompany-import' AND ${table.integrationId} IS NULL) OR (${table.sourceProvider} <> 'opencompany-import' AND ${table.integrationId} IS NOT NULL)`,
     ),
     retiredCheck: check(
       "opencompany_wiki_ingest_jobs_retired_check",
@@ -2740,254 +1849,6 @@ export const slackBotThreadParticipation = productSchema.table(
   }),
 );
 
-// Retired Slack-ingestion storage. Kept temporarily so this cutover does not
-// delete customer data; no webhook or runner path writes or flushes these rows.
-export const slackMessageEvents = productSchema.table(
-  "slack_message_events",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    teamId: text("team_id").notNull(),
-    channelId: text("channel_id").notNull(),
-    channelType: text("channel_type").$type<SlackChannelType>().notNull(),
-    messageTs: text("message_ts").notNull(),
-    threadTs: text("thread_ts"),
-    slackUserId: text("slack_user_id"),
-    subtype: text("subtype"),
-    text: text("text").notNull().default(""),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    // Slack redelivers events on retry; ts is unique per channel.
-    integrationChannelTsIdx: uniqueIndex("goat_slack_message_events_integration_channel_ts_idx").on(
-      table.integrationId,
-      table.channelId,
-      table.messageTs,
-    ),
-    pendingIdx: index("goat_slack_message_events_pending_idx")
-      .on(table.integrationId, table.channelId, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_slack_message_events_source_item_idx").on(table.sourceItemId),
-    channelTypeCheck: check(
-      "goat_slack_message_events_channel_type_check",
-      sql`${table.channelType} IN ('channel', 'group', 'im', 'mpim')`,
-    ),
-  }),
-);
-
-// Raw Linear activity buffer: the webhook inserts one row per relevant issue or
-// comment event; the runner's flush sweeper batches unflushed rows per issue
-// into an issue-window source item after a quiet period (source_item_id NULL =
-// unflushed).
-export const linearIssueEvents = productSchema.table(
-  "linear_issue_events",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    organizationId: text("organization_id").notNull(),
-    // Nullable: comment events do not always carry the issue's team; the flush
-    // worker re-resolves the team from the live issue snapshot.
-    teamId: text("team_id"),
-    issueId: text("issue_id").notNull(),
-    // One webhook delivery may buffer for several integrations of the same
-    // Linear organization; the delivery id makes redeliveries per-integration no-ops.
-    deliveryId: text("delivery_id").notNull(),
-    entityType: text("entity_type").$type<LinearEventEntityType>().notNull(),
-    action: text("action").$type<LinearEventAction>().notNull(),
-    issueTitle: text("issue_title"),
-    actorName: text("actor_name"),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationDeliveryIdx: uniqueIndex("goat_linear_issue_events_integration_delivery_idx").on(
-      table.integrationId,
-      table.deliveryId,
-    ),
-    pendingIdx: index("goat_linear_issue_events_pending_idx")
-      .on(table.integrationId, table.issueId, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_linear_issue_events_source_item_idx").on(table.sourceItemId),
-    entityTypeCheck: check(
-      "goat_linear_issue_events_entity_type_check",
-      sql`${table.entityType} IN ('issue', 'comment')`,
-    ),
-    actionCheck: check(
-      "goat_linear_issue_events_action_check",
-      sql`${table.action} IN ('create', 'update', 'remove')`,
-    ),
-  }),
-);
-
-// Retired GitHub-ingestion storage. Kept so this cutover does not delete
-// customer data; no webhook or runner path writes or flushes these rows.
-export const gitHubPullRequestEvents = productSchema.table(
-  "github_pull_request_events",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    installationId: text("installation_id").notNull(),
-    repositoryId: text("repository_id").notNull(),
-    pullRequestNumber: integer("pull_request_number").notNull(),
-    // GitHub's X-GitHub-Delivery UUID is stable across redelivery attempts.
-    deliveryId: text("delivery_id").notNull(),
-    eventType: text("event_type").$type<GitHubPullRequestEventType>().notNull(),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationDeliveryIdx: uniqueIndex(
-      "goat_github_pull_request_events_integration_delivery_idx",
-    ).on(table.integrationId, table.deliveryId),
-    pendingIdx: index("goat_github_pull_request_events_pending_idx")
-      .on(table.integrationId, table.repositoryId, table.pullRequestNumber, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_github_pull_request_events_source_item_idx").on(table.sourceItemId),
-    eventTypeCheck: check(
-      "goat_github_pull_request_events_event_type_check",
-      sql`${table.eventType} IN ('pull_request_opened', 'pull_request_merged', 'pull_request_commented')`,
-    ),
-  }),
-);
-
-// Raw HubSpot CRM activity buffer: the webhook inserts one row per relevant
-// object event (creation or property change); the runner's flush sweeper
-// batches unflushed rows per CRM object into an object-window source item
-// after a quiet period (source_item_id NULL = unflushed).
-export const hubspotObjectEvents = productSchema.table(
-  "hubspot_object_events",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    portalId: text("portal_id").notNull(),
-    objectType: text("object_type").$type<HubspotObjectType>().notNull(),
-    objectId: text("object_id").notNull(),
-    // One webhook delivery may buffer for several integrations of the same
-    // HubSpot portal; the event id makes redeliveries per-integration no-ops.
-    deliveryId: text("delivery_id").notNull(),
-    action: text("action").$type<HubspotEventAction>().notNull(),
-    // Set for property-change events; flush classification reads it without
-    // re-parsing the payload.
-    propertyName: text("property_name"),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationDeliveryIdx: uniqueIndex("goat_hubspot_object_events_integration_delivery_idx").on(
-      table.integrationId,
-      table.deliveryId,
-    ),
-    pendingIdx: index("goat_hubspot_object_events_pending_idx")
-      .on(table.integrationId, table.objectType, table.objectId, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_hubspot_object_events_source_item_idx").on(table.sourceItemId),
-    objectTypeCheck: check(
-      "goat_hubspot_object_events_object_type_check",
-      sql`${table.objectType} IN ('contact', 'company', 'deal')`,
-    ),
-    actionCheck: check(
-      "goat_hubspot_object_events_action_check",
-      sql`${table.action} IN ('create', 'update')`,
-    ),
-  }),
-);
-
-// Raw Attio CRM activity buffer: the webhook inserts one row per relevant
-// record event (creation, attribute change, or note added); the runner's flush
-// sweeper batches unflushed rows per record into an object-window source item
-// after a quiet period (source_item_id NULL = unflushed).
-export const attioObjectEvents = productSchema.table(
-  "attio_object_events",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    workspaceId: text("workspace_id").notNull(),
-    objectType: text("object_type").$type<AttioObjectType>().notNull(),
-    recordId: text("record_id").notNull(),
-    // Attio deliveries carry no delivery id; the receiver synthesizes one that
-    // is stable for note/create events so redeliveries are per-integration
-    // no-ops (update events coalesce in the window instead).
-    deliveryId: text("delivery_id").notNull(),
-    action: text("action").$type<AttioEventAction>().notNull(),
-    // Set for attribute-change events; flush enrichment resolves the attribute
-    // name without re-parsing the payload.
-    attributeId: text("attribute_id"),
-    // Set for note.created events; the flush worker fetches note content.
-    noteId: text("note_id"),
-    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
-    eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
-    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationDeliveryIdx: uniqueIndex("goat_attio_object_events_integration_delivery_idx").on(
-      table.integrationId,
-      table.deliveryId,
-    ),
-    pendingIdx: index("goat_attio_object_events_pending_idx")
-      .on(table.integrationId, table.objectType, table.recordId, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_attio_object_events_source_item_idx").on(table.sourceItemId),
-    objectTypeCheck: check(
-      "goat_attio_object_events_object_type_check",
-      sql`${table.objectType} IN ('person', 'company', 'deal')`,
-    ),
-    actionCheck: check(
-      "goat_attio_object_events_action_check",
-      sql`${table.action} IN ('create', 'update', 'note')`,
-    ),
-  }),
-);
-
 // Raw Gmail message buffer: the runner's poll worker inserts one row per new
 // message discovered via the Gmail history API; the flush sweeper batches
 // unflushed rows per thread into a thread-window source item after a quiet
@@ -3005,20 +1866,17 @@ export const gmailMessageEvents = productSchema.table(
     threadId: text("thread_id").notNull(),
     messageId: text("message_id").notNull(),
     // RFC822 Message-ID header — the only cross-mailbox identity for an email
-    // (Gmail message ids are per-mailbox). Used for cross-member brain dedup;
+    // (Gmail message ids are per-mailbox). Used for cross-member dedup;
     // NULL for rows buffered before capture shipped or when the header is absent.
     rfc822MessageId: text("rfc822_message_id"),
-    // Classified at poll time from labelIds (SENT label); flush routing matches
-    // brain-source event filters against this without re-parsing labels.
+    // Classified at poll time from labelIds (SENT label); workflow event
+    // filters match against this without re-parsing labels.
     direction: text("direction").$type<GmailMessageDirection>().notNull(),
     subject: text("subject"),
     fromHeader: text("from_header"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     eventTime: timestamp("event_time", { withTimezone: true }).notNull(),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-    sourceItemId: text("source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
@@ -3028,10 +1886,6 @@ export const gmailMessageEvents = productSchema.table(
       table.integrationId,
       table.messageId,
     ),
-    pendingIdx: index("goat_gmail_message_events_pending_idx")
-      .on(table.integrationId, table.threadId, table.receivedAt)
-      .where(sql`${table.sourceItemId} IS NULL`),
-    sourceItemIdx: index("goat_gmail_message_events_source_item_idx").on(table.sourceItemId),
     directionCheck: check(
       "goat_gmail_message_events_direction_check",
       sql`${table.direction} IN ('sent', 'received')`,
@@ -3096,184 +1950,6 @@ export const posthogEventSyncState = productSchema.table("posthog_event_sync_sta
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Per-integration Fathom poll cursor. opencompany uses bounded created_after /
-// created_before windows for personal API-key connections. The initial cursor
-// is written when the connection is created, so live ingestion never backfills
-// implicitly. pending_created_before_cursor pins the upper bound while an
-// opaque page_cursor continuation is in flight.
-export const fathomSyncState = productSchema.table("fathom_sync_state", {
-  integrationId: text("integration_id")
-    .primaryKey()
-    .references(() => integrations.id, { onDelete: "cascade" }),
-  userWorkosId: text("user_workos_id")
-    .notNull()
-    .references(() => users.workosUserId, { onDelete: "cascade" }),
-  createdAfterCursor: timestamp("created_after_cursor", { withTimezone: true }),
-  pageCursor: text("page_cursor"),
-  pendingCreatedBeforeCursor: timestamp("pending_created_before_cursor", { withTimezone: true }),
-  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-// Fathom can list a recording before its generated summary or transcript is
-// available. Keep those recordings durable while the timestamp cursor moves
-// forward; the runner retries the recording content endpoints and only creates
-// the cross-brain event claim once usable content exists.
-export const fathomPendingMeetings = productSchema.table(
-  "fathom_pending_meetings",
-  {
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    recordingId: text("recording_id").notNull(),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    meetingCreatedAt: timestamp("meeting_created_at", { withTimezone: true }).notNull(),
-    rawPayload: jsonb("raw_payload").$type<Record<string, unknown>>().notNull(),
-    attemptCount: integer("attempt_count").notNull().default(0),
-    lastAttemptedAt: timestamp("last_attempted_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    pk: primaryKey({
-      name: "goat_fathom_pending_meetings_pk",
-      columns: [table.integrationId, table.recordingId],
-    }),
-    retryIdx: index("goat_fathom_pending_meetings_retry_idx").on(
-      table.integrationId,
-      table.lastAttemptedAt.asc().nullsFirst(),
-      table.createdAt,
-    ),
-  }),
-);
-
-// One durable Drive change-feed cursor per connected account/corpus. My Drive
-// and directly shared files use corpus_key "user"; selected Shared Drives use
-// "drive:<id>" because Google maintains a distinct change log for each drive.
-export const googleDriveSyncCursors = productSchema.table(
-  "google_drive_sync_cursors",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    corpusKey: text("corpus_key").notNull(),
-    driveId: text("drive_id"),
-    pageToken: text("page_token").notNull(),
-    webhookAddress: text("webhook_address").notNull(),
-    wakeRequestedAt: timestamp("wake_requested_at", { withTimezone: true }),
-    leaseId: text("lease_id"),
-    leaseOwner: text("lease_owner"),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
-    lastSuccessfulAt: timestamp("last_successful_at", { withTimezone: true }),
-    lastResetAt: timestamp("last_reset_at", { withTimezone: true }),
-    lastError: text("last_error"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationCorpusIdx: uniqueIndex("goat_google_drive_sync_cursors_integration_corpus_idx").on(
-      table.integrationId,
-      table.corpusKey,
-    ),
-    dueIdx: index("goat_google_drive_sync_cursors_due_idx").on(
-      table.wakeRequestedAt,
-      table.lastPolledAt,
-    ),
-    leaseIdx: index("goat_google_drive_sync_cursors_lease_idx").on(table.leaseExpiresAt),
-  }),
-);
-
-// Drive watch renewal intentionally overlaps old and new channels. Keeping
-// each channel lets the public webhook authenticate either one until expiry.
-export const googleDriveWatchChannels = productSchema.table(
-  "google_drive_watch_channels",
-  {
-    id: text("id").primaryKey(),
-    cursorId: text("cursor_id")
-      .notNull()
-      .references(() => googleDriveSyncCursors.id, { onDelete: "cascade" }),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    resourceId: text("resource_id"),
-    tokenHash: text("token_hash").notNull(),
-    status: text("status").$type<GoogleDriveWatchChannelStatus>().notNull().default("creating"),
-    expiresAt: timestamp("expires_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    cursorExpiryIdx: index("goat_google_drive_watch_channels_cursor_expiry_idx").on(
-      table.cursorId,
-      table.status,
-      table.expiresAt,
-    ),
-    statusCheck: check(
-      "goat_google_drive_watch_channels_status_check",
-      sql`${table.status} IN ('creating', 'active', 'stopped')`,
-    ),
-  }),
-);
-
-// A single coalescing row per Drive file. observed_version may advance while a
-// leased ingest is running; completion only advances ingested_version to the
-// exact fetched version, leaving any newer observation eligible for the next pass.
-export const googleDriveFileStates = productSchema.table(
-  "google_drive_file_states",
-  {
-    id: text("id").primaryKey(),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integrations.id, { onDelete: "cascade" }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    fileId: text("file_id").notNull(),
-    driveId: text("drive_id"),
-    observedVersion: text("observed_version").notNull(),
-    ingestedVersion: text("ingested_version"),
-    metadata: jsonb("metadata")
-      .$type<Record<string, unknown>>()
-      .notNull()
-      .default(sql`'{}'::jsonb`),
-    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).notNull(),
-    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).notNull(),
-    nextIngestAt: timestamp("next_ingest_at", { withTimezone: true }).notNull(),
-    forceIngestAt: timestamp("force_ingest_at", { withTimezone: true }).notNull(),
-    leaseId: text("lease_id"),
-    leaseOwner: text("lease_owner"),
-    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
-    attempts: integer("attempts").notNull().default(0),
-    lastError: text("last_error"),
-    lastSourceItemId: text("last_source_item_id").references(() => brainSourceItems.id, {
-      onDelete: "set null",
-    }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    integrationFileIdx: uniqueIndex("goat_google_drive_file_states_integration_file_idx").on(
-      table.integrationId,
-      table.fileId,
-    ),
-    dueIdx: index("goat_google_drive_file_states_due_idx").on(
-      table.nextIngestAt,
-      table.forceIngestAt,
-    ),
-    leaseExpiryIdx: index("goat_google_drive_file_states_lease_expiry_idx").on(
-      table.leaseExpiresAt,
-    ),
-  }),
-);
-
 // RETIRED: the Recurring Tasks ("Routines") feature was removed. Nothing reads or writes these
 // two tables or `tasks.schedule_id` any more; they are retained only because dropping them is an
 // explicitly destructive migration that needs its own plan and production verification. See
@@ -3324,10 +2000,8 @@ export const taskSchedules = productSchema.table(
   }),
 );
 
-// Workspace-scoped automations. Formerly stored as markdown documents in a
-// reserved `workflows/` Brain folder; extracted here so "how work happens" is a
-// first-class, company-level primitive rather than Brain (knowledge) content.
-// `slug` is the stable handle used by the `#` composer mention and persisted as
+// Workspace-scoped automations. `slug` is the stable handle used by the `#`
+// composer mention and persisted as
 // `tasks.workflow_id` when a workflow fires.
 export const workflows = productSchema.table(
   "workflows",
@@ -3986,7 +2660,6 @@ export const tasks = productSchema.table(
     // authority (`user_workos_id`), but the work belongs to the agent, so it stays out of every
     // personal Task list and is read back through the agent's run history instead.
     agentId: text("agent_id").references(() => workflows.id, { onDelete: "set null" }),
-    workflowBrainRef: text("workflow_brain_ref"),
     reportedOutcome: text("reported_outcome").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
     harnessSpec: jsonb("harness_spec").$type<HarnessSpec>().notNull().default(sql`'{}'::jsonb`),
@@ -5160,9 +3833,6 @@ export const codexChatSessions = productSchema.table(
     engine: text("engine").$type<CodexChatEngine>().notNull().default("codex"),
     harness: text("harness").$type<CodexChatHarness>().notNull().default("chat"),
     model: text("model").notNull().default("gpt-5.5"),
-    brainRef: text("brain_ref").references(() => brains.id, {
-      onDelete: "set null",
-    }),
     workspaceId: text("workspace_id").references(() => workspaces.id, {
       onDelete: "set null",
     }),
@@ -5553,7 +4223,7 @@ export const knowledgeCommandIdempotency = productSchema.table(
     ),
     operationCheck: check(
       "goat_knowledge_command_idempotency_operation_check",
-      sql`${table.operation} IN ('brain_document.create', 'brain_asset.create', 'brain_asset.replace', 'wiki_page.create', 'wiki_timeline.create', 'brain_import.start')`,
+      sql`${table.operation} IN ('wiki_page.create', 'wiki_timeline.create')`,
     ),
   }),
 );
@@ -6310,54 +4980,6 @@ export const codexChatEvents = productSchema.table(
   }),
 );
 
-export const brainToolRuns = productSchema.table(
-  "brain_tool_runs",
-  {
-    id: text("id").primaryKey(),
-    brainRef: text("brain_ref").references(() => brains.id, {
-      onDelete: "set null",
-    }),
-    userWorkosId: text("user_workos_id")
-      .notNull()
-      .references(() => users.workosUserId, { onDelete: "cascade" }),
-    chatSessionId: text("chat_session_id").references(() => chatSessions.id, {
-      onDelete: "set null",
-    }),
-    userMessageId: text("user_message_id").references(() => chatMessages.id, {
-      onDelete: "set null",
-    }),
-    assistantMessageId: text("assistant_message_id").references(() => chatMessages.id, {
-      onDelete: "set null",
-    }),
-    toolCallId: text("tool_call_id"),
-    sourceRef: text("source_ref"),
-    action: text("action"),
-    ok: boolean("ok").notNull().default(false),
-    exitCode: integer("exit_code"),
-    durationMs: integer("duration_ms"),
-    tracePath: text("trace_path"),
-    trace: jsonb("trace").$type<BrainToolRunTrace>().notNull().default(sql`'{}'::jsonb`),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => ({
-    brainCreatedAtIdx: index("goat_brain_tool_runs_brain_created_at_idx").on(
-      table.brainRef,
-      table.createdAt,
-    ),
-    userCreatedAtIdx: index("goat_brain_tool_runs_user_created_at_idx").on(
-      table.userWorkosId,
-      table.createdAt,
-    ),
-    chatSessionCreatedAtIdx: index("goat_brain_tool_runs_chat_session_created_at_idx").on(
-      table.chatSessionId,
-      table.createdAt,
-    ),
-    userMessageIdx: index("goat_brain_tool_runs_user_message_idx").on(table.userMessageId),
-    toolCallIdx: index("goat_brain_tool_runs_tool_call_idx").on(table.toolCallId),
-    sourceRefIdx: index("goat_brain_tool_runs_source_ref_idx").on(table.sourceRef),
-  }),
-);
-
 export const codexCredentials = productSchema.table(
   "codex_credentials",
   {
@@ -6632,13 +5254,6 @@ export const claudeCodeCredentials = productSchema.table(
 
 export const usersRelations = relations(users, ({ many }) => ({
   workspaceMemberships: many(workspaceMembers),
-  brainMemberships: many(brainMembers),
-  brainFolders: many(brainFolders),
-  brainDocuments: many(brainDocuments),
-  brainTimelineEntries: many(brainTimelineEntries),
-  brainEdges: many(brainEdges),
-  brainDocumentVersions: many(brainDocumentVersions),
-  brainToolRuns: many(brainToolRuns),
   taskSchedules: many(taskSchedules),
   taskScheduleRuns: many(taskScheduleRuns),
   tasks: many(tasks),
@@ -6657,8 +5272,6 @@ export const usersRelations = relations(users, ({ many }) => ({
   integrationCredentials: many(integrationCredentials),
   integrationResources: many(integrationResources),
   repoConfigs: many(repoConfigs),
-  brainSourceItems: many(brainSourceItems),
-  brainIngestJobs: many(brainIngestJobs),
   codexDeviceAuthFlows: many(codexDeviceAuthFlows),
   providedWorkspaceCodexEngineAccounts: many(workspaceCodexEngineAccounts),
 }));
@@ -6673,7 +5286,6 @@ export const workspacesRelations = relations(workspaces, ({ one, many }) => ({
   capabilityRuns: many(capabilityRuns),
   billing: one(workspaceBilling),
   ingestionReservations: many(workspaceIngestionReservations),
-  brains: many(brains),
   repoConfigs: many(repoConfigs),
   wikiSources: many(wikiSources),
   wikiSourceItems: many(wikiSourceItems),
@@ -6730,89 +5342,6 @@ export const workspaceCapabilitiesRelations = relations(workspaceCapabilities, (
   updatedBy: one(users, {
     fields: [workspaceCapabilities.updatedByWorkosId],
     references: [users.workosUserId],
-  }),
-}));
-
-export const brainsRelations = relations(brains, ({ one, many }) => ({
-  workspace: one(workspaces, {
-    fields: [brains.workspaceId],
-    references: [workspaces.id],
-  }),
-  createdBy: one(users, {
-    fields: [brains.createdByWorkosId],
-    references: [users.workosUserId],
-  }),
-  members: many(brainMembers),
-  documents: many(brainDocuments),
-  folders: many(brainFolders),
-}));
-
-export const brainMembersRelations = relations(brainMembers, ({ one }) => ({
-  brain: one(brains, {
-    fields: [brainMembers.brainId],
-    references: [brains.id],
-  }),
-  user: one(users, {
-    fields: [brainMembers.userWorkosId],
-    references: [users.workosUserId],
-  }),
-}));
-
-export const brainFoldersRelations = relations(brainFolders, ({ one }) => ({
-  user: one(users, {
-    fields: [brainFolders.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  brain: one(brains, {
-    fields: [brainFolders.brainRef],
-    references: [brains.id],
-  }),
-}));
-
-export const brainDocumentsRelations = relations(brainDocuments, ({ one, many }) => ({
-  user: one(users, {
-    fields: [brainDocuments.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  brain: one(brains, {
-    fields: [brainDocuments.brainRef],
-    references: [brains.id],
-  }),
-  timelineEntries: many(brainTimelineEntries),
-  edges: many(brainEdges),
-  versions: many(brainDocumentVersions),
-}));
-
-export const brainTimelineEntriesRelations = relations(brainTimelineEntries, ({ one }) => ({
-  user: one(users, {
-    fields: [brainTimelineEntries.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  document: one(brainDocuments, {
-    fields: [brainTimelineEntries.documentId],
-    references: [brainDocuments.id],
-  }),
-}));
-
-export const brainEdgesRelations = relations(brainEdges, ({ one }) => ({
-  user: one(users, {
-    fields: [brainEdges.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  document: one(brainDocuments, {
-    fields: [brainEdges.documentId],
-    references: [brainDocuments.id],
-  }),
-}));
-
-export const brainDocumentVersionsRelations = relations(brainDocumentVersions, ({ one }) => ({
-  user: one(users, {
-    fields: [brainDocumentVersions.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  document: one(brainDocuments, {
-    fields: [brainDocumentVersions.documentId],
-    references: [brainDocuments.id],
   }),
 }));
 
@@ -6923,27 +5452,6 @@ export const wikiLinksRelations = relations(wikiLinks, ({ one }) => ({
   fromPage: one(wikiPages, {
     fields: [wikiLinks.fromPageId],
     references: [wikiPages.id],
-  }),
-}));
-
-export const brainToolRunsRelations = relations(brainToolRuns, ({ one }) => ({
-  user: one(users, {
-    fields: [brainToolRuns.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  chatSession: one(chatSessions, {
-    fields: [brainToolRuns.chatSessionId],
-    references: [chatSessions.id],
-  }),
-  userMessage: one(chatMessages, {
-    fields: [brainToolRuns.userMessageId],
-    references: [chatMessages.id],
-    relationName: "goat_brain_tool_runs_user_message",
-  }),
-  assistantMessage: one(chatMessages, {
-    fields: [brainToolRuns.assistantMessageId],
-    references: [chatMessages.id],
-    relationName: "goat_brain_tool_runs_assistant_message",
   }),
 }));
 
@@ -7112,7 +5620,6 @@ export const integrationsRelations = relations(integrations, ({ one, many }) => 
   }),
   credentials: many(integrationCredentials),
   resources: many(integrationResources),
-  brainSourceItems: many(brainSourceItems),
 }));
 
 export const integrationCredentialsRelations = relations(integrationCredentials, ({ one }) => ({
@@ -7148,19 +5655,6 @@ export const repoConfigsRelations = relations(repoConfigs, ({ one }) => ({
   }),
 }));
 
-export const brainSourceItemsRelations = relations(brainSourceItems, ({ one, many }) => ({
-  user: one(users, {
-    fields: [brainSourceItems.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  integration: one(integrations, {
-    fields: [brainSourceItems.integrationId],
-    references: [integrations.id],
-  }),
-  ingestJobs: many(brainIngestJobs),
-  workspaceReservations: many(workspaceIngestionReservations),
-}));
-
 export const workspaceIngestionReservationsRelations = relations(
   workspaceIngestionReservations,
   ({ one }) => ({
@@ -7168,27 +5662,12 @@ export const workspaceIngestionReservationsRelations = relations(
       fields: [workspaceIngestionReservations.workspaceId],
       references: [workspaces.id],
     }),
-    sourceItem: one(brainSourceItems, {
-      fields: [workspaceIngestionReservations.sourceItemId],
-      references: [brainSourceItems.id],
-    }),
     wikiSourceItem: one(wikiSourceItems, {
       fields: [workspaceIngestionReservations.wikiSourceItemId],
       references: [wikiSourceItems.id],
     }),
   }),
 );
-
-export const brainIngestJobsRelations = relations(brainIngestJobs, ({ one }) => ({
-  user: one(users, {
-    fields: [brainIngestJobs.userWorkosId],
-    references: [users.workosUserId],
-  }),
-  sourceItem: one(brainSourceItems, {
-    fields: [brainIngestJobs.sourceItemId],
-    references: [brainSourceItems.id],
-  }),
-}));
 
 export const tasksRelations = relations(tasks, ({ one, many }) => ({
   user: one(users, {
@@ -7359,7 +5838,6 @@ export const chatSessionsRelations = relations(chatSessions, ({ one, many }) => 
   browserProfileSessions: many(browserProfileSessions),
   skillBundles: many(chatSessionSkillBundles),
   plugins: many(chatSessionPlugins),
-  brainToolRuns: many(brainToolRuns),
   capabilityRuns: many(capabilityRuns),
   artifacts: many(chatArtifacts),
 }));
@@ -7581,15 +6059,6 @@ export type WikiPageVersion = typeof wikiPageVersions.$inferSelect;
 export type WikiTimelineEntry = typeof wikiTimelineEntries.$inferSelect;
 export type WikiLink = typeof wikiLinks.$inferSelect;
 
-export type Brain = typeof brains.$inferSelect;
-export type BrainMember = typeof brainMembers.$inferSelect;
-export type BrainFolder = typeof brainFolders.$inferSelect;
-export type BrainDocument = typeof brainDocuments.$inferSelect;
-export type BrainTimelineEntryRecord = typeof brainTimelineEntries.$inferSelect;
-export type BrainEdge = typeof brainEdges.$inferSelect;
-export type BrainDocumentEmbedding = typeof brainDocumentEmbeddings.$inferSelect;
-export type BrainDocumentVersion = typeof brainDocumentVersions.$inferSelect;
-export type BrainToolRun = typeof brainToolRuns.$inferSelect;
 export type CodexChatSession = typeof codexChatSessions.$inferSelect;
 export type CodexChatTurn = typeof codexChatTurns.$inferSelect;
 export type ChatCommandIdempotency = typeof chatCommandIdempotency.$inferSelect;
@@ -7602,8 +6071,6 @@ export type CodexChatInteraction = typeof codexChatInteractions.$inferSelect;
 export type CodexChatEvent = typeof codexChatEvents.$inferSelect;
 export type Integration = typeof integrations.$inferSelect;
 export type IntegrationCredential = typeof integrationCredentials.$inferSelect;
-export type BrainSourceItem = typeof brainSourceItems.$inferSelect;
-export type BrainIngestJob = typeof brainIngestJobs.$inferSelect;
 export type CodexCredential = typeof codexCredentials.$inferSelect;
 export type WorkspaceCodexEngineAccount = typeof workspaceCodexEngineAccounts.$inferSelect;
 export type ClaudeCodeCredential = typeof claudeCodeCredentials.$inferSelect;

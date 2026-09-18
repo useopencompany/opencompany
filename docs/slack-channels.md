@@ -124,7 +124,7 @@ is simply silent when a member writes to it. Custom avatars must be public HTTPS
 because Slack downloads the image when it posts the message. New installs still do not request
 private-channel, mention, or reaction *event* scopes - `reactions:write` only lets the bot mark a
 message, not read anyone else's reactions. Old grants may remain until the Slack app is
-reinstalled; ingress ignores those event types. Stop configuring the legacy Wiki answer bot's Brain destinations.
+reinstalled; ingress ignores those event types.
 
 Slack contracts: [posting and thread timestamps](https://docs.slack.dev/reference/methods/chat.postmessage/),
 [message metadata](https://docs.slack.dev/messaging/message-metadata/),

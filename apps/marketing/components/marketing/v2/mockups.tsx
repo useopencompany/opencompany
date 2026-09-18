@@ -429,7 +429,7 @@ export function ReviewMockup() {
           { title: "Add seat limits to billing", repo: "web", when: "5h" },
           { title: "Fix wiki search ranking", repo: "packages/wiki", when: "Yesterday" },
           { title: "Rotate expiring API tokens", repo: "runner", when: "Yesterday" },
-          { title: "Deduplicate competitor pages", repo: "packages/brain", when: "2d" },
+          { title: "Deduplicate competitor pages", repo: "packages/wiki", when: "2d" },
           { title: "Cache the changelog feed", repo: "marketing", when: "3d" },
         ].map((item) => (
           <div

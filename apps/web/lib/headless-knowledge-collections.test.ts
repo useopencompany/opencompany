@@ -1,8 +1,6 @@
-import { createCollection } from "@tanstack/react-db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   awaitHeadlessWikiTransactions,
-  getHeadlessBrainCollections,
   getHeadlessWikiCollections,
   persistHeadlessWikiPageWrites,
 } from "./headless-knowledge-collections";
@@ -56,29 +54,6 @@ const wikiPage = {
 
 describe("headless knowledge collections", () => {
   beforeEach(() => vi.clearAllMocks());
-
-  it("uses versioned API-owned Brain shapes scoped by the authorized Brain", () => {
-    const first = getHeadlessBrainCollections("brain_alpha");
-    const second = getHeadlessBrainCollections("brain_alpha");
-
-    expect(first).toBe(second);
-    expect(createCollection).toHaveBeenCalledTimes(6);
-    expect((first.documents as unknown as TestCollection).options).toMatchObject({
-      id: "headless-brain-documents:v1:brain_alpha",
-      shapeOptions: {
-        url: "https://api.example.test/v1/read-models/brain-documents-v1?brainId=brain_alpha",
-      },
-    });
-    expect((first.edges as unknown as TestCollection).options.shapeOptions.url).toBe(
-      "https://api.example.test/v1/read-models/brain-edges-v1?brainId=brain_alpha",
-    );
-    expect((first.ingestJobs as unknown as TestCollection).options.shapeOptions.url).toBe(
-      "https://api.example.test/v1/read-models/brain-ingest-jobs-v1?brainId=brain_alpha",
-    );
-    expect((first.importRuns as unknown as TestCollection).options.shapeOptions.url).toBe(
-      "https://api.example.test/v1/read-models/brain-import-runs-v1?brainId=brain_alpha",
-    );
-  });
 
   it("scopes the Wiki shapes to one authorized wiki, not the whole workspace", () => {
     const wiki = getHeadlessWikiCollections("goat_wiki_clevel");

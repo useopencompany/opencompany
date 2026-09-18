@@ -7,7 +7,6 @@ import {
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
 } from "@opencompany/agent/chat-agent";
 import type {
-  BrainToolInput,
   ChatUiMessage,
   StoredChatMessage,
   WebFetchToolInput,
@@ -55,13 +54,7 @@ import {
   chatMessages,
   type ProductChatContextCompactionState,
 } from "@opencompany/db/product-schema";
-import {
-  DEFAULT_BRAIN_SLUG,
-  getBrainAccess,
-  getWorkspaceRole,
-  isLegacyBrainEnabledForWorkspace,
-  listAccessibleBrains,
-} from "@opencompany/db/workspaces";
+import { getWorkspaceRole } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
 import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
@@ -81,7 +74,6 @@ import {
 import { asc, eq, sql } from "drizzle-orm";
 import { downloadBlobBytes } from "./attachment-hydration";
 import { loadBotIdentityPrompt } from "./bot-context";
-import { runTaskBrainRead } from "./codex-brain-tool";
 import {
   CodexChatHandoffError,
   CodexChatLeaseLostError,
@@ -92,7 +84,6 @@ import { createProductSteeringChannel } from "./coding-chat-steering";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createActionDispatcher } from "./opencompany-action-gateway";
-import { createBrainCaptureRunner } from "./opencompany-brain-capture";
 import {
   createProductChatProjector,
   ProductChatInterruptedError,
@@ -294,7 +285,6 @@ export async function runProductChatTurn(input: {
       feature,
       chatSessionId: session.chatSessionId,
       ...(input.taskContext ? { taskId: input.taskContext.task.id } : {}),
-      ...(runtime.brain ? { brainRef: runtime.brain.id } : {}),
     });
     const providerOptions =
       modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution);
@@ -1332,26 +1322,6 @@ async function resolveProductChatRuntime(input: {
   if (!workspaceRole) {
     throw new Error("You no longer have access to this chat's workspace.");
   }
-  const legacyBrainEnabled = await isLegacyBrainEnabledForWorkspace(workspaceId, { db: getDb() });
-
-  let brain = null;
-  if (legacyBrainEnabled && session.brainRef) {
-    const access = await getBrainAccess(
-      { userWorkosId: turn.userWorkosId, brainRef: session.brainRef },
-      { db: getDb() },
-    );
-    if (!access || access.brain.workspaceId !== workspaceId) {
-      throw new Error("You no longer have access to this chat's Brain.");
-    }
-    brain = access.brain;
-  } else if (legacyBrainEnabled) {
-    const brains = await listAccessibleBrains(
-      { userWorkosId: turn.userWorkosId, workspaceId },
-      { db: getDb() },
-    );
-    brain = brains.find((candidate) => candidate.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
-  }
-
   const actionDispatcher = await createActionDispatcher({
     ...(session.hostToolContractVersion
       ? { hostToolContractVersion: session.hostToolContractVersion }
@@ -1376,27 +1346,9 @@ async function resolveProductChatRuntime(input: {
   }
 
   const currentDate = new Date();
-  const brainCapture = brain
-    ? createBrainCaptureRunner({
-        sessionId: session.id,
-        turnId: turn.id,
-        signal,
-      })
-    : null;
   const exaApiKey = env.exaApiKey?.trim();
   // Hoisted out of the tool-context call so the subagent runner can reuse the same read-only
   // runners rather than constructing a second set with different credentials or limits.
-  const runBrainCli = brain
-    ? (toolInput: BrainToolInput) =>
-        runTaskBrainRead({
-          brainRef: brain.id,
-          userWorkosId: turn.userWorkosId,
-          chatSessionId: session.chatSessionId,
-          gatewayApiKey: env.vercelAiGatewayApiKey,
-          toolInput,
-          db: getDb(),
-        })
-    : null;
   const webSearch = exaApiKey
     ? async (toolInput: WebSearchToolInput): Promise<WebSearchToolOutput> => {
         try {
@@ -1432,9 +1384,7 @@ async function resolveProductChatRuntime(input: {
         budget: createSubagentBudget({ signal }),
         trace: input.subagentTrace,
         recordUsage: input.recordSubagentUsage,
-        ...(brain ? { brainRef: brain.id } : {}),
         runners: {
-          ...(runBrainCli ? { runBrainCli } : {}),
           ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
           ...(webSearch ? { webSearch } : {}),
           ...(webFetch ? { webFetch } : {}),
@@ -1464,8 +1414,6 @@ async function resolveProductChatRuntime(input: {
 
   const toolContext = createProductChatToolContext({
     model,
-    ...(runBrainCli ? { runBrainCli } : {}),
-    ...(brainCapture ? { saveToBrain: brainCapture } : {}),
     ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
@@ -1517,13 +1465,6 @@ async function resolveProductChatRuntime(input: {
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     subagentsEnabled: Boolean(subagentRunner),
-    activeBrain: brain
-      ? {
-          name: brain.name,
-          workspaceName: hostTools?.bootstrap.workspaceName ?? brain.name,
-          readOnly: !brainCapture,
-        }
-      : null,
     ...(hostTools
       ? {
           userContext: hostTools.bootstrap.userContext,
@@ -1562,7 +1503,6 @@ async function resolveProductChatRuntime(input: {
     : [];
   return {
     model,
-    brain,
     activeSkills: hostTools?.activeSkills ?? [],
     toolContext,
     system: [

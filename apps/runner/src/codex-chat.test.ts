@@ -73,9 +73,7 @@ const eventMocks = vi.hoisted(() => ({
 }));
 const historyMocks = vi.hoisted(() => ({ loadCodingChatHistory: vi.fn() }));
 const githubAuthMocks = vi.hoisted(() => ({ loadGitHubAuthForUser: vi.fn() }));
-const workspaceMocks = vi.hoisted(() => ({
-  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
-}));
+const workspaceMocks = vi.hoisted(() => ({}));
 const repoMocks = vi.hoisted(() => ({
   loadRepositoryBootstrap: vi.fn(),
   stageRepositoryBootstrap: vi.fn(),
@@ -811,7 +809,6 @@ describe("runCodexChatTurn over ACP", () => {
         }),
         session: codexSession({
           workspaceId: "workspace_1",
-          brainRef: "brain_1",
           hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
         }),
         canonicalAttemptId: "attempt_1",
@@ -1716,7 +1713,6 @@ function codexSession(overrides: Partial<CodexChatSession> = {}): CodexChatSessi
     engine: "codex",
     harness: "chat",
     model: "gpt-5.5",
-    brainRef: null,
     workspaceId: "workspace_1",
     hostToolContractVersion: null,
     executionBackend: "runner_attached",

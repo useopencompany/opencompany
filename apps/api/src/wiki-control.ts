@@ -1,6 +1,5 @@
 // Wiki management: create a named wiki, edit its name and instructions, and set
-// who can reach it. Mirrors ./brain-control, which solved the same problem for
-// the predecessor Brain entity.
+// who can reach it.
 //
 // This is the *management* surface only. Reading and writing wiki content is
 // authorized inside @opencompany/core (KnowledgeApplicationService and

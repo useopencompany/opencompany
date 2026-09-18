@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Brand accent (violet, matching the old marketing brain visualization).
+// Brand accent (violet, matching the marketing mind visualization).
 const ACCENT = "139, 92, 246";
 
 const WOBBLE_KEYFRAMES = `@keyframes mind-wobble{0%,100%{transform:translate(0,6px)}25%{transform:translate(6px,0)}50%{transform:translate(0,-6px)}75%{transform:translate(-6px,0)}}`;
@@ -129,7 +129,7 @@ const DOCS = [
   },
   {
     label: "onboarding",
-    ascii: `┌───────────────────┐\n│ § onboarding       │\n│───────────────────│\n│ 1. create brain    │\n│ 2. add context     │\n│ 3. type #agent     │\n└───────────────────┘`,
+    ascii: `┌───────────────────┐\n│ § onboarding       │\n│───────────────────│\n│ 1. create wiki     │\n│ 2. add context     │\n│ 3. type #agent     │\n└───────────────────┘`,
     x: 5,
     y: 70,
   },

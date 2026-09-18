@@ -5,7 +5,7 @@ import {
   listGmailLabelsAction,
   listGranolaFoldersAction,
   listLinearTeamsAction,
-} from "@/lib/brain-source-actions";
+} from "@/lib/integration-resource-actions";
 import {
   listPostHogEventDefinitionsAction,
   type PostHogEventDefinitionListResult,

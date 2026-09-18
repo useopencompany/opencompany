@@ -32,7 +32,6 @@ import {
 } from "@opencompany/db/plugin-runtime-repository";
 import { type CodexChatSession, type CodexChatTurn } from "@opencompany/db/product-schema";
 import type { ImmutableSkillBundle } from "@opencompany/db/skill-bundle-repository";
-import { isLegacyBrainEnabledForWorkspace } from "@opencompany/db/workspaces";
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { ACP_ENGINE_ADAPTERS } from "./acp-engine-adapters";
@@ -142,7 +141,6 @@ import {
   buildTaskTerminalProjection,
   buildTaskTurnCompletion,
   closeTaskTurn,
-  finalizeTaskResult,
   markTaskTurnRunning,
   orchestrateTaskFailure,
   type TaskTurnContext,
@@ -174,10 +172,6 @@ const CLAUDE_CHAT_ARTIFACTS_PROMPT =
   "When you create a finished file the user should receive, call publish_artifact with its sandbox path so it appears as a durable file in chat. Do not publish source files, repository diffs, logs, or temporary work.";
 const CLAUDE_CHAT_WIKI_PROMPT =
   "A wiki tool is available for durable workspace knowledge. Inspect existing pages before changing them, and read a page before overwriting it.";
-const CLAUDE_CHAT_BRAIN_PROMPT =
-  "A read-only goat_brain tool is available for the Brain pinned to this chat. Use it when durable company or user context would help; it cannot modify the Brain.";
-const CLAUDE_CHAT_BRAIN_CAPTURE_PROMPT =
-  "A save_to_brain tool is available for the Brain pinned to this chat. Use it only when the user explicitly asks to save or remember something; preserve their content faithfully and do not use it as a scratchpad.";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -623,15 +617,6 @@ export async function runClaudeCodeChatTurn(input: {
     const artifactToolsEnabled = hostGatewayEnabled;
     const wikiToolsSupported =
       hostGatewayEnabled && isWikiHostToolContractVersion(session.hostToolContractVersion);
-    const legacyBrainEnabled = session.workspaceId
-      ? await isLegacyBrainEnabledForWorkspace(session.workspaceId, { db: getDb() })
-      : false;
-    const brainToolsEnabled = hostGatewayEnabled && legacyBrainEnabled && Boolean(session.brainRef);
-    const brainCaptureEnabled =
-      brainToolsEnabled &&
-      (session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
-        session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3 ||
-        session.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V4);
     // Minted before the redactor so a leaked ticket (e.g. the agent cats its own MCP
     // config) is scrubbed from logs the same way the other sandbox credentials are.
     const actionGatewayTicket =
@@ -801,8 +786,6 @@ export async function runClaudeCodeChatTurn(input: {
             ),
             artifactsAvailable: artifactToolsEnabled,
             wikiSupported: wikiToolsSupported,
-            brainAvailable: brainToolsEnabled,
-            brainCaptureAvailable: brainCaptureEnabled,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
               botPrompt,
               repositoryBootstrap.promptFragment,
@@ -825,8 +808,6 @@ export async function runClaudeCodeChatTurn(input: {
             ),
             artifactsAvailable: artifactToolsEnabled,
             wikiSupported: wikiToolsSupported,
-            brainAvailable: brainToolsEnabled,
-            brainCaptureAvailable: brainCaptureEnabled,
             repositoryBootstrapPrompt: combineSandboxPromptFragments(
               botPrompt,
               repositoryBootstrap.promptFragment,
@@ -1109,20 +1090,14 @@ export async function runClaudeCodeChatTurn(input: {
         clearInterval(closerAbortTimer);
       }
 
-      const finalResult = await finalizeTaskResult({
-        context: taskContext,
-        assistantContent: rawResult,
-        turnId: turn.id,
-      });
       await projector.finalize(
-        { ...engineSummary, result: finalResult },
+        { ...engineSummary, result: rawResult },
         {
-          // Only a rewritten result (e.g. the Brain report pointer) needs appending; in the
-          // default mode the final message already streamed into the trace parts.
-          settledResultContent: finalResult === rawResult ? null : finalResult,
+          // The final message already streamed into the trace parts.
+          settledResultContent: null,
           taskCompletion: buildTaskTurnCompletion({
             context: taskContext,
-            result: finalResult,
+            result: rawResult,
             disposition:
               reported?.disposition === "done" ||
               reported?.disposition === "needs_attention" ||
@@ -1411,8 +1386,6 @@ function buildClaudeChatTask(input: {
   actionDiscoveryInstructions: string;
   artifactsAvailable: boolean;
   wikiSupported: boolean;
-  brainAvailable: boolean;
-  brainCaptureAvailable: boolean;
   repositoryBootstrapPrompt: string;
   attachmentPaths: string[];
   skillPaths: string[];
@@ -1431,8 +1404,6 @@ function buildClaudeChatTask(input: {
       : null,
     input.artifactsAvailable ? CLAUDE_CHAT_ARTIFACTS_PROMPT : null,
     input.wikiSupported ? CLAUDE_CHAT_WIKI_PROMPT : null,
-    input.brainAvailable ? CLAUDE_CHAT_BRAIN_PROMPT : null,
-    input.brainCaptureAvailable ? CLAUDE_CHAT_BRAIN_CAPTURE_PROMPT : null,
     input.repositoryBootstrapPrompt || null,
     ...claudeBackgroundTaskPromptLines(input.taskContext),
     "Answer conversationally. Run commands or edit files only when the message calls for it, and keep replies concise unless the user asks for detail.",
@@ -1459,8 +1430,6 @@ function buildClaudeChatRecoveryTask(input: {
   actionDiscoveryInstructions: string;
   artifactsAvailable: boolean;
   wikiSupported: boolean;
-  brainAvailable: boolean;
-  brainCaptureAvailable: boolean;
   repositoryBootstrapPrompt: string;
   previousProgress: string;
   attachmentPaths: string[];
@@ -1481,8 +1450,6 @@ function buildClaudeChatRecoveryTask(input: {
       : null,
     input.artifactsAvailable ? CLAUDE_CHAT_ARTIFACTS_PROMPT : null,
     input.wikiSupported ? CLAUDE_CHAT_WIKI_PROMPT : null,
-    input.brainAvailable ? CLAUDE_CHAT_BRAIN_PROMPT : null,
-    input.brainCaptureAvailable ? CLAUDE_CHAT_BRAIN_CAPTURE_PROMPT : null,
     input.repositoryBootstrapPrompt || null,
     ...claudeBackgroundTaskPromptLines(input.taskContext),
     "If the interrupted work already finished, report the final result. If additional work is needed, finish it and then answer concisely.",

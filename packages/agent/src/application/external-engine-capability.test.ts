@@ -1,5 +1,4 @@
 import { ACTION_HOST_TOOL_CONTRACT_VERSION } from "@opencompany/agent-runtime";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import { describe, expect, it } from "vitest";
 import {
   authorizeExternalEngineToolCapability,
@@ -33,7 +32,6 @@ function state(
     workspaceId: "workspace_1",
     workspaceName: "Acme",
     workspaceSlug: "acme",
-    legacyBrainEnabled: false,
     actorId: "user_1",
     conversationId: "conversation_1",
     sandboxId: "sandbox_1",
@@ -44,7 +42,6 @@ function state(
     interruptRequestedAt: null,
     membershipId: "member_1",
     workspaceRole: "admin",
-    brainRef: null,
     userMessageId: "message_user_1",
     assistantMessageId: "message_assistant_1",
     ...overrides,
@@ -108,11 +105,9 @@ describe("External engine tool capability authority", () => {
       workspaceId: "workspace_1",
       workspaceName: "Acme",
       workspaceSlug: "acme",
-      legacyBrainEnabled: false,
       conversationId: "conversation_1",
       sandboxId: "sandbox_1",
       engine: "claude_code",
-      brainRef: null,
       userMessageId: "message_user_1",
       assistantMessageId: "message_assistant_1",
       hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -132,18 +127,8 @@ describe("External engine tool capability authority", () => {
     });
   });
 
-  it.each([
-    ["Codex", { engine: "codex" }],
-    [
-      "a legacy Brain-pinned Codex session",
-      {
-        engine: "codex",
-        brainRef: "brain_1",
-        legacyBrainEnabled: true,
-        hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
-      },
-    ],
-  ])("authorizes %s through the shared capability boundary", (_name, overrides) => {
+  it("authorizes Codex through the shared capability boundary", () => {
+    const overrides = { engine: "codex" };
     expect(
       authorizeExternalEngineToolCapability({ capability, state: state(overrides), now }),
     ).toMatchObject(overrides);

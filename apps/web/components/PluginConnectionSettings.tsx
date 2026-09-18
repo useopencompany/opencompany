@@ -3,10 +3,7 @@
 import { toast } from "@opencompany/ui/components/sonner";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import {
-  disconnectIntegrationAccountAction,
-  getIntegrationAccountUsageAction,
-} from "@/lib/integration-account-actions";
+import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
 import type { IntegrationAccountView, PersonalAccountProvider } from "@/lib/integration-state";
 import { gmailMcpScopesSatisfied } from "@/lib/integrations/gmail-scopes";
 import { hasGoogleSheetsWriteScope } from "@/lib/integrations/google-drive-scopes";
@@ -59,9 +56,6 @@ export function PluginAccountRow({
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [confirming, setConfirming] = useState<{
-    affectedBrainSourceCount: number;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const identity =
     account.provider === "slack" || account.provider === "x_account"
@@ -90,30 +84,9 @@ export function PluginAccountRow({
   const beginDisconnect = () => {
     setError(null);
     startTransition(async () => {
-      const usage = await getIntegrationAccountUsageAction(account.integrationId);
-      if (!usage.ok) {
-        setError(usage.error);
-        return;
-      }
-      if (usage.affectedBrainSourceCount > 0) {
-        setConfirming({ affectedBrainSourceCount: usage.affectedBrainSourceCount });
-        return;
-      }
       const result = await disconnectIntegrationAccountAction(account.integrationId);
       if (!result.ok) setError(result.error);
       else router.refresh();
-    });
-  };
-
-  const confirmDisconnect = () => {
-    setError(null);
-    startTransition(async () => {
-      const result = await disconnectIntegrationAccountAction(account.integrationId);
-      if (!result.ok) setError(result.error);
-      else {
-        setConfirming(null);
-        router.refresh();
-      }
     });
   };
 
@@ -190,33 +163,6 @@ export function PluginAccountRow({
               Reconnect
             </a>
           )}
-        </div>
-      ) : null}
-      {confirming ? (
-        <div className="rounded-lg border border-border bg-surface-muted px-3 py-2 text-[12px] leading-5 text-ink-muted">
-          <span>
-            Disconnect {identity}? {confirming.affectedBrainSourceCount} brain source
-            {confirming.affectedBrainSourceCount === 1 ? "" : "s"} fed by this account will stop
-            ingesting.
-          </span>
-          <div className="mt-1.5 flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={confirmDisconnect}
-              disabled={isPending}
-              className="rounded-full bg-surface-muted px-2 py-0.5 text-[11px] font-medium leading-4 text-warning transition-colors duration-150 hover:bg-surface-hover disabled:opacity-60"
-            >
-              Disconnect account
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(null)}
-              disabled={isPending}
-              className="rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 text-ink-subtle transition-colors duration-150 hover:bg-surface-hover"
-            >
-              Cancel
-            </button>
-          </div>
         </div>
       ) : null}
       {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}

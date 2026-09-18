@@ -2,7 +2,6 @@
 
 import {
   AlertCircle,
-  BookOpen,
   Bot,
   CalendarClock,
   CheckCircle2,
@@ -21,7 +20,6 @@ import { useAppDataOptional } from "@/components/AppDataProvider";
 import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
 import { actionRowLabel, actionSourceLabel, actionVerb } from "@/lib/action-identity";
 import {
-  BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
@@ -34,12 +32,7 @@ import { githubInstallGapCandidate } from "@/lib/github-repository-access";
 import { actionSourceMark } from "@/lib/service-marks";
 import { ApprovalCard, type ApprovalChoice } from "./ApprovalCard";
 import { type ApprovalPresentation, approvalPresentation } from "./approval-presentation";
-import {
-  formatDebugValue,
-  isBrainToolOutput,
-  isRecord,
-  type ToolCallView,
-} from "./assistant-items";
+import { formatDebugValue, isRecord, type ToolCallView } from "./assistant-items";
 import {
   type HistoricalPresentationDetailController,
   HistoricalPresentationDetailStatus,
@@ -162,9 +155,6 @@ export function ToolCallItem({
   // editable conversation may render those controls.
   if (readOnly) return <ToolCallRow tool={tool} {...(detail ? { detail } : {})} {...disclosure} />;
 
-  if (tool.name === BRAIN_TOOL_NAME) {
-    return <BrainToolCallRow tool={tool} {...disclosure} />;
-  }
   if (tool.name === CODEX_COMMAND_TOOL_NAME) {
     const target = githubInstallGapCandidate(tool);
     const row = <CodexCommandRow tool={tool} {...disclosure} />;
@@ -1190,66 +1180,6 @@ function browserProfileProbeUrl(value: string) {
   return `${url.pathname}${url.search}`;
 }
 
-function BrainToolCallRow({
-  tool,
-  expanded,
-  onToggle,
-}: {
-  tool: ToolCallView;
-} & ToolCallDisclosure) {
-  const detail = tool.detail ?? "goat_brain";
-  const commandPreview = brainOutputCommand(tool.output);
-  const stdoutPreview = brainOutputStdout(tool.output);
-  const parsedPreview = brainOutputParsed(tool.output);
-  const stderrPreview = brainOutputStderr(tool.output);
-  const errorPreview = brainOutputError(tool.output, tool.errorText);
-  return (
-    <div
-      data-testid={`chat-tool-call-${tool.name}`}
-      className="-ml-1 max-w-[92%] text-[11.5px] leading-5 text-ink-muted"
-    >
-      <div className="flex min-w-0 max-w-full items-center gap-1">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={onToggle}
-          className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-px text-left transition-colors hover:bg-surface-hover/65 hover:text-ink/75 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-        >
-          <ChevronRight
-            size={11}
-            strokeWidth={1.9}
-            className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
-          />
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-ink-subtle">
-            <BookOpen size={11} strokeWidth={1.75} />
-          </span>
-          <span className="shrink-0 font-medium text-ink/65">Brain</span>
-          <span
-            title={detail}
-            className="inline-flex min-w-0 max-w-[min(440px,calc(100vw-180px))] items-center rounded bg-ink/5 px-1.5 py-px font-mono text-[10.5px] leading-4 text-ink/55"
-          >
-            <span className="min-w-0 truncate">{detail}</span>
-          </span>
-          <BrainStatusText status={tool.status} />
-        </button>
-      </div>
-      {expanded ? (
-        <div className="ml-6 mt-1 border-l border-border pl-3">
-          <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input)} />
-          {commandPreview ? <ToolPreviewBlock label="Command" value={commandPreview} /> : null}
-          {stdoutPreview ? <ToolPreviewBlock label="Stdout" value={stdoutPreview} /> : null}
-          {parsedPreview ? <ToolPreviewBlock label="Parsed" value={parsedPreview} /> : null}
-          {stderrPreview ? <ToolPreviewBlock label="Stderr" value={stderrPreview} /> : null}
-          {errorPreview ? <ToolPreviewBlock label="Error" value={errorPreview} /> : null}
-          {!isBrainToolOutput(tool.output) && !tool.errorText ? (
-            <div className="py-1 text-[11px] text-ink-subtle">Waiting for result</div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function CodexCommandRow({
   tool,
   expanded,
@@ -1360,28 +1290,6 @@ function isCodexCommandToolOutput(value: unknown): value is CodexCommandToolOutp
   );
 }
 
-function BrainStatusText({ status }: { status: ToolCallView["status"] }) {
-  if (status === "completed") return null;
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium ${
-        status === "failed" ? "text-danger" : "text-ink-subtle"
-      }`}
-    >
-      {status === "failed" ? (
-        <AlertCircle size={9} strokeWidth={1.9} />
-      ) : (
-        <CircleDotDashed
-          size={9}
-          strokeWidth={2}
-          className="animate-[spin_3s_linear_infinite] text-warning"
-        />
-      )}
-      {status}
-    </span>
-  );
-}
-
 function ToolPreviewBlock({ label, value }: { label: string; value: string }) {
   return (
     <div className="py-1 first:pt-0">
@@ -1404,33 +1312,6 @@ function ToolDetailChip({ detail }: { detail: string }) {
   );
 }
 
-function brainOutputCommand(value: unknown) {
-  if (!isBrainToolOutput(value)) return null;
-  const lines: string[] = [];
-  if (value.command) lines.push(`brain ${value.command}`);
-  if (Array.isArray(value.argv)) lines.push(`argv: ${JSON.stringify(value.argv)}`);
-  return lines.length > 0 ? lines.join("\n") : null;
-}
-
-function brainOutputStdout(value: unknown) {
-  return isBrainToolOutput(value) && value.stdout?.trim() ? value.stdout : null;
-}
-
-function brainOutputStderr(value: unknown) {
-  return isBrainToolOutput(value) && value.stderr?.trim() ? value.stderr : null;
-}
-
-function brainOutputParsed(value: unknown) {
-  return isBrainToolOutput(value) && value.parsed !== undefined
-    ? formatDebugValue(value.parsed)
-    : null;
-}
-
-function brainOutputError(value: unknown, errorText: string | null) {
-  if (errorText?.trim()) return errorText;
-  return isBrainToolOutput(value) && value.error?.trim() ? value.error : null;
-}
-
 function getToolCallMeta(tool: ToolCallView): {
   icon: typeof FileText;
   className: string;
@@ -1449,13 +1330,8 @@ function getToolCallMeta(tool: ToolCallView): {
     return { icon: Square, className: "text-ink-subtle", spin: false };
   }
   return {
-    icon:
-      tool.name === BRAIN_TOOL_NAME
-        ? BookOpen
-        : RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name)
-          ? CalendarClock
-          : CircleDotDashed,
+    icon: RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name) ? CalendarClock : CircleDotDashed,
     className: "text-amber-500",
-    spin: tool.name !== BRAIN_TOOL_NAME && !RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name),
+    spin: !RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name),
   };
 }

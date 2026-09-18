@@ -454,7 +454,7 @@ async function resolvePersonalAgentRuntime(input: {
     : null;
   const actions = withoutActionApprovals(actionDispatcher);
   // Web search, wiki, skills and plugin actions only. No schedules, workflows, browser,
-  // artifacts, brain or subagents: a phone surface has nowhere to show or approve them.
+  // artifacts or subagents: a phone surface has nowhere to show or approve them.
   const toolContext = createProductChatToolContext({
     model,
     ...(hostTools.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
@@ -475,7 +475,6 @@ async function resolvePersonalAgentRuntime(input: {
       artifactToolEnabled: false,
       subagentsEnabled: false,
       wikiToolEnabled: Boolean(hostTools.runWiki),
-      activeBrain: null,
       userContext: hostTools.bootstrap.userContext,
       skillsAvailable: hostTools.bootstrap.skills.length > 0,
       ...(actionDispatcher.catalog.sources.length

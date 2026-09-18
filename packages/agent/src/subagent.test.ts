@@ -4,7 +4,6 @@ import { WIKI_TOOL_NAME } from "@opencompany/wiki/tool";
 import { describe, expect, it, vi } from "vitest";
 import { createProductChatToolContext, UPDATE_TASK_STATUS_TOOL_NAME } from "./chat-agent";
 import {
-  BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   DESCRIBE_ACTIONS_TOOL_NAME,
@@ -12,7 +11,6 @@ import {
   LIST_ACTIONS_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   READ_SKILL_FILE_TOOL_NAME,
-  SAVE_TO_BRAIN_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
@@ -46,8 +44,6 @@ function fullyLoadedToolContext() {
     workspaceSkills: vi.fn(),
     createWorkspaceSkill: vi.fn(),
     editWorkspaceSkill: vi.fn(),
-    runBrainCli: vi.fn(),
-    saveToBrain: vi.fn(),
     runWiki: vi.fn(),
     writeArtifact: vi.fn(),
     webFetch: vi.fn(),
@@ -100,7 +96,6 @@ describe("subagent tool inheritance", () => {
     const inherited = subagentToolSet(tools, { depth: 1 });
 
     for (const name of [
-      BRAIN_TOOL_NAME,
       WIKI_TOOL_NAME,
       WEB_SEARCH_TOOL_NAME,
       WEB_FETCH_TOOL_NAME,
@@ -120,7 +115,6 @@ describe("subagent tool inheritance", () => {
     const inherited = subagentToolSet(tools, { depth: 1 });
 
     for (const name of [
-      SAVE_TO_BRAIN_TOOL_NAME,
       WRITE_ARTIFACT_TOOL_NAME,
       CREATE_WORKSPACE_SKILL_TOOL_NAME,
       EDIT_WORKSPACE_SKILL_TOOL_NAME,

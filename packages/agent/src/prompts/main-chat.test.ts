@@ -41,7 +41,6 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(base).not.toContain("<action_sources>");
     expect(base).not.toContain("<wiki_fill>");
     expect(base).toContain("Use the wiki tool whenever the user wants something kept");
-    expect(base).not.toContain("Use the save_to_brain tool whenever");
     expect(base).not.toContain("<skill_source>");
     expect(base).not.toContain("<workflow_source>");
     expect(base).not.toContain("list_actions");

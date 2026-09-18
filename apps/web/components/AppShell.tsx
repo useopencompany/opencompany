@@ -34,10 +34,9 @@ import { getXAccountIntegrationState } from "@/lib/integrations/x-account";
 import { getWorkspaceSettingsAction } from "@/lib/workspace-actions";
 
 export async function AppShell({ children }: { children: ReactNode }) {
-  const { authUser, user, workspace, role, workspaces, brains, activeBrain } = await currentUser();
+  const { authUser, user, workspace, role, workspaces } = await currentUser();
   const featureFlags = featureFlagsFromUser({
     ...user,
-    legacyBrainEnabled: workspace.legacyBrainEnabled,
   });
   const emptyIntegrations = integrationStateFromRows([]);
   const [
@@ -187,8 +186,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       lastName: member.lastName,
       avatarUrl: member.avatarUrl,
     })),
-    brains: featureFlags.legacyBrain ? brains.map(brainSummaryView) : [],
-    activeBrain: featureFlags.legacyBrain && activeBrain ? brainSummaryView(activeBrain) : null,
     // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
     // empty prevents the Next.js composition root from regaining a direct Task database reader.
     tasks: [],
@@ -260,22 +257,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
       </AppDataProvider>
     </ProductAnalyticsProvider>
   );
-}
-
-function brainSummaryView(brain: {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  visibility: "workspace" | "restricted";
-}) {
-  return {
-    id: brain.id,
-    name: brain.name,
-    slug: brain.slug,
-    description: brain.description,
-    visibility: brain.visibility,
-  };
 }
 
 function buildIntegrationState(input: {

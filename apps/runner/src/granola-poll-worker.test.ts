@@ -10,16 +10,11 @@ import {
 const workerMocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   fetchGranolaNote: vi.fn(),
-  listClaimedBrainRefs: vi.fn(),
   listClaimedWikiWorkspaceIds: vi.fn(),
-  claimBrainEvents: vi.fn(),
   claimWikiEvents: vi.fn(),
-  upsertBrainItem: vi.fn(),
   upsertWikiItem: vi.fn(),
-  attributeBrainClaims: vi.fn(),
   attributeWikiClaims: vi.fn(),
   captureQuotaAnalytics: vi.fn(),
-  wakeBrain: vi.fn(),
   wakeWiki: vi.fn(),
   enqueueWorkflowEventRuns: vi.fn(),
   listWorkflowEventTriggerRoutes: vi.fn(),
@@ -29,7 +24,6 @@ const workerMocks = vi.hoisted(() => ({
   markIntegrationStatus: vi.fn(),
   ensureGranolaSyncState: vi.fn(),
   claimGranolaSyncState: vi.fn(),
-  listEnabledBrainSourceRoutes: vi.fn(),
   completeGranolaSyncPages: vi.fn(),
   updateGranolaSyncPage: vi.fn(),
 }));
@@ -52,7 +46,6 @@ vi.mock("@opencompany/db/granola", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ensureGranolaSyncState: workerMocks.ensureGranolaSyncState,
   claimGranolaSyncState: workerMocks.claimGranolaSyncState,
-  listEnabledGranolaBrainSourceRoutes: workerMocks.listEnabledBrainSourceRoutes,
   completeGranolaSyncPages: workerMocks.completeGranolaSyncPages,
   updateGranolaSyncPage: workerMocks.updateGranolaSyncPage,
 }));
@@ -60,22 +53,11 @@ vi.mock("@opencompany/analytics/product", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   captureProductIngestionQuotaAnalytics: workerMocks.captureQuotaAnalytics,
 }));
-vi.mock("@opencompany/db/brain-event-claims", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  attributeBrainSourceEventClaims: workerMocks.attributeBrainClaims,
-  claimBrainSourceEvents: workerMocks.claimBrainEvents,
-  listBrainSourceEventClaimedBrainRefs: workerMocks.listClaimedBrainRefs,
-}));
-vi.mock("@opencompany/db/brain-ingest", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  upsertBrainSourceItemAndEnqueue: workerMocks.upsertBrainItem,
-}));
 vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   enqueueWorkflowEventRuns: workerMocks.enqueueWorkflowEventRuns,
   listWorkflowEventTriggerRoutes: workerMocks.listWorkflowEventTriggerRoutes,
 }));
-vi.mock("./brain-ingest-worker", () => ({ wakeBrainIngestWorker: workerMocks.wakeBrain }));
 vi.mock("./wiki-ingest-worker", () => ({ wakeWikiIngestWorker: workerMocks.wakeWiki }));
 
 describe("Granola poll pagination", () => {
@@ -156,23 +138,10 @@ describe("Granola meeting event routing", () => {
       transaction: vi.fn(async (run: (transaction: typeof tx) => Promise<unknown>) => run(tx)),
     });
     workerMocks.fetchGranolaNote.mockResolvedValue(granolaPayload());
-    workerMocks.listClaimedBrainRefs.mockResolvedValue(new Set<string>());
     workerMocks.listClaimedWikiWorkspaceIds.mockResolvedValue(new Set<string>());
-    workerMocks.claimBrainEvents.mockResolvedValue({
-      claimedCount: 1,
-      claimedEventKeys: ["note:note_1"],
-    });
     workerMocks.claimWikiEvents.mockResolvedValue({
       claimedCount: 1,
       claimedEventKeys: ["note:note_1"],
-    });
-    workerMocks.upsertBrainItem.mockResolvedValue({
-      sourceItemId: "gbsrc_1",
-      jobId: "gbjob_1",
-      jobIds: ["gbjob_1"],
-      enqueued: true,
-      skipped: false,
-      quotaUpdates: undefined,
     });
     workerMocks.upsertWikiItem.mockResolvedValue({
       sourceItemId: "gwsrc_1",
@@ -180,68 +149,16 @@ describe("Granola meeting event routing", () => {
       enqueued: true,
       skipped: false,
     });
-    workerMocks.attributeBrainClaims.mockResolvedValue(undefined);
     workerMocks.attributeWikiClaims.mockResolvedValue(undefined);
-    workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
-  });
-
-  it("does not fetch or enqueue when neither brain nor wiki has an enabled route", async () => {
-    await expect(ingestMeeting({ routedBrainRefs: [] })).resolves.toEqual({
-      enqueued: false,
-      workflowRuns: 0,
-    });
-
-    expect(workerMocks.fetchGranolaNote).not.toHaveBeenCalled();
-    expect(workerMocks.upsertBrainItem).not.toHaveBeenCalled();
-    expect(workerMocks.upsertWikiItem).not.toHaveBeenCalled();
-  });
-
-  it("leaves the existing brain-only enqueue path untouched", async () => {
-    await expect(
-      ingestMeeting({
-        routedBrainRefs: ["brain_1"],
-      }),
-    ).resolves.toEqual({ enqueued: true, workflowRuns: 0 });
-
-    expect(workerMocks.claimBrainEvents).toHaveBeenCalledWith(
-      expect.objectContaining({ brainRef: "brain_1", eventKeys: ["note:note_1"] }),
-    );
-    expect(workerMocks.upsertBrainItem).toHaveBeenCalledWith(
-      expect.objectContaining({
-        brainRefs: ["brain_1"],
-        rawPayload: granolaPayload(),
-        item: expect.objectContaining({
-          sourceProvider: "granola",
-          sourceType: "meeting",
-          sourceRef: "granola:note:note_1",
-        }),
-      }),
-    );
-    expect(workerMocks.wakeBrain).toHaveBeenCalledOnce();
-    expect(workerMocks.claimWikiEvents).not.toHaveBeenCalled();
-    expect(workerMocks.upsertWikiItem).not.toHaveBeenCalled();
-    expect(workerMocks.wakeWiki).not.toHaveBeenCalled();
-  });
-});
-
-describe("Granola meeting.notes_ready workflow routing", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    workerMocks.getDb.mockReturnValue({ transaction: vi.fn() });
-    workerMocks.fetchGranolaNote.mockResolvedValue(granolaPayload());
-    workerMocks.listClaimedBrainRefs.mockResolvedValue(new Set<string>());
-    workerMocks.listClaimedWikiWorkspaceIds.mockResolvedValue(new Set<string>());
     workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
   });
 
   it("enqueues one run keyed on the note id with the meeting as context", async () => {
     await expect(
       ingestMeeting({
-        routedBrainRefs: [],
-
         workflowRoutes: [meetingRoute()],
       }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
+    ).resolves.toEqual({ workflowRuns: 1 });
 
     expect(workerMocks.fetchGranolaNote).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ includeTranscript: false }),
@@ -265,41 +182,6 @@ describe("Granola meeting.notes_ready workflow routing", () => {
     );
   });
 
-  it("makes the event durable before a separate Brain transcript fetch fails", async () => {
-    workerMocks.fetchGranolaNote.mockImplementation(async ({ includeTranscript }) => {
-      if (includeTranscript) throw new GranolaApiError("Transcript too large", 413);
-      return { ...granolaPayload(), transcript: null };
-    });
-
-    await expect(
-      ingestMeeting({ routedBrainRefs: ["brain_1"], workflowRoutes: [meetingRoute()] }),
-    ).rejects.toMatchObject({ status: 413 });
-    expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledOnce();
-    expect(workerMocks.enqueueWorkflowEventRuns.mock.invocationCallOrder[0]).toBeLessThan(
-      workerMocks.fetchGranolaNote.mock.invocationCallOrder[1]!,
-    );
-  });
-
-  it.each([
-    ["missing", undefined],
-    ["empty", "   "],
-  ])("leaves a note whose summary is %s for a later poll", async (_label, summary) => {
-    workerMocks.fetchGranolaNote.mockResolvedValue({
-      ...granolaPayload(),
-      summary_markdown: summary,
-    });
-
-    await expect(
-      ingestMeeting({
-        routedBrainRefs: [],
-
-        workflowRoutes: [meetingRoute()],
-      }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
-
-    expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
-  });
-
   it("fires a folder-filtered route for a note filed in one of that folder's subfolders", async () => {
     workerMocks.fetchGranolaNote.mockResolvedValue({
       ...granolaPayload(),
@@ -308,14 +190,13 @@ describe("Granola meeting.notes_ready workflow routing", () => {
 
     await expect(
       ingestMeeting({
-        routedBrainRefs: [],
         workflowRoutes: [meetingRoute({ folder: { id: "fol_customers" } })],
         folderParentIds: new Map([
           ["fol_acme", "fol_customers"],
           ["fol_customers", null],
         ]),
       }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
+    ).resolves.toEqual({ workflowRuns: 1 });
 
     expect(workerMocks.enqueueWorkflowEventRuns).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -333,33 +214,30 @@ describe("Granola meeting.notes_ready workflow routing", () => {
 
     await expect(
       ingestMeeting({
-        routedBrainRefs: [],
         workflowRoutes: [meetingRoute({ folder: { id: "fol_customers" } })],
         folderParentIds: new Map([
           ["fol_internal", null],
           ["fol_customers", null],
         ]),
       }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
+    ).resolves.toEqual({ workflowRuns: 0 });
 
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
   });
 
   it("keeps an unfiltered route matching a note that belongs to no folder", async () => {
-    await expect(
-      ingestMeeting({ routedBrainRefs: [], workflowRoutes: [meetingRoute()] }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 1 });
+    await expect(ingestMeeting({ workflowRoutes: [meetingRoute()] })).resolves.toEqual({
+      workflowRuns: 1,
+    });
   });
 
   it("does not replay a stale backlog as one task per historical meeting", async () => {
     await expect(
       ingestMeeting({
-        routedBrainRefs: [],
-
         workflowRoutes: [meetingRoute()],
         now: new Date("2026-08-26T11:05:00.000Z"),
       }),
-    ).resolves.toEqual({ enqueued: false, workflowRuns: 0 });
+    ).resolves.toEqual({ workflowRuns: 0 });
 
     expect(workerMocks.fetchGranolaNote).toHaveBeenCalledOnce();
     expect(workerMocks.enqueueWorkflowEventRuns).not.toHaveBeenCalled();
@@ -392,8 +270,6 @@ describe("Granola poll pass folder scoping", () => {
       hasMore: false,
       cursor: null,
     });
-    workerMocks.listEnabledBrainSourceRoutes.mockResolvedValue([]);
-    workerMocks.listClaimedBrainRefs.mockResolvedValue(new Set<string>());
     workerMocks.fetchGranolaNote.mockResolvedValue(granolaPayload());
     workerMocks.enqueueWorkflowEventRuns.mockResolvedValue(1);
     workerMocks.completeGranolaSyncPages.mockResolvedValue(true);
@@ -408,7 +284,7 @@ describe("Granola poll pass folder scoping", () => {
   it("does not read the folder tree when no route filters on one", async () => {
     workerMocks.listWorkflowEventTriggerRoutes.mockResolvedValue([meetingRoute()]);
 
-    await expect(poll()).resolves.toEqual({ enqueued: 0, seen: 1, workflowRuns: 1 });
+    await expect(poll()).resolves.toEqual({ seen: 1, workflowRuns: 1 });
     expect(workerMocks.listGranolaFolders).not.toHaveBeenCalled();
   });
 
@@ -481,7 +357,7 @@ describe("Granola poll pass folder scoping", () => {
 
     // Retrying would never read more, and failing every pass would stop this connection's
     // ingestion for good, so the pass completes on the memberships it can still resolve.
-    await expect(poll()).resolves.toEqual({ enqueued: 0, seen: 1, workflowRuns: 1 });
+    await expect(poll()).resolves.toEqual({ seen: 1, workflowRuns: 1 });
     expect(workerMocks.completeGranolaSyncPages).toHaveBeenCalled();
   });
 
@@ -506,7 +382,6 @@ describe("Granola poll pass folder scoping", () => {
 const NOTE_UPDATED_AT = "2026-08-24T11:00:00.000Z";
 
 function ingestMeeting(routes: {
-  routedBrainRefs: string[];
   workflowRoutes?: WorkflowEventTriggerRoute[];
   folderParentIds?: ReadonlyMap<string, string | null>;
   now?: Date;

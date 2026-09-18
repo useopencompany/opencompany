@@ -12,7 +12,7 @@ Current service names are:
 Do not infer runtime ownership from older span names such as `goat.chat.turn` or physical fields such
 as `chat_session_id`. Chat and Task execution is runner-owned even where retained telemetry names
 reflect the physical schema. API request spans identify the public command/read boundary; runner Run,
-Task, and Brain-ingestion spans identify durable work.
+Task, and Wiki-ingestion spans identify durable work.
 
 ## Configuration
 

@@ -23,7 +23,6 @@ import { normalizeTaskName } from "../task-display";
 export type TaskCreationCommand = {
   actorId: string;
   workspaceId?: string | null;
-  brainRef?: string | null;
   prompt: string;
   model: AgentModelId;
   name?: string;
@@ -32,7 +31,6 @@ export type TaskCreationCommand = {
   scheduleId?: string;
   scheduledFor?: Date;
   workflowId?: string;
-  workflowBrainRef?: string;
   attachments?: ChatMessageAttachment[];
   attachmentTexts?: Record<string, string> | null;
   source?: TaskSource;
@@ -90,8 +88,6 @@ export async function createTaskForActor(
             },
           }
         : {}),
-      brainRef: input.brainRef ?? null,
-      workflowBrainRef: input.workflowBrainRef ?? null,
       initialMessageContent: harnessSpec.initialUserMessage.trim() || input.prompt,
     },
   });

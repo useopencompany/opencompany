@@ -37,10 +37,10 @@ describe("onboarding email templates", () => {
     expect(email.html).toContain("hey there,");
   });
 
-  it("check-in explains sources plus bringing the mcp into the user's tools", () => {
+  it("check-in explains plugins plus bringing the mcp into the user's tools", () => {
     const email = renderCheckinEmail({ firstName: "Grace", unsubscribeUrl: UNSUB });
     expect(email.subject).toBe("how's it going with opencompany?");
-    expect(email.text).toContain("connect the sources");
+    expect(email.text).toContain("connect the plugins");
     expect(email.text).toContain("opencompany mcp");
   });
 

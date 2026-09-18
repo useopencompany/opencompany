@@ -198,7 +198,7 @@ export function CapabilitiesPanel({
           one-time approval after the per-chat limit is reached.
         </p>
         <p>
-          These are managed capabilities, not connected integrations. Results are saved to Brain
+          These are managed capabilities, not connected integrations. Results are saved to the Wiki
           only when someone explicitly asks.
         </p>
         <p>

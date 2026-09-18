@@ -14,17 +14,17 @@
 // host editor), fed to the node views through node decorations so a rename
 // updates every chip instantly.
 
-import { parseBrainInlineLinks } from "@opencompany/brain/inline-links";
+import { parseWikiInlineLinks } from "@opencompany/wiki/links";
 import { type JSONContent, Node } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { Decoration, DecorationSet, type EditorView } from "@tiptap/pm/view";
-import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/brain-source-links";
+import { isExternalHref, sourceChipDisplay, sourceHrefForRef } from "@/lib/wiki-source-links";
 
 // Live data the chips resolve against. The host editor keeps this current by
 // dispatching a WIKI_LINK_STATE_KEY meta transaction whenever its props change.
 export type WikiLinkState = {
   // Page path / "kind:target" -> href. Also drives whether a link is resolved.
-  brainLinks: Record<string, string>;
+  pageLinks: Record<string, string>;
   // Live page titles keyed by path, so a rename re-labels every chip.
   pageTitles: Record<string, string>;
   editingEnabled: boolean;
@@ -34,22 +34,22 @@ export type WikiLinkState = {
 export const WIKI_LINK_STATE_KEY = new PluginKey<WikiLinkState>("wikiLinkState");
 
 const DEFAULT_STATE: WikiLinkState = {
-  brainLinks: {},
+  pageLinks: {},
   pageTitles: {},
   editingEnabled: true,
   onNavigateInternal: undefined,
 };
 
 // Single token anchored at the start of the source, mirroring the grammar in
-// parseBrainInlineLinks so the editor and the shared parser never disagree.
+// parseWikiInlineLinks so the editor and the shared parser never disagree.
 const BRACKET_AT_START = /^\[\[([^[\]\n|]+)(?:\|([^[\]\n]+))?\]\]/;
 const LEGACY_EVIDENCE_AT_START = /^\[\^ev:([^\]\n]+)\]/;
 
 const WIKI_LINK_ICON =
-  '<svg class="wiki-brain-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>';
+  '<svg class="wiki-source-chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></svg>';
 
 const GITHUB_ICON =
-  '<svg class="wiki-brain-chip-icon wiki-brain-chip-icon-github" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
+  '<svg class="wiki-source-chip-icon wiki-source-chip-icon-github" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
 
 type ResolvedWikiLink = {
   href: string; // "" when the target doesn't resolve yet
@@ -60,7 +60,7 @@ type ResolvedWikiLink = {
 };
 
 function targetForPageLink(target: string, state: WikiLinkState): string | null {
-  if (state.brainLinks[target] || state.pageTitles[target]) return target;
+  if (state.pageLinks[target] || state.pageTitles[target]) return target;
   if (target.includes("/")) return null;
   const matches = Object.keys(state.pageTitles).filter(
     (path) => path.slice(path.lastIndexOf("/") + 1) === target,
@@ -69,15 +69,15 @@ function targetForPageLink(target: string, state: WikiLinkState): string | null 
 }
 
 function hrefForLink(
-  link: ReturnType<typeof parseBrainInlineLinks>[number],
+  link: ReturnType<typeof parseWikiInlineLinks>[number],
   state: WikiLinkState,
 ): { href: string; resolvedTarget: string } {
-  const mapped = state.brainLinks[`${link.kind}:${link.target}`];
+  const mapped = state.pageLinks[`${link.kind}:${link.target}`];
   if (mapped) return { href: mapped, resolvedTarget: link.target };
   if (link.kind === "page") {
     const resolvedTarget = targetForPageLink(link.target, state);
     return {
-      href: resolvedTarget ? (state.brainLinks[resolvedTarget] ?? "") : "",
+      href: resolvedTarget ? (state.pageLinks[resolvedTarget] ?? "") : "",
       resolvedTarget: resolvedTarget ?? link.target,
     };
   }
@@ -88,7 +88,7 @@ function hrefForLink(
 }
 
 export function resolveWikiLink(raw: string, state: WikiLinkState): ResolvedWikiLink {
-  const link = parseBrainInlineLinks(raw)[0];
+  const link = parseWikiInlineLinks(raw)[0];
   if (!link) {
     return { href: "", label: raw, icon: "link", external: false, title: raw };
   }
@@ -123,7 +123,7 @@ function isPlainLeftClick(event: MouseEvent): boolean {
 function buildChip(resolved: ResolvedWikiLink, getState: () => WikiLinkState): HTMLElement {
   const { href, label, icon, external, title } = resolved;
   const chip = document.createElement(href ? "a" : "span");
-  chip.className = href ? "wiki-brain-chip" : "wiki-brain-chip wiki-brain-chip-unresolved";
+  chip.className = href ? "wiki-source-chip" : "wiki-source-chip wiki-source-chip-unresolved";
   const displayLabel = label || "Untitled";
   // The visible label can be ellipsized, so keep its full value available on
   // hover while retaining the useful resolved/unresolved status text.
@@ -132,7 +132,7 @@ function buildChip(resolved: ResolvedWikiLink, getState: () => WikiLinkState): H
   chip.contentEditable = "false";
   chip.innerHTML = icon === "github" ? GITHUB_ICON : WIKI_LINK_ICON;
   const text = document.createElement("span");
-  text.className = "wiki-brain-chip-label";
+  text.className = "wiki-source-chip-label";
   text.textContent = displayLabel;
   chip.appendChild(text);
   if (href) {

@@ -16,7 +16,6 @@ import {
   ACTION_MAX_CALLS_PER_TURN,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
-import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -46,11 +45,9 @@ const authorized = {
   workspaceId: "workspace_1",
   workspaceName: "Acme",
   workspaceSlug: "acme",
-  legacyBrainEnabled: false,
   conversationId: "conversation_1",
   sandboxId: "sandbox_1",
   engine: "claude_code" as const,
-  brainRef: null,
   userMessageId: "message_user_1",
   assistantMessageId: "message_assistant_1",
   hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
@@ -588,8 +585,8 @@ describe("runner ACP tools MCP", () => {
     }
   });
 
-  it("advertises wiki when legacy Brain is disabled", async () => {
-    const authorize = vi.fn(async () => ({ ...authorized, legacyBrainEnabled: false }));
+  it("advertises the wiki tool", async () => {
+    const authorize = vi.fn(async () => ({ ...authorized }));
     const app = Fastify();
     apps.push(app);
     registerAcpToolsMcpRoute(app, env, { authorize });
@@ -886,80 +883,6 @@ describe("runner ACP tools MCP", () => {
     });
     expect((input.params.body as string).endsWith("…")).toBe(true);
     expect(JSON.stringify(input)).not.toContain("do-not-project");
-  });
-
-  it("exposes actions, artifacts, Brain reads, and Brain capture to Codex", async () => {
-    const authorize = vi.fn(async () => ({
-      ...authorized,
-      engine: "codex" as const,
-      brainRef: "brain_1",
-      legacyBrainEnabled: true,
-    }));
-    const app = Fastify();
-    apps.push(app);
-    registerAcpToolsMcpRoute(app, env, { authorize });
-    await app.listen({ host: "127.0.0.1", port: 0 });
-    const address = app.server.address();
-    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
-    const ticket = createExternalEngineGatewayTicket({
-      ...capability,
-      secret: env.internalToken,
-    }).ticket;
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
-      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
-    );
-    const client = new Client({ name: "runner-test", version: "0.1.0" });
-
-    try {
-      await client.connect(transport as Parameters<typeof client.connect>[0]);
-      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-        "publish_artifact",
-        "list_actions",
-        "describe_actions",
-        "use_action",
-        "wiki",
-        "goat_brain",
-        "save_to_brain",
-      ]);
-    } finally {
-      await client.close();
-    }
-  });
-
-  it("preserves read-only Brain access for legacy pinned sessions", async () => {
-    const authorize = vi.fn(async () => ({
-      ...authorized,
-      engine: "codex" as const,
-      brainRef: "brain_1",
-      legacyBrainEnabled: true,
-      hostToolContractVersion: CODEX_BRAIN_TOOL_CONTRACT_VERSION,
-    }));
-    const app = Fastify();
-    apps.push(app);
-    registerAcpToolsMcpRoute(app, env, { authorize });
-    await app.listen({ host: "127.0.0.1", port: 0 });
-    const address = app.server.address();
-    if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
-    const ticket = createExternalEngineGatewayTicket({
-      ...capability,
-      secret: env.internalToken,
-    }).ticket;
-    const transport = new StreamableHTTPClientTransport(
-      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
-      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
-    );
-    const client = new Client({ name: "runner-test", version: "0.1.0" });
-
-    try {
-      await client.connect(transport as Parameters<typeof client.connect>[0]);
-      expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual([
-        "wiki",
-        "goat_brain",
-      ]);
-    } finally {
-      await client.close();
-    }
   });
 
   it("registers the Wiki tool for retained v2 host-tool sessions", async () => {

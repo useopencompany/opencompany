@@ -167,11 +167,6 @@ export function createProductChatSystemPrompt(
     wikiToolEnabled?: boolean;
     wikiToolReadOnly?: boolean;
     automationToolsEnabled?: boolean;
-    activeBrain?: {
-      name: string;
-      workspaceName: string;
-      readOnly?: boolean;
-    } | null;
     connectedIntegrations?: readonly {
       id: string;
       label: string;
@@ -210,10 +205,7 @@ export function createProductChatSystemPrompt(
       ...CHAT_SYSTEM_BASE_LINES,
       ...(automationToolsEnabled ? CHAT_AUTOMATION_SYSTEM_LINES : []),
     ]),
-    promptBlock("runtime_context", [
-      `Current date: ${formatPromptDate(input.currentDate)}.`,
-      ...(input.activeBrain ? formatActiveBrainContext(input.activeBrain) : []),
-    ]),
+    promptBlock("runtime_context", [`Current date: ${formatPromptDate(input.currentDate)}.`]),
     promptBlock("user_context", formatUserContext(input.userContext)),
     ...(actionSources.length > 0
       ? [
@@ -309,21 +301,6 @@ function formatActionBehaviorLines(input: {
     }
     return line;
   });
-}
-
-function formatActiveBrainContext(activeBrain: {
-  name: string;
-  workspaceName: string;
-  readOnly?: boolean;
-}) {
-  if (activeBrain.readOnly) {
-    return [
-      `The legacy brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace. This user has browse-only access: do not save, capture, or otherwise add legacy Brain content.`,
-    ];
-  }
-  return [
-    `The legacy brain tool reads the ${JSON.stringify(activeBrain.name)} brain in the ${JSON.stringify(activeBrain.workspaceName)} workspace; save_to_brain captures new content into it for the background curation agent. The Wiki remains the default knowledge system.`,
-  ];
 }
 
 function formatBaseBehaviorLines(input: {

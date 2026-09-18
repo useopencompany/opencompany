@@ -719,7 +719,6 @@ function taskRow(overrides: Partial<TaskRow> & Pick<TaskRow, "id" | "name" | "st
     schedule_id: overrides.schedule_id ?? null,
     scheduled_for: overrides.scheduled_for ?? null,
     workflow_id: overrides.workflow_id ?? null,
-    workflow_brain_ref: null,
     status: overrides.status,
     stage: overrides.status === "running" ? "running" : "completed",
     result: overrides.result ?? null,

@@ -927,6 +927,8 @@ function isSubagentPart(part: CodexUiMessagePart): part is CodexUiSubagentPart {
 function dynamicToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayload {
   const tool = readString(event.payload.tool);
   const namespace = readString(event.payload.namespace);
+  // goat_brain/save_to_brain are retired, but persisted transcripts still carry
+  // their calls; keep the labels so old sessions render with real names.
   const label =
     tool === "goat_brain"
       ? "Brain"

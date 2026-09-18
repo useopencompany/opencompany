@@ -88,7 +88,6 @@ describe("runner server CORS", () => {
     expect(response.json()).toMatchObject({
       capabilities: {
         acpToolsMcp: "v3",
-        brainWorkerAdmission: "postgres-v1",
         personalSkillsAuthorization: "v1",
         personalPluginsAuthorization: "v1",
       },

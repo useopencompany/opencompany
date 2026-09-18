@@ -63,7 +63,6 @@ const serverApiErrorMessageMock = vi.mocked(serverApiErrorMessage);
 const activation = {
   workspaceId: "goat_ws_new",
   organizationId: "org_new",
-  brainId: "brain_general",
 };
 
 describe("createWorkspaceAction", () => {
@@ -103,7 +102,6 @@ describe("createWorkspaceAction", () => {
     expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
-      brainId: "brain_general",
     });
     expect(revalidatePathMock).toHaveBeenCalledWith("/", "layout");
   });
@@ -146,7 +144,6 @@ describe("switchWorkspaceAction", () => {
     expect(activateWorkspaceMock).toHaveBeenCalledWith({
       workspaceId: "goat_ws_new",
       workosOrganizationId: "org_new",
-      brainId: "brain_general",
     });
   });
 

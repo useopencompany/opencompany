@@ -355,7 +355,7 @@ export async function runClaimedTurn(
   ) {
     throw new Error(`Run ${turn.id} does not match a supported Session execution binding.`);
   }
-  const taskContext = task ? resolveTaskTurnContext(task, turn) : null;
+  const taskContext = task ? resolveTaskTurnContext(task) : null;
   const execution = new PostgresRunExecutionRepository((query) => getDb().execute(query));
   const deployVersion = runnerDeployVersion();
   const requestedAttemptId = `run_attempt_${randomUUID()}`;

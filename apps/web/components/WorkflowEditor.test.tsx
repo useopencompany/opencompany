@@ -50,8 +50,8 @@ vi.mock("@/components/WorkflowRunHistory", () => ({
     <div data-testid="workflow-run-history">{workflowSlug}</div>
   ),
 }));
-vi.mock("@/components/MarkdownBrainEditor", () => ({
-  MarkdownBrainEditor: ({
+vi.mock("@/components/MarkdownEditor", () => ({
+  MarkdownEditor: ({
     content,
     onChange,
     placeholder,
@@ -88,7 +88,6 @@ function WorkflowEditor(
       canCustomizeIdentity: true,
       teamName: "Acme",
       statusReason: null,
-      destinationCount: 0,
     },
     ...editorProps
   } = props;
@@ -259,7 +258,6 @@ describe("WorkflowEditor", () => {
           canCustomizeIdentity: false,
           teamName: "Acme",
           statusReason: null,
-          destinationCount: 0,
         }}
       />,
     );
@@ -291,7 +289,6 @@ describe("WorkflowEditor", () => {
           canCustomizeIdentity: true,
           teamName: "Acme",
           statusReason: null,
-          destinationCount: 0,
         }}
       />,
     );

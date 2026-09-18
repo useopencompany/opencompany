@@ -1,7 +1,6 @@
 import { ACP_TOOLS_MCP_SERVER_NAME, CODEX_DYNAMIC_TOOL_NAME } from "@opencompany/agent-runtime";
 import { actionRowLabel, actionSource } from "@/lib/action-identity";
 import {
-  BRAIN_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
@@ -54,7 +53,6 @@ const FIXED_CODING_TOOL_LABELS: Readonly<Record<string, string>> = {
 
 // opencompany's own host tools, where the registered tool name does not read as a label.
 const HOST_TOOL_LABELS: Readonly<Record<string, string>> = {
-  [BRAIN_TOOL_NAME]: "Brain",
   [SLACK_BOT_TOOL_NAME]: "Slack bot",
 };
 

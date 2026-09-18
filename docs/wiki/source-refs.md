@@ -82,7 +82,5 @@ matched the provider's pattern, so a malformed ref cannot produce an attacker-sh
 2. Cover it in `packages/wiki/src/sources.test.ts`, including one malformed id.
 3. Add the row to the table above.
 
-The tool description, the chips, and the ingest writers then agree by construction. Writers that
-mint refs live in `packages/brain/src/source-items.ts` and `packages/agent/src/actions/*`.
-
-Related: [Brain pointer and copy contract](../brain/pointer-copy-contract.md).
+The tool description, the chips, and the writers then agree by construction. Writers that mint refs
+live in `packages/agent/src/actions/*`.

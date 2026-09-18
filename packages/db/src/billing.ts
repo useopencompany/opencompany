@@ -4,7 +4,6 @@ import { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { getDb } from "./client";
 import { stringifyPostgresJson } from "./postgres-json";
 import {
-  brainIngestJobs,
   creditBalances,
   creditLedger,
   type IngestionReservationSourceProvider,
@@ -49,7 +48,7 @@ import { getCreditPoolsUsdMicros, grantMonthlyIncludedUsage, USD_MICROS_PER_CENT
 // The default web-app client (`./client`) is neon-http, which has no interactive
 // transactions (one HTTPS request per query) and throws on db.transaction().
 // Run the mutation steps sequentially there; pooled callers (the runner) keep a
-// real transaction. Mirrors runAtomically() in ./brain-files.
+// real transaction.
 function runAtomically<T>(db: DbLike, fn: (tx: DbLike) => Promise<T>): Promise<T> {
   if (db instanceof NeonHttpDatabase) return fn(db);
   if (typeof db.transaction !== "function") return fn(db);
@@ -295,7 +294,6 @@ async function tryAdmitIngestion(
 export async function reserveWorkspaceIngestion(input: {
   workspaceId: string;
   sourceItemId: string;
-  sourceKind?: "brain" | "wiki";
   sourceProvider: IngestionReservationSourceProvider;
   rawEventCount: number;
   now?: Date;
@@ -310,7 +308,6 @@ export async function reserveWorkspaceIngestion(input: {
   }
   const db = input.db ?? getDb();
   const now = input.now ?? new Date();
-  const wikiSource = input.sourceKind === "wiki";
   await ensureMonthlyIncludedUsage(input.workspaceId, { now, db });
   const run = async (tx: DbLike) => {
     await lockWorkspace(input.workspaceId, tx);
@@ -331,8 +328,7 @@ export async function reserveWorkspaceIngestion(input: {
       .values({
         id: `gir_${randomUUID().replace(/-/g, "")}`,
         workspaceId: input.workspaceId,
-        sourceItemId: wikiSource ? null : input.sourceItemId,
-        wikiSourceItemId: wikiSource ? input.sourceItemId : null,
+        wikiSourceItemId: input.sourceItemId,
         sourceProvider: input.sourceProvider,
         rawEventCount: input.rawEventCount,
         status: "pending",
@@ -371,9 +367,7 @@ export async function reserveWorkspaceIngestion(input: {
       .where(
         and(
           eq(workspaceIngestionReservations.workspaceId, input.workspaceId),
-          wikiSource
-            ? eq(workspaceIngestionReservations.wikiSourceItemId, input.sourceItemId)
-            : eq(workspaceIngestionReservations.sourceItemId, input.sourceItemId),
+          eq(workspaceIngestionReservations.wikiSourceItemId, input.sourceItemId),
         ),
       )
       .limit(1);
@@ -427,20 +421,6 @@ export async function releasePendingForWorkspace(
       if (!admitted) break;
       released.push(reservation);
     }
-    if (released.length === 0) return 0;
-    await tx
-      .update(brainIngestJobs)
-      .set({ planPaused: false, updatedAt: now })
-      .where(
-        and(
-          eq(brainIngestJobs.workspaceId, workspaceId),
-          inArray(
-            brainIngestJobs.sourceItemId,
-            released.map((reservation: { sourceItemId: string }) => reservation.sourceItemId),
-          ),
-          eq(brainIngestJobs.planPaused, true),
-        ),
-      );
     return released.length;
   });
 }

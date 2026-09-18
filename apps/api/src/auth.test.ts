@@ -71,8 +71,7 @@ describe("API authentication", () => {
         new Request("https://api.example.test/v1/identity/sync", {
           method: "POST",
           headers: {
-            Cookie:
-              "wos-session=fresh%2Fsession%3D%3D; goat-active-workspace=workspace_1; goat-active-brain=brain_1",
+            Cookie: "wos-session=fresh%2Fsession%3D%3D; goat-active-workspace=workspace_1",
             Origin: "https://my.opencompany.chat",
           },
         }),
@@ -81,7 +80,6 @@ describe("API authentication", () => {
       userId: "user_1",
       organizationId: "org_1",
       activeWorkspaceId: "workspace_1",
-      activeBrainId: "brain_1",
       method: "session",
     });
     expect(loadSealedSession).toHaveBeenCalledWith({
@@ -105,7 +103,7 @@ describe("API authentication", () => {
         new Request("https://api.example.test/v1/identity/sync", {
           headers: {
             Authorization: `Bearer ${token}`,
-            Cookie: "goat-active-workspace=workspace_1; goat-active-brain=brain_1",
+            Cookie: "goat-active-workspace=workspace_1",
           },
         }),
       ),
@@ -113,7 +111,6 @@ describe("API authentication", () => {
       userId: "user_1",
       organizationId: null,
       activeWorkspaceId: null,
-      activeBrainId: null,
       credentialKind: "authkit_bearer",
     });
   });
@@ -124,7 +121,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          legacyBrainEnabled: true,
         },
       ],
     }));
@@ -164,9 +160,7 @@ describe("API authentication", () => {
           "skill:read",
           "wiki:read",
           "wiki:write",
-          "brain:read",
           "skill:write",
-          "brain:write",
           "workflow:read",
           "workflow:write",
         ],
@@ -206,7 +200,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -245,7 +238,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_mobile",
           role: "member",
-          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -396,7 +388,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -463,7 +454,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -509,7 +499,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          legacyBrainEnabled: false,
         },
       ],
     }));
@@ -544,7 +533,7 @@ describe("API authentication", () => {
     ["POST", "/v1/plugins/imports"],
   ])("resolves %s %s for a browser session mid-onboarding", async (method, path) => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+      rows: [{ workspaceId: "workspace_1", role: "admin" }],
     }));
     const authenticate = browserSessionAuthenticator(execute);
 
@@ -567,7 +556,7 @@ describe("API authentication", () => {
     ["POST", "/v1/plugins/custom"],
   ])("keeps the onboarding gate on %s %s", async (method, path) => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+      rows: [{ workspaceId: "workspace_1", role: "admin" }],
     }));
     const authenticate = browserSessionAuthenticator(execute);
 
@@ -583,7 +572,7 @@ describe("API authentication", () => {
 
   it("never waives the onboarding gate for bearer credentials", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
-      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+      rows: [{ workspaceId: "workspace_1", role: "admin" }],
     }));
     const authenticate = createWorkOsApiAuthenticator(execute, {
       audience: "api_resource",

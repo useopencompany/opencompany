@@ -98,10 +98,6 @@ const commands = vi.hoisted(() => ({
 }));
 const accountActions = vi.hoisted(() => ({
   disconnectIntegrationAccountAction: vi.fn(async () => ({ ok: true as const })),
-  getIntegrationAccountUsageAction: vi.fn(async () => ({
-    ok: true as const,
-    affectedBrainSourceCount: 0,
-  })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
   setIntegrationToolModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
@@ -1423,7 +1419,6 @@ describe("Linear plugin settings", () => {
     toasts.error.mockReset();
     toasts.success.mockReset();
     accountActions.disconnectIntegrationAccountAction.mockClear();
-    accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
     accountActions.setIntegrationToolModeAction.mockReset();

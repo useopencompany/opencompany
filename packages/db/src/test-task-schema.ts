@@ -9,12 +9,6 @@ export const TASK_TEST_BASE_SCHEMA = `
     user_workos_id text NOT NULL,
     role text NOT NULL
   );
-  CREATE TABLE goat.brains (
-    id text PRIMARY KEY,
-    workspace_id text NOT NULL,
-    slug text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-  );
   CREATE TABLE goat.chat_sessions (
     id text PRIMARY KEY,
     user_workos_id text NOT NULL REFERENCES goat.users(workos_user_id),
@@ -42,11 +36,10 @@ export const TASK_TEST_BASE_SCHEMA = `
     status text NOT NULL DEFAULT 'queued',
     stage text NOT NULL DEFAULT 'queued',
     result text,
-    error text,
-    workflow_id text,
-    agent_id text,
-    workflow_brain_ref text,
-    reported_outcome text,
+      error text,
+      workflow_id text,
+      agent_id text,
+      reported_outcome text,
     outcome_comment text,
     harness_spec jsonb NOT NULL DEFAULT '{}'::jsonb,
     debug_trace jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -128,7 +121,6 @@ export const TASK_TEST_BASE_SCHEMA = `
     chat_session_id text NOT NULL UNIQUE REFERENCES goat.chat_sessions(id),
     engine text NOT NULL DEFAULT 'codex',
     model text NOT NULL,
-    brain_ref text,
     workspace_id text,
     host_tool_contract_version text,
     execution_backend text NOT NULL DEFAULT 'runner_attached',

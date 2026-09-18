@@ -129,9 +129,7 @@ const wakeupMocks = vi.hoisted(() => ({
   enqueueCodexChatWakeup: vi.fn(),
   persistCodexChatScheduledWakeup: vi.fn(),
 }));
-const workspaceMocks = vi.hoisted(() => ({
-  isLegacyBrainEnabledForWorkspace: vi.fn(async () => false),
-}));
+const workspaceMocks = vi.hoisted(() => ({}));
 
 vi.mock("./bot-context", () => ({ loadBotIdentityPrompt: vi.fn(async () => "") }));
 
@@ -1644,7 +1642,6 @@ function claudeSession(overrides: Partial<CodexChatSession> = {}): CodexChatSess
     engine: "claude_code",
     harness: "chat",
     model: "claude-sonnet-5",
-    brainRef: null,
     workspaceId: "workspace_1",
     hostToolContractVersion: null,
     executionBackend: "runner_attached",
@@ -1753,7 +1750,6 @@ function taskForHarness(harnessSpec: HarnessSpec): Task {
     result: null,
     error: null,
     workflowId: "workflow_1",
-    workflowBrainRef: null,
     reportedOutcome: null,
     outcomeComment: null,
     harnessSpec,

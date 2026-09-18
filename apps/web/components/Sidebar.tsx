@@ -38,7 +38,6 @@ import {
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { SidebarBots } from "@/components/Bots";
-import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { PullRequestBadge } from "@/components/PullRequestBadge";
@@ -255,13 +254,6 @@ export function Sidebar({
             <SidebarNavRow href="/agents" icon={Bot} label="Company agents" active={agentsActive} />
           ) : null}
         </nav>
-
-        {/* Brains */}
-        {featureFlags.legacyBrain ? (
-          <div className="px-2 pt-4">
-            <BrainSwitcher />
-          </div>
-        ) : null}
 
         {/* Wiki: knowledge before agents */}
         <div className="pt-4">

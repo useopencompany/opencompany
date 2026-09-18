@@ -1,7 +1,7 @@
 # opencompany system map
 
 This document describes the current product flow. The web app presents Chat, Tasks, Workflows,
-Brain, Wiki, integrations, and settings; the canonical API owns public commands and read models;
+Wiki, integrations, and settings; the canonical API owns public commands and read models;
 the runner owns durable execution.
 
 ## Chat
@@ -138,7 +138,7 @@ and reconnect/expiry behavior.
 
 ## Knowledge, Skills, Plugins, and integrations
 
-Brain, Wiki, Agent Skills, Agent Plugins, and integration commands are API- or runner-owned. Skills
+Wiki, Agent Skills, Agent Plugins, and integration commands are API- or runner-owned. Skills
 and Plugins are immutable packages installed by exact resolved commit. Chats snapshot immutable
 bundle and Plugin IDs; Workflow Tasks pin bundle IDs per step in their Harness spec. The runner
 mounts those exact versions, and only integrity-approved stdio MCP servers are exposed to Codex or

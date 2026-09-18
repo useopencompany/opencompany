@@ -11,14 +11,7 @@ import {
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  BRAIN_TOOL_NAME,
-  BRAIN_TOOL_PART_TYPE,
-  type ChatUiMessage,
-  USE_ACTION_TOOL_NAME,
-  USE_ACTION_TOOL_PART_TYPE,
-} from "@/lib/chat-ui";
-import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
+import { type ChatUiMessage, USE_ACTION_TOOL_NAME, USE_ACTION_TOOL_PART_TYPE } from "@/lib/chat-ui";
 import type { ChatTaskLookup } from "./assistant-items";
 import { MessageBubble } from "./MessageBubble";
 
@@ -277,18 +270,13 @@ it.each(["retry", "deny"])(
 
 describe("MessageBubble historical presentation details", () => {
   it.each(
-    [CODEX_COMMAND_TOOL_NAME, BRAIN_TOOL_NAME, "history_search"].flatMap((selectedTool) =>
+    [CODEX_COMMAND_TOOL_NAME, "history_search"].flatMap((selectedTool) =>
       [false, true].map((closeBeforeLoad) => ({ selectedTool, closeBeforeLoad })),
     ),
   )(
     "preserves only the selected $selectedTool disclosure when details load (closed while loading: $closeBeforeLoad)",
     async ({ selectedTool, closeBeforeLoad }) => {
-      const names = [
-        CODEX_COMMAND_TOOL_NAME,
-        CODEX_COMMAND_TOOL_NAME,
-        BRAIN_TOOL_NAME,
-        "history_search",
-      ];
+      const names = [CODEX_COMMAND_TOOL_NAME, CODEX_COMMAND_TOOL_NAME, "history_search"];
       const summaryMessage = {
         id: "assistant_disclosures",
         role: "assistant",
@@ -306,12 +294,9 @@ describe("MessageBubble historical presentation details", () => {
       } as ChatUiMessage;
       const fullMessage = {
         ...summaryMessage,
-        parts: summaryMessage.parts.map((part, index) => ({
+        parts: summaryMessage.parts.map((part) => ({
           ...part,
-          output:
-            names[index] === BRAIN_TOOL_NAME
-              ? { ok: true, brainRef: "brain_1", exitCode: 0, stdout: "Full result", stderr: "" }
-              : { status: "completed", exitCode: 0, outputPreview: "Full result" },
+          output: { status: "completed", exitCode: 0, outputPreview: "Full result" },
         })),
       } as ChatUiMessage;
       let resolvePresentation!: (message: ChatUiMessage) => void;
@@ -865,116 +850,6 @@ describe("MessageBubble assistant errors", () => {
       "The selected model couldn’t process some content returned by a source. Everything completed above is still available. Try another model to continue.",
     );
     expect(screen.queryByText(/DataInspectionFailed/)).not.toBeInTheDocument();
-  });
-
-  it("renders source chips for text after successful brain reads", () => {
-    const message: ChatUiMessage = {
-      id: "assistant_5",
-      role: "assistant",
-      metadata: { sessionId: "goat_chat_1" },
-      parts: [
-        {
-          type: BRAIN_TOOL_PART_TYPE,
-          toolCallId: "tool_brain_1",
-          state: "output-available",
-          input: { command: "query", flags: { text: "gtm", limit: 3 } },
-          output: {
-            ok: true,
-            brainRef: "goat_brain_1",
-            exitCode: 0,
-            stdout: "",
-            stderr: "",
-            parsed: {
-              hits: [
-                {
-                  id: "ada",
-                  title: "Ada Lovelace",
-                  folder: "team/gtm",
-                  type: "person",
-                  kind: "page",
-                  status: "active",
-                  updatedAt: "2026-07-01T00:00:00.000Z",
-                  score: 0.9,
-                  signals: ["lexical"],
-                  snippet: "Ada leads GTM.",
-                  neighbors: [],
-                },
-              ],
-            },
-          },
-        },
-        { type: "text", text: "Ada leads GTM." },
-      ],
-    };
-
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
-
-    expect(screen.getByText("Ada leads GTM.")).toBeInTheDocument();
-    const source = screen.getByRole("link", {
-      name: "Source 1: Ada Lovelace (team/gtm/ada)",
-    });
-    expect(source).toHaveAttribute("href", "/brain/goat_brain_1/team/gtm/ada");
-    expect(screen.getByLabelText("Sources")).toBeInTheDocument();
-  });
-
-  it("cites wiki pages without their underlying evidence", () => {
-    const message: ChatUiMessage = {
-      id: "assistant_6",
-      role: "assistant",
-      metadata: { sessionId: "goat_chat_1" },
-      parts: [
-        {
-          type: BRAIN_TOOL_PART_TYPE,
-          toolCallId: "tool_brain_2",
-          state: "output-available",
-          input: { command: "get", flags: { id: "ada" } },
-          output: {
-            ok: true,
-            brainRef: "goat_brain_1",
-            exitCode: 0,
-            stdout: "",
-            stderr: "",
-            parsed: {
-              documents: [
-                {
-                  id: "ada",
-                  title: "Ada Lovelace",
-                  folder: "team/gtm",
-                  kind: "page",
-                  sources: [{ ref: "github:acme/api:pull:123", title: "acme/api #123" }],
-                },
-                {
-                  id: "ada-hired",
-                  title: "Ada was hired",
-                  folder: "evidence",
-                  kind: "evidence",
-                  sources: [
-                    {
-                      ref: "slack:channel:message:456",
-                      title: "Hiring update",
-                    },
-                  ],
-                },
-              ],
-            },
-          },
-        },
-        { type: "text", text: "Ada leads GTM." },
-      ],
-    };
-
-    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
-
-    const sources = screen.getByLabelText("Sources");
-    expect(within(sources).getAllByRole("link")).toHaveLength(1);
-    expect(
-      within(sources).getByRole("link", {
-        name: "Source 1: Ada Lovelace (team/gtm/ada)",
-      }),
-    ).toHaveAttribute("href", "/brain/goat_brain_1/team/gtm/ada");
-    expect(screen.queryByText("Ada was hired")).not.toBeInTheDocument();
-    expect(screen.queryByText("acme/api #123")).not.toBeInTheDocument();
-    expect(screen.queryByText("Hiring update")).not.toBeInTheDocument();
   });
 
   it("renders use_action parts as expandable input and output details", async () => {
@@ -2348,42 +2223,6 @@ describe("MessageBubble Codex interactions", () => {
     );
   });
 });
-
-describe("getVisibleBrainCitationCount", () => {
-  it("keeps every source when they fit on one row", () => {
-    expect(
-      getVisibleBrainCitationCount({
-        availableWidth: 158,
-        chipWidths: [50, 50, 50],
-        overflowWidths: { 1: 90, 2: 90 },
-        gap: 4,
-      }),
-    ).toBe(3);
-  });
-
-  it("collapses wrapped sources behind an overflow control", () => {
-    expect(
-      getVisibleBrainCitationCount({
-        availableWidth: 304,
-        chipWidths: [90, 90, 90, 90, 90, 90],
-        overflowWidths: { 1: 116, 2: 116, 3: 116, 4: 116, 5: 116 },
-        gap: 4,
-      }),
-    ).toBe(2);
-  });
-
-  it("keeps the first source visible when the row is very narrow", () => {
-    expect(
-      getVisibleBrainCitationCount({
-        availableWidth: 80,
-        chipWidths: [120, 120, 120],
-        overflowWidths: { 1: 110, 2: 110 },
-        gap: 4,
-      }),
-    ).toBe(1);
-  });
-});
-
 it("shows automatic approval on the action row and explains it in details", async () => {
   const message: ChatUiMessage = {
     id: "automatic-example",

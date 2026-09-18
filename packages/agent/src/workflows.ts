@@ -5,12 +5,6 @@ import {
   nextCronRunAt,
   normalizeScheduleTimezone,
 } from "@opencompany/agent-runtime";
-import {
-  BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH,
-  BRAIN_WORKFLOW_NAME_MAX_LENGTH,
-  isValidBrainId,
-  normalizeBrainId,
-} from "@opencompany/brain";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import { getDb } from "@opencompany/db/client";
 import {
@@ -35,13 +29,36 @@ import {
   DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "./workflow-schedule-defaults";
 
-// Workflows are workspace-scoped automations. They used to live as markdown
-// documents in a reserved `workflows/` Brain folder; they now have their own
-// `goat.workflows` table so "how work happens" is a first-class, company-level
-// primitive rather than Brain (knowledge) content. The `#` composer mention
-// fires a workflow as a background task on send (see lib/workflow-tasks.ts).
+// Workflows are workspace-scoped automations living in `goat.workflows`, so
+// "how work happens" is a first-class, company-level primitive. The `#`
+// composer mention fires a workflow as a background task on send (see
+// lib/workflow-tasks.ts).
 
 type Db = ReturnType<typeof getDb>;
+
+export const WORKFLOW_NAME_MAX_LENGTH = 64;
+export const WORKFLOW_DESCRIPTION_MAX_LENGTH = 1024;
+
+// Slugs address a workflow in mentions and URLs, so they stay lowercase,
+// hyphenated, and bounded.
+const WORKFLOW_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u;
+
+export function isValidWorkflowSlug(value: unknown): value is string {
+  return typeof value === "string" && WORKFLOW_SLUG_PATTERN.test(value);
+}
+
+export function workflowSlugFromName(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/gu, "")
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-+/u, "")
+    .slice(0, WORKFLOW_NAME_MAX_LENGTH)
+    .replace(/-+$/u, "");
+  return slug || "workflow";
+}
 
 export { DEFAULT_WORKFLOW_SCHEDULE_CRON, DEFAULT_WORKFLOW_SCHEDULE_PROMPT };
 
@@ -138,7 +155,7 @@ export function readWorkflowMentionRef(
     if (!mention || typeof mention !== "object" || Array.isArray(mention)) continue;
     const candidate = mention as Record<string, unknown>;
     if (candidate.kind !== "workflow") continue;
-    if (typeof candidate.id !== "string" || !isValidBrainId(candidate.id)) {
+    if (typeof candidate.id !== "string" || !isValidWorkflowSlug(candidate.id)) {
       return { ok: false, error: "Invalid workflow mention." };
     }
     mentions.push({ id: candidate.id });
@@ -315,11 +332,11 @@ export function validateWorkflowFields(input: {
   const name = input.name.trim();
   const description = input.description.trim();
   if (!name) return "Workflow name cannot be empty.";
-  if (name.length > BRAIN_WORKFLOW_NAME_MAX_LENGTH) {
-    return `Workflow names must be ${BRAIN_WORKFLOW_NAME_MAX_LENGTH} characters or fewer.`;
+  if (name.length > WORKFLOW_NAME_MAX_LENGTH) {
+    return `Workflow names must be ${WORKFLOW_NAME_MAX_LENGTH} characters or fewer.`;
   }
-  if (description.length > BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH) {
-    return `Workflow descriptions must be ${BRAIN_WORKFLOW_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
+  if (description.length > WORKFLOW_DESCRIPTION_MAX_LENGTH) {
+    return `Workflow descriptions must be ${WORKFLOW_DESCRIPTION_MAX_LENGTH} characters or fewer.`;
   }
   if (description.includes("<") || description.includes(">")) {
     return 'Workflow descriptions cannot contain "<" or ">".';
@@ -626,7 +643,7 @@ function emptyWorkflowStep(): WorkflowStep {
 }
 
 async function uniqueWorkflowSlug(db: Db, workspaceId: string, name: string): Promise<string> {
-  const base = normalizeBrainId(name).slice(0, 64).replace(/-+$/g, "") || "workflow";
+  const base = workflowSlugFromName(name);
   const rows = await db
     .select({ slug: workflows.slug })
     .from(workflows)

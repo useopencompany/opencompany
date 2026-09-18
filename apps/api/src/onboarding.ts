@@ -1,18 +1,13 @@
-import { onboardingFoldersForRole } from "@opencompany/agent/onboarding-profile";
 import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
 import {
   provisionWorkspace,
   WorkspaceProvisioningError,
 } from "@opencompany/agent/workspaces/provisioning";
-import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
-import { createBrainFolderRow, deleteBrainFolderRow } from "@opencompany/db/brain-files";
 import type { WorkspaceWithRole } from "@opencompany/db/workspaces";
 import {
-  DEFAULT_BRAIN_SLUG,
   getOnboarding,
   hasOwnedHobbyWorkspace,
   isWorkspaceSlugAvailable,
-  listAccessibleBrains,
   listWorkspacesForUser,
   markUserOnboarded,
   updateWorkspaceNameAndSlug,
@@ -40,13 +35,11 @@ export type OnboardingStateView = {
     slug: string | null;
     createdByCaller: boolean;
   } | null;
-  activeBrainId: string | null;
 };
 
 export type OnboardingWorkspaceView = {
   workspaceId: string;
   organizationId: string;
-  brainId: string | null;
   createdByCaller: boolean;
 };
 
@@ -69,7 +62,6 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
         getOnboarding(identity.userId, { db }),
         resolveOnboardingContext(identity, db),
       ]);
-      const brain = context ? await activeBrain(identity.userId, context.workspace.id, db) : null;
       return {
         onboarding: onboarding
           ? {
@@ -87,7 +79,6 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
               createdByCaller: context.workspace.createdByWorkosId === identity.userId,
             }
           : null,
-        activeBrainId: brain?.id ?? null,
       };
     },
 
@@ -127,10 +118,6 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
         const slug = await allocateWorkspaceSlug(name, context?.workspace.id ?? null, db);
 
         if (context) {
-          const brain = await activeBrain(identity.userId, context.workspace.id, db);
-          if (context.workspace.legacyBrainEnabled && !brain) {
-            throw new ApiError(404, "not_found", "No brain is available for this workspace.");
-          }
           const organizationId = await ensureWorkspaceOrganization(context.workspace, {
             workos,
             db,
@@ -144,13 +131,9 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
             { userWorkosId: identity.userId, workspaceId: context.workspace.id },
             { db },
           );
-          if (context.workspace.legacyBrainEnabled && brain) {
-            await scaffoldOnboardingFolders(identity.userId, brain.id, db);
-          }
           return {
             workspaceId: context.workspace.id,
             organizationId,
-            brainId: context.workspace.legacyBrainEnabled ? (brain?.id ?? null) : null,
             createdByCaller: context.workspace.createdByWorkosId === identity.userId,
           };
         }
@@ -179,7 +162,6 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
         return {
           workspaceId: created.workspace.id,
           organizationId,
-          brainId: null,
           createdByCaller: true,
         };
       } catch (error) {
@@ -238,55 +220,6 @@ async function resolveOnboardingContext(
   );
 }
 
-async function activeBrain(userId: string, workspaceId: string, db: DbLike) {
-  const brains = await listAccessibleBrains({ userWorkosId: userId, workspaceId }, { db });
-  return brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ?? brains[0] ?? null;
-}
-
-async function scaffoldOnboardingFolders(userId: string, brainId: string, db: DbLike) {
-  const onboarding = await getOnboarding(userId, { db });
-  const target = new Set(onboardingFoldersForRole(onboarding?.role));
-  const adjustable = new Set<string>(ADJUSTABLE_DEFAULT_BRAIN_FOLDERS);
-
-  for (const folder of ADJUSTABLE_DEFAULT_BRAIN_FOLDERS) {
-    await reconcileFolder(target.has(folder) ? "create" : "delete", userId, brainId, folder, db);
-  }
-  for (const folder of target) {
-    if (adjustable.has(folder)) continue;
-    await reconcileFolder("create", userId, brainId, folder, db);
-  }
-}
-
-async function reconcileFolder(
-  operation: "create" | "delete",
-  userId: string,
-  brainId: string,
-  folder: string,
-  db: DbLike,
-) {
-  try {
-    if (operation === "create") {
-      await createBrainFolderRow({ brainRef: brainId, userWorkosId: userId, path: folder }, { db });
-    } else {
-      await deleteBrainFolderRow({ brainRef: brainId, userWorkosId: userId, path: folder }, { db });
-    }
-  } catch (error) {
-    // Folder tailoring was best-effort in the retired action. Keep onboarding
-    // available if one optional preset folder cannot be reconciled.
-    logger.warn("Onboarding Brain folder reconciliation failed", {
-      event: "opencompany.api_onboarding_folder_reconcile_failed",
-      operation,
-      brain_id: brainId,
-      folder,
-      error_name: error instanceof Error ? error.name : typeof error,
-    });
-  }
-}
-
-// Onboarding asks only for a company name; the URL slug is derived from it.
-// The slug column is uniquely indexed, so a taken base gets a numeric suffix the
-// same way brain slugs are allocated. Names with no slug-safe characters at all
-// (e.g. entirely non-Latin) fall back to a generic base rather than failing setup.
 const WORKSPACE_SLUG_MAX_LENGTH = 40;
 const WORKSPACE_SLUG_FALLBACK = "workspace";
 const WORKSPACE_SLUG_MAX_ATTEMPTS = 50;

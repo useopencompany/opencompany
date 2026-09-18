@@ -1,4 +1,13 @@
-import { ADJUSTABLE_DEFAULT_BRAIN_FOLDERS } from "@opencompany/brain/schema";
+// Used when the wizard has no role to tailor for; mirrors the generic set the
+// founder/product roles narrow down.
+export const DEFAULT_ONBOARDING_FOLDERS = [
+  "thoughts",
+  "projects",
+  "meetings",
+  "research",
+  "decisions",
+  "concepts",
+] as const;
 
 export const ONBOARDING_ROLE_IDS = [
   "founder",
@@ -35,7 +44,7 @@ export function isOnboardingRole(value: unknown): value is OnboardingRole {
 export function onboardingFoldersForRole(role: unknown): string[] {
   return isOnboardingRole(role)
     ? [...ONBOARDING_ROLE_FOLDERS[role]]
-    : [...ADJUSTABLE_DEFAULT_BRAIN_FOLDERS];
+    : [...DEFAULT_ONBOARDING_FOLDERS];
 }
 
 export function normalizeOnboardingCompanyUrl(value: unknown): string | null {

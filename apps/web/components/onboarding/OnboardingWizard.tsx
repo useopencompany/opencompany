@@ -30,7 +30,6 @@ import {
   saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction,
 } from "@/lib/onboarding-actions";
-import { queueOnboardingKickoff } from "@/lib/onboarding-kickoff";
 import {
   isOnboardingRole,
   normalizeOnboardingCompanyUrl,
@@ -124,7 +123,6 @@ type CompanyUrlStatus = "idle" | "valid" | "invalid";
 export function OnboardingWizard({
   user,
   currentWorkspaceName,
-  legacyBrainEnabled,
   variant,
   initialStep,
   initialWorkspaceId,
@@ -135,7 +133,6 @@ export function OnboardingWizard({
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
-  legacyBrainEnabled: boolean;
   variant: "owner" | "member";
   initialStep: number;
   initialWorkspaceId: string | null;
@@ -234,11 +231,6 @@ export function OnboardingWizard({
             workspace_id: activeWorkspaceId,
           });
         }
-        if (variant === "owner" && legacyBrainEnabled && normalizedCompanyUrl) {
-          if (!queueOnboardingKickoff(normalizedCompanyUrl)) {
-            toast.error("Onboarding finished, but the first Wiki run could not be started.");
-          }
-        }
         router.push("/");
         return;
       }
@@ -295,20 +287,9 @@ export function OnboardingWizard({
             />
           )}
           {step === "workspace" && (
-            <WorkspaceStep
-              user={user}
-              wiki={!legacyBrainEnabled}
-              name={workspaceName}
-              onName={setWorkspaceName}
-            />
+            <WorkspaceStep user={user} name={workspaceName} onName={setWorkspaceName} />
           )}
-          {step === "welcome" && (
-            <WelcomeStep
-              user={user}
-              workspaceName={currentWorkspaceName}
-              wiki={!legacyBrainEnabled}
-            />
-          )}
+          {step === "welcome" && <WelcomeStep user={user} workspaceName={currentWorkspaceName} />}
           {step === "subscriptions" && (
             <OnboardingSubscriptionsStep onConnectedCountChange={setConnectedSubscriptions} />
           )}
@@ -321,7 +302,6 @@ export function OnboardingWizard({
               referral={referral}
               onSelect={setReferral}
               showReferral={variant === "owner"}
-              wiki={!legacyBrainEnabled}
             />
           )}
 
@@ -509,12 +489,10 @@ function ProfileStep({
 
 function WorkspaceStep({
   user,
-  wiki,
   name,
   onName,
 }: {
   user: OnboardingUser;
-  wiki: boolean;
   name: string;
   onName: (v: string) => void;
 }) {
@@ -522,7 +500,7 @@ function WorkspaceStep({
     <div>
       <StepHeader
         title="Create your workspace"
-        subtitle={`This is the home for your company's ${wiki ? "Wiki" : "brain"}. Hobby includes one member; upgrade to Pro to invite teammates.`}
+        subtitle="This is the home for your company's Wiki. Hobby includes one member; upgrade to Pro to invite teammates."
       />
 
       <IdentityRow user={user} />
@@ -546,24 +524,12 @@ function WorkspaceStep({
 // Step — Welcome (invited members)
 // ---------------------------------------------------------------------------
 
-function WelcomeStep({
-  user,
-  workspaceName,
-  wiki,
-}: {
-  user: OnboardingUser;
-  workspaceName: string;
-  wiki: boolean;
-}) {
+function WelcomeStep({ user, workspaceName }: { user: OnboardingUser; workspaceName: string }) {
   return (
     <div>
       <StepHeader
         title={`Welcome to ${workspaceName}`}
-        subtitle={
-          wiki
-            ? "You've joined this company's workspace. Its Wiki brings shared context together — here's how to start using it."
-            : "You've been added to this company's brain. It already knows a lot — here's how to start putting it to work."
-        }
+        subtitle="You've joined this company's workspace. Its Wiki brings shared context together — here's how to start using it."
       />
 
       <IdentityRow user={user} />
@@ -572,11 +538,7 @@ function WelcomeStep({
         <HighlightRow
           icon={MessagesSquare}
           title="Ask it anything"
-          text={
-            wiki
-              ? "Chat with opencompany to get up to speed on people, projects, and decisions from the company Wiki."
-              : "Chat with the brain to get up to speed on people, projects, and decisions."
-          }
+          text="Chat with opencompany to get up to speed on people, projects, and decisions from the company Wiki."
         />
         <HighlightRow
           icon={ShieldCheck}
@@ -630,13 +592,11 @@ function FinishStep({
   referral,
   onSelect,
   showReferral,
-  wiki,
 }: {
   workspaceName: string;
   referral: string | null;
   onSelect: (v: string) => void;
   showReferral: boolean;
-  wiki: boolean;
 }) {
   return (
     <div>
@@ -649,12 +609,10 @@ function FinishStep({
             You&apos;re all set
           </h1>
           <p className="text-[14px] leading-6 text-ink-muted">
-            {workspaceName
-              ? `${workspaceName} is ready.`
-              : `Your ${wiki ? "Wiki" : "brain"} is ready.`}{" "}
+            {workspaceName ? `${workspaceName} is ready.` : "Your Wiki is ready."}{" "}
             {showReferral
               ? "You can connect more plugins or import company context anytime from Settings."
-              : `You can start exploring the company ${wiki ? "Wiki" : "brain"} now.`}
+              : "You can start exploring the company Wiki now."}
           </p>
         </div>
       </div>

@@ -1,5 +1,4 @@
-import { get, put } from "@vercel/blob";
-import { brainAssetUploadPrefix } from "./brain-assets";
+import { get } from "@vercel/blob";
 
 export async function downloadChatAttachment(blobUrl: string): Promise<Buffer> {
   const result = await get(blobUrl, { access: "private", useCache: false });
@@ -14,17 +13,4 @@ export async function downloadChatAttachment(blobUrl: string): Promise<Buffer> {
     if (value) chunks.push(value);
   }
   return Buffer.concat(chunks);
-}
-
-export function copyChatAttachmentToBrain(input: {
-  brainRef: string;
-  filename: string;
-  bytes: Buffer;
-  mediaType: string;
-}) {
-  return put(`${brainAssetUploadPrefix(input.brainRef)}${input.filename}`, input.bytes, {
-    access: "private",
-    addRandomSuffix: true,
-    contentType: input.mediaType,
-  });
 }

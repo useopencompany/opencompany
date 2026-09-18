@@ -11,7 +11,7 @@ without maintaining a second analytics sink.
 
 `packages/analytics/src/product-events.ts` is the current product registry. It defines every event
 name, allowed property shape, description, and safe property keys. Events cover app and onboarding
-activity, Chat and Task use, plugins, connections and Brain ingestion, model usage and spend, and billing
+activity, Chat and Task use, plugins, connections and Wiki ingestion, model usage and spend, and billing
 top-ups.
 
 `packages/analytics/src/events.ts` is a separate billing-compatibility registry. It exists for the

@@ -20,7 +20,6 @@
     "@opencompany/db": "workspace:*",
     "@opencompany/file-extract": "workspace:*",
     "@opencompany/agent": "workspace:*",
-    "@opencompany/brain": "workspace:*",
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/observability": "workspace:*",
     "@opencompany/protocol": "workspace:*",

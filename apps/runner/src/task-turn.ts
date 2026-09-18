@@ -36,7 +36,6 @@ import {
 import * as ai from "ai";
 import { createGateway, jsonSchema, type LanguageModelUsage } from "ai";
 import { sql } from "drizzle-orm";
-import { createBrainMarkdownReportForTask } from "./brain";
 import { CodexChatLeaseLostError, TaskTurnTerminalError } from "./codex-chat-errors";
 import {
   type CodexChatScheduledWakeup,
@@ -89,21 +88,14 @@ export type TaskCommentThreadEntry = {
   body: string;
 };
 
-export function resolveTaskTurnContext(task: Task, turn: CodexChatTurn): TaskTurnContext {
-  const resultMode = turn.settings.taskResultMode;
-  if (!resultMode || resultMode === task.harnessSpec.resultMode) {
-    return { task, harnessSpec: task.harnessSpec };
-  }
+export function resolveTaskTurnContext(task: Task): TaskTurnContext {
   return {
     task,
     harnessSpec: {
       ...task.harnessSpec,
-      resultMode,
-      systemPrompt: systemPromptForTaskResultMode(task.harnessSpec.systemPrompt, resultMode),
+      systemPrompt: systemPromptForTaskResultMode(task.harnessSpec.systemPrompt),
       ...(task.harnessSpec.systemBlocks
-        ? {
-            systemBlocks: systemBlocksForTaskResultMode(task.harnessSpec.systemBlocks, resultMode),
-          }
+        ? { systemBlocks: systemBlocksForTaskResultMode(task.harnessSpec.systemBlocks) }
         : {}),
     },
   };
@@ -461,27 +453,6 @@ export function buildTaskCloserPrompt(input: {
   ].join("\n");
 }
 
-export async function finalizeTaskResult(input: {
-  context: TaskTurnContext;
-  assistantContent: string;
-  turnId?: string | undefined;
-}) {
-  const content = input.assistantContent.trim();
-  if (input.context.harnessSpec.resultMode !== "brain_markdown_report") return content;
-  const artifact = await createBrainMarkdownReportForTask({
-    userWorkosId: input.context.task.userWorkosId,
-    taskId: input.context.task.id,
-    taskTurnId: input.turnId,
-    title: input.context.task.name,
-    markdown: content,
-  });
-  return [
-    `Research report saved to Brain: [${artifact.title}](${artifact.url}).`,
-    "",
-    `Artifact: \`${artifact.brainPath}\``,
-  ].join("\n");
-}
-
 export function buildTaskTurnCompletion(input: {
   context: TaskTurnContext;
   result: string;
@@ -558,8 +529,8 @@ export function buildTaskTurnCompletion(input: {
         engine: nextStep.engine,
         model: nextStep.model,
         ...(nextStepCodexConfig ? { codex: nextStepCodexConfig } : {}),
-        systemPrompt: systemPromptForTaskResultMode(nextStep.systemPrompt, harnessSpec.resultMode),
-        systemBlocks: systemBlocksForTaskResultMode(nextStep.systemBlocks, harnessSpec.resultMode),
+        systemPrompt: systemPromptForTaskResultMode(nextStep.systemPrompt),
+        systemBlocks: systemBlocksForTaskResultMode(nextStep.systemBlocks),
         workflow: {
           ...harnessSpec.workflow!,
           currentStepIndex: currentStepIndex + 1,
@@ -615,10 +586,6 @@ export function buildTaskFailureCompletion(input: {
   });
   const decision = automaticDecision ?? input.decision;
   const retry = decision?.disposition === "retry" && input.context.task.attempts < 2;
-  const resultModeOverride =
-    input.context.harnessSpec.resultMode !== input.context.task.harnessSpec.resultMode
-      ? input.context.harnessSpec.resultMode
-      : null;
   return {
     taskId: input.context.task.id,
     taskDisplayId: input.context.task.displayId,
@@ -632,14 +599,6 @@ export function buildTaskFailureCompletion(input: {
       ? createNextTaskTurn({
           harnessSpec: input.context.task.harnessSpec,
           prompt: taskRetryPrompt(error, Boolean(automaticDecision)),
-          ...(resultModeOverride
-            ? {
-                settings: {
-                  ...taskTurnSettingsForHarness(input.context.harnessSpec),
-                  taskResultMode: resultModeOverride,
-                },
-              }
-            : {}),
         })
       : null,
   };

@@ -130,12 +130,6 @@ services:
       # HubSpot OAuth + webhook ingress moved to the API in the #1203 4c
       # cutover. Attio and Jamie webhooks moved too but verify against
       # per-integration credentials, so they need no env.
-      - key: OPENCOMPANY_HUBSPOT_CLIENT_ID
-        sync: false
-      - key: OPENCOMPANY_HUBSPOT_CLIENT_SECRET
-        sync: false
-      - key: OPENCOMPANY_HUBSPOT_STATE_SECRET
-        sync: false
       # HubSpot MCP auth-app credentials are a distinct OAuth audience from
       # the read-only ingestion app above.
       - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
@@ -228,13 +222,6 @@ services:
       - key: OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH
         sync: false
       - key: OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS
-        sync: false
-      # Optional Brain retrieval/model tuning; defaults are safe when unset.
-      - key: OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
-        sync: false
-      - key: OPENCOMPANY_BRAIN_EMBEDDING_MODEL
-        sync: false
-      - key: OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE
         sync: false
       - key: BLOB_READ_WRITE_TOKEN
         sync: false
@@ -434,10 +421,6 @@ services:
       - key: OPENCOMPANY_X_CLIENT_SECRET
         sync: false
       # HubSpot snapshots refresh short-lived OAuth tokens in the runner.
-      - key: OPENCOMPANY_HUBSPOT_CLIENT_ID
-        sync: false
-      - key: OPENCOMPANY_HUBSPOT_CLIENT_SECRET
-        sync: false
       # Refreshes audience-bound HubSpot MCP OAuth tokens for plugin calls.
       - key: OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
         sync: false
@@ -471,12 +454,6 @@ services:
       - key: OPENCOMPANY_DICTATION_FINAL_MODEL
         sync: false
       # Optional Brain/model/action tuning and emergency controls.
-      - key: OPENCOMPANY_BRAIN_GATEWAY_BASE_URL
-        sync: false
-      - key: OPENCOMPANY_BRAIN_EMBEDDING_MODEL
-        sync: false
-      - key: OPENCOMPANY_BRAIN_VECTOR_MAX_DISTANCE
-        sync: false
       - key: OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH
         sync: false
       - key: OPENCOMPANY_CHAT_SANDBOX_IMAGE

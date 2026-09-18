@@ -1,17 +1,12 @@
 import { and, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
-import { brainSources, granolaSyncState } from "./product-schema";
+import { granolaSyncState } from "./product-schema";
 import type { WorkflowEventContext } from "./workflow-event-routes";
 
 type DbLike = any;
 
 export const GRANOLA_PROVIDER = "granola" as const;
 export const GRANOLA_CREDENTIAL_KIND = "api_key" as const;
-
-export type GranolaBrainSourceRoute = {
-  integrationId: string;
-  brainRef: string;
-};
 
 export type GranolaSyncStateRow = {
   integrationId: string;
@@ -20,27 +15,6 @@ export type GranolaSyncStateRow = {
   pageCursor: string | null;
   pendingUpdatedAfterCursor: Date | null;
 };
-
-export async function listEnabledGranolaBrainSourceRoutes(
-  integrationIds: readonly string[],
-  db: DbLike = getDb(),
-): Promise<GranolaBrainSourceRoute[]> {
-  if (integrationIds.length === 0) return [];
-  const rows = await db
-    .select({
-      integrationId: brainSources.integrationId,
-      brainRef: brainSources.brainId,
-    })
-    .from(brainSources)
-    .where(
-      and(
-        eq(brainSources.provider, GRANOLA_PROVIDER),
-        eq(brainSources.enabled, true),
-        inArray(brainSources.integrationId, [...integrationIds]),
-      ),
-    );
-  return rows;
-}
 
 export async function ensureGranolaSyncState(
   input: { integrationId: string; userWorkosId: string },
@@ -164,7 +138,7 @@ export async function updateGranolaSyncCursor(
 
 // Cross-member dedup key for one Granola note. Note ids are stable per note,
 // so two members whose keys can both read a shared note converge on one claim
-// per brain.
+// per workspace.
 export function granolaEventClaimKey(noteId: string): string {
   return `note:${noteId}`;
 }

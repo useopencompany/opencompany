@@ -1,6 +1,6 @@
-import { isValidBrainSourceRef } from "@opencompany/brain";
 import { getDb } from "@opencompany/db/client";
 import { integrations } from "@opencompany/db/product-schema";
+import { isValidWikiSourceRef } from "@opencompany/wiki";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { hasGmailDraftScope, hasGmailSendScope } from "../integrations/gmail-scopes";
 import { GoogleAccessAuthError, googleApiCall } from "../integrations/google-access-token";
@@ -1011,8 +1011,8 @@ function withGmailSource<T extends { threadId?: string | undefined }>(
 
 function gmailThreadSourceRef(threadId: string) {
   const sourceRef = `gmail:thread:${threadId}`;
-  if (!isValidBrainSourceRef(sourceRef)) {
-    throw new Error("Gmail returned a thread id that cannot form a Brain source reference.");
+  if (!isValidWikiSourceRef(sourceRef)) {
+    throw new Error("Gmail returned a thread id that cannot form a source reference.");
   }
   return sourceRef;
 }

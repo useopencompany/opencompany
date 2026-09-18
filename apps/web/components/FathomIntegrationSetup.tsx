@@ -1,7 +1,6 @@
 "use client";
 
 import { Check } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { disconnectIntegrationAccountAction } from "@/lib/integration-account-actions";
@@ -10,12 +9,10 @@ import { saveFathomApiKeyAction } from "@/lib/integrations/fathom-actions";
 
 export function FathomIntegrationSetup({
   initialState,
-  brainSourcesHref = null,
   variant = "settings",
   onSaved,
 }: {
   initialState: FathomProviderState;
-  brainSourcesHref?: string | null;
   // "modal" embeds the form in the onboarding connect dialog: the Status
   // section (which duplicates the dialog title) is dropped.
   variant?: "settings" | "modal";
@@ -83,17 +80,6 @@ export function FathomIntegrationSetup({
               {status.badge}
             </span>
           </div>
-          {state.connected && brainSourcesHref ? (
-            <div className="px-2 pt-1">
-              <Link
-                href={brainSourcesHref}
-                prefetch
-                className="inline-flex items-center rounded-md border border-ink/15 px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-surface-hover"
-              >
-                Open Brain sources
-              </Link>
-            </div>
-          ) : null}
         </section>
       )}
 
@@ -171,7 +157,6 @@ export function FathomIntegrationSetup({
             team.
           </li>
           <li>Copy the key Fathom shows once, paste it here, and save it.</li>
-          <li>Enable Fathom from a brain&apos;s Sources settings to route new meetings.</li>
         </ol>
         <p className="px-2 text-[13px] leading-5 text-ink-subtle">
           New meetings are usually picked up within about 20 minutes of ending. If Fathom is still
@@ -188,7 +173,7 @@ function setupStatus(state: FathomProviderState) {
   if (state.connected) {
     return {
       label: state.accountEmail ? `Connected as ${state.accountEmail}` : "Fathom is connected",
-      detail: "New meetings are picked up by the opencompany Brain ingestion queue.",
+      detail: "Chat can read your Fathom meetings and transcripts.",
       badge: "Connected",
     };
   }

@@ -336,14 +336,14 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   border-top: 1px solid var(--color-border);
 }
 
-.tiptap-brain > *:first-child {
+.tiptap-doc > *:first-child {
   margin-top: 0;
 }
-.tiptap-brain > *:last-child {
+.tiptap-doc > *:last-child {
   margin-bottom: 0;
 }
 /* Placeholder extension: hint shown only while the whole document is empty. */
-.tiptap-brain .is-editor-empty:first-child::before {
+.tiptap-doc .is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -378,69 +378,69 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   display: inline-flex;
   pointer-events: none;
 }
-.tiptap-brain p,
-.tiptap-brain ul,
-.tiptap-brain ol,
-.tiptap-brain blockquote,
-.tiptap-brain pre {
+.tiptap-doc p,
+.tiptap-doc ul,
+.tiptap-doc ol,
+.tiptap-doc blockquote,
+.tiptap-doc pre {
   margin: 0 0 0.82em;
 }
-.tiptap-brain h1,
-.tiptap-brain h2,
-.tiptap-brain h3 {
+.tiptap-doc h1,
+.tiptap-doc h2,
+.tiptap-doc h3 {
   color: var(--color-ink);
   font-weight: 680;
   line-height: 1.18;
 }
-.tiptap-brain h1 {
+.tiptap-doc h1 {
   margin: 1.15em 0 0.34em;
   font-size: 34px;
 }
-.tiptap-brain h2 {
+.tiptap-doc h2 {
   margin: 1.25em 0 0.34em;
   font-size: 24px;
 }
-.tiptap-brain h3 {
+.tiptap-doc h3 {
   margin: 1.1em 0 0.3em;
   font-size: 17px;
 }
-.tiptap-brain-compact h1 {
+.tiptap-doc-compact h1 {
   margin: 0.6em 0 0.22em;
   font-size: 19px;
 }
-.tiptap-brain-compact h2 {
+.tiptap-doc-compact h2 {
   margin: 0.6em 0 0.2em;
   font-size: 16px;
 }
-.tiptap-brain-compact h3 {
+.tiptap-doc-compact h3 {
   margin: 0.55em 0 0.18em;
   font-size: 14px;
 }
-.tiptap-brain ul,
-.tiptap-brain ol {
+.tiptap-doc ul,
+.tiptap-doc ol {
   padding-left: 1.35em;
 }
-.tiptap-brain ul {
+.tiptap-doc ul {
   list-style: disc;
 }
-.tiptap-brain ol {
+.tiptap-doc ol {
   list-style: decimal;
 }
-.tiptap-brain li {
+.tiptap-doc li {
   padding-left: 0.16em;
 }
-.tiptap-brain li + li {
+.tiptap-doc li + li {
   margin-top: 0.18em;
 }
-.tiptap-brain li > p {
+.tiptap-doc li > p {
   margin: 0.12em 0;
 }
-.tiptap-brain blockquote {
+.tiptap-doc blockquote {
   border-left: 3px solid var(--color-border-strong);
   padding-left: 0.95em;
   color: var(--color-ink-muted);
 }
-.tiptap-brain code {
+.tiptap-doc code {
   border-radius: 5px;
   background: var(--color-surface-subtle);
   padding: 0.12em 0.34em;
@@ -448,7 +448,7 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   font-size: 0.9em;
   color: var(--color-ink);
 }
-.tiptap-brain pre {
+.tiptap-doc pre {
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -456,23 +456,23 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   padding: 0.85em 1em;
   line-height: 1.55;
 }
-.tiptap-brain pre code {
+.tiptap-doc pre code {
   border-radius: 0;
   background: transparent;
   padding: 0;
   font-size: 12px;
 }
-.tiptap-brain hr {
+.tiptap-doc hr {
   margin: 1.25em 0;
   border: 0;
   border-top: 1px solid var(--color-border);
 }
 /* No selected-node box for now (e.g. the outline a block shows right after a
    drag-drop). `none` also overrides prosemirror-view's default blue outline. */
-.tiptap-brain .ProseMirror-selectednode {
+.tiptap-doc .ProseMirror-selectednode {
   outline: none;
 }
-.tiptap-brain .wiki-brain-link {
+.tiptap-doc .wiki-brain-link {
   cursor: pointer;
   color: var(--color-ink);
   font-weight: 560;
@@ -481,24 +481,24 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-.tiptap-brain .wiki-brain-link-unresolved {
+.tiptap-doc .wiki-brain-link-unresolved {
   color: var(--color-ink-muted);
   text-decoration-style: dashed;
   text-decoration-color: var(--color-border);
 }
 
 /* Raw wiki-link markup, hidden while the chip is shown. */
-.tiptap-brain .wiki-brain-hidden {
+.tiptap-doc .wiki-brain-hidden {
   display: none;
 }
 /* Bracket / prefix syntax, dimmed while editing the raw link. */
-.tiptap-brain .wiki-brain-syntax {
+.tiptap-doc .wiki-doc-syntax {
   color: var(--color-ink-subtle);
   opacity: 0.55;
 }
 
 /* Collapsed wiki-link rendered as a compact @mention-style chip. */
-.tiptap-brain .wiki-brain-chip {
+.tiptap-doc .wiki-source-chip {
   display: inline-flex;
   align-items: center;
   max-width: calc(100% - 0.08em);
@@ -522,23 +522,23 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
     background 120ms ease,
     border-color 120ms ease;
 }
-.tiptap-brain .wiki-brain-chip:hover {
+.tiptap-doc .wiki-source-chip:hover {
   background: var(--color-surface-active);
   border-color: var(--color-border-strong);
 }
-.tiptap-brain .wiki-brain-chip-icon {
+.tiptap-doc .wiki-source-chip-icon {
   width: 0.82em;
   height: 0.82em;
   flex: 0 0 auto;
   opacity: 0.55;
 }
 /* Filled brand marks (e.g. GitHub) need a touch more weight to read clearly. */
-.tiptap-brain .wiki-brain-chip-icon-github {
+.tiptap-doc .wiki-source-chip-icon-github {
   width: 0.86em;
   height: 0.86em;
   opacity: 0.75;
 }
-.tiptap-brain .wiki-brain-chip-label {
+.tiptap-doc .wiki-source-chip-label {
   display: block;
   min-width: 0;
   max-width: 32ch;
@@ -546,7 +546,7 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tiptap-brain .wiki-brain-chip-unresolved {
+.tiptap-doc .wiki-source-chip-unresolved {
   color: var(--color-ink-muted);
   border-style: dashed;
   background: transparent;

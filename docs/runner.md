@@ -8,7 +8,7 @@ deployed on Render and started locally by `bun run dev:web`.
 - claim, heartbeat, recover, cancel, and settle durable Runs and Attempts;
 - execute opencompany, Codex, and Claude Code engine adapters;
 - manage persistent E2B coding sandboxes, credentials, skills, attachments, and artifacts;
-- run Brain ingestion/import, integration poll/flush, and schedule workers;
+- run Wiki ingestion, integration polling, and schedule workers;
 - serve dictation, coding-workspace, ticketed Claude MCP, and LLM-broker transports;
 - meter model usage and expose release-aware health checks.
 
@@ -31,18 +31,18 @@ namespace, preventing a local runner that shares E2B credentials from selecting 
 
 ## Worker admission
 
-Runs, due schedules, Brain import, Brain ingestion, Google Drive sync, and integration work are
+Runs, due schedules, Wiki ingestion, and integration work are
 admitted by committed Postgres rows. Database triggers publish a versioned Postgres notification containing only the
 worker kind; the runner keeps one dedicated listener connection and maps that hint to the existing
 worker's in-process `notify()` callback. Notifications are a latency optimization, not a queue or a
 claim. Each worker's polling loop remains active and authoritative for retry timing, fenced leases,
-per-Brain serialization, Drive cursor ordering, and crash recovery. A dropped notification or
+per-wiki serialization and crash recovery. A dropped notification or
 listener outage therefore delays work only until the normal poll, and the listener reconnects
 without changing execution semantics.
 
-Private Brain import/ingest and Drive wake routes expose the same latency hint for authorized
-internal callers. They do not admit work, bypass claims, or replace polling, and first-party web
-product flows do not call them.
+Private wake routes expose the same latency hint for authorized internal callers. They do not admit
+work, bypass claims, or replace polling, and first-party web product flows do not call them. The
+retired Brain import and Google Drive sync routes remain mounted and answer `410`.
 
 ## Sandboxes and broker
 
@@ -109,6 +109,6 @@ existing API already treats as unavailable.
 ## Verification
 
 Run runner unit tests and typecheck, then exercise the real product path that durably admits the
-touched worker. For deployment changes, verify `/healthz` reports the expected release and Brain
-worker admission capability version, then create representative work through the web or provider
+touched worker. For deployment changes, verify `/healthz` reports the expected release and
+capability versions, then create representative work through the web or provider
 path rather than calling worker internals alone.

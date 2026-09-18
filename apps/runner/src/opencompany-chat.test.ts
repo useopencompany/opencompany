@@ -311,19 +311,19 @@ describe("consumeProductChatStream", () => {
         {
           type: "tool-input-start",
           id: "tool_1",
-          toolName: "goat_brain",
+          toolName: "wiki",
         },
         {
           type: "tool-call",
           toolCallId: "tool_1",
-          toolName: "goat_brain",
+          toolName: "wiki",
           input: { command: "query", flags: { text: "launch" } },
           providerMetadata: { gateway: { callId: "call_1" } },
         },
         {
           type: "tool-result",
           toolCallId: "tool_1",
-          toolName: "goat_brain",
+          toolName: "wiki",
           input: { command: "query", flags: { text: "launch" } },
           output: { ok: true, stdout: "Launch is Friday." },
           providerMetadata: { gateway: { resultId: "result_1" } },
@@ -401,7 +401,7 @@ describe("consumeProductChatStream", () => {
           providerMetadata: { gateway: { reasoningId: "reasoning_final" } },
         },
         {
-          type: "tool-goat_brain",
+          type: "tool-wiki",
           toolCallId: "tool_1",
           state: "output-available",
           input: { command: "query", flags: { text: "launch" } },
@@ -877,7 +877,7 @@ describe("opencompanyModelMessagesFromStored", () => {
           model: "anthropic/claude-sonnet-5",
           uiMessageParts: [
             {
-              type: "tool-brain",
+              type: "tool-wiki",
               toolCallId: "tool_1",
               state: "output-available",
               input: { command: "query", flags: { text: "launch" } },

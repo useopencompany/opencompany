@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getDb } from "@opencompany/db/client";
-import {
-  ensureFathomSyncState,
-  FATHOM_CREDENTIAL_KIND,
-  FATHOM_PROVIDER,
-} from "@opencompany/db/fathom";
+import { FATHOM_CREDENTIAL_KIND, FATHOM_PROVIDER } from "@opencompany/db/fathom";
 import { markIntegrationStatus, saveIntegrationCredential } from "@opencompany/db/integrations";
 import { integrations } from "@opencompany/db/product-schema";
 import { and, desc, eq, ne, sql } from "drizzle-orm";
@@ -132,17 +128,6 @@ export async function connectFathomIntegration(input: {
     });
     throw error;
   }
-
-  // Anchor the poll cursor row now so the first runner poll starts from the
-  // moment of connection (no backfill) without racing the credential write.
-  await ensureFathomSyncState(
-    {
-      integrationId: integration.id,
-      userWorkosId: input.userWorkosId,
-      createdAfterCursor: now,
-    },
-    db,
-  );
 
   await captureConnectionAddedAnalytics({
     connectionId: integration.id,

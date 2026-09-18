@@ -18,6 +18,14 @@
     },
     "./integrations/slack-channel": "./src/integrations/slack-channel.ts",
     "./integrations/imessage": "./src/integrations/imessage.ts",
+    "./integration-resource-options": {
+      "types": "./src/integration-resource-options.ts",
+      "default": "./src/integration-resource-options.ts"
+    },
+    "./workflows": {
+      "types": "./src/workflows.ts",
+      "default": "./src/workflows.ts"
+    },
     "./integrations/whatsapp": "./src/integrations/whatsapp.ts"
   },
   "scripts": {
@@ -33,7 +41,6 @@
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
-    "@opencompany/brain": "workspace:*",
     "@opencompany/browser-tools": "workspace:*",
     "@opencompany/core": "workspace:*",
     "@opencompany/crypto": "workspace:*",

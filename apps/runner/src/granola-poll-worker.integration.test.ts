@@ -27,7 +27,6 @@ describe("Granola polling through the durable workflow event inbox", () => {
       CREATE TABLE goat.integrations (id text PRIMARY KEY, provider text, workspace_id text, user_workos_id text, status text, external_id text);
       CREATE TABLE goat.plugins (workspace_id text, owner_user_id text, name text, status text, archived_at timestamptz, events jsonb, event_modes jsonb);
       CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text, slug text, name text, trigger text, status text, archived_at timestamptz, event_user_workos_id text, event_config jsonb, event_harness_spec jsonb, event_activated_at timestamptz, automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb, kind text NOT NULL DEFAULT 'workflow');
-      CREATE TABLE goat.brain_sources (integration_id text, brain_id text, provider text, enabled boolean);
       CREATE TABLE goat.granola_sync_state (
         integration_id text PRIMARY KEY, user_workos_id text, updated_after_cursor timestamptz,
         page_cursor text, pending_updated_after_cursor timestamptz, last_polled_at timestamptz,
@@ -53,7 +52,7 @@ describe("Granola polling through the durable workflow event inbox", () => {
     noteUpdatedAt = new Date(Date.now() - 60_000);
     await database.exec(`
       TRUNCATE goat.workflow_event_runs, goat.tasks, goat.workflows, goat.plugins, goat.integrations,
-        goat.workspace_members, goat.users, goat.granola_sync_state, goat.brain_sources CASCADE;
+        goat.workspace_members, goat.users, goat.granola_sync_state CASCADE;
       INSERT INTO goat.users VALUES ('user_1', now());
       INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1');
       INSERT INTO goat.integrations VALUES
@@ -116,9 +115,9 @@ describe("Granola polling through the durable workflow event inbox", () => {
     await database.exec("UPDATE goat.granola_sync_state SET last_polled_at = NULL");
   }
 
-  it("starts one task from a finished summary without a Brain source or transcript download", async () => {
+  it("starts one task from a finished summary without downloading the transcript", async () => {
     expect(await listGranolaPollCandidates(db as never)).toEqual([candidate]);
-    expect(await poll()).toEqual({ enqueued: 0, seen: 1, workflowRuns: 1 });
+    expect(await poll()).toEqual({ seen: 1, workflowRuns: 1 });
     expect(dependencies.loadCredential).toHaveBeenCalledWith(
       expect.objectContaining({ integrationId: "connection_1", kind: "api_key" }),
     );
@@ -188,13 +187,5 @@ describe("Granola polling through the durable workflow event inbox", () => {
       await createNextWorkflowEventTask(new Date(), { db: db as never, createTask }),
     ).toMatchObject({ status: "ignored" });
     expect(createTask).not.toHaveBeenCalled();
-  });
-
-  it("retains separate Brain polling when the workflow event is disabled", async () => {
-    await database.exec(`
-      UPDATE goat.plugins SET event_modes = '{}';
-      INSERT INTO goat.brain_sources VALUES ('connection_1', 'brain_1', 'granola', true);
-    `);
-    expect(await listGranolaPollCandidates(db as never)).toEqual([candidate]);
   });
 });

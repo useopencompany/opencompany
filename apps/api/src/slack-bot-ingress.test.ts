@@ -50,7 +50,6 @@ function ingress(overrides: { role?: string } = {}) {
       method: "session",
       credentialKind: "browser_cookie",
       activeWorkspaceId: null,
-      activeBrainId: null,
     }),
     runner: {
       requestJson: runnerRequest as RunnerClient["requestJson"],

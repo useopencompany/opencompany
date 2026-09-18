@@ -47,7 +47,7 @@ describe("opencompany Google OAuth callback", () => {
     consumeOAuthStateCookieMock.mockResolvedValue({
       state: "state-123",
       invitationToken: "invite-token-123",
-      returnPathname: "/brain",
+      returnPathname: "/wiki",
     });
     const authenticateWithCode = vi.fn(async () => ({
       user: { id: "user_123", email: "ada@example.com" },
@@ -71,7 +71,7 @@ describe("opencompany Google OAuth callback", () => {
       expect.objectContaining({ organizationId: "org_invited" }),
       expect.anything(),
     );
-    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/brain");
+    expect(response.headers.get("location")).toBe("https://my.opencompany.chat/wiki");
   });
 
   it("ignores a returnPathname that would redirect off our own origin", async () => {
@@ -124,7 +124,7 @@ describe("opencompany Google OAuth callback", () => {
   it("continues with organization selection when WorkOS requires it", async () => {
     consumeOAuthStateCookieMock.mockResolvedValue({
       state: "state-123",
-      returnPathname: "/brain",
+      returnPathname: "/wiki",
     });
     const authenticateWithCode = vi.fn(async () => {
       throw new AuthenticationException(
@@ -152,7 +152,7 @@ describe("opencompany Google OAuth callback", () => {
         { id: "org_one", name: "One" },
         { id: "org_two", name: "Two" },
       ],
-      returnPathname: "/brain",
+      returnPathname: "/wiki",
     });
     expect(completeAuthenticationMock).not.toHaveBeenCalled();
     const location = new URL(response.headers.get("location") ?? "");

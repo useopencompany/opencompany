@@ -46,8 +46,6 @@ export type RunnerEnv = {
   // HubSpot OAuth client (same app as the opencompany web OAuth flow). HubSpot access
   // tokens are short-lived, so the runner refreshes them against HubSpot's
   // token endpoint before snapshot enrichment.
-  hubspotOAuthClientId?: string | undefined;
-  hubspotOAuthClientSecret?: string | undefined;
   // One E2B template alias per user-selectable sandbox size. E2B fixes vCPU and RAM
   // at template build time, so the size a workspace picks is which template the
   // runner spawns from. Unset entries fall back to E2B's stock `codex` template.
@@ -110,8 +108,6 @@ export function loadEnv(): RunnerEnv {
     browserEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
-    hubspotOAuthClientId: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID"),
-    hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
     codexE2bTemplates: {
       small: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL"),
       standard: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD"),

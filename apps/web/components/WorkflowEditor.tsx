@@ -44,7 +44,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { Markdown } from "@/components/Markdown";
-import { MarkdownBrainEditor } from "@/components/MarkdownBrainEditor";
+import { MarkdownEditor } from "@/components/MarkdownEditor";
 import { ScopePicker } from "@/components/ScopeControls";
 import { StatusDot } from "@/components/StatusDot";
 import { WorkflowMemoryPanel } from "@/components/WorkflowMemoryPanel";
@@ -1463,7 +1463,7 @@ export function StepCard({
       </div>
       <section className="rounded-xl border border-border bg-surface px-3.5 py-3">
         {canEdit ? (
-          <MarkdownBrainEditor
+          <MarkdownEditor
             content={step.instructions}
             onChange={(instructions) => onChange({ instructions })}
             compact

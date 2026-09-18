@@ -16,7 +16,6 @@ import {
   executeActionGateway,
   executeActionHostGateway,
 } from "@opencompany/agent/application/persisted-action-gateway";
-import { executePersistedBrainCapture } from "@opencompany/agent/application/persisted-brain-capture";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
 import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import {
@@ -58,10 +57,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { executeApiWikiCommand } from "./api-wiki-client";
 import { executeApiWorkflowCommand } from "./api-workflow-client";
-import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { publishExternalEngineChatArtifact } from "./chat-artifacts";
-import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
-import { createCodexBrainDynamicTool } from "./codex-brain-tool";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 
@@ -292,21 +288,6 @@ export function registerAcpToolsMcpRoute(
           signal: request.signal,
         });
       }
-      if (authorizedContext.legacyBrainEnabled && authorizedContext.brainRef) {
-        registerBrainTools({
-          server,
-          capability,
-          authorizedContext,
-          env,
-          includeCapture:
-            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION ||
-            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V3 ||
-            authorizedContext.hostToolContractVersion === ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
-          authorizeOperation,
-          signal: request.signal,
-        });
-      }
-
       // Use Streamable HTTP's SSE response path. JSON response mode buffers related
       // notifications until the final result, which would make approval progress keepalives
       // invisible to the MCP client while the tool call is parked.
@@ -853,91 +834,4 @@ function registerExternalEngineWikiTool(input: {
 function externalEngineWikiIdempotencyKey(turnId: string, invocationKey: string) {
   const digest = createHash("sha256").update(invocationKey).digest("hex").slice(0, 24);
   return `acp-wiki:${turnId}:${digest}`;
-}
-
-function registerBrainTools(input: {
-  server: McpServer;
-  capability: ExternalEngineGatewayTicketPayload;
-  authorizedContext: NonNullable<
-    Awaited<ReturnType<typeof authorizePersistedExternalEngineToolCapability>>
-  >;
-  env: RunnerEnv;
-  includeCapture: boolean;
-  authorizeOperation: () => ReturnType<typeof authorizePersistedExternalEngineToolCapability>;
-  signal: AbortSignal;
-}) {
-  const brainRef = input.authorizedContext.brainRef;
-  if (!input.authorizedContext.legacyBrainEnabled || !brainRef) return;
-  const checkAbort = async () => {
-    if (input.signal.aborted) throw new Error("The tool call was canceled.");
-    const current = await input.authorizeOperation();
-    if (!current?.legacyBrainEnabled || current.brainRef !== brainRef) {
-      throw new Error("This engine turn is no longer active.");
-    }
-  };
-  const brainTool = createCodexBrainDynamicTool({
-    brainRef,
-    userWorkosId: input.authorizedContext.actorId,
-    chatSessionId: input.authorizedContext.conversationId,
-    userMessageId: input.authorizedContext.userMessageId,
-    assistantMessageId: input.authorizedContext.assistantMessageId,
-    env: input.env,
-    checkAbort,
-  });
-  const tools = [brainTool];
-  if (input.includeCapture) {
-    tools.push(
-      createCodexBrainCaptureDynamicTool(
-        {
-          codexChatSessionId: input.capability.codexChatSessionId,
-          codexChatTurnId: input.capability.codexChatTurnId,
-          checkAbort,
-        },
-        {
-          execute: (brainCaptureRequest) =>
-            executePersistedBrainCapture({
-              request: brainCaptureRequest,
-              dependencies: { wakeIngest: async () => wakeBrainIngestWorker() },
-            }),
-        },
-      ),
-    );
-  }
-  for (const tool of tools) {
-    input.server.registerTool(
-      tool.spec.name,
-      {
-        description: tool.spec.description,
-        inputSchema: mcpInputSchema(tool.spec.inputSchema),
-        annotations: {
-          readOnlyHint: tool === brainTool,
-          destructiveHint: false,
-          idempotentHint: tool === brainTool,
-          openWorldHint: false,
-        },
-      },
-      async (args, extra) => {
-        const response = await tool.execute({
-          threadId: input.capability.codexChatSessionId,
-          turnId: input.capability.codexChatTurnId,
-          callId: mcpInvocationId(
-            input.capability.codexChatTurnId,
-            extra.sessionId,
-            extra.requestId,
-          ),
-          namespace: null,
-          tool: tool.spec.name,
-          arguments: args,
-        });
-        const text = response.contentItems
-          .map((item) => (item.type === "inputText" ? item.text : ""))
-          .filter(Boolean)
-          .join("\n");
-        return {
-          content: [{ type: "text" as const, text }],
-          isError: !response.success,
-        };
-      },
-    );
-  }
 }

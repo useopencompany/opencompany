@@ -10,33 +10,6 @@ import {
   MAX_WORKFLOW_STARTS_PER_TURN,
 } from "../chat-limits";
 
-export const BRAIN_TOOL_DESCRIPTION =
-  "Read-only access to the user's durable opencompany Brain (structured memory stored as Markdown files). Use it to recall and inspect existing knowledge, never to write. Use query for recall/search, list for inventory, get for a known brain id, timeline for a record's history, help for command-specific usage, and doctor for validation. Query returns curated pages by default; pass kind: \"evidence\" only when raw source material is explicitly needed. Use query with since windows like 6h, 2d, 1w, or an ISO timestamp to search or browse recent Brain pages; omit text when the user only wants recent entries. Query output includes pagination. When pagination.hasMore is true, repeat the same query with all filters unchanged and offset set to pagination.nextOffset. Use includeMerged only when inspecting duplicate/merged history and includeArchived only for retired records. To add or edit Brain content — new pages, evidence, corrections, links, or merges — use save_to_brain instead; the background curation agent files it. Do not treat Brain as a chat scratchpad.";
-
-export const SAVE_TO_BRAIN_TOOL_DESCRIPTION =
-  "Save something the user wants remembered - a reference, idea, thought, note, decision, pasted content, connected-integration item, or an attached file - into their Brain. This captures a draft page in the inbox immediately and queues background curation. When saving an item returned by use_action, pass its canonical sourceRef so the Brain cites the Slack, Gmail, or Linear source instead of this chat. A bare Gmail or Linear pointer can be saved without content when its integrationId is also passed; the worker then re-fetches the full source before curation. Slack findings must include the content to save. To save files attached in this conversation, pass their attachment ids via attachmentIds instead of copying the content field.";
-
-export const SAVE_TO_BRAIN_CONTENT_DESCRIPTION =
-  "The content to save, verbatim or lightly cleaned. Preserve the user's wording, links, and details; do not summarize away specifics. Omit when saving attached files or a bare hydratable integration source.";
-
-export const SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION =
-  "Canonical provenance for the saved item. Pass the sourceRef returned by use_action (for example slack:conversation:T123:C123:1234.5678, gmail:thread:abc, or linear:issue:ENG-123), or the public URL returned by web_fetch or web_search.";
-
-export const SAVE_TO_BRAIN_INTEGRATION_ID_DESCRIPTION =
-  "For a bare Gmail or Linear sourceRef with no content, pass the integrationId returned alongside that use_action result so the background worker can re-fetch it. Omit for Slack findings, copied content, public URLs, and attachments.";
-
-export const SAVE_TO_BRAIN_FALLBACK_CONTENT_DESCRIPTION =
-  "Optional one-line fallback for a bare integration pointer. It is curated only if the original source was deleted or is no longer readable.";
-
-export const SAVE_TO_BRAIN_ATTACHMENT_IDS_DESCRIPTION =
-  "Ids of files attached in this conversation to save into the Brain as assets (each attachment's id is shown next to it in the conversation). The file itself is copied into the Brain and ingested in the background; do not also paste its content into the content field.";
-
-export const SAVE_TO_BRAIN_TITLE_DESCRIPTION =
-  "Optional short title for the capture. Omit it to derive one from the content.";
-
-export const SAVE_TO_BRAIN_INTENT_DESCRIPTION =
-  "Optional one-line note on what the user wants this for, e.g. 'reference for the pricing page rework'. Helps the background curation agent file it.";
-
 export const START_WORKFLOW_TOOL_DESCRIPTION = `Start one active workspace workflow as a tracked background task. Use only when the user's latest message explicitly asks to run, start, fire, or execute an existing workflow, or clearly confirms your immediately preceding question to start one; never call this merely because a workflow seems relevant or helpful. Match the request against the workflow catalog in <workflow_source>. If the target is ambiguous, ask which workflow they mean instead of guessing. Call it once per workflow when the user asks for several; up to ${MAX_WORKFLOW_STARTS_PER_TURN} distinct workflows can start per turn, and calling it again for one already started this turn replays that same task.`;
 
 export const START_WORKFLOW_ID_DESCRIPTION =

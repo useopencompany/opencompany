@@ -13,7 +13,7 @@ beforeAll(() => {
 
 describe("WikiLink path resolution", () => {
   const state = (paths: string[]): WikiLinkState => ({
-    brainLinks: Object.fromEntries(paths.map((path) => [path, `/wiki/${path}`])),
+    pageLinks: Object.fromEntries(paths.map((path) => [path, `/wiki/${path}`])),
     pageTitles: Object.fromEntries(paths.map((path) => [path, `Title for ${path}`])),
     editingEnabled: true,
     onNavigateInternal: undefined,

@@ -4,8 +4,6 @@ import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import { type User, users } from "@opencompany/db/product-schema";
 import {
   adoptWorkspaceMembershipsFromOrgs,
-  DEFAULT_BRAIN_SLUG,
-  listAccessibleBrains,
   listWorkspacesForUser,
 } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
@@ -142,18 +140,6 @@ export function createIdentityService(input: {
           workspaces.find((entry) => entry.workspace.id === identity.activeWorkspaceId) ??
           first)
         : null;
-    const brains = active?.workspace.legacyBrainEnabled
-      ? await listAccessibleBrains(
-          { userWorkosId: identity.userId, workspaceId: active.workspace.id },
-          { db },
-        )
-      : [];
-    const activeBrain =
-      brains.find((brain) => brain.id === identity.activeBrainId) ??
-      brains.find((brain) => brain.slug === DEFAULT_BRAIN_SLUG) ??
-      brains[0] ??
-      null;
-
     return IdentitySchema.parse({
       user: {
         id: user.workosUserId,
@@ -188,20 +174,8 @@ export function createIdentityService(input: {
         name: entry.workspace.name,
         slug: entry.workspace.slug,
         role: entry.role,
-        legacyBrainEnabled: entry.workspace.legacyBrainEnabled,
       })),
       activeWorkspaceId: active?.workspace.id ?? null,
-      brains: brains.map((brain) => ({
-        id: brain.id,
-        workspaceId: brain.workspaceId,
-        name: brain.name,
-        slug: brain.slug,
-        description: brain.description,
-        visibility: brain.visibility,
-        enrichmentEnabled: brain.enrichmentEnabled,
-        intelligence: brain.intelligence,
-      })),
-      activeBrainId: activeBrain?.id ?? null,
     });
   }
 

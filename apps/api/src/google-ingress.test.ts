@@ -1,13 +1,8 @@
-import { createHash } from "node:crypto";
 import {
   createGoogleIntegrationState,
   exchangeGoogleCode,
   fetchGoogleUserInfo,
 } from "@opencompany/agent/integrations/google-oauth";
-import {
-  loadGoogleDriveWatchChannel,
-  requestGoogleDriveCursorWake,
-} from "@opencompany/db/google-drive";
 import { connectGoogleIntegration } from "@opencompany/db/integrations";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,11 +12,6 @@ import { createGoogleIngress } from "./google-ingress";
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   connectGoogleIntegration: vi.fn(),
-}));
-vi.mock("@opencompany/db/google-drive", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  loadGoogleDriveWatchChannel: vi.fn(),
-  requestGoogleDriveCursorWake: vi.fn(),
 }));
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -65,7 +55,6 @@ function ingress(
         method: "session",
         credentialKind: "browser_cookie",
         activeWorkspaceId: null,
-        activeBrainId: null,
       };
     },
     ...(overrides.refreshPluginRegistrations
@@ -371,82 +360,4 @@ describe("Google ingress", () => {
       workspaceIds: ["workspace_1"],
     });
   });
-
-  describe("drive webhook", () => {
-    function driveNotification(state = "change") {
-      return new Request("https://api.example.com/webhooks/google-drive", {
-        method: "POST",
-        headers: {
-          "x-goog-channel-id": "channel_1",
-          "x-goog-channel-token": "secret-token",
-          "x-goog-resource-id": "resource_1",
-          "x-goog-resource-state": state,
-        },
-      });
-    }
-
-    it("turns an authenticated notification into an idempotent cursor wake", async () => {
-      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
-        id: "channel_1",
-        cursorId: "cursor_1",
-        tokenHash: sha256("secret-token"),
-        resourceId: "resource_1",
-        status: "active",
-        expiresAt: new Date(Date.now() + 60_000),
-      } as never);
-
-      const response = await ingress().driveWebhook(driveNotification());
-      expect(response.status).toBe(204);
-      expect(requestGoogleDriveCursorWake).toHaveBeenCalledWith(
-        "cursor_1",
-        expect.any(Date),
-        expect.objectContaining({ sentinel: "db" }),
-      );
-      expect(loadGoogleDriveWatchChannel).toHaveBeenCalledWith(
-        "channel_1",
-        expect.objectContaining({ sentinel: "db" }),
-      );
-    });
-
-    it("rejects an invalid channel token without waking", async () => {
-      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
-        id: "channel_1",
-        cursorId: "cursor_1",
-        tokenHash: sha256("different-token"),
-        resourceId: "resource_1",
-        status: "active",
-        expiresAt: new Date(Date.now() + 60_000),
-      } as never);
-
-      const response = await ingress().driveWebhook(driveNotification());
-      expect(response.status).toBe(401);
-      expect(requestGoogleDriveCursorWake).not.toHaveBeenCalled();
-    });
-
-    it("accepts the early sync notification for a creating channel", async () => {
-      vi.mocked(loadGoogleDriveWatchChannel).mockResolvedValue({
-        id: "channel_1",
-        cursorId: "cursor_1",
-        tokenHash: sha256("secret-token"),
-        resourceId: null,
-        status: "creating",
-        expiresAt: new Date(Date.now() + 60_000),
-      } as never);
-
-      const response = await ingress().driveWebhook(driveNotification("sync"));
-      expect(response.status).toBe(204);
-      expect(requestGoogleDriveCursorWake).toHaveBeenCalled();
-    });
-
-    it("rejects notifications with missing headers", async () => {
-      const response = await ingress().driveWebhook(
-        new Request("https://api.example.com/webhooks/google-drive", { method: "POST" }),
-      );
-      expect(response.status).toBe(400);
-    });
-  });
 });
-
-function sha256(value: string) {
-  return createHash("sha256").update(value).digest("hex");
-}

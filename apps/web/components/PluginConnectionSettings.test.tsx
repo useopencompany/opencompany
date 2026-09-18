@@ -21,10 +21,6 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/integration-account-actions", () => ({
   disconnectIntegrationAccountAction: vi.fn(async () => ({ ok: true })),
-  getIntegrationAccountUsageAction: vi.fn(async () => ({
-    ok: true,
-    affectedBrainSourceCount: 0,
-  })),
 }));
 
 describe("PluginConnectionFeedback", () => {

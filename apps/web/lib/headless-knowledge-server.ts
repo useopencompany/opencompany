@@ -1,8 +1,6 @@
 import "server-only";
 
 import {
-  type BrainOverviewDto,
-  type BrainSnapshotDto,
   createApiClient,
   type PluginInstallationDto,
   type PluginListItemDto,
@@ -14,23 +12,6 @@ import {
 } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
-export async function getHeadlessBrainSnapshot(brainId: string): Promise<BrainSnapshotDto> {
-  const response = await (await serverKnowledgeClient()).v1.brains[":brainId"].$get({
-    param: { brainId },
-  });
-  if (!response.ok) throw await serverResponseError(response, "Brain loading failed");
-  return (await response.json()).data;
-}
-
-export async function getHeadlessBrainOverview(brainId: string): Promise<BrainOverviewDto> {
-  const response = await (await serverKnowledgeClient()).v1.brains[":brainId"].overview.$get({
-    param: { brainId },
-  });
-  if (!response.ok) throw await serverResponseError(response, "Brain overview loading failed");
-  return (await response.json()).data;
-}
-
-/** Every wiki in the workspace the viewer may read, the default one first. */
 export async function listHeadlessWikis(): Promise<WikiDto[]> {
   const response = await (await serverKnowledgeClient()).v1.wikis.$get();
   if (!response.ok) throw await serverResponseError(response, "Wiki loading failed");

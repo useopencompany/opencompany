@@ -1,4 +1,5 @@
 export {
+  DEFAULT_ONBOARDING_FOLDERS,
   isOnboardingRole,
   normalizeOnboardingCompanyUrl,
   ONBOARDING_COMPANY_URL_MAX_LENGTH,

@@ -93,7 +93,7 @@ import {
   POSTHOG_EVENTS_EXTERNAL_ID,
   POSTHOG_PROVIDER,
 } from "@opencompany/db/posthog-events";
-import { brainSources, integrations } from "@opencompany/db/product-schema";
+import { integrations } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import type { IntegrationAccountDto } from "@opencompany/protocol";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
@@ -111,7 +111,6 @@ const STRIPE_ADMIN_ONLY_MESSAGE = "Only workspace admins can manage the Stripe i
 
 export type IntegrationAccountService = {
   list(actor: Actor): Promise<IntegrationAccountDto[]>;
-  getUsage(actor: Actor, integrationId: string): Promise<{ affectedBrainSourceCount: number }>;
   disconnect(actor: Actor, integrationId: string): Promise<void>;
   setCapabilityMode(
     actor: Actor,
@@ -193,23 +192,6 @@ export function createIntegrationAccountService(input: {
           status: account.status as IntegrationAccountDto["status"],
         }));
     },
-
-    async getUsage(actor, integrationId) {
-      const integration = await requireOwnPersonalIntegration(db, actor, integrationId);
-      if (integration.provider === "slack") {
-        return { affectedBrainSourceCount: 0 };
-      }
-      try {
-        const [row] = await db
-          .select({ count: sql<number>`count(*)::integer` })
-          .from(brainSources)
-          .where(eq(brainSources.integrationId, integrationId));
-        return { affectedBrainSourceCount: Number(row?.count ?? 0) };
-      } catch (error) {
-        throw commandFailure(error, "Could not check account usage.", "usage_check");
-      }
-    },
-
     async disconnect(actor, integrationId) {
       await disconnectOwnedPersonalIntegration(db, actor, integrationId);
     },

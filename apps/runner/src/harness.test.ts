@@ -101,7 +101,7 @@ describe("planHarness", () => {
     expect(JSON.stringify(request.schema)).not.toContain('"goalMode"');
     expect(request.system).toContain("<result_contract>");
     expect(request.system).toContain("there is no final-result tool");
-    expect(request.system).toContain('resultMode "brain_markdown_report"');
+    expect(request.system).toContain('resultMode is always "assistant_final"');
     expect(request.system).toContain("Use exa_search for broad web discovery");
     expect(request.system).toContain(
       "Use browser_* tools when the task depends on rendered websites",
@@ -240,7 +240,7 @@ describe("planHarness", () => {
         tools: ["exa_search"],
         skills: [],
         maxModelSteps: 16,
-        resultMode: "brain_markdown_report",
+        resultMode: "assistant_final",
       },
     });
 
@@ -253,7 +253,7 @@ describe("planHarness", () => {
       }),
     ).resolves.toMatchObject({
       model: glmModel,
-      resultMode: "brain_markdown_report",
+      resultMode: "assistant_final",
     });
   });
 
@@ -348,7 +348,7 @@ describe("planHarness", () => {
     expect(request.prompt).toContain("<tool>\nbrowser_read\n</tool>");
   });
 
-  it("keeps brain markdown report mode and augments the execution contract", async () => {
+  it("pins the result mode and augments the execution contract", async () => {
     aiMock.generateObject.mockResolvedValueOnce({
       object: {
         schemaVersion: "goat.harness.v1",
@@ -359,7 +359,7 @@ describe("planHarness", () => {
         tools: ["exa_search"],
         skills: [],
         maxModelSteps: 10,
-        resultMode: "brain_markdown_report",
+        resultMode: "assistant_final",
       },
     });
 
@@ -374,12 +374,12 @@ describe("planHarness", () => {
       schemaVersion: "goat.harness.v1",
       engine: "opencompany",
       model: claudeModel,
-      systemPrompt: expect.stringContaining("<brain_markdown_report_result_contract>"),
+      systemPrompt: expect.stringContaining("Research the market deeply."),
       initialUserMessage: "Deep research the Marseille AI market.",
       tools: ["exa_search"],
       skills: [],
       maxModelSteps: 10,
-      resultMode: "brain_markdown_report",
+      resultMode: "assistant_final",
     });
   });
 

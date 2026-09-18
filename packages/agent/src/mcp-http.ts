@@ -1,7 +1,4 @@
-import {
-  getLegacyBrainAccessForUser,
-  markMcpSetupCompletedForUser,
-} from "@opencompany/db/workspaces";
+import { markMcpSetupCompletedForUser } from "@opencompany/db/workspaces";
 import { createMcpHandler, withMcpAuth } from "mcp-handler";
 import {
   buildUserMcpResourceMetadataPath,
@@ -9,7 +6,7 @@ import {
   userWorkosIdFromMcpAuth,
   verifyMcpBearerToken,
 } from "./mcp-oauth";
-import { type McpWikiGateway, registerBrainTools, registerWikiTool } from "./mcp-server";
+import { type McpWikiGateway, registerWikiTool } from "./mcp-server";
 import { MCP_SERVER_NAME } from "./mcp-setup";
 
 const MCP_MAX_DURATION_SECONDS = 120;
@@ -40,17 +37,8 @@ export function createMcpService(input: {
           if (!gatewayApiKey) {
             return Response.json({ error: "opencompany MCP is not configured." }, { status: 503 });
           }
-          const legacyBrainEnabled = (await getLegacyBrainAccessForUser(userWorkosId)).length > 0;
-
           const handler = createMcpHandler(
             (server) => {
-              if (legacyBrainEnabled) {
-                registerBrainTools(server, {
-                  userWorkosId,
-                  gatewayApiKey,
-                  signal: authenticatedRequest.signal,
-                });
-              }
               registerWikiTool(server, {
                 userWorkosId,
                 gatewayApiKey,
@@ -60,9 +48,8 @@ export function createMcpService(input: {
             },
             {
               serverInfo: { name: MCP_SERVER_NAME, version: "0.1.0" },
-              instructions: legacyBrainEnabled
-                ? "The workspace wiki is the primary knowledge system; use wiki tree/read/search for recall and wiki write for explicit knowledge updates. Legacy Brain tools are also available for workspaces that opted in: use search_brain/get_document for reads and save_to_brain only when the user explicitly asks to save there."
-                : "The workspace wiki is the knowledge system. Start with wiki tree, read promising pages, use search for recall, and write only when the user explicitly asks to update durable knowledge.",
+              instructions:
+                "The workspace wiki is the knowledge system. Start with wiki tree, read promising pages, use search for recall, and write only when the user explicitly asks to update durable knowledge.",
             },
             { basePath: "", disableSse: true, maxDuration: MCP_MAX_DURATION_SECONDS },
           );

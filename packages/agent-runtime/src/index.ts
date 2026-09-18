@@ -6,7 +6,6 @@ export * from "./attachments";
 export * from "./chat-artifacts";
 export * from "./chat-host-tools";
 export * from "./cloud-coding-engines";
-export * from "./codex-brain-capture";
 export * from "./codex-ui-message-parts";
 export * from "./exa-search";
 export * from "./external-engine-gateway-auth";

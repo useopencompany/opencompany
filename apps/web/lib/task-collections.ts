@@ -17,7 +17,6 @@ export type TaskRow = {
   schedule_id: string | null;
   scheduled_for: string | null;
   workflow_id: string | null;
-  workflow_brain_ref: string | null;
   status: TaskStatus;
   stage: TaskStage;
   result: string | null;
