@@ -140,6 +140,39 @@ describe("persisted automatic approval", () => {
     expect(result?.resolvedAt).toBeUndefined();
     expect(review).toHaveBeenCalledTimes(1);
   });
+  it.each(["connection", "definition"])(
+    "invalidates changed %s without re-review",
+    async (change) => {
+      const boundAction = {
+        ...action,
+        permission: {
+          provider: "linear" as const,
+          capabilityId: "read" as const,
+          label: "Read Linear",
+          integrationIds: ["connection-1"],
+        },
+      };
+      expect(
+        await registerReviewedApproval({ ...input, action: boundAction }, deps()),
+      ).toMatchObject({
+        status: "approved",
+      });
+      const changedAction =
+        change === "connection"
+          ? {
+              ...boundAction,
+              permission: { ...boundAction.permission, integrationIds: ["connection-2"] },
+            }
+          : { ...boundAction, description: "Changed action scope" };
+      expect(
+        await registerReviewedApproval({ ...input, action: changedAction }, deps()),
+      ).toMatchObject({
+        status: "pending",
+        automaticReview: { outcome: "requires_approval", reason: "action_changed" },
+      });
+      expect(review).toHaveBeenCalledTimes(1);
+    },
+  );
   it("leaves fallback decisions pending without re-reviewing them", async () => {
     const fallback = vi.fn(async () => ({
       ...(await review()),

@@ -28,6 +28,7 @@ export type ActionCapabilityQuoteRecord = {
 export type ActionApprovalRecord = {
   reviewToken?: string;
   automaticReview?: {
+    actionContext?: string;
     outcome: "auto_approved" | "requires_approval";
     reason: string;
     model: string;
@@ -565,7 +566,7 @@ export async function finishAutomaticApprovalReview(input: {
 export async function revokeAutomaticApproval(input: {
   turn: ActionTurnRef;
   invocationId: string;
-  reason: "preference_disabled" | "policy_changed";
+  reason: "preference_disabled" | "policy_changed" | "action_changed";
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();

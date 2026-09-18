@@ -8,6 +8,7 @@ import {
 } from "@opencompany/agent-runtime";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import {
+  actionApprovalInputHash,
   claimActionAsyncRun,
   claimActionInvocation,
   finishAutomaticApprovalReview,
@@ -306,6 +307,19 @@ export async function registerReviewedApproval(
 ) {
   const { db } = dependencies;
   const turn = actionTurnRef(run);
+  const actionContext = action
+    ? actionApprovalInputHash(
+        {
+          id: action.id,
+          description: action.description,
+          effects: action.effects,
+          schema: action.params,
+          integrationIds: action.permission?.integrationIds ?? [],
+          provider: action.permission?.provider ?? null,
+        },
+        input.approvalContext,
+      )
+    : undefined;
   // Read intent from the authenticated turn, never from the action's model-supplied rationale.
   const [owner] = await db
     .select({ enabled: users.approveForMeEnabled, prompt: codexChatTurns.prompt })
@@ -332,13 +346,19 @@ export async function registerReviewedApproval(
   if (
     record.status === "approved" &&
     record.automaticReview?.outcome === "auto_approved" &&
-    (!owner?.enabled || record.automaticReview.policy !== APPROVAL_REVIEW_POLICY)
+    (!owner?.enabled ||
+      record.automaticReview.policy !== APPROVAL_REVIEW_POLICY ||
+      record.automaticReview.actionContext !== actionContext)
   ) {
     await revokeAutomaticApproval({
       db,
       turn,
       invocationId: input.invocationId,
-      reason: owner?.enabled ? "policy_changed" : "preference_disabled",
+      reason: !owner?.enabled
+        ? "preference_disabled"
+        : record.automaticReview.policy !== APPROVAL_REVIEW_POLICY
+          ? "policy_changed"
+          : "action_changed",
     });
     return getActionApproval({ db, turn, invocationId: input.invocationId });
   }
@@ -376,7 +396,7 @@ export async function registerReviewedApproval(
     invocationId: input.invocationId,
     reviewToken: record.reviewToken,
     inputHash: record.inputHash,
-    review,
+    review: { ...review, actionContext },
   });
   if (resolved)
     await dependencies.capture("action_approval_reviewed", run.actorId, {
