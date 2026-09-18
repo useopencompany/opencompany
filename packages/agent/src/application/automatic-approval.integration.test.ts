@@ -7,6 +7,7 @@ import { registerReviewedApproval } from "./persisted-action-gateway";
 
 let pg: Awaited<ReturnType<typeof createTestPGlite>>;
 let db: ReturnType<typeof drizzle>;
+const queryParameters: unknown[][] = [];
 const run = {
   sessionId: "session",
   runId: "run",
@@ -53,8 +54,9 @@ const deps = () => ({ db, review, capture });
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  queryParameters.length = 0;
   pg = await createTestPGlite();
-  db = drizzle(pg);
+  db = drizzle(pg, { logger: { logQuery: (_query, params) => queryParameters.push(params) } });
   await pg.exec(`CREATE SCHEMA goat;
 CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, approve_for_me_enabled boolean);
 CREATE TABLE goat.codex_chat_turns (id text PRIMARY KEY, user_workos_id text, codex_chat_session_id text, status text, interrupt_requested_at timestamptz, prompt text, created_at timestamptz DEFAULT now());
@@ -84,6 +86,7 @@ describe("persisted automatic approval", () => {
       expect.objectContaining({ outcome: "auto_approved", request_id: "call" }),
     );
     expect(JSON.stringify(capture.mock.calls)).not.toContain("Summarize ENG-1");
+    expect(JSON.stringify(queryParameters)).not.toContain("Summarize ENG-1");
     expect(
       await registerReviewedApproval({ ...input, params: { id: "ENG-2" } }, deps()),
     ).toBeNull();

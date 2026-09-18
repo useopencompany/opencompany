@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSIONS,
   type ActionGatewayRequest,
@@ -414,7 +414,7 @@ export async function registerReviewedApproval(
   const resolved = await finishAutomaticApprovalReview({
     db,
     turn,
-    requestPrompt: owner.prompt,
+    requestPromptHash: createHash("sha256").update(owner.prompt).digest("hex"),
     invocationId: input.invocationId,
     reviewToken: record.reviewToken,
     inputHash: record.inputHash,

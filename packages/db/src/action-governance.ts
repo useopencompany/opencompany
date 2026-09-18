@@ -531,7 +531,7 @@ function isAutomaticReview(
 // cannot be re-reviewed. The preference is checked in the same statement as the approval write.
 export async function finishAutomaticApprovalReview(input: {
   turn: ActionTurnRef;
-  requestPrompt: string;
+  requestPromptHash: string;
   invocationId: string;
   reviewToken: string;
   inputHash: string;
@@ -564,7 +564,7 @@ export async function finishAutomaticApprovalReview(input: {
             AND ${codexChatTurns.codexChatSessionId} = ${input.turn.sessionId}
             AND ${codexChatTurns.status} = 'running'
             AND ${codexChatTurns.interruptRequestedAt} IS NULL
-            AND ${codexChatTurns.prompt} = ${input.requestPrompt})`,
+            AND encode(sha256(convert_to(${codexChatTurns.prompt}, 'UTF8')), 'hex') = ${input.requestPromptHash})`,
       ),
     )
     .returning({ approvalRecords: actionTurns.approvalRecords });
