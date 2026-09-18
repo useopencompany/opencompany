@@ -4,8 +4,9 @@ import type {
   PluginRemoteMcpServerDto,
 } from "@opencompany/protocol";
 import type { IntegrationAccountView } from "@/lib/integration-state";
+import { DopplerPluginDetail } from "./DopplerPluginSettings";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,9 @@ import {
   AttioPluginDetail,
   BetterStackPluginDetailView,
   betterStackToolsStateFromPlugin,
+  Dash0PluginDetail,
   defaultAttioToolsState,
+  defaultDash0ToolsState,
   defaultFathomToolsState,
   defaultHubSpotToolsState,
   defaultLatitudeToolsState,
@@ -52,6 +55,7 @@ import {
   StripePluginDetail,
   SupabasePluginDetail,
   slackToolsStateFromPlugin,
+  TodoistPluginDetail,
   uncuratedPluginToolGroups,
   VercelPluginDetail,
   XPluginDetail,
@@ -99,6 +103,7 @@ const accountActions = vi.hoisted(() => ({
     affectedBrainSourceCount: 0,
   })),
   setIntegrationCapabilityModeAction: vi.fn(async () => ({ ok: true as const })),
+  setIntegrationToolModeAction: vi.fn(async () => ({ ok: true as const })),
 }));
 const infisicalAuth = vi.hoisted(() => ({
   completeInfisicalAuth: vi.fn(),
@@ -292,6 +297,7 @@ const appData = vi.hoisted(() => ({
             "https://www.googleapis.com/auth/calendar.events",
           ],
           capabilityModes: {},
+          toolModes: {},
         },
       ],
       google_drive: [
@@ -306,6 +312,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: [],
           capabilityModes: {},
+          toolModes: {},
         },
         {
           integrationId: "gint_google_drive_latest",
@@ -352,6 +359,7 @@ const appData = vi.hoisted(() => ({
       neon: [],
       stripe: [] as IntegrationAccountView<"stripe">[],
       supabase: [],
+      todoist: [],
       resend: [],
       notion: [
         {
@@ -367,6 +375,7 @@ const appData = vi.hoisted(() => ({
           capabilityModes: { query: "ask", draft: "ask", write: "ask" },
         },
       ],
+      dash0: [],
       signoz: [
         {
           integrationId: "gint_signoz",
@@ -419,6 +428,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["channels:history"],
           capabilityModes: {},
+          toolModes: {},
         },
       ],
       x_account: [
@@ -433,6 +443,7 @@ const appData = vi.hoisted(() => ({
           statusReason: null,
           scopes: ["tweet.read", "tweet.write", "users.read", "offline.access"],
           capabilityModes: {},
+          toolModes: {},
         },
         {
           integrationId: "gint_x_latest",
@@ -693,6 +704,7 @@ const toolsState: PluginToolsState = {
       tools: [
         {
           id: "linear_search_issues",
+          toolName: "linear_search_issues",
           name: "Search issues",
           description: "Find issues in the connected workspace.",
           readOnly: true,
@@ -709,6 +721,7 @@ const toolsState: PluginToolsState = {
       tools: [
         {
           id: "linear_create_issue",
+          toolName: "linear_create_issue",
           name: "Create issue",
           description: null,
           readOnly: false,
@@ -958,7 +971,7 @@ const googleDrivePlugin = {
   source: {
     ...plugin.source,
     path: "google-drive",
-    resolvedCommit: "bae88070e498725de008e358a74bd18bc46ed27c",
+    resolvedCommit: "8b328aa34239234c215e905275c2de3bf4567c29",
   },
   skills: [],
   remoteMcpServers: [
@@ -977,13 +990,25 @@ const googleDrivePlugin = {
           id: "query",
           label: "Read files & permissions",
           defaultMode: "ask",
-          tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+          tools: [
+            "download_file_content",
+            "get_file_permissions",
+            "read_file_content",
+            "get_spreadsheet_values",
+          ],
         },
         {
           id: "write",
           label: "Create & edit files",
           defaultMode: "ask",
-          tools: ["copy_file", "create_file", "replace_document_text", "replace_document_contents"],
+          tools: [
+            "copy_file",
+            "create_file",
+            "replace_document_text",
+            "replace_document_contents",
+            "update_spreadsheet_values",
+            "append_spreadsheet_values",
+          ],
         },
       ],
       tools: [
@@ -993,10 +1018,13 @@ const googleDrivePlugin = {
         driveTool("download_file_content", "query"),
         driveTool("get_file_permissions", "query"),
         driveTool("read_file_content", "query"),
+        driveTool("get_spreadsheet_values", "query"),
         driveTool("copy_file", "write"),
         driveTool("create_file", "write"),
         driveTool("replace_document_text", "write"),
         driveTool("replace_document_contents", "write"),
+        driveTool("update_spreadsheet_values", "write"),
+        driveTool("append_spreadsheet_values", "write"),
       ],
       discoveryStatus: "ready",
       discoveredAt: "2026-09-03T06:00:00.000Z",
@@ -1303,12 +1331,12 @@ const gmailPlugin = {
   name: "gmail",
   manifest: {
     name: "gmail",
-    description: "Search and read Gmail, create drafts, and organize messages.",
+    description: "Search and read Gmail, create drafts, send email, and organize messages.",
   },
   source: {
     ...plugin.source,
     path: "gmail",
-    resolvedCommit: "ff6f34b42796129c2a125a32b3a78e8cae353df6",
+    resolvedCommit: "e78fb74bd31f16e9e03b68799e3bcafaa052e88b",
   },
   skills: [],
   remoteMcpServers: [
@@ -1319,7 +1347,12 @@ const gmailPlugin = {
       capabilities: [
         { id: "query", label: "Read Gmail", defaultMode: "ask", tools: ["get_message"] },
         { id: "draft", label: "Create drafts", defaultMode: "ask", tools: ["create_draft"] },
-        { id: "write", label: "Organize Gmail", defaultMode: "ask", tools: ["trash_message"] },
+        {
+          id: "write",
+          label: "Send & organize Gmail",
+          defaultMode: "ask",
+          tools: ["send_email", "trash_message"],
+        },
       ],
       tools: [
         {
@@ -1345,11 +1378,22 @@ const gmailPlugin = {
           },
         },
         {
+          name: "send_email",
+          description: "Send an email from the connected Gmail account.",
+          classification: {
+            capabilityId: "write",
+            capabilityLabel: "Send & organize Gmail",
+            defaultMode: "ask",
+            bucket: "write",
+            curated: true,
+          },
+        },
+        {
           name: "trash_message",
           description: "Move a Gmail message to trash.",
           classification: {
             capabilityId: "write",
-            capabilityLabel: "Organize Gmail",
+            capabilityLabel: "Send & organize Gmail",
             defaultMode: "ask",
             bucket: "write",
             curated: true,
@@ -1382,13 +1426,125 @@ describe("Linear plugin settings", () => {
     accountActions.getIntegrationAccountUsageAction.mockClear();
     accountActions.setIntegrationCapabilityModeAction.mockReset();
     accountActions.setIntegrationCapabilityModeAction.mockResolvedValue({ ok: true });
+    accountActions.setIntegrationToolModeAction.mockReset();
+    accountActions.setIntegrationToolModeAction.mockResolvedValue({ ok: true });
     for (const action of Object.values(infisicalAuth)) action.mockReset();
     useLiveQuery.mockClear();
-    window.history.replaceState({}, "", "/settings/plugins/linear");
+    window.history.replaceState({}, "", "/plugins/linear");
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("shows each tool's effective mode and pins one without touching its group", async () => {
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={accountsState}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool/ })) {
+      await userEvent.click(disclosure);
+    }
+    // "Read Linear" is On, so its inherited tool reads On without anyone configuring it.
+    const searchIssues = screen.getByRole("combobox", { name: "Permission for Search issues" });
+    expect(searchIssues).toHaveTextContent("On");
+
+    await userEvent.click(searchIssues);
+    await userEvent.click(await screen.findByRole("option", { name: "Ask" }));
+    expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
+      "gint_linear_tools",
+      "linear_search_issues",
+      "ask",
+    );
+    // Pinning one tool must never write the capability the rest of the group still follows.
+    expect(accountActions.setIntegrationCapabilityModeAction).not.toHaveBeenCalled();
+  });
+
+  it("marks a pinned tool, counts it on the group, and releases it back with Use group", async () => {
+    const pinned = account(
+      "gint_linear_tools",
+      "Linear tool access",
+      { read: "on", write: "ask" },
+      "linear",
+      { linear_search_issues: "off" },
+    );
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: pinned }],
+          permissionConnection: pinned,
+        }}
+        toolsState={toolsState}
+        canEdit
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "1 custom" })).toBeInTheDocument();
+    expect(screen.getByText("1 tool keeps its own setting")).toBeInTheDocument();
+
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool/ })) {
+      await userEvent.click(disclosure);
+    }
+    const searchIssues = screen.getByRole("combobox", { name: "Permission for Search issues" });
+    expect(searchIssues).toHaveTextContent("Off");
+
+    await userEvent.click(searchIssues);
+    // The inherit option names the mode the tool returns to, so releasing it is never a guess.
+    await userEvent.click(await screen.findByRole("option", { name: "Use group (On)" }));
+    expect(accountActions.setIntegrationToolModeAction).toHaveBeenCalledWith(
+      "gint_linear_tools",
+      "linear_search_issues",
+      "inherit",
+    );
+  });
+
+  it("resolves an unset group from the package default the group toggle shows", async () => {
+    // "query" is not in Linear's capability registry, so a tool row that fell back to the registry
+    // would read On while its own group header read Ask.
+    const packageDefaultState: PluginToolsState = {
+      ...toolsState,
+      groups: [
+        {
+          id: "query",
+          label: "Read Linear",
+          description: "Look up Linear work.",
+          modeKey: "query",
+          defaultMode: "ask",
+          curated: true,
+          tools: toolsState.groups[0]!.tools,
+        },
+      ],
+    };
+    const unsetAccount = account("gint_linear_tools", "Linear tool access", {}, "linear");
+    render(
+      <LinearPluginDetailView
+        pluginState={{ status: "ready", plugin }}
+        accountsState={{
+          status: "ready",
+          accounts: [{ account: unsetAccount }],
+          permissionConnection: unsetAccount,
+        }}
+        toolsState={packageDefaultState}
+        canEdit
+      />,
+    );
+
+    expect(
+      within(screen.getByRole("group", { name: "Read Linear permission" })).getByRole("button", {
+        name: "Ask",
+      }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByRole("button", { name: /^1 tool/ }));
+    expect(
+      screen.getByRole("combobox", { name: "Permission for Search issues" }),
+    ).toHaveTextContent("Ask");
   });
 
   it("uses the shared Google Admin account, OAuth, permission, and uninstall controls", async () => {
@@ -1406,6 +1562,7 @@ describe("Linear plugin settings", () => {
         "https://www.googleapis.com/auth/admin.directory.group",
       ],
       capabilityModes: {},
+      toolModes: {},
     };
     appData.integrations.personalAccounts.google_admin = [adminAccount];
     const adminPlugin: PluginInstallationDto = {
@@ -1469,6 +1626,38 @@ describe("Linear plugin settings", () => {
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
+  it("gives Doppler standard package controls and a connection-aware status without the inspector", () => {
+    const dopplerPlugin = { ...plugin, name: "doppler", remoteMcpServers: [], events: [] };
+    const settings = { status: null, statusReason: null, accountName: null, lastValidatedAt: null };
+    const view = render(
+      <DopplerPluginDetail
+        pluginState={{ status: "ready", plugin: dopplerPlugin }}
+        settings={settings}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Doppler" })).toBeInTheDocument();
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Connect Doppler" })).toHaveLength(1);
+    expect(screen.getByText("Advanced package details").closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    expect(screen.getByRole("button", { name: "Uninstall" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Passive skills|Executable MCP servers|Collision report/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
+    view.rerender(
+      <DopplerPluginDetail
+        pluginState={{ status: "ready", plugin: dopplerPlugin }}
+        settings={{ ...settings, status: "connected", accountName: "Demo account" }}
+      />,
+    );
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Demo account")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+  });
+
   it("moves the workspace Infisical connection and fixed permissions onto the plugin page", () => {
     render(
       <InfisicalPluginDetail pluginState={{ status: "ready", plugin: infisicalPlugin }} canEdit />,
@@ -1482,6 +1671,7 @@ describe("Linear plugin settings", () => {
       screen.queryByText("Give workspace coding agents access to the real Infisical CLI."),
     ).not.toBeInTheDocument();
     expect(screen.getByText("infisical-sandbox-secrets")).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Search infisical")).toBeInTheDocument();
     expect(screen.getByText("Submit feedback")).toBeInTheDocument();
     expect(
@@ -1575,7 +1765,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText(/most recently connected Google Drive account/i)).toBeVisible();
     expect(screen.getByRole("link", { name: "Connect Google Drive account" })).toHaveAttribute(
       "href",
-      "/api/integrations/google-drive/start?returnTo=/settings/plugins/google-drive",
+      "/api/integrations/google-drive/start?returnTo=/plugins/google-drive",
     );
     expect(
       screen.queryByRole("link", { name: "Configure Google Drive ingestion in Wiki sources" }),
@@ -1589,7 +1779,7 @@ describe("Linear plugin settings", () => {
     }
     expect(toolsState).toMatchObject({
       status: "ready",
-      discovery: { status: "ready", toolCount: 10 },
+      discovery: { status: "ready", toolCount: 13 },
     });
     if (toolsState.status !== "ready") throw new Error("Expected discovered Drive tools.");
     expect(
@@ -1607,16 +1797,28 @@ describe("Linear plugin settings", () => {
       {
         id: "query",
         defaultMode: "ask",
-        tools: ["Download file content", "Get file permissions", "Read file content"],
+        tools: [
+          "Download file content",
+          "Get file permissions",
+          "Read file content",
+          "Get spreadsheet values",
+        ],
       },
       {
         id: "write",
         defaultMode: "ask",
-        tools: ["Copy file", "Create file", "Replace document text", "Replace document contents"],
+        tools: [
+          "Copy file",
+          "Create file",
+          "Replace document text",
+          "Replace document contents",
+          "Update spreadsheet values",
+          "Append spreadsheet values",
+        ],
       },
     ]);
     expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+      "https://github.com/useopencompany/plugins/tree/8b328aa34239234c215e905275c2de3bf4567c29/google-drive",
     );
   });
 
@@ -1640,6 +1842,30 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read SigNoz documentation");
     expect(html).toContain("Inspect observability data");
     expect(html).toContain("Manage SigNoz");
+  });
+
+  it("maps the personal Dash0 connection onto the official plugin surface", () => {
+    const dash0Plugin = {
+      ...plugin,
+      id: "plugin_dash0",
+      name: "dash0",
+      manifest: { name: "dash0", description: "AWS Ireland only" },
+      source: { ...plugin.source, path: "dash0" },
+    } satisfies PluginInstallationDto;
+    const html = renderToString(
+      <Dash0PluginDetail
+        pluginState={{ status: "ready", plugin: dash0Plugin }}
+        toolsState={defaultDash0ToolsState()}
+        canEdit
+      />,
+    );
+
+    expect(html).toContain("region is detected automatically");
+    expect(html).not.toContain("AWS Ireland only");
+    expect(html).toContain("GCP Netherlands");
+    expect(html).toContain("Read Agent0 investigations");
+    expect(html).toContain("Inspect observability data");
+    expect(html).toContain("Run paid Agent0 investigations");
   });
 
   it("maps the dedicated Fathom MCP connection onto the official plugin surface", () => {
@@ -1728,7 +1954,7 @@ describe("Linear plugin settings", () => {
     expect(html).toContain("Read analytics");
     expect(html).toContain("Create insights");
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+      "https://github.com/useopencompany/plugins/tree/e2b5b58aaccca1783df7ec960751ab13d23dcd86/posthog",
     );
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
@@ -1884,6 +2110,7 @@ describe("Linear plugin settings", () => {
           statusReason: status === "needs_reauth" ? "Reconnect Stripe" : null,
           scopes: [],
           capabilityModes: {},
+          toolModes: {},
         },
       ];
       render(
@@ -1908,7 +2135,7 @@ describe("Linear plugin settings", () => {
       } else {
         expect(screen.getByRole("link", { name: "Connect Stripe account" })).toHaveAttribute(
           "href",
-          "/api/integrations/stripe/start?returnTo=/settings/plugins/stripe",
+          "/api/integrations/stripe/start?returnTo=/plugins/stripe",
         );
       }
       if (status === "needs_reauth")
@@ -1964,6 +2191,12 @@ describe("Linear plugin settings", () => {
     expect(screen.queryByText("gint_linear_tools")).not.toBeInTheDocument();
     expect(screen.getByText("Linear tool access")).toBeInTheDocument();
     expect(screen.queryByText("Acme")).not.toBeInTheDocument();
+    // Tool rows stay collapsed, and unmounted, until the user opens the group.
+    for (const disclosure of screen.getAllByRole("button", { name: /^1 tool$/ })) {
+      expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(screen.queryByText("Search issues")).not.toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Search issues")).toBeInTheDocument();
     expect(screen.getByText("linear-triage")).toBeInTheDocument();
     expect(screen.getByText("a".repeat(40))).toBeInTheDocument();
@@ -1979,11 +2212,6 @@ describe("Linear plugin settings", () => {
       `https://github.com/useopencompany/plugins/tree/${"a".repeat(40)}/linear`,
     );
     expect(advancedDetails).not.toHaveAttribute("open");
-    for (const toolDetails of screen
-      .getAllByText("1 tool")
-      .map((item) => item.closest("details"))) {
-      expect(toolDetails).not.toHaveAttribute("open");
-    }
 
     const readModes = screen.getByRole("group", { name: "Read Linear permission" });
     await userEvent.click(within(readModes).getByRole("button", { name: "Ask" }));
@@ -2168,6 +2396,7 @@ describe("Linear plugin settings", () => {
     statusReason: null,
     scopes: [],
     capabilityModes: { read: "on", write: "ask" },
+    toolModes: {},
   };
 
   it("makes connecting the account the primary action while setup is incomplete", () => {
@@ -2282,7 +2511,7 @@ describe("Linear plugin settings", () => {
     expect(toasts.error).not.toHaveBeenCalled();
     expect(screen.getByRole("link", { name: "Connect Linear account" })).toHaveAttribute(
       "href",
-      "/api/integrations/linear/start?returnTo=/settings/plugins/linear",
+      "/api/integrations/linear/start?returnTo=/plugins/linear",
     );
   });
 
@@ -2342,7 +2571,7 @@ describe("Linear plugin settings", () => {
     { query: "integration=linear&setup=connected", toast: "success" as const },
     { query: "integration=linear&setup=error&reason=oauth_failed", toast: "error" as const },
   ])("surfaces and clears OAuth return status: $toast", async ({ query, toast }) => {
-    window.history.replaceState({}, "", `/settings/plugins/linear?${query}`);
+    window.history.replaceState({}, "", `/plugins/linear?${query}`);
 
     render(
       <LinearPluginDetailView
@@ -2354,7 +2583,7 @@ describe("Linear plugin settings", () => {
     );
 
     await waitFor(() => expect(toasts[toast]).toHaveBeenCalledTimes(1));
-    expect(window.location.pathname).toBe("/settings/plugins/linear");
+    expect(window.location.pathname).toBe("/plugins/linear");
     expect(window.location.search).toBe("");
   });
 
@@ -2411,7 +2640,7 @@ describe("Linear plugin settings", () => {
 
   it("renders GitHub connection, discovery, and permission controls against github_user", async () => {
     const state = githubToolsStateFromPlugin(githubPlugin);
-    window.history.replaceState({}, "", "/settings/plugins/github");
+    window.history.replaceState({}, "", "/plugins/github");
     let accessRequestCount = 0;
     const fetchMock = vi.fn(async () => {
       accessRequestCount += 1;
@@ -2485,7 +2714,7 @@ describe("Linear plugin settings", () => {
     );
     expect(screen.getByRole("link", { name: "Add organization or account" })).toHaveAttribute(
       "href",
-      "/api/integrations/github-user/start?returnTo=%2Fsettings%2Fplugins%2Fgithub",
+      "/api/integrations/github-user/start?returnTo=%2Fplugins%2Fgithub",
     );
     await userEvent.click(screen.getByRole("link", { name: "Add organization or account" }));
     expect(screen.getByTestId("github-installation-pending")).toHaveTextContent(
@@ -2553,7 +2782,7 @@ describe("Linear plugin settings", () => {
       message: "The selected GitHub App installation is not available to this GitHub account.",
     },
   ])("surfaces and clears GitHub setup status: $toast", async ({ query, toast, message }) => {
-    window.history.replaceState({}, "", `/settings/plugins/github?${query}`);
+    window.history.replaceState({}, "", `/plugins/github?${query}`);
 
     render(
       <GitHubPluginDetailView
@@ -2569,7 +2798,7 @@ describe("Linear plugin settings", () => {
     );
 
     await waitFor(() => expect(toasts[toast]).toHaveBeenCalledWith(message));
-    expect(window.location.pathname).toBe("/settings/plugins/github");
+    expect(window.location.pathname).toBe("/plugins/github");
     expect(window.location.search).toBe("");
   });
 
@@ -2591,6 +2820,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Neon" })).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("List projects")).toBeInTheDocument();
     expect(screen.getByText("Run sql")).toBeInTheDocument();
     expect(screen.getByText("This version of the plugin contains no skills.")).toBeInTheDocument();
@@ -2636,6 +2866,7 @@ describe("Linear plugin settings", () => {
     );
 
     expect(screen.getByRole("heading", { level: 1, name: "Better Stack" })).toBeInTheDocument();
+    expandToolGroups();
     expect(screen.getByText("Documentation")).toBeInTheDocument();
     expect(screen.getByText("Query")).toBeInTheDocument();
     expect(screen.getByText("Create monitor")).toBeInTheDocument();
@@ -2678,7 +2909,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Not active")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect another Slack account" })).toHaveAttribute(
       "href",
-      "/api/integrations/slack/start?returnTo=/settings/plugins/slack",
+      "/api/integrations/slack/start?returnTo=/plugins/slack",
     );
     expect(
       screen.queryByRole("link", { name: /Configure Slack ingestion/ }),
@@ -2763,7 +2994,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByText("Legacy fallback")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect another X account" })).toHaveAttribute(
       "href",
-      "/api/integrations/x-account/start?returnTo=/settings/plugins/x",
+      "/api/integrations/x-account/start?returnTo=/plugins/x",
     );
     expect(
       screen.getByRole("group", { name: "Research public X data permission" }),
@@ -2855,7 +3086,7 @@ describe("Linear plugin settings", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Gmail" })).toBeInTheDocument();
     expect(screen.getByText("ada@example.com")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Connect Gmail account" })).toBeNull();
-    for (const label of ["Read Gmail", "Create drafts", "Organize Gmail"]) {
+    for (const label of ["Read Gmail", "Create drafts", "Send & organize Gmail"]) {
       expect(
         within(screen.getByRole("group", { name: `${label} permission` })).getByRole("button", {
           name: "Ask",
@@ -2866,10 +3097,14 @@ describe("Linear plugin settings", () => {
       groups: [
         { id: "query", defaultMode: "ask", tools: [{ readOnly: true }] },
         { id: "draft", defaultMode: "ask", tools: [{ readOnly: false }] },
-        { id: "write", defaultMode: "ask", tools: [{ readOnly: false }] },
+        {
+          id: "write",
+          defaultMode: "ask",
+          tools: [{ name: "Send email", readOnly: false }, { readOnly: false }],
+        },
       ],
     });
-    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail");
+    expect(GMAIL_PLUGIN_SOURCE).toContain("/tree/82998a44647a31c0b1f973f0554ca25c33e822dc/gmail");
   });
 
   it("edits the same Gmail account selected by the MCP gateway", async () => {
@@ -2959,14 +3194,14 @@ describe("Linear plugin settings", () => {
 
     expect(screen.getByRole("link", { name: "Enable full Gmail tools" })).toHaveAttribute(
       "href",
-      "/api/integrations/gmail/start?access=mcp&returnTo=/settings/plugins/gmail",
+      "/api/integrations/gmail/start?access=mcp&returnTo=/plugins/gmail",
     );
   });
 
   it("builds the two-bucket advanced fallback with ask defaults", () => {
     const groups = uncuratedPluginToolGroups([
-      { id: "search", name: "Search", description: null, readOnly: true },
-      { id: "mutate", name: "Mutate", description: null, readOnly: false },
+      { id: "search", toolName: "search", name: "Search", description: null, readOnly: true },
+      { id: "mutate", toolName: "mutate", name: "Mutate", description: null, readOnly: false },
     ]);
 
     expect(groups).toMatchObject([
@@ -3019,9 +3254,59 @@ describe("Linear plugin settings", () => {
     );
     expect(screen.getByRole("link", { name: /connect supabase account/i })).toHaveAttribute(
       "href",
-      "/api/integrations/supabase/start?returnTo=/settings/plugins/supabase",
+      "/api/integrations/supabase/start?returnTo=/plugins/supabase",
     );
     expect(screen.getByText(/SQL can read or change data/)).toBeInTheDocument();
+  });
+  it("offers the shared Todoist account connection and keeps deletion opt-in", () => {
+    const todoistPlugin = {
+      ...notionPlugin,
+      id: "plugin_todoist",
+      name: "todoist",
+      manifest: { name: "todoist" },
+      remoteMcpServers: [
+        {
+          ...notionPlugin.remoteMcpServers[0],
+          name: "todoist",
+          connectionProvider: "todoist",
+          capabilities: [
+            {
+              id: "read",
+              label: "Read tasks and projects",
+              defaultMode: "on",
+              tools: ["find-tasks"],
+            },
+            {
+              id: "query",
+              label: "Read activity history, analytics, and attachments",
+              defaultMode: "ask",
+              tools: ["find-activity"],
+            },
+            {
+              id: "write",
+              label: "Create and change Todoist items",
+              defaultMode: "ask",
+              tools: ["add-tasks"],
+            },
+            {
+              id: "draft",
+              label: "Permanently delete Todoist items",
+              defaultMode: "off",
+              tools: ["delete-object"],
+            },
+          ],
+          tools: [],
+        },
+      ],
+    } as const satisfies PluginInstallationDto;
+    render(
+      <TodoistPluginDetail pluginState={{ status: "ready", plugin: todoistPlugin }} canEdit />,
+    );
+    expect(screen.getByRole("link", { name: /connect todoist account/i })).toHaveAttribute(
+      "href",
+      "/api/integrations/todoist/start?returnTo=/plugins/todoist",
+    );
+    expect(screen.getByText(/Changes and deletions need your approval/)).toBeInTheDocument();
   });
   it("offers the shared Resend account connection and conservative permission groups", () => {
     const resendPlugin = {
@@ -3067,17 +3352,26 @@ describe("Linear plugin settings", () => {
     render(<ResendPluginDetail pluginState={{ status: "ready", plugin: resendPlugin }} canEdit />);
     expect(screen.getByRole("link", { name: /connect resend account/i })).toHaveAttribute(
       "href",
-      "/api/integrations/resend/start?returnTo=/settings/plugins/resend",
+      "/api/integrations/resend/start?returnTo=/plugins/resend",
     );
     expect(screen.getByText(/Sending and sensitive reads require approval/)).toBeInTheDocument();
   });
 });
+
+// Each capability group keeps its tool rows unmounted until the disclosure is opened, so tests
+// that assert on tool names have to open them the way a user does.
+function expandToolGroups() {
+  for (const button of screen.queryAllByRole("button", { name: /^\d+ tools?( ·.*)?$/ })) {
+    fireEvent.click(button);
+  }
+}
 
 function account(
   integrationId: string,
   connectionLabel: string,
   capabilityModes: Record<string, unknown>,
   provider: IntegrationAccountView["provider"] = "linear",
+  toolModes: Record<string, unknown> = {},
 ): IntegrationAccountView {
   return {
     integrationId,
@@ -3090,5 +3384,6 @@ function account(
     statusReason: null,
     scopes: [],
     capabilityModes,
+    toolModes,
   };
 }

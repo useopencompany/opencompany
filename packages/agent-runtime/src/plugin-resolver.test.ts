@@ -736,7 +736,10 @@ describe("resolvePlugin", () => {
       trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
-    expect(plugin.manifest).toMatchObject({ name: "posthog", version: "1.0.0" });
+    expect(plugin.manifest).toMatchObject({ name: "posthog", version: "1.1.0" });
+    expect(plugin.manifest.extensions?.["so.opencompany.events"]).toMatchObject([
+      { id: "event.captured", delivery: "poll" },
+    ]);
     expect(plugin.skills).toEqual([]);
     expect(plugin.stdioServers).toEqual([]);
     expect(plugin.remoteServers).toEqual([
@@ -1085,7 +1088,7 @@ describe("resolvePlugin", () => {
       trustedCapabilitySources: ["useopencompany/plugins"],
     });
 
-    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.2.0" });
+    expect(plugin.manifest).toMatchObject({ name: "google-drive", version: "1.3.0" });
     expect(plugin.skills).toEqual([]);
     expect(plugin.remoteServers).toEqual([
       {
@@ -1106,16 +1109,28 @@ describe("resolvePlugin", () => {
         id: "query",
         label: "Read files & permissions",
         defaultMode: "ask",
-        tools: ["download_file_content", "get_file_permissions", "read_file_content"],
+        tools: [
+          "download_file_content",
+          "get_file_permissions",
+          "read_file_content",
+          "get_spreadsheet_values",
+        ],
       },
       {
         id: "write",
         label: "Create & edit files",
         defaultMode: "ask",
-        tools: ["copy_file", "create_file", "replace_document_text", "replace_document_contents"],
+        tools: [
+          "copy_file",
+          "create_file",
+          "replace_document_text",
+          "replace_document_contents",
+          "update_spreadsheet_values",
+          "append_spreadsheet_values",
+        ],
       },
     ]);
-    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(10);
+    expect(plugin.capabilities.flatMap((capability) => capability.tools)).toHaveLength(13);
     expect(plugin.report.mcp).toMatchObject({
       status: "parsed",
       reports: [{ name: "google-drive", status: "gateway-registered" }],

@@ -30,8 +30,14 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1160],
-  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 26],
+  // 1180 = 1192 - the twelve Recurring Task fixture ids that left with those tests. The physical
+  // goat.task_schedules and goat.task_schedule_runs identifiers stay until their own drop migration.
+  // 1185 = 1180 + the harness check on goat.codex_chat_sessions and the four constraint and index
+  // names on goat.imessage_bindings.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 1185],
+  // 28 = 26 + the two browser storage keys for the composer's remembered reasoning effort and
+  // per-engine model, namespaced beside the existing remembered model selection key.
+  ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 28],
   ["chat source-provider values", /["']goat-chat["']/gu, 28],
   ["import source-provider values", /["']goat-import["']/gu, 13],
 ];
@@ -188,6 +194,13 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "MESSAGES_API_KEY",
+  "MESSAGES_LINE_HANDLE",
+  "MESSAGES_WEBHOOK_SECRET",
+  "KAPSO_API_KEY",
+  "KAPSO_PHONE_NUMBER_ID",
+  "KAPSO_WEBHOOK_SECRET",
+  "WHATSAPP_LINE_HANDLE",
   "BUN_CONFIG_MAX_HTTP_REQUESTS",
   "DOCS_VERCEL_PROJECT_ID",
   "ELECTRIC_AUTH_MODE",
@@ -203,6 +216,9 @@ const addedEnvKeys = [
   "OPENCOMPANY_AGENT_USER_EMAIL",
   "OPENCOMPANY_AGENT_USER_PASSWORD",
   "OPENCOMPANY_DESKTOP_AUTH_SECRET",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
   "OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID",
   "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
   "RUNNER_CODEX_CHAT_SELF_HEAL_ENABLED",
@@ -212,6 +228,8 @@ const addedEnvKeys = [
 const retiredEnvKeys = new Set([
   // Replaced by the per-member users.subagents_enabled preference before it was ever enabled.
   "RUNNER_OPENCOMPANY_SUBAGENTS_ENABLED",
+  // Split into one template alias per user-selectable sandbox size (PRO-197).
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE",
   "GITHUB_INTEGRATION_APP_CLIENT_ID",
   "GITHUB_INTEGRATION_APP_CLIENT_SECRET",
   "GITHUB_INTEGRATION_APP_ID",

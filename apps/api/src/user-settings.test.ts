@@ -14,11 +14,12 @@ const actor: Actor = {
 const storedPreferences = {
   timezone: "UTC",
   botsEnabled: false,
-  taskSpawningEnabled: false,
+  taskSpawningEnabled: true as const,
   wikiEnabled: true as const,
   taskViewMode: "board" as const,
   taskTimeRange: "7d" as const,
   autoModelRoutingEnabled: false,
+  approveForMeEnabled: false,
 };
 
 function fakeDb(options: { selectRows?: unknown[]; updateRows?: unknown[] }) {
@@ -59,6 +60,16 @@ describe("user settings service", () => {
     const service = createUserSettingsService({ db });
 
     await expect(service.updatePreferences(actor, { wikiEnabled: false })).resolves.toEqual(
+      storedPreferences,
+    );
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("keeps the retired Tasks & Workflows preference always on without writing", async () => {
+    const { db, update } = fakeDb({ selectRows: [storedPreferences] });
+    const service = createUserSettingsService({ db });
+
+    await expect(service.updatePreferences(actor, { taskSpawningEnabled: false })).resolves.toEqual(
       storedPreferences,
     );
     expect(update).not.toHaveBeenCalled();

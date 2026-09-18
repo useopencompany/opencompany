@@ -22,7 +22,7 @@ bun run bench --resume .context/bench/<timestamp>.json --budget-usd 5
 `--list` and `--help` need no key and make no model calls. Every actual trial is metered.
 No extra production environment variables, database, dev server or hosted eval service is needed.
 
-Defaults: all nine scenarios, k=4, v5, concurrency=1, $5 run budget. The small model set follows
+Defaults: all twelve scenarios, k=4, v5, concurrency=1, $5 run budget. The small model set follows
 the production router's answer models (Kimi K2.6 and Kimi K3) plus Sonnet 5. `--models` accepts
 comma-separated exact `AGENT_MODEL_CATALOG` IDs. `--scenarios` accepts comma-separated IDs and
 `tag:<tag>` selectors. `--variant` accepts v4, v5, or both. Other catalog models are opt-in.
@@ -61,7 +61,7 @@ and messages are never saved. Eval generations disable external telemetry export
 
 The new Linear scenarios cost roughly $0.01 per Kimi K2.6 trial and $0.02–$0.04 per Kimi K3 or
 Sonnet trial in the initial September 2026 validation; the cross-tool `posthog-linear-triage`
-case ranged $0.002 (DeepSeek V4 Flash) to $0.12 (Kimi K3) per trial. A full default run is 108 trials; plan for
+case ranged $0.002 (DeepSeek V4 Flash) to $0.12 (Kimi K3) per trial. A full default run is 144 trials; plan for
 roughly $2–$5, with larger PostHog schemas or failures potentially costing more. Start with one
 model and `--k 1`. These are observed planning estimates, not fixed provider prices.
 
@@ -109,6 +109,22 @@ For approval cases the adapter appends an SDK approval response and uses product
 `prepareProductChatStep({ finalizeAfterApproval: true })` for the final answer. The follow-up case
 seeds a prior tool-result message so it checks reuse of an already-visible full schema.
 
-Do not assert exact wording or a single valid tool trajectory. The v1 fixture surface is only
-`list_actions`, `describe_actions` and `use_action`; other engines, judges, hosted dashboards,
+Do not assert exact wording or a single valid tool trajectory. The fixture surface covers action discovery/execution and workflow commands; other engines,
+judges, hosted dashboards,
 recording production traces, and wiki/brain/browser fixtures remain out of scope.
+
+## Workflow authoring contracts
+
+The `workflows` tag covers scheduled creation with memory, missing-timing clarification, and
+versioned partial edits. `workflow-flat`, `workflow-grouped`, and `workflow-describe` compare
+three shapes for the same production tool. Integration and workflow execution remain synthetic;
+the real prompt, tool descriptions, argument validation, and model calls run unchanged.
+
+```sh
+bun run bench --scenarios tag:workflows --variant workflow-flat,workflow-grouped,workflow-describe --models moonshotai/kimi-k2.6 --k 1 --budget-usd 1
+```
+
+Compare repeated success and invalid arguments first, then tokens and round trips. A successful
+rename must send only the requested field and the current version. The ambiguous schedule case
+must ask before writing. These focused evals do not replace the application service's permission,
+idempotency, concurrency, planner-failure, or browser tests.

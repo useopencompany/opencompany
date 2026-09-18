@@ -1,4 +1,5 @@
 import { createProductChatToolContext } from "@opencompany/agent/chat-agent";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import type { ChatHostBootstrap, ChatHostToolGatewayRequest } from "@opencompany/agent-runtime";
 import { assert, describe, expect, it, vi } from "vitest";
@@ -12,7 +13,8 @@ const bootstrap: ChatHostBootstrap = {
     timezone: "Europe/London",
   },
   workspaceName: "Analytical Engines",
-  taskToolsEnabled: true,
+  automationToolsEnabled: true,
+  slackChannelEnabled: false,
   skillToolsEnabled: true,
   subagentsEnabled: false,
   browserToolsEnabled: true,
@@ -27,15 +29,47 @@ const bootstrap: ChatHostBootstrap = {
     },
   ],
   workflows: [{ id: "research", name: "Research", description: "Research a market." }],
-  recurringSchedules: [],
 };
 
 describe("loadHostTools", () => {
-  it("keeps task execution tools but removes delegation tools and routing instructions", async () => {
+  it("exposes the Slack bot tool to an enabled opencompany workflow run", async () => {
+    const execute = vi.fn(async ({ request }: { request: ChatHostToolGatewayRequest }) => ({
+      ok: true as const,
+      result:
+        request.operation === "bootstrap"
+          ? { ...bootstrap, automationToolsEnabled: false, slackChannelEnabled: true }
+          : { deliveryId: "delivery_1", status: "pending" },
+    }));
+    const hostTools = await loadHostTools(context(), { execute });
+    assert(hostTools);
+    const slackTool = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...hostTools,
+      runWiki: hostTools.runWiki as never,
+    }).tools[SLACK_BOT_TOOL_NAME] as { execute: (input: unknown) => Promise<unknown> };
+
+    await expect(
+      slackTool.execute({ channel: "#product", text: "Done.", messageKey: "summary" }),
+    ).resolves.toMatchObject({ deliveryId: "delivery_1" });
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({
+          operation: "post_slack_message",
+          input: { channel: "#product", text: "Done.", messageKey: "summary" },
+        }),
+      }),
+    );
+  });
+
+  it("keeps task execution tools but removes automation tools and routing instructions", async () => {
     const hostTools = await loadHostTools(context(), {
       execute: async () => ({
         ok: true,
-        result: { ...bootstrap, taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+        result: {
+          ...bootstrap,
+          automationToolsEnabled: false,
+          workflows: [],
+        },
       }),
     });
     assert(hostTools);
@@ -44,27 +78,40 @@ describe("loadHostTools", () => {
       ...hostTools,
       runWiki: hostTools.runWiki as never,
     });
-    for (const name of [
-      "start_task",
-      "start_workflow",
-      "schedule_task",
-      "edit_task_schedule",
-      "delete_task_schedule",
-    ]) {
-      expect(tools).not.toHaveProperty(name);
-    }
+    expect(tools).not.toHaveProperty("start_workflow");
+    expect(tools).not.toHaveProperty("workflows");
     expect(tools).toHaveProperty("wiki");
     expect(tools).toHaveProperty("write_artifact");
     expect(tools).toHaveProperty("list_skills");
 
     const prompt = createProductChatSystemPrompt({
-      taskToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
-      scheduleToolsEnabled: hostTools.bootstrap.taskToolsEnabled,
+      automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
       workflows: hostTools.bootstrap.workflows,
     });
-    expect(prompt).not.toContain("still call the task tool instead of refusing");
-    expect(prompt).not.toContain("start_task");
     expect(prompt).not.toContain("start_workflow");
+  });
+
+  it("never composes a one-off task tool for a main chat with automation enabled", async () => {
+    const hostTools = await loadHostTools(context(), {
+      execute: async () => ({ ok: true, result: bootstrap }),
+    });
+    assert(hostTools);
+    const { tools } = createProductChatToolContext({
+      model: "moonshotai/kimi-k2.6" as never,
+      ...hostTools,
+      runWiki: hostTools.runWiki as never,
+    });
+
+    expect(tools).not.toHaveProperty("start_task");
+    expect(tools).toHaveProperty("workflows");
+    expect(tools).not.toHaveProperty("start_workflow");
+
+    const prompt = createProductChatSystemPrompt({
+      automationToolsEnabled: hostTools.bootstrap.automationToolsEnabled,
+      workflows: hostTools.bootstrap.workflows,
+    });
+    expect(prompt).not.toContain("start_task");
+    expect(prompt).toContain("You cannot start a one-off task");
   });
 
   it("composes shared tools and authenticated browser profiles through one persisted service", async () => {
@@ -98,15 +145,6 @@ describe("loadHostTools", () => {
     await expect(
       tools?.browserTools?.({ name: "browser_open", args: { url: "https://github.com" } }),
     ).resolves.toMatchObject({ ok: true, output: "opened" });
-    await tools?.startTask?.(
-      {
-        name: "Review code",
-        prompt: "Review the code.",
-        model: "openai/gpt-5.6-sol",
-        engine: "codex",
-      },
-      { toolCallId: "call_task_1" },
-    );
     await tools?.createWorkspaceSkill?.(
       {
         name: "customer-health-review",
@@ -133,36 +171,27 @@ describe("loadHostTools", () => {
       "bootstrap",
       "browser_use_profile",
       "browser",
-      "start_task",
       "create_workspace_skill",
       "edit_workspace_skill",
       "write_artifact",
       "browser_end_profile",
     ]);
     expect(requests[3]).toMatchObject({
-      operation: "start_task",
-      toolCallId: "call_task_1",
-      input: {
-        model: "openai/gpt-5.6-sol",
-        engine: "codex",
-      },
-    });
-    expect(requests[4]).toMatchObject({
       operation: "create_workspace_skill",
       toolCallId: "call_skill_1",
       input: { name: "customer-health-review" },
     });
-    expect(requests[5]).toMatchObject({
+    expect(requests[4]).toMatchObject({
       operation: "edit_workspace_skill",
       toolCallId: "call_skill_edit_1",
       input: { name: "add-mcp-provider-plugin" },
     });
-    expect(requests[6]).toMatchObject({
+    expect(requests[5]).toMatchObject({
       operation: "write_artifact",
       toolCallId: "call_artifact_1",
       input: { filename: "report.md", title: "Report", content: "# Report" },
     });
-    expect(execute).toHaveBeenCalledTimes(8);
+    expect(execute).toHaveBeenCalledTimes(7);
   });
 
   it("does not call the web origin", async () => {

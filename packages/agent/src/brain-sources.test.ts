@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
     canDownload: true,
   })),
   getDriveToken: vi.fn(async () => "cursor_1"),
+  getLinearToken: vi.fn(async () => "linear_token"),
   hasAnySource: vi.fn(async () => false),
   listDriveFiles: vi.fn(async () => ({ files: [], nextPageToken: null })),
   listPersonalAccounts: vi.fn(async () => []),
@@ -68,6 +69,10 @@ vi.mock("./integrations/google-drive-source", async (importActual) => ({
   listGoogleDriveFiles: mocks.listDriveFiles,
   listGoogleSharedDrives: mocks.listSharedDrives,
   loadOwnGoogleDriveAccount: mocks.loadDriveAccount,
+}));
+vi.mock("./integrations/linear-ingest", async (importActual) => ({
+  ...(await importActual<typeof import("./integrations/linear-ingest")>()),
+  getLinearIngestAccessToken: mocks.getLinearToken,
 }));
 
 const { BrainSourceApplicationService } = await import("./brain-sources");
@@ -169,6 +174,44 @@ describe("BrainSourceApplicationService", () => {
     });
   });
 
+  it("refreshes and retries when Linear rejects an access token early", async () => {
+    const service = new BrainSourceApplicationService(queuedDb([linearIntegrationRow()]));
+    mocks.getLinearToken
+      .mockResolvedValueOnce("linear_token_old")
+      .mockResolvedValueOnce("linear_token_new");
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            teams: {
+              nodes: [{ id: "team_1", key: "PRO", name: "Product" }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetch);
+
+    await expect(
+      service.listOptions(member, "integration_1", { provider: "linear" }),
+    ).resolves.toEqual({
+      provider: "linear",
+      teams: [{ id: "team_1", key: "PRO", name: "Product" }],
+      partial: false,
+    });
+    expect(mocks.getLinearToken).toHaveBeenNthCalledWith(
+      2,
+      { userWorkosId: member.userId, integrationId: "integration_1" },
+      { db: expect.anything(), refreshIfAccessToken: "linear_token_old" },
+    );
+    expect(fetch.mock.calls[1]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer linear_token_new",
+    });
+    expect(mocks.markIntegrationStatus).not.toHaveBeenCalled();
+  });
+
   it("does not disguise a failed Linear team lookup as an empty workspace", async () => {
     const service = new BrainSourceApplicationService(queuedDb([linearIntegrationRow()]));
     vi.stubGlobal(
@@ -220,7 +263,7 @@ describe("BrainSourceApplicationService", () => {
             },
           }),
         )
-        .mockResolvedValueOnce(new Response(null, { status: 401 })),
+        .mockResolvedValue(new Response(null, { status: 401 })),
     );
 
     await expect(
@@ -257,6 +300,7 @@ describe("BrainSourceApplicationService", () => {
       message: "Connect Linear in your settings first.",
     });
     expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.getLinearToken).not.toHaveBeenCalled();
     expect(mocks.loadCredential).not.toHaveBeenCalled();
   });
 

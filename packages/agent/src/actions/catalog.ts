@@ -14,8 +14,13 @@ export type ManagedCapabilitiesResolution = {
   sources: ActionSourceDescriptor[];
   actions: ResolvedAction[];
 };
+// Paid plugin installs are per user within a workspace, so resolution needs both identities.
+export type ManagedCapabilitiesResolverInput = {
+  workspaceId: string;
+  userWorkosId: string;
+};
 export type ManagedCapabilitiesResolver = (
-  workspaceId: string,
+  input: ManagedCapabilitiesResolverInput,
 ) => Promise<ManagedCapabilitiesResolution>;
 
 export type ActionCatalogDeps = {
@@ -63,7 +68,10 @@ export async function resolveActionCatalog(
   );
   const managed = deps.resolveManagedCapabilities
     ? await deps
-        .resolveManagedCapabilities(input.workspaceId)
+        .resolveManagedCapabilities({
+          workspaceId: input.workspaceId,
+          userWorkosId: input.userWorkosId,
+        })
         .catch(() => ({ sources: [], actions: [] }) satisfies ManagedCapabilitiesResolution)
     : { sources: [], actions: [] };
   const reconciledManaged = xPluginInstalled

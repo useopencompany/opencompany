@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCodexEventToUiMessageParts,
+  CHAT_STEERING_DATA_PART_TYPE,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
@@ -39,6 +40,30 @@ function reduceNormalized(parts: CodexUiMessagePart[], raw: HarnessNormalizedEve
 }
 
 describe("applyCodexEventToUiMessageParts", () => {
+  it("appends a steering part once per delivered message", () => {
+    const first = applyCodexEventToUiMessageParts([], {
+      type: "steering.delivered",
+      payload: { itemId: "goat_codex_turn_2", text: "Check the worker registry too." },
+      rawEvent: {},
+    });
+    expect(first.parts).toEqual([
+      {
+        type: CHAT_STEERING_DATA_PART_TYPE,
+        data: { text: "Check the worker registry too.", itemId: "goat_codex_turn_2" },
+      },
+    ]);
+    // A reclaimed attempt replays the same event; the message must not render twice.
+    const replayed = applyCodexEventToUiMessageParts(first.parts, {
+      type: "steering.delivered",
+      payload: { itemId: "goat_codex_turn_2", text: "Check the worker registry too." },
+      rawEvent: {},
+    });
+    expect(replayed.changed).toBe(false);
+    // Steered text belongs to the user, so it stays out of the assistant message content.
+    expect(codexUiMessagePartsContent(first.parts)).toBe("");
+    expect(parseCodexUiMessageParts(JSON.parse(JSON.stringify(first.parts)))).toEqual(first.parts);
+  });
+
   it("coalesces streamed assistant deltas by item id", () => {
     const first = applyCodexEventToUiMessageParts(
       [],

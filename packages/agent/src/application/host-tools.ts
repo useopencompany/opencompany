@@ -1,17 +1,13 @@
 import { createHash } from "node:crypto";
-import {
-  type ChatHostBootstrap,
-  type ChatHostSkillFileChunk,
-  type ChatHostToolGatewayResponse,
-  type ChatHostToolOperation,
-  isAvailableAgentModelId,
-  isClaudeCodeModelId,
-  isCodexModelId,
+import type {
+  ChatHostBootstrap,
+  ChatHostSkillFileChunk,
+  ChatHostToolGatewayResponse,
+  ChatHostToolOperation,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
-import type { DeleteTaskScheduleToolOutput, EditTaskScheduleToolOutput } from "../chat-ui";
+import { WorkflowCommandSchema } from "../workflow-tool";
 
 export type ChatHostContext = {
   taskConversation: boolean;
@@ -20,15 +16,15 @@ export type ChatHostContext = {
   workspaceName: string;
   conversationId: string;
   messageId: string;
-  brainRef: string | null;
   email: string;
   firstName: string | null;
   lastName: string | null;
   timezone: string;
-  taskToolsEnabled: boolean;
+  automationToolsEnabled: boolean;
   subagentsEnabled: boolean;
   skillToolsEnabled: boolean;
-  legacyBrainEnabled: boolean;
+  // True only for a run of a workflow whose Channels section keeps Slack on.
+  slackChannelEnabled: boolean;
 };
 
 export type ChatHostToolCommand = {
@@ -72,26 +68,16 @@ type ActiveSkill = {
   instructions: string;
 };
 
-type ScheduleView = {
-  id: string;
-  name: string;
-  cron: string;
-  timezone: string;
-  enabled: boolean;
-  nextRunAt: string;
-  prompt: string;
-  sourceDescription: string;
-};
-
 type TaskResult = { id: string; displayId: string; name: string; prompt: string };
 
 export type ChatHostToolServiceDependencies = {
-  loadContext: (command: ChatHostToolCommand) => Promise<ChatHostContext | null>;
-  listBrains: (input: {
+  manageWorkflows?: (input: {
     actorId: string;
     workspaceId: string;
-  }) => Promise<readonly { id: string; slug: string }[]>;
-  defaultBrainSlug: string;
+    toolInput: Record<string, unknown>;
+    idempotencyKey: string;
+  }) => Promise<unknown>;
+  loadContext: (command: ChatHostToolCommand) => Promise<ChatHostContext | null>;
   browserProfilesAvailable: () => boolean;
   createAgentSession: (input: {
     actorId: string;
@@ -165,59 +151,6 @@ export type ChatHostToolServiceDependencies = {
       expectedBundleId?: string;
     };
   }) => Promise<{ updated: true; name: string; command: string; bundleId: string }>;
-  createTask: (input: {
-    actorId: string;
-    workspaceId: string;
-    brainRef: string | null;
-    prompt: string;
-    model: AgentModelId;
-    name?: string;
-    engine?: "opencompany" | "codex" | "claude_code";
-  }) => Promise<TaskResult>;
-  listSchedules: (actorId: string) => Promise<ScheduleView[]>;
-  createSchedule: (input: {
-    actorId: string;
-    workspaceId: string;
-    name: string;
-    sourceDescription: string;
-    cron: string;
-    timezone: string;
-    prompt: string;
-  }) => Promise<{
-    id: string;
-    name: string;
-    cron: string;
-    timezone: string;
-    nextRunAt: Date;
-    prompt: string;
-  }>;
-  updateSchedule: (
-    actorId: string,
-    scheduleId: string,
-    input: {
-      name: string;
-      prompt: string;
-      cron: string;
-      timezone: string;
-      sourceDescription: string;
-    },
-  ) => Promise<
-    | {
-        ok: true;
-        schedule: {
-          id: string;
-          name: string;
-          cron: string;
-          timezone: string;
-          nextRunAt: Date;
-        };
-      }
-    | { ok: false; error: string }
-  >;
-  deleteSchedule: (
-    actorId: string,
-    scheduleId: string,
-  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   createWorkflowTask: (input: {
     actorId: string;
     workspaceId: string;
@@ -226,6 +159,7 @@ export type ChatHostToolServiceDependencies = {
   }) => Promise<TaskResult>;
   listWorkflowCatalog: (
     workspaceId: string,
+    userId: string,
   ) => Promise<Array<{ id: string; name: string; description: string }>>;
   executeBrowserTool: (input: {
     context: ChatHostContext;
@@ -241,6 +175,11 @@ export type ChatHostToolServiceDependencies = {
     wikiId?: string;
     /** Stable per-tool-call key, e.g. `agent-wiki:<turnId>:<toolCallId>`. */
     idempotencyKey: string;
+  }) => Promise<unknown>;
+  postSlackMessage?: (input: {
+    runId: string;
+    actorId: string;
+    post: { channel?: string; text: string; messageKey: string };
   }) => Promise<unknown>;
   writeArtifact?: (input: {
     context: ChatHostContext;
@@ -404,103 +343,20 @@ async function executeOperation(
         },
       });
     }
-    case "start_task": {
-      assertTaskTools(context);
-      const engine = optionalEngine(toolInput.engine);
-      const model = requiredModel(toolInput.model, engine);
-      const name = optionalString(toolInput.name);
-      assertModelSupportsEngine(model, engine);
-      const created = await dependencies.createTask({
+    case "workflows": {
+      assertAutomationTools(context);
+      if (toolInput.command === "run")
+        throw new Error("Workflow runs must use the turn's run dispatcher.");
+      if (!dependencies.manageWorkflows) throw new Error("Workflow management is unavailable.");
+      return dependencies.manageWorkflows({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
-        brainRef: await activeBrainRef(context, dependencies),
-        prompt: requiredString(toolInput.prompt, "prompt"),
-        model,
-        ...(name ? { name } : {}),
-        ...(engine ? { engine } : {}),
+        toolInput,
+        idempotencyKey: workflowCommandIdempotencyKey(command.runId, command.toolCallId, toolInput),
       });
-      return taskResult(created);
-    }
-    case "schedule_task": {
-      assertTaskTools(context);
-      const created = await dependencies.createSchedule({
-        actorId: context.actorId,
-        workspaceId: context.workspaceId,
-        name: requiredString(toolInput.name, "name"),
-        sourceDescription:
-          optionalString(toolInput.sourceDescription) ?? optionalString(toolInput.reason) ?? "",
-        cron: requiredString(toolInput.cron, "cron"),
-        timezone: optionalString(toolInput.timezone) ?? context.timezone,
-        prompt: requiredString(toolInput.prompt, "prompt"),
-      });
-      return {
-        scheduleId: created.id,
-        scheduleName: created.name,
-        cron: created.cron,
-        timezone: created.timezone,
-        nextRunAt: created.nextRunAt.toISOString(),
-        prompt: created.prompt,
-        status: "scheduled",
-      };
-    }
-    case "edit_task_schedule": {
-      assertTaskTools(context);
-      const schedules = await dependencies.listSchedules(context.actorId);
-      const target = resolveScheduleTarget(schedules, toolInput);
-      if (!target.ok) return target;
-      const cron = optionalString(toolInput.cron) ?? target.schedule.cron;
-      const timezone = optionalString(toolInput.timezone) ?? target.schedule.timezone;
-      const timingChanged = Boolean(
-        optionalString(toolInput.cron) || optionalString(toolInput.timezone),
-      );
-      const result = await dependencies.updateSchedule(context.actorId, target.schedule.id, {
-        name: optionalString(toolInput.name) ?? target.schedule.name,
-        prompt: optionalString(toolInput.prompt) ?? target.schedule.prompt,
-        cron,
-        timezone,
-        sourceDescription:
-          optionalString(toolInput.sourceDescription) ??
-          ((!timingChanged ? target.schedule.sourceDescription : "") || `${cron} - ${timezone}`),
-      });
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies EditTaskScheduleToolOutput;
-      }
-      return {
-        ok: true,
-        scheduleId: result.schedule.id,
-        scheduleName: result.schedule.name,
-        cron: result.schedule.cron,
-        timezone: result.schedule.timezone,
-        nextRunAt: result.schedule.nextRunAt.toISOString(),
-        status: "updated",
-      } satisfies EditTaskScheduleToolOutput;
-    }
-    case "delete_task_schedule": {
-      assertTaskTools(context);
-      const schedules = await dependencies.listSchedules(context.actorId);
-      const target = resolveScheduleTarget(schedules, toolInput);
-      if (!target.ok) return target;
-      const result = await dependencies.deleteSchedule(context.actorId, target.schedule.id);
-      if (!result.ok) {
-        return {
-          ok: false,
-          status: "invalid",
-          error: result.error,
-        } satisfies DeleteTaskScheduleToolOutput;
-      }
-      return {
-        ok: true,
-        scheduleId: target.schedule.id,
-        scheduleName: target.schedule.name,
-        status: "deleted",
-      } satisfies DeleteTaskScheduleToolOutput;
     }
     case "start_workflow": {
-      assertTaskTools(context);
+      assertAutomationTools(context);
       const created = await dependencies.createWorkflowTask({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
@@ -573,6 +429,17 @@ async function executeOperation(
         idempotencyKey: `agent-wiki:${command.runId}:${command.toolCallId ?? command.sessionId}`,
       });
     }
+    case "post_slack_message": {
+      if (!context.slackChannelEnabled || !dependencies.postSlackMessage)
+        throw new Error(
+          "Slack Channel posting is only available in workflows that have Slack turned on.",
+        );
+      return dependencies.postSlackMessage({
+        runId: command.runId,
+        actorId: context.actorId,
+        post: command.input as { channel?: string; text: string; messageKey: string },
+      });
+    }
     case "write_artifact": {
       if (!command.toolCallId) throw new Error("write_artifact requires a stable tool call id.");
       if (!dependencies.writeArtifact) {
@@ -594,31 +461,29 @@ async function bootstrap(
   input: Record<string, unknown>,
   dependencies: ChatHostToolServiceDependencies,
 ): Promise<ChatHostBootstrap> {
-  const taskToolsEnabled = context.taskToolsEnabled && !context.taskConversation;
+  const automationToolsEnabled = context.automationToolsEnabled && !context.taskConversation;
   const mentionedSkillIds = stringArray(input.mentionedSkillIds);
-  const [mentionedSkills, skills, workflows, recurringSchedules, browserProfiles] =
-    await Promise.all([
-      mentionedSkillIds.length
-        ? dependencies.resolveSkillMentions({
-            workspaceId: context.workspaceId,
-            userId: context.actorId,
-            ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
-            mentions: mentionedSkillIds.map((id) => ({ id })),
-          })
-        : Promise.resolve([]),
-      dependencies.listSkillCatalog(
-        context.workspaceId,
-        context.actorId,
-        context.taskConversation ? "company" : undefined,
-      ),
-      taskToolsEnabled
-        ? dependencies.listWorkflowCatalog(context.workspaceId)
-        : Promise.resolve([]),
-      taskToolsEnabled ? dependencies.listSchedules(context.actorId) : Promise.resolve([]),
-      dependencies.browserProfilesAvailable()
-        ? dependencies.listBrowserProfiles(context.actorId)
-        : Promise.resolve([]),
-    ]);
+  const [mentionedSkills, skills, workflows, browserProfiles] = await Promise.all([
+    mentionedSkillIds.length
+      ? dependencies.resolveSkillMentions({
+          workspaceId: context.workspaceId,
+          userId: context.actorId,
+          ...(context.taskConversation ? { skillAccess: "company" as const } : {}),
+          mentions: mentionedSkillIds.map((id) => ({ id })),
+        })
+      : Promise.resolve([]),
+    dependencies.listSkillCatalog(
+      context.workspaceId,
+      context.actorId,
+      context.taskConversation ? "company" : undefined,
+    ),
+    automationToolsEnabled
+      ? dependencies.listWorkflowCatalog(context.workspaceId, context.actorId)
+      : Promise.resolve([]),
+    dependencies.browserProfilesAvailable()
+      ? dependencies.listBrowserProfiles(context.actorId)
+      : Promise.resolve([]),
+  ]);
   const sessionSkills = await dependencies.activateAndListSkills({
     conversationId: context.conversationId,
     messageId: context.messageId,
@@ -635,10 +500,12 @@ async function bootstrap(
       timezone: context.timezone,
     },
     workspaceName: context.workspaceName,
-    taskToolsEnabled,
+    automationToolsEnabled,
+    slackChannelEnabled: context.slackChannelEnabled,
     skillToolsEnabled: context.skillToolsEnabled,
-    // Chat only, for the same reason task tools are withheld from a task conversation: a task is
-    // already the deeper-work primitive, so a second delegation layer inside one is unobserved cost.
+    // Chat only, for the same reason automation tools are withheld from a task conversation: a task
+    // is already the deeper-work primitive, so a second delegation layer inside one is unobserved
+    // cost.
     subagentsEnabled: context.subagentsEnabled && !context.taskConversation,
     browserToolsEnabled: true,
     browserProfiles: browserProfiles.map(({ id, name, siteHost }) => ({ id, name, siteHost })),
@@ -650,25 +517,7 @@ async function bootstrap(
       instructions: skill.instructions,
     })),
     workflows,
-    recurringSchedules,
   };
-}
-
-async function activeBrainRef(
-  context: ChatHostContext,
-  dependencies: ChatHostToolServiceDependencies,
-) {
-  if (!context.legacyBrainEnabled) return null;
-  if (context.brainRef) return context.brainRef;
-  const brains = await dependencies.listBrains({
-    actorId: context.actorId,
-    workspaceId: context.workspaceId,
-  });
-  return (
-    brains.find((candidate) => candidate.slug === dependencies.defaultBrainSlug)?.id ??
-    brains[0]?.id ??
-    null
-  );
 }
 
 async function endActiveBrowserProfile(
@@ -704,13 +553,13 @@ function browserProfileResult(session: BrowserProfileSession) {
   };
 }
 
-function assertTaskTools(context: ChatHostContext) {
+function assertAutomationTools(context: ChatHostContext) {
   if (context.taskConversation) {
-    throw new Error(
-      "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
-    );
+    throw new Error("Tasks cannot start workflows. Use a main chat instead.");
   }
-  if (!context.taskToolsEnabled) throw new Error("Task creation is not enabled for this user.");
+  if (!context.automationToolsEnabled) {
+    throw new Error("Workflows and recurring tasks are not enabled for this user.");
+  }
 }
 
 function assertSkillTools(context: ChatHostContext) {
@@ -724,33 +573,6 @@ export function workspaceSkillIdempotencyKey(turnId: string, toolCallId?: string
     .update(`${turnId}:${toolCallId ?? "create-workspace-skill"}`)
     .digest("hex");
   return `agent-skill:${invocationHash}`;
-}
-
-function requiredModel(value: unknown, engine: ReturnType<typeof optionalEngine>): AgentModelId {
-  const model = requiredString(value, "model");
-  if (engine === "codex" && isCodexModelId(model)) return model;
-  if (!isAvailableAgentModelId(model)) {
-    throw new Error(`Unsupported model "${model}".`);
-  }
-  return model;
-}
-
-function optionalEngine(value: unknown) {
-  return value === "opencompany" || value === "codex" || value === "claude_code"
-    ? value
-    : undefined;
-}
-
-function assertModelSupportsEngine(
-  model: AgentModelId,
-  engine: "opencompany" | "codex" | "claude_code" | undefined,
-) {
-  if (engine === "codex" && !isCodexModelId(model)) {
-    throw new Error(`Model "${model}" is not available for the Codex engine.`);
-  }
-  if (engine === "claude_code" && !isClaudeCodeModelId(model)) {
-    throw new Error(`Model "${model}" is not available for the Claude Code engine.`);
-  }
 }
 
 function browserToolName(value: unknown) {
@@ -787,40 +609,6 @@ function stringArray(value: unknown) {
     : [];
 }
 
-function resolveScheduleTarget(
-  schedules: ScheduleView[],
-  input: Record<string, unknown>,
-):
-  | { ok: true; schedule: ScheduleView }
-  | { ok: false; error: string; status: "not_found" | "ambiguous" | "invalid" } {
-  const scheduleId = optionalString(input.scheduleId);
-  if (scheduleId) {
-    const schedule = schedules.find((candidate) => candidate.id === scheduleId);
-    return schedule
-      ? { ok: true, schedule }
-      : { ok: false, status: "not_found", error: "Recurring task not found." };
-  }
-  const scheduleName = optionalString(input.scheduleName);
-  if (!scheduleName) {
-    return { ok: false, status: "invalid", error: "Specify which recurring task to change." };
-  }
-  const normalized = normalizeLookup(scheduleName);
-  const matches = schedules.filter((schedule) => normalizeLookup(schedule.name) === normalized);
-  if (matches.length === 1 && matches[0]) return { ok: true, schedule: matches[0] };
-  if (matches.length > 1) {
-    return {
-      ok: false,
-      status: "ambiguous",
-      error: "Multiple recurring tasks matched that name. Ask which one to change.",
-    };
-  }
-  return { ok: false, status: "not_found", error: "Recurring task not found." };
-}
-
-function normalizeLookup(value: string) {
-  return value.trim().toLocaleLowerCase().replace(/\s+/gu, " ");
-}
-
 function failure(error: string): ChatHostToolGatewayResponse {
   return { ok: false, error };
 }
@@ -828,4 +616,31 @@ function failure(error: string): ChatHostToolGatewayResponse {
 function skillScope(value: unknown): "personal" | "company" {
   if (value !== "personal" && value !== "company") throw new Error("Choose Personal or Company.");
   return value;
+}
+
+// Repeating the same creation within a turn is a model retry, even when the model
+// gives it a new tool-call ID. Zod fixes property order before hashing the request.
+export function workflowCommandIdempotencyKey(
+  turnId: string,
+  toolCallId: string | undefined,
+  input: unknown,
+) {
+  const args = WorkflowCommandSchema.parse(input);
+  if (args.command !== "create")
+    return workspaceSkillIdempotencyKey(turnId, toolCallId).replace(
+      "agent-skill:",
+      "agent-workflow:",
+    );
+  const definition = WorkflowCommandSchema.parse({
+    ...args,
+    description: args.description ?? "",
+    instructions: args.instructions ?? "",
+    status: args.status ?? "draft",
+    scope: args.scope ?? "personal",
+    schedule: args.schedule ?? null,
+    memoryEnabled: args.memoryEnabled ?? false,
+  });
+  return `agent-workflow:${createHash("sha256")
+    .update(JSON.stringify([turnId, definition]))
+    .digest("hex")}`;
 }

@@ -10,6 +10,7 @@ const ACP_STDERR_TAIL_LIMIT = 4_000;
 const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 const ACP_GUEST_PROBE_INTERVAL_MS = 60_000;
+const ACP_HEALTHY_SILENCE_WARNING_MS = 5 * 60_000;
 const logger = createLogger({ service: "opencompany-runner", runtime: "acp-harness" });
 
 export const ACP_EMPTY_RESULT_REPAIR_PROMPT =
@@ -79,8 +80,19 @@ export type AcpEngineAdapter = {
       values: Record<"default" | "plan", string>;
     };
   };
-  steeringControlMethod?: string;
 };
+
+// One user message to inject into the turn that is already running.
+export type AcpSteeringMessage = {
+  id: string;
+  prompt: AcpPromptBlock[];
+};
+
+// "injected" is the only outcome that joins the message to the live turn. The extension also
+// reports "startedNewTurn" (it found no turn to join and opened its own, whose output this prompt
+// never sees) and adapter-specific refusals; the caller owns what happens to a message the
+// adapter would not inject.
+export type AcpSteeringOutcome = "injected" | "rejected";
 
 export type AcpExtensionRequest = {
   method: string;
@@ -119,7 +131,11 @@ export type AcpHarnessTurnInput = {
   permissionMode?: "default" | "bypassPermissions";
   collaborationMode?: "default" | "plan";
   goal?: { objective: string; tokenBudget?: number | null } | null;
-  steering?: AsyncIterable<AcpPromptBlock[]>;
+  steering?: AsyncIterable<AcpSteeringMessage>;
+  onSteeringOutcome?: (input: {
+    message: AcpSteeringMessage;
+    outcome: AcpSteeringOutcome;
+  }) => Promise<void>;
   emptyResultRepair?: {
     shouldRepair: () => boolean;
     prompt?: string;
@@ -194,6 +210,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       const initializedRecord = readRecord(initialized);
       const capabilities = readRecord(initializedRecord?.agentCapabilities) ?? {};
       const goalControlMethod = readGoalControlMethod(initializedRecord);
+      const steeringControlMethod = readSteeringControlMethod(initializedRecord);
       for (const request of input.extensionRequests ?? []) {
         await client.requestBeforeExecution(request.method, request.params);
       }
@@ -277,6 +294,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
         sessionId,
         prompt,
         deadline: executionDeadline,
+        steeringControlMethod,
       });
       await client.flush();
       await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
@@ -291,6 +309,7 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
           sessionId,
           prompt: textPrompt(input.emptyResultRepair.prompt ?? ACP_EMPTY_RESULT_REPAIR_PROMPT),
           deadline: executionDeadline,
+          steeringControlMethod,
         });
         await client.flush();
         await input.onRuntimeEvents([promptResultEvent(sessionId, promptResponse)]);
@@ -501,12 +520,64 @@ async function configureSession(
   }
 }
 
+type SteeringStep = { type: "steering"; value: IteratorResult<AcpSteeringMessage> };
+
+// Injects one promoted message into the turn that is already running. Delivery is best-effort by
+// design: an adapter that refuses with a JSON-RPC error, or a settlement that does not land, must
+// not take down a turn that is already producing work. Every failure leaves the promoted turn
+// queued, so the message runs as the next turn -- redirected, never lost.
+async function deliverSteering(input: {
+  client: AcpJsonRpcClient;
+  input: AcpHarnessTurnInput;
+  sessionId: string;
+  steeringControlMethod: string | null;
+  message: AcpSteeringMessage;
+}) {
+  let outcome: AcpSteeringOutcome = "rejected";
+  try {
+    // An agent that does not advertise the extension cannot be steered at all. Report the refusal
+    // rather than failing the turn: the caller still owns an undelivered message.
+    const response = input.steeringControlMethod
+      ? readRecord(
+          await input.client.request(input.steeringControlMethod, {
+            sessionId: input.sessionId,
+            prompt: input.message.prompt,
+          }),
+        )
+      : null;
+    if (readString(response?.outcome) === "injected") outcome = "injected";
+  } catch (error) {
+    // Adapters refuse through a JSON-RPC error as readily as through the outcome field -- most
+    // often because the turn ended between the poll and the injection. That is the same refusal.
+    logger.warn("ACP adapter refused a steering message", {
+      event: "opencompany.goat_acp_steering_refused",
+      engine: input.input.adapter.id,
+      steered_run_id: input.message.id,
+      error: input.input.redact(asError(error).message),
+    });
+  }
+  try {
+    await input.input.onSteeringOutcome?.({ message: input.message, outcome });
+  } catch (error) {
+    // Only the promoted turn's settlement failed. It is still queued, so it runs as the next turn;
+    // a message the adapter did inject is delivered twice rather than lost, as on a worker crash.
+    logger.warn("Could not settle a steered ACP turn; the message stays queued", {
+      event: "opencompany.goat_acp_steering_settle_failed",
+      engine: input.input.adapter.id,
+      steered_run_id: input.message.id,
+      outcome,
+      error: input.input.redact(asError(error).message),
+    });
+  }
+}
+
 async function requestPromptWithAbort(input: {
   client: AcpJsonRpcClient;
   input: AcpHarnessTurnInput;
   sessionId: string;
   prompt: AcpPromptBlock[];
   deadline: number;
+  steeringControlMethod: string | null;
 }) {
   const requestTimeoutMs = Math.max(1, input.deadline - Date.now()) + ACP_CANCEL_GRACE_MS;
   const outcome = input.client
@@ -523,9 +594,22 @@ async function requestPromptWithAbort(input: {
       (error) => ({ type: "prompt" as const, ok: false as const, error }),
     );
   const steeringIterator = input.input.steering?.[Symbol.asyncIterator]();
-  let nextSteering = steeringIterator
-    ?.next()
-    .then((value) => ({ type: "steering" as const, value }));
+  // Steering runs alongside a turn that is already producing work, so nothing on this leg may
+  // reject into the race below: a poll that fails ends steering for the turn, and the promoted
+  // turn stays queued and simply runs next.
+  const pollSteering = (): Promise<SteeringStep> | undefined =>
+    steeringIterator?.next().then(
+      (value) => ({ type: "steering" as const, value }),
+      (error): SteeringStep => {
+        logger.warn("Could not poll for steered messages; steering is off for this turn", {
+          event: "opencompany.goat_acp_steering_poll_failed",
+          engine: input.input.adapter.id,
+          error: input.input.redact(asError(error).message),
+        });
+        return { type: "steering" as const, value: { done: true, value: undefined } };
+      },
+    );
+  let nextSteering = pollSteering();
   while (true) {
     const settled = await Promise.race([
       outcome,
@@ -544,22 +628,14 @@ async function requestPromptWithAbort(input: {
         nextSteering = undefined;
         continue;
       }
-      const steeringMethod = input.input.adapter.steeringControlMethod;
-      if (!steeringMethod) {
-        throw new Error(`${input.input.adapter.displayName} does not advertise ACP steering.`);
-      }
-      const response = readRecord(
-        await input.client.request(steeringMethod, {
-          sessionId: input.sessionId,
-          prompt: settled.value.value,
-        }),
-      );
-      if (response?.outcome === "failed") {
-        throw new Error(`${input.input.adapter.displayName} could not steer the active ACP turn.`);
-      }
-      nextSteering = steeringIterator
-        ?.next()
-        .then((value) => ({ type: "steering" as const, value }));
+      await deliverSteering({
+        client: input.client,
+        input: input.input,
+        sessionId: input.sessionId,
+        steeringControlMethod: input.steeringControlMethod,
+        message: settled.value.value,
+      });
+      nextSteering = pollSteering();
       continue;
     }
 
@@ -641,6 +717,17 @@ async function requestGoalWithAbort(input: {
   }
 }
 
+// Steering is an ACP extension, not part of protocol version 1: an agent that supports it
+// advertises `_meta.steering.supported` on the initialize response and then accepts
+// `_session/steering` requests. Negotiate rather than assume, so an adapter that drops the
+// extension makes steering unavailable instead of failing turns with an unknown method.
+const ACP_STEERING_CONTROL_METHOD = "_session/steering";
+
+function readSteeringControlMethod(initialized: Record<string, unknown> | null) {
+  const steering = readRecord(readRecord(initialized?._meta)?.steering);
+  return steering?.supported === true ? ACP_STEERING_CONTROL_METHOD : null;
+}
+
 function readGoalControlMethod(initialized: Record<string, unknown> | null) {
   const goal = readRecord(readRecord(initialized?._meta)?.goal);
   if (goal?.version !== 1) return null;
@@ -667,6 +754,7 @@ class AcpJsonRpcClient {
   private pumping = false;
   private watchGeneration = 0;
   private lastGuestActivityAt = Date.now();
+  private warnedGuestActivityAt: number | null = null;
   private guestProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<
     number | string,
@@ -674,6 +762,7 @@ class AcpJsonRpcClient {
       resolve: (value: unknown) => void;
       reject: (error: Error) => void;
       timeout: ReturnType<typeof setTimeout>;
+      method: string;
     }
   >();
 
@@ -731,7 +820,7 @@ class AcpJsonRpcClient {
         reject(new Error(`ACP request "${method}" timed out.${suffix}`));
       }, timeoutMs);
       timeout.unref?.();
-      this.pending.set(id, { resolve, reject, timeout });
+      this.pending.set(id, { resolve, reject, timeout, method });
     });
     void this.send({ jsonrpc: "2.0", id, method, params }).catch((error) => {
       const pending = this.pending.get(id);
@@ -986,6 +1075,26 @@ class AcpJsonRpcClient {
       // alive. Silence alone is normal during thinking and long tools; test guest execution
       // before entering the existing fenced recovery path, which can reboot from disk state.
       await probeSandboxGuest(this.input.sandbox);
+      const silenceMs = Date.now() - lastActivityAt;
+      if (
+        !this.stopping &&
+        !this.failure &&
+        this.lastGuestActivityAt === lastActivityAt &&
+        silenceMs >= ACP_HEALTHY_SILENCE_WARNING_MS &&
+        this.warnedGuestActivityAt !== lastActivityAt
+      ) {
+        this.warnedGuestActivityAt = lastActivityAt;
+        logger.warn("ACP command stream is silent while its sandbox guest remains healthy", {
+          event: "opencompany.goat_acp_stream_silent_guest_healthy",
+          adapter: this.input.adapterName,
+          silence_ms: silenceMs,
+          pending_methods: [
+            ...new Set([...this.pending.values()].map((pending) => pending.method)),
+          ],
+          pending_notification_count: this.pendingNotifications.length,
+          notification_pump_active: this.pumping,
+        });
+      }
     } catch (error) {
       if (this.stopping || this.failure || this.lastGuestActivityAt !== lastActivityAt) return;
       const cause = asError(error);

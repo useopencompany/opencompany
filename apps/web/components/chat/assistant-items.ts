@@ -2,12 +2,14 @@ import { SUBAGENT_TOOL_NAME } from "@opencompany/agent/subagent";
 import type { TaskStatus } from "@opencompany/agent/task-runtime-types";
 import {
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   CODEX_DYNAMIC_TOOL_NAME,
   type PublishedChatArtifact,
   parsePublishedChatArtifact,
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import type { TaskView } from "@/components/Surface";
+import { actionRowLabel, actionSource } from "@/lib/action-identity";
 import {
   BRAIN_TOOL_NAME,
   type BrainToolOutput,
@@ -21,9 +23,8 @@ import {
   CODEX_QUESTION_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
+  LEGACY_SLACK_BOT_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
   START_WORKFLOW_TOOL_NAME,
@@ -39,15 +40,24 @@ import {
 } from "@/lib/chat-ui";
 import { codingToolPresentation } from "@/lib/coding-tool-presentation";
 
+// Recurring Tasks were removed, but their tool calls are still in saved transcripts. These names
+// are spelled out because the constants no longer exist; they only ever match historical parts.
+const RETIRED_SCHEDULE_TASK_TOOL_NAME = "schedule_task";
+const RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
+const RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
+
 export type AssistantRenderItem =
   | { type: "text"; key: string; text: string; citations: BrainCitation[] }
   | { type: "reasoning"; key: string; text: string }
+  | { type: "steering"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "artifact"; key: string; artifact: PublishedChatArtifact }
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
-export type AssistantVisibleOutputKind = AssistantRenderItem["type"] | "error";
+// What the user first saw the engine produce. Steering is the user's own message echoed into the
+// turn, not engine output, so it never satisfies time-to-first-output.
+export type AssistantVisibleOutputKind = Exclude<AssistantRenderItem["type"], "steering"> | "error";
 
 // A Claude Code Task call: the tool header plus the subagent's own nested trace, already
 // resolved into render items so the UI can render them under an expandable subagent row.
@@ -92,6 +102,8 @@ export type ToolCallView = {
   // approval request apart from an in-flight call.
   state: string;
   approvalId: string | null;
+  // The service a connected action ran against ("linear"), so the row can carry its brand mark.
+  actionSource: string | null;
 };
 
 type AssistantRenderOptions = {
@@ -133,8 +145,10 @@ export function firstVisibleAssistantOutputKind(
   taskLookup: ChatTaskLookup,
   options: AssistantRenderOptions = {},
 ): AssistantVisibleOutputKind | null {
-  const firstItem = getOrderedAssistantItems(message, taskLookup, options)[0];
-  if (firstItem) return firstItem.type;
+  const firstItem = getOrderedAssistantItems(message, taskLookup, options).find(
+    (item) => item.type !== "steering",
+  );
+  if (firstItem) return firstItem.type as AssistantVisibleOutputKind;
   return message.metadata?.error ? "error" : null;
 }
 
@@ -180,6 +194,14 @@ function collectRenderItems(
       items.push({ type: "reasoning", key: `${keyPrefix}reasoning-${index}`, text });
       continue;
     }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE) {
+      const data = part.data as { text?: unknown } | undefined;
+      const text = typeof data?.text === "string" ? data.text : "";
+      if (!text.trim()) continue;
+      flushText(`${keyPrefix}text-${index}`);
+      items.push({ type: "steering", key: `${keyPrefix}steering-${index}`, text });
+      continue;
+    }
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
       const artifact = parsePublishedChatArtifact({ ok: true, artifact: part.data });
       if (!artifact) continue;
@@ -210,7 +232,9 @@ function collectRenderItems(
       continue;
     }
     if (
-      (part.type === START_TASK_TOOL_PART_TYPE || part.type === START_WORKFLOW_TOOL_PART_TYPE) &&
+      (part.type === START_TASK_TOOL_PART_TYPE ||
+        part.type === START_WORKFLOW_TOOL_PART_TYPE ||
+        part.type === "tool-workflows") &&
       part.state === "output-available" &&
       isStartTaskToolOutput(part.output)
     ) {
@@ -291,6 +315,8 @@ export function toolCallViewFromPart(
     output.error.code === "approval_required";
   const approvalDeclined =
     state === "approval-responded" && isRecord(part.approval) && part.approval.approved === false;
+  const failedWorkflow =
+    name === "workflows" && state === "output-available" && isRecord(output) && output.ok === false;
   const failedPublicWebTool =
     (name === WEB_FETCH_TOOL_NAME || name === WEB_SEARCH_TOOL_NAME) &&
     state === "output-available" &&
@@ -309,7 +335,7 @@ export function toolCallViewFromPart(
       : null;
   const status = approvalDeclined
     ? "failed"
-    : failedBrain
+    : failedBrain || failedWorkflow
       ? "failed"
       : failedAction
         ? "failed"
@@ -339,6 +365,10 @@ export function toolCallViewFromPart(
       name === USE_ACTION_TOOL_NAME
         ? actionToolLabel(part.input)
         : (presentation?.label ?? toolLabel(name)),
+    actionSource:
+      name === USE_ACTION_TOOL_NAME
+        ? actionToolSource(part.input)
+        : (presentation?.actionSource ?? null),
     status,
     statusText:
       codexPromptOutcome === "answered"
@@ -427,10 +457,13 @@ export function toolLabel(name: string) {
   if (name === CODEX_WEB_SEARCH_TOOL_NAME) return "Web search";
   if (name === CODEX_SUBAGENT_TOOL_NAME || name === SUBAGENT_TOOL_NAME) return "Subagent";
   if (name === START_TASK_TOOL_NAME) return "Task";
-  if (name === START_WORKFLOW_TOOL_NAME) return "Workflow";
-  if (name === SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
-  if (name === DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === START_WORKFLOW_TOOL_NAME || name === "workflows") return "Workflow";
+  if (name === RETIRED_SCHEDULE_TASK_TOOL_NAME) return "Recurring task";
+  if (name === RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME) return "Edit routine";
+  if (name === RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME) return "Delete routine";
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) return "Slack bot";
+  if (name === "read_workflow_memory") return "Workflow memory";
+  if (name === "update_workflow_memory") return "Update workflow memory";
   if (name === WEB_FETCH_TOOL_NAME) return "Web Fetch";
   if (name === WEB_SEARCH_TOOL_NAME) return "Web Search";
   if (name === "browser_open") return "Open page";
@@ -479,16 +512,36 @@ export function toolDetail(
   if (name === BRAIN_TOOL_NAME) {
     return brainToolDetail(part, status);
   }
+  if (name === "workflows") {
+    const output = isRecord(part.output) ? part.output : null;
+    const workflow = output && isRecord(output.workflow) ? output.workflow : null;
+    if (workflow && typeof workflow.name === "string")
+      return `${workflow.name} · ${output?.ok === false ? "Needs attention" : workflow.archived ? "Archived" : workflow.status === "active" ? "Active" : "Draft"}`;
+    return isRecord(part.input) && typeof part.input.command === "string"
+      ? part.input.command
+      : null;
+  }
 
   if (name === START_TASK_TOOL_NAME || name === START_WORKFLOW_TOOL_NAME) {
     return startTaskToolDetail(part);
   }
 
-  if (name === SCHEDULE_TASK_TOOL_NAME) {
+  if (name === RETIRED_SCHEDULE_TASK_TOOL_NAME) {
     return scheduleTaskToolDetail(part);
   }
-  if (name === EDIT_TASK_SCHEDULE_TOOL_NAME || name === DELETE_TASK_SCHEDULE_TOOL_NAME) {
+  if (
+    name === RETIRED_EDIT_TASK_SCHEDULE_TOOL_NAME ||
+    name === RETIRED_DELETE_TASK_SCHEDULE_TOOL_NAME
+  ) {
     return taskScheduleMutationToolDetail(part);
+  }
+  if (name === SLACK_BOT_TOOL_NAME || name === LEGACY_SLACK_BOT_TOOL_NAME) {
+    // The destination is what a reader checks; the message body is already in the transcript.
+    if (!isRecord(part.input)) return formatToolInput(part.input);
+    const channel = readString(part.input.channel);
+    // No channel means a reply, which lands in the thread of an earlier post or of the Slack
+    // message that started this run. Naming the thread beats dumping the message body here.
+    return channel ? truncateToolPreview(channel) : "Thread reply";
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);
@@ -579,31 +632,26 @@ function browserUrlLabel(value: string) {
   }
 }
 
+// The row label already names the service and the action, so the chip carries only what the
+// label cannot: why a call failed, and what a metered lookup returned and cost.
 function actionToolDetail(part: Record<string, unknown>) {
-  const action = isRecord(part.input) ? readString(part.input.action) : null;
-  if (part.state === "output-available" && isUseActionToolOutput(part.output)) {
-    if (part.output.ok === false) {
-      return truncateToolPreview([action, part.output.error.message].filter(Boolean).join(" - "));
-    }
-    if (isRecord(part.output.result) && part.output.result.untrustedProviderData === true) {
-      const resultCount =
-        typeof part.output.result.resultCount === "number"
-          ? `${part.output.result.resultCount} result${
-              part.output.result.resultCount === 1 ? "" : "s"
-            }`
-          : null;
-      const cost = isRecord(part.output.result.cost)
-        ? part.output.result.cost.state === "settling"
-          ? "cost settling"
-          : typeof part.output.result.cost.totalUsdMicros === "number"
-            ? formatActionCost(part.output.result.cost.totalUsdMicros)
-            : null
-        : null;
-      return truncateToolPreview([action, resultCount, cost].filter(Boolean).join(" · "));
-    }
-    return truncateToolPreview(action);
+  if (part.state !== "output-available" || !isUseActionToolOutput(part.output)) return null;
+  if (part.output.ok === false) return truncateToolPreview(part.output.error.message);
+  if (!isRecord(part.output.result) || part.output.result.untrustedProviderData !== true) {
+    return null;
   }
-  return truncateToolPreview(action) ?? formatToolInput(part.input);
+  const resultCount =
+    typeof part.output.result.resultCount === "number"
+      ? `${part.output.result.resultCount} result${part.output.result.resultCount === 1 ? "" : "s"}`
+      : null;
+  const cost = isRecord(part.output.result.cost)
+    ? part.output.result.cost.state === "settling"
+      ? "cost settling"
+      : typeof part.output.result.cost.totalUsdMicros === "number"
+        ? formatActionCost(part.output.result.cost.totalUsdMicros)
+        : null
+    : null;
+  return truncateToolPreview([resultCount, cost].filter(Boolean).join(" · "));
 }
 
 function formatActionCost(usdMicros: number) {
@@ -617,12 +665,13 @@ function formatActionCost(usdMicros: number) {
 
 export function actionToolLabel(input: unknown) {
   const action = isRecord(input) ? readString(input.action) : null;
-  if (!action) return "Action";
-  const pluginMatch = /^plugin:([^:]+):[^.]+\.(.+)$/u.exec(action);
-  if (pluginMatch) {
-    return `${toolLabel(pluginMatch[1]!)} · ${toolLabel(pluginMatch[2]!)}`;
-  }
-  return toolLabel(action.split(".").join("_"));
+  return action ? actionRowLabel(action) : "Action";
+}
+
+/** The service slug behind a connected action call, for the row's brand mark. */
+export function actionToolSource(input: unknown) {
+  const action = isRecord(input) ? readString(input.action) : null;
+  return action ? actionSource(action) : null;
 }
 
 export function isUseActionToolOutput(value: unknown): value is UseActionToolOutput {

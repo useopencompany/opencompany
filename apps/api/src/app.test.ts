@@ -33,13 +33,11 @@ import {
   type Task,
   TaskApplicationService,
   type TaskRepository,
-  type TaskSchedule,
-  TaskScheduleApplicationService,
-  type TaskScheduleRepository,
   WikiCommandApplicationService,
   type WikiCommandRepository,
   type Workflow,
   WorkflowApplicationService,
+  type WorkflowMemory,
   type WorkflowRepository,
 } from "@opencompany/core";
 import { setExceptionReporter } from "@opencompany/observability";
@@ -57,6 +55,7 @@ import type { BrainAssetService } from "./brain-assets";
 import type { ChatResourceService } from "./chat-resources";
 import { ApiError } from "./errors";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
+import type { WorkflowAvatarService } from "./workflow-avatars";
 
 vi.mock("@opencompany/analytics/product/server", () => ({
   captureProductServerEvent: vi.fn(async () => undefined),
@@ -73,8 +72,6 @@ const actor: Actor = {
     "task:write",
     "workflow:read",
     "workflow:write",
-    "schedule:read",
-    "schedule:write",
     "brain:read",
     "brain:write",
     "wiki:read",
@@ -330,6 +327,7 @@ describe("canonical Hono API", () => {
       skillImports: fakeSkillImportService(),
       pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
+      workflowAvatars: fakeWorkflowAvatars(),
       brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
@@ -337,12 +335,14 @@ describe("canonical Hono API", () => {
       userSettings: fakeUserSettings(),
       feedback: fakeFeedback(),
       repoConfigs: fakeRepoConfigs(),
+      sessionPullRequests: async () => [],
       integrationAccounts: fakeIntegrationAccounts(),
       slackBotSettings: fakeSlackBotSettings(),
       engineAuth: fakeEngineAuth(),
       engineSessions: fakeEngineSessions(),
       billing: fakeBilling(),
       workspaceCapabilities: fakeWorkspaceCapabilities(),
+      pluginBilling: fakePluginBilling(),
       workspaceControl: fakeWorkspaceControl(),
       identity: fakeIdentity(),
       onboarding: fakeOnboarding(),
@@ -494,6 +494,48 @@ describe("canonical Hono API", () => {
     });
   });
 
+  it("reads, toggles, and clears Workflow memory without touching the definition", async () => {
+    const automations = populatedAutomationServices();
+    const app = testApp(fakeRepository(), automations);
+
+    const initial = await app.request("/v1/workflows/weekly-research/memory");
+    expect(initial.status).toBe(200);
+    await expect(initial.json()).resolves.toMatchObject({
+      data: {
+        workflowId: "workflow_1",
+        enabled: true,
+        content: "Last run found two pricing changes.",
+        updatedAt: createdAt.toISOString(),
+      },
+    });
+
+    const disabled = await app.request("/v1/workflows/weekly-research/memory", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await expect(disabled.json()).resolves.toMatchObject({ data: { enabled: false } });
+
+    const cleared = await app.request("/v1/workflows/weekly-research/memory", {
+      method: "DELETE",
+    });
+    expect(cleared.status).toBe(200);
+    await expect(cleared.json()).resolves.toMatchObject({
+      data: { content: "", updatedAt: null },
+    });
+
+    // Toggling and clearing memory leaves the definition's optimistic version untouched.
+    const workflow = await app.request("/v1/workflows/weekly-research");
+    await expect(workflow.json()).resolves.toMatchObject({ data: { version: 1 } });
+  });
+
+  it("returns 404 for memory on a Workflow the actor cannot see", async () => {
+    const app = testApp(fakeRepository(), fakeAutomationServices());
+    const response = await app.request("/v1/workflows/workflow_missing/memory");
+    expect(response.status).toBe(404);
+  });
+
   it("serves canonical Workflow and Recurring Task contracts through Core services", async () => {
     const automations = populatedAutomationServices();
     const app = testApp(fakeRepository(), automations);
@@ -534,11 +576,18 @@ describe("canonical Hono API", () => {
         ],
         status: "active",
         trigger: { type: "manual" },
+        slackChannel: { enabled: false, displayName: "James", avatarUrl: "" },
       }),
     });
     expect(updatedWorkflow.status).toBe(200);
     await expect(updatedWorkflow.json()).resolves.toMatchObject({
-      data: { workflow: { version: 2 }, transactionId: "52" },
+      data: {
+        workflow: {
+          version: 2,
+          slackChannel: { enabled: false, displayName: "James", avatarUrl: "" },
+        },
+        transactionId: "52",
+      },
     });
 
     const invoked = await app.request("/v1/workflows/workflow_1/invoke", {
@@ -576,27 +625,6 @@ describe("canonical Hono API", () => {
         }),
       }),
     );
-
-    const createdSchedule = await app.request("/v1/schedules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": "schedule-create-1" },
-      body: JSON.stringify({
-        name: "Daily research",
-        cron: "0 9 * * *",
-        timezone: "UTC",
-        prompt: "Research market changes.",
-      }),
-    });
-    expect(createdSchedule.status).toBe(201);
-    const scheduleBody = await createdSchedule.json();
-    expect(scheduleBody).toMatchObject({
-      data: {
-        schedule: { id: "schedule_1", name: "Daily research", version: 1 },
-        transactionId: "61",
-        replayed: false,
-      },
-    });
-    expect(JSON.stringify(scheduleBody)).not.toMatch(/workos|workspace_id|harness|goat_/iu);
   });
 
   it("previews metadata only and installs an immutable Skill through the API boundary", async () => {
@@ -1125,6 +1153,7 @@ describe("canonical Hono API", () => {
       source: installation.source,
       integrity: installation.integrity,
       files: [{ path: "plugin.json", content: packageBytes, executable: false }],
+      pricing: null,
       fileCount: 1,
       totalBytes: packageBytes.length,
       skills: [],
@@ -1959,9 +1988,11 @@ describe("canonical Hono API", () => {
       ["GET", "/integrations/posthog/callback", "mcp.callback.posthog"],
       ["GET", "/integrations/neon/start", "mcp.start.neon"],
       ["GET", "/integrations/supabase/start", "mcp.start.supabase"],
+      ["GET", "/integrations/todoist/start", "mcp.start.todoist"],
       ["GET", "/integrations/resend/start", "mcp.start.resend"],
       ["GET", "/integrations/neon/callback", "mcp.callback.neon"],
       ["GET", "/integrations/supabase/callback", "mcp.callback.supabase"],
+      ["GET", "/integrations/todoist/callback", "mcp.callback.todoist"],
       ["GET", "/integrations/resend/callback", "mcp.callback.resend"],
       ["GET", "/integrations/latitude/start", "mcp.start.latitude"],
       ["GET", "/integrations/latitude/callback", "mcp.callback.latitude"],
@@ -3256,6 +3287,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload, replace }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
     const file = new File(["private bytes"], "plan.pdf", { type: "application/pdf" });
     const createForm = new FormData();
@@ -3318,6 +3350,7 @@ describe("canonical Hono API", () => {
     }));
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ download }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
 
     const response = await app.request("/v1/brain-assets/document_1");
@@ -3364,6 +3397,7 @@ describe("canonical Hono API", () => {
     const upload = vi.fn();
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload }),
+      workflowAvatars: fakeWorkflowAvatars(),
     });
     const response = await app.request("/v1/brains/brain_1/assets", {
       method: "POST",
@@ -3443,10 +3477,13 @@ describe("canonical Hono API", () => {
             taskViewMode: "list",
             taskTimeRange: "24h",
             autoModelRoutingEnabled: true,
+            approveForMeEnabled: false,
             reviewInboxEnabled: false,
             sidebarProjectsEnabled: false,
             subagentsEnabled: false,
             pastSessionAccessEnabled: false,
+            imessageEnabled: false,
+            whatsappEnabled: false,
           }),
         },
       });
@@ -3505,15 +3542,18 @@ describe("canonical Hono API", () => {
       const updatePreferences = vi.fn(async () => ({
         timezone: "UTC",
         botsEnabled,
-        taskSpawningEnabled: false,
+        taskSpawningEnabled: true as const,
         wikiEnabled: true as const,
         taskViewMode: "board" as const,
         taskTimeRange: "7d" as const,
         autoModelRoutingEnabled: false,
+        approveForMeEnabled: false,
         reviewInboxEnabled: false,
         sidebarProjectsEnabled: false,
         subagentsEnabled: false,
         pastSessionAccessEnabled: false,
+        imessageEnabled: false,
+        whatsappEnabled: false,
       }));
       const app = testApp(fakeRepository(), {
         userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3535,15 +3575,18 @@ describe("canonical Hono API", () => {
     const updatePreferences = vi.fn(async () => ({
       timezone: "Europe/Berlin",
       botsEnabled: false,
-      taskSpawningEnabled: true,
+      taskSpawningEnabled: true as const,
       wikiEnabled: true as const,
       taskViewMode: "list" as const,
       taskTimeRange: "24h" as const,
       autoModelRoutingEnabled: true,
+      approveForMeEnabled: false,
       reviewInboxEnabled: false,
       sidebarProjectsEnabled: false,
       subagentsEnabled: false,
       pastSessionAccessEnabled: false,
+      imessageEnabled: false,
+      whatsappEnabled: false,
     }));
     const app = testApp(fakeRepository(), {
       userSettings: { ...fakeUserSettings(), updatePreferences },
@@ -3561,6 +3604,7 @@ describe("canonical Hono API", () => {
         taskViewMode: "list",
         taskTimeRange: "24h",
         autoModelRoutingEnabled: true,
+        approveForMeEnabled: false,
       },
       meta: { apiVersion: "v1" },
     });
@@ -3607,6 +3651,11 @@ describe("canonical Hono API", () => {
       ["/v1/engine-auth/codex", "GET"],
       ["/v1/engine-auth/codex/usage", "GET"],
       ["/v1/engine-auth/codex/device", "POST"],
+      ["/v1/engine-auth/doppler", "GET"],
+      ["/v1/engine-auth/doppler/start", "POST"],
+      ["/v1/engine-auth/doppler/flow/poll", "POST"],
+      ["/v1/engine-auth/doppler/cancel", "POST"],
+      ["/v1/engine-auth/doppler", "DELETE"],
       ["/v1/engine-auth/infisical", "GET"],
       ["/v1/engine-auth/infisical/start", "POST"],
       ["/v1/engine-auth/infisical", "DELETE"],
@@ -3684,13 +3733,40 @@ describe("canonical Hono API", () => {
       message: "The board drops my column order.",
     });
 
+    const withContext = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "bug",
+        message: "The run stalled halfway.",
+        context: { kind: "task", id: "tsk_1" },
+      }),
+    });
+    expect(withContext.status).toBe(200);
+    expect(submit).toHaveBeenLastCalledWith(actor, {
+      kind: "bug",
+      message: "The run stalled halfway.",
+      context: { kind: "task", id: "tsk_1" },
+    });
+
     const tooShort = await app.request("/v1/feedback", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "bug", message: "no" }),
     });
     expect(tooShort.status).toBe(400);
-    expect(submit).toHaveBeenCalledTimes(1);
+
+    const unknownContextKind = await app.request("/v1/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "bug",
+        message: "The board drops my column order.",
+        context: { kind: "wiki", id: "page_1" },
+      }),
+    });
+    expect(unknownContextKind.status).toBe(400);
+    expect(submit).toHaveBeenCalledTimes(2);
   });
 
   it("serves repository configs without ever echoing stored env values", async () => {
@@ -3864,6 +3940,9 @@ describe("canonical Hono API", () => {
       installed: true,
       status: "connected" as const,
       needsScopeUpgrade: false,
+      canCustomizeIdentity: true,
+      canReact: true,
+      canReadDirectMessages: true,
       teamName: "Acme",
       statusReason: null,
       destinationCount: 1,
@@ -4173,6 +4252,36 @@ describe("canonical Hono API", () => {
     expect(disconnectCodex).toHaveBeenCalledWith(actor);
   });
 
+  it("scopes Doppler start, poll, cancel and disconnect to the authenticated actor", async () => {
+    const flow = {
+      id: "gdopf_test",
+      status: "link_ready" as const,
+      loginUrl: "https://dashboard.doppler.com/workplace/auth/cli",
+      userCode: "synthetic_auth_code",
+      statusReason: null,
+      expiresAt: "2026-09-14T15:00:00.000Z",
+    };
+    const startDopplerAuth = vi.fn(async () => flow);
+    const pollDopplerAuth = vi.fn(async () => flow);
+    const cancelDopplerAuth = vi.fn(async () => {});
+    const app = testApp(fakeRepository(), {
+      engineAuth: engineAuthService({ startDopplerAuth, pollDopplerAuth, cancelDopplerAuth }),
+    });
+    const started = await app.request("/v1/engine-auth/doppler/start", { method: "POST" });
+    expect(started.status).toBe(201);
+    await expect(started.json()).resolves.toMatchObject({ data: { flow } });
+    expect(startDopplerAuth).toHaveBeenCalledWith(actor);
+    const polled = await app.request("/v1/engine-auth/doppler/gdopf_test/poll", { method: "POST" });
+    expect(polled.status).toBe(200);
+    expect(pollDopplerAuth).toHaveBeenCalledWith(actor, flow.id);
+    expect((await app.request("/v1/engine-auth/doppler/cancel", { method: "POST" })).status).toBe(
+      200,
+    );
+    expect(cancelDopplerAuth).toHaveBeenLastCalledWith(actor, false);
+    expect((await app.request("/v1/engine-auth/doppler", { method: "DELETE" })).status).toBe(200);
+    expect(cancelDopplerAuth).toHaveBeenLastCalledWith(actor, true);
+  });
+
   it("gives engine auth flow starts their own small rate bucket", async () => {
     const startCodexDeviceAuth = vi.fn(async () => ({
       id: "gcodf_1",
@@ -4477,6 +4586,36 @@ describe("canonical Hono API", () => {
       expect(JSON.stringify(captureException.mock.calls)).not.toContain(
         "private prompt that must not enter telemetry",
       );
+    } finally {
+      setExceptionReporter(undefined);
+    }
+  });
+
+  it("does not report expected 4xx domain errors to the exception reporter", async () => {
+    const captureException = vi.fn();
+    setExceptionReporter({ captureException });
+    try {
+      const app = testApp(fakeRepository(), { wikiCommandsInternalSecret: "wiki-secret" });
+
+      const notFound = await app.request("/v1/tasks/task_missing");
+      expect(notFound.status).toBe(404);
+      await expect(notFound.json()).resolves.toMatchObject({
+        error: { code: "not_found" },
+      });
+
+      // Routes outside /v1 only have `app.onError` between them and the reporter.
+      const invalid = await app.request("/internal/wiki/commands", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer wiki-secret",
+          "Idempotency-Key": "agent-wiki:turn_1:call_1",
+        },
+        body: JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command: {} }),
+      });
+      expect(invalid.status).toBe(400);
+
+      expect(captureException).not.toHaveBeenCalled();
     } finally {
       setExceptionReporter(undefined);
     }
@@ -4826,7 +4965,6 @@ describe("canonical Hono API", () => {
       workspace: null,
       activeBrainId: null,
     }));
-    const checkSlug = vi.fn(async () => ({ slug: "analytical-co", available: true }));
     const saveProfile = vi.fn(async () => undefined);
     const saveWorkspace = vi.fn(async () => ({
       workspaceId: "goat_ws_new",
@@ -4838,21 +4976,13 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       authenticate,
       identify,
-      onboarding: { getState, checkSlug, saveProfile, saveWorkspace, finish },
+      onboarding: { getState, saveProfile, saveWorkspace, finish },
     });
 
     const state = await app.request("/v1/onboarding");
     expect(state.status).toBe(200);
     expect(state.headers.get("set-cookie")).toContain("wos-session=refreshed");
     expect(getState).toHaveBeenCalledWith(identity);
-
-    const checked = await app.request("/v1/onboarding/workspace-slug/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: "analytical-co" }),
-    });
-    expect(checked.status).toBe(200);
-    expect(checkSlug).toHaveBeenCalledWith(identity, "analytical-co");
 
     const profile = await app.request("/v1/onboarding/profile", {
       method: "PUT",
@@ -4871,14 +5001,12 @@ describe("canonical Hono API", () => {
       body: JSON.stringify({
         workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
         name: "Analytical Co",
-        slug: "analytical-co",
       }),
     });
     expect(workspace.status).toBe(200);
     expect(saveWorkspace).toHaveBeenCalledWith(identity, {
       workspaceId: "goat_ws_00000000-0000-4000-8000-000000000123",
       name: "Analytical Co",
-      slug: "analytical-co",
     });
 
     const completed = await app.request("/v1/onboarding/complete", {
@@ -4888,7 +5016,7 @@ describe("canonical Hono API", () => {
     });
     expect(completed.status).toBe(200);
     expect(finish).toHaveBeenCalledWith(identity, "friend");
-    expect(identify).toHaveBeenCalledTimes(5);
+    expect(identify).toHaveBeenCalledTimes(4);
     expect(authenticate).not.toHaveBeenCalled();
   });
 
@@ -5158,6 +5286,7 @@ function testApp(
     skillImports: fakeSkillImportService(),
     pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
+    workflowAvatars: fakeWorkflowAvatars(),
     brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
@@ -5165,12 +5294,14 @@ function testApp(
     userSettings: fakeUserSettings(),
     feedback: fakeFeedback(),
     repoConfigs: fakeRepoConfigs(),
+    sessionPullRequests: async () => [],
     integrationAccounts: fakeIntegrationAccounts(),
     slackBotSettings: fakeSlackBotSettings(),
     engineAuth: fakeEngineAuth(),
     engineSessions: fakeEngineSessions(),
     billing: fakeBilling(),
     workspaceCapabilities: fakeWorkspaceCapabilities(),
+    pluginBilling: fakePluginBilling(),
     workspaceControl: fakeWorkspaceControl(),
     identity: fakeIdentity(),
     onboarding: fakeOnboarding(),
@@ -5222,6 +5353,17 @@ function fakeAttachments(): AttachmentUploadService {
   return {
     upload: async () => {
       throw new Error("Unexpected attachment upload.");
+    },
+  };
+}
+
+function fakeWorkflowAvatars(): WorkflowAvatarService {
+  return {
+    upload: async () => {
+      throw new Error("Unexpected workflow avatar upload.");
+    },
+    download: async () => {
+      throw new Error("Unexpected workflow avatar download.");
     },
   };
 }
@@ -5320,10 +5462,27 @@ function fakeWorkspaceCapabilities(): Parameters<typeof createApiApp>[0]["worksp
   };
 }
 
+function fakePluginBilling(): Parameters<typeof createApiApp>[0]["pluginBilling"] {
+  return {
+    get: async () => {
+      throw new Error("Unexpected plugin billing read.");
+    },
+    setDailyLimit: async () => {
+      throw new Error("Unexpected plugin spend limit mutation.");
+    },
+  };
+}
+
 function fakeWorkspaceControl(): Parameters<typeof createApiApp>[0]["workspaceControl"] {
   return {
     getSettings: async () => {
       throw new Error("Unexpected workspace settings read.");
+    },
+    getSandboxSize: async () => {
+      throw new Error("Unexpected workspace sandbox size read.");
+    },
+    setSandboxSize: async () => {
+      throw new Error("Unexpected workspace sandbox size write.");
     },
     invite: async () => {
       throw new Error("Unexpected workspace invitation.");
@@ -5357,6 +5516,7 @@ function fakeIdentity(): Parameters<typeof createApiApp>[0]["identity"] {
       timezone: "UTC",
       taskSpawningEnabled: true,
       autoModelRoutingEnabled: false,
+      approveForMeEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       taskViewMode: "board" as const,
       taskTimeRange: "7d" as const,
@@ -5389,9 +5549,6 @@ function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
   return {
     getState: async () => {
       throw new Error("Unexpected onboarding state read.");
-    },
-    checkSlug: async () => {
-      throw new Error("Unexpected onboarding slug check.");
     },
     saveProfile: async () => {
       throw new Error("Unexpected onboarding profile mutation.");
@@ -5542,6 +5699,10 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     alwaysAllowAction: async () => {
       throw new Error("Unexpected standing permission mutation.");
     },
+
+    setToolMode: async () => {
+      throw new Error("Unexpected integration tool mode update.");
+    },
     connectAttio: async () => {
       throw new Error("Unexpected Attio connect.");
     },
@@ -5554,6 +5715,12 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     connectGranola: async () => {
       throw new Error("Unexpected Granola connect.");
     },
+    connectPostHogEvents: async () => {
+      throw new Error("Unexpected PostHog event connect.");
+    },
+    listPostHogEvents: async () => {
+      throw new Error("Unexpected PostHog event list.");
+    },
     createJamieEventsEndpoint: async () => {
       throw new Error("Unexpected Jamie event endpoint creation.");
     },
@@ -5562,6 +5729,12 @@ function fakeIntegrationAccounts(): Parameters<typeof createApiApp>[0]["integrat
     },
     connectConvex: async () => {
       throw new Error("Unexpected Convex connect.");
+    },
+    enableConvexEvents: async () => {
+      throw new Error("Unexpected Convex events enable.");
+    },
+    disableConvexEvents: async () => {
+      throw new Error("Unexpected Convex events disable.");
     },
     connectRender: async () => {
       throw new Error("Unexpected Render connect.");
@@ -5603,6 +5776,18 @@ function integrationAccountService(
 
 function fakeEngineAuth(): Parameters<typeof createApiApp>[0]["engineAuth"] {
   return {
+    getDopplerStatus: async () => {
+      throw new Error("Unexpected Doppler status read.");
+    },
+    startDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth start.");
+    },
+    pollDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth poll.");
+    },
+    cancelDopplerAuth: async () => {
+      throw new Error("Unexpected Doppler auth cancellation.");
+    },
     getClaudeCodeStatus: async () => {
       throw new Error("Unexpected Claude Code status read.");
     },
@@ -6084,6 +6269,7 @@ function fakePluginInstallation(): PluginInstallation {
     id: "plugin_1",
     name: "quality-tools",
     status: "enabled",
+    pricing: null,
     manifest: { name: "quality-tools", description: "Quality helpers." },
     source: {
       type: "github",
@@ -6175,20 +6361,9 @@ function fakeAutomationServices() {
     updateWorkflow: async () => ({ status: "not_found" }),
     archiveWorkflow: async () => ({ status: "not_found" }),
     recordRunNow: async () => undefined,
-  };
-  const scheduleRepository: TaskScheduleRepository = {
-    assertTaskScheduleWriteAllowed: async () => undefined,
-    replayTaskScheduleCreate: async () => null,
-    listTaskSchedules: async () => ({ schedules: [], nextCursor: null }),
-    getTaskSchedule: async () => null,
-    createTaskSchedule: async () => {
-      throw new Error("Unexpected Task schedule creation.");
-    },
-    updateTaskSchedule: async () => ({ status: "not_found" }),
-    setTaskScheduleEnabled: async () => ({ status: "not_found" }),
-    archiveTaskSchedule: async () => ({ status: "not_found" }),
-    loadTaskScheduleExecution: async () => null,
-    recordRunNow: async () => undefined,
+    getWorkflowMemory: async () => null,
+    setWorkflowMemoryEnabled: async () => null,
+    clearWorkflowMemory: async () => null,
   };
   const options = {
     scheduleRules: {
@@ -6210,9 +6385,6 @@ function fakeAutomationServices() {
       prepareWorkflow: async () => {
         throw new Error("Unexpected Workflow planning.");
       },
-      prepareTaskSchedule: async () => {
-        throw new Error("Unexpected Task schedule planning.");
-      },
     },
     taskCreator: {
       create: async () => {
@@ -6222,7 +6394,6 @@ function fakeAutomationServices() {
   };
   return {
     workflows: new WorkflowApplicationService(workflowRepository, options),
-    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
   };
 }
 
@@ -6241,24 +6412,19 @@ function populatedAutomationServices() {
       },
     ],
     status: "active",
+    scope: "company",
+    slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
+    createdByUserId: "user_1",
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,
     createdAt,
     updatedAt: createdAt,
   };
-  const schedule: TaskSchedule = {
-    id: "schedule_1",
-    name: "Daily research",
-    sourceDescription: "",
-    cron: "0 9 * * *",
-    timezone: "UTC",
-    prompt: "Research market changes.",
+  let memory: WorkflowMemory = {
+    workflowId: "workflow_1",
     enabled: true,
-    lastRunAt: null,
-    nextRunAt: createdAt,
-    version: 1,
-    createdAt,
+    content: "Last run found two pricing changes.",
     updatedAt: createdAt,
   };
   const workflowRepository: WorkflowRepository = {
@@ -6277,6 +6443,7 @@ function populatedAutomationServices() {
         description: input.description,
         steps: input.steps,
         status: input.status,
+        slackChannel: input.slackChannel,
         trigger:
           input.trigger.type === "manual" || input.trigger.type === "event"
             ? input.trigger.type === "event"
@@ -6304,44 +6471,18 @@ function populatedAutomationServices() {
       transactionId: "53",
     }),
     recordRunNow: async () => undefined,
-  };
-  const scheduleRepository: TaskScheduleRepository = {
-    assertTaskScheduleWriteAllowed: async () => undefined,
-    replayTaskScheduleCreate: async () => null,
-    listTaskSchedules: async () => ({ schedules: [schedule], nextCursor: null }),
-    getTaskSchedule: async ({ scheduleId }) => (scheduleId === schedule.id ? schedule : null),
-    createTaskSchedule: async () => ({
-      schedule,
-      transactionId: "61",
-      idempotentReplay: false,
-    }),
-    updateTaskSchedule: async () => ({
-      status: "updated",
-      value: { ...schedule, version: 2 },
-      transactionId: "62",
-    }),
-    setTaskScheduleEnabled: async ({ enabled }) => ({
-      status: "updated",
-      value: { ...schedule, enabled, version: 2 },
-      transactionId: "63",
-    }),
-    archiveTaskSchedule: async () => ({
-      status: "updated",
-      value: { scheduleId: schedule.id, version: 2 },
-      transactionId: "64",
-    }),
-    loadTaskScheduleExecution: async ({ scheduleId }) =>
-      scheduleId === schedule.id
-        ? {
-            schedule,
-            execution: {
-              engine: "opencompany",
-              model: "provider/model",
-              payload: { engine: "opencompany", model: "provider/model" },
-            },
-          }
-        : null,
-    recordRunNow: async () => undefined,
+    getWorkflowMemory: async ({ workflowId }) =>
+      workflowId === workflow.id || workflowId === workflow.slug ? memory : null,
+    setWorkflowMemoryEnabled: async ({ workflowId, enabled }) => {
+      if (workflowId !== workflow.id && workflowId !== workflow.slug) return null;
+      memory = { ...memory, enabled };
+      return memory;
+    },
+    clearWorkflowMemory: async ({ workflowId }) => {
+      if (workflowId !== workflow.id && workflowId !== workflow.slug) return null;
+      memory = { ...memory, content: "", updatedAt: null };
+      return memory;
+    },
   };
   const prepareWorkflow = vi.fn(async () => ({
     engine: "opencompany" as const,
@@ -6358,11 +6499,6 @@ function populatedAutomationServices() {
     },
     planner: {
       prepareWorkflow,
-      prepareTaskSchedule: async () => ({
-        engine: "opencompany" as const,
-        model: "provider/model",
-        payload: { engine: "opencompany", model: "provider/model" },
-      }),
     },
     taskCreator: {
       create: async ({ source }: { source: "workflow" | "schedule" }) => ({
@@ -6381,7 +6517,6 @@ function populatedAutomationServices() {
   };
   return {
     workflows: new WorkflowApplicationService(workflowRepository, options),
-    schedules: new TaskScheduleApplicationService(scheduleRepository, options),
     prepareWorkflow,
   };
 }
@@ -6476,6 +6611,7 @@ function fakeRepository(): FakeRepository {
           title: "Chat",
           engine: "opencompany",
           model: "provider/default",
+          composerSettings: null,
           messageShapeEpoch: 4,
           runtime: {
             status: "running",
@@ -6485,6 +6621,7 @@ function fakeRepository(): FakeRepository {
           },
           activityState: "working",
           hasUnseen: false,
+          awaitingInput: false,
           pinnedAt: null,
           createdAt,
           updatedAt: createdAt,
@@ -6497,6 +6634,7 @@ function fakeRepository(): FakeRepository {
       title: "Chat",
       engine: "opencompany",
       model: "provider/default",
+      composerSettings: null,
       messageShapeEpoch: 4,
       runtime: {
         status: "running",
@@ -6506,6 +6644,7 @@ function fakeRepository(): FakeRepository {
       },
       activityState: "working",
       hasUnseen: false,
+      awaitingInput: false,
       pinnedAt: null,
       createdAt,
       updatedAt: createdAt,
@@ -6574,6 +6713,10 @@ function fakeRepository(): FakeRepository {
       runId,
       status: "canceled",
       idempotentReplay: false,
+    }),
+    steerRun: async ({ runId }) => ({
+      result: { runId, targetRunId: "run_active" },
+      found: true,
     }),
     resolveApproval: async ({ command }) => ({
       approvalId: command.approvalId,
@@ -6736,5 +6879,55 @@ describe("retired Wiki ingestion endpoints", () => {
     expect(await response.json()).toMatchObject({
       error: { message: expect.stringContaining("Wiki ingestion has been retired") },
     });
+  });
+});
+
+describe("POST /internal/workflows/commands", () => {
+  const request = (command: unknown, token = "workflow-test-token") => ({
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      "Idempotency-Key": "workflow:turn:call",
+    },
+    body: JSON.stringify({ userWorkosId: "user_1", workspaceId: "workspace_1", command }),
+  });
+  it("requires the internal credential before resolving the actor", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }, "wrong")))
+        .status,
+    ).toBe(401);
+    expect(resolveWikiServiceActor).not.toHaveBeenCalled();
+  });
+  it("reauthorizes workspace membership and rejects malformed commands", async () => {
+    const resolveWikiServiceActor = vi.fn(async () => actor);
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor,
+    });
+    const read = await app.request("/internal/workflows/commands", request({ command: "list" }));
+    expect(read.status).toBe(200);
+    expect(resolveWikiServiceActor).toHaveBeenCalledWith(
+      expect.objectContaining({ userWorkosId: "user_1", workspaceId: "workspace_1" }),
+    );
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "oops" }))).status,
+    ).toBe(400);
+  });
+  it("does not grant access to a caller-supplied workspace", async () => {
+    const app = testApp(fakeRepository(), {
+      wikiCommandsInternalSecret: "workflow-test-token",
+      resolveWikiServiceActor: async () => {
+        throw new ApiError(403, "forbidden", "Not a workspace member");
+      },
+    });
+    expect(
+      (await app.request("/internal/workflows/commands", request({ command: "list" }))).status,
+    ).toBe(403);
   });
 });

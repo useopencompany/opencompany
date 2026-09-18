@@ -20,6 +20,7 @@ import {
 } from "@opencompany/ui/components/dialog";
 import { Skeleton } from "@opencompany/ui/components/skeleton";
 import { toast } from "@opencompany/ui/components/sonner";
+import { cn } from "@opencompany/ui/lib/utils";
 import {
   AlertCircle,
   ChevronDown,
@@ -27,6 +28,7 @@ import {
   Loader2,
   PlugZap,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Unplug,
   Users,
@@ -39,23 +41,23 @@ import { useEffect, useMemo, useOptimistic, useState, useTransition } from "reac
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
+import { ConvexErrorEventsSetup } from "@/components/ConvexErrorEventsSetup";
 import { GitHubRepositoryAccessSection } from "@/components/GitHubRepositoryAccess";
 import { GranolaIntegrationSetup } from "@/components/GranolaIntegrationSetup";
 import { InfisicalPluginConnectionForm } from "@/components/InfisicalPluginConnectionForm";
 import { JamieEventsSetup } from "@/components/JamieEventsSetup";
+import { PageContent } from "@/components/PageContent";
 import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
-import {
-  installOfficialMcpPlugin,
-  OFFICIAL_MCP_PLUGINS,
-  type OfficialMcpPluginConfig,
-} from "@/components/PluginSettings";
+import { PostHogEventsSetup } from "@/components/PostHogEventsSetup";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
-import { SettingsContent } from "@/components/SettingsChrome";
+import { ToolPermissionRow } from "@/components/ToolPermissionRow";
 import {
   type CapabilityId,
   type CapabilityMode,
   effectiveCapabilityMode,
+  effectiveToolMode,
   providerCapabilities,
+  type ToolMode,
 } from "@/lib/actions/capabilities";
 import {
   archiveHeadlessPlugin,
@@ -64,8 +66,17 @@ import {
   refreshHeadlessPluginMcp,
   setHeadlessPluginEventEnabled,
 } from "@/lib/headless-knowledge-commands";
-import { setIntegrationCapabilityModeAction } from "@/lib/integration-account-actions";
+import {
+  setIntegrationCapabilityModeAction,
+  setIntegrationToolModeAction,
+} from "@/lib/integration-account-actions";
 import { type IntegrationAccountView, type PersonalAccountProvider } from "@/lib/integration-state";
+import {
+  installOfficialPlugin,
+  OFFICIAL_MCP_PLUGINS,
+  type OfficialMcpPluginConfig,
+  type OfficialPluginConfig,
+} from "@/lib/official-plugin-catalog";
 import { type OfficialMcpPluginName, officialPluginUpdateAvailable } from "@/lib/official-plugins";
 import {
   type ManagedPluginConnection,
@@ -85,6 +96,8 @@ export type PluginLoadState =
 
 export type PluginToolView = {
   id: string;
+  /** The raw MCP tool name — the key `tool_modes` is stored under and the gateway resolves. */
+  toolName: string;
   name: string;
   description: string | null;
   readOnly: boolean;
@@ -121,7 +134,7 @@ type PluginSkill = {
   description: string;
 };
 
-type PluginPreviewState =
+export type PluginPreviewState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "ready"; preview: PluginImportPreviewDto };
@@ -461,6 +474,25 @@ export function SupabasePluginDetail({
   );
 }
 
+export function TodoistPluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.todoist}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
 export function ResendPluginDetail({
   pluginState,
   canEdit,
@@ -606,6 +638,25 @@ export function SigNozPluginDetail({
   return (
     <OfficialMcpPluginDetail
       config={OFFICIAL_MCP_PLUGINS.signoz}
+      pluginState={pluginState}
+      canEdit={canEdit}
+      {...(toolsState ? { toolsState } : {})}
+    />
+  );
+}
+
+export function Dash0PluginDetail({
+  pluginState,
+  canEdit,
+  toolsState,
+}: {
+  pluginState: PluginLoadState;
+  canEdit: boolean;
+  toolsState?: PluginToolsState;
+}) {
+  return (
+    <OfficialMcpPluginDetail
+      config={OFFICIAL_MCP_PLUGINS.dash0}
       pluginState={pluginState}
       canEdit={canEdit}
       {...(toolsState ? { toolsState } : {})}
@@ -867,10 +918,14 @@ function OfficialMcpPluginDetailView({
   return (
     <>
       <PluginConnectionFeedback />
-      <SettingsContent
+      <PageContent
         title={config.label}
-        description={plugin?.manifest.description || config.description}
-        backLink={{ href: "/settings/plugins", label: "Plugins" }}
+        description={
+          config.name === "dash0"
+            ? config.description
+            : plugin?.manifest.description || config.description
+        }
+        backLink={{ href: "/plugins", label: "Plugins" }}
         icon={
           <span
             aria-hidden="true"
@@ -917,7 +972,7 @@ function OfficialMcpPluginDetailView({
           }
         />
         <SkillsSection config={config} state={pluginState} previewState={previewState} />
-      </SettingsContent>
+      </PageContent>
     </>
   );
 }
@@ -926,6 +981,9 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
   const router = useRouter();
   const { integrations } = useAppData();
   const linearAccount = integrations.personalAccounts.linear.find((account) => account.connected);
+  const posthogAccounts = integrations.personalAccounts.posthog ?? [];
+  const posthogAccount =
+    posthogAccounts.find((account) => account.connected) ?? posthogAccounts[0] ?? null;
   const [error, setError] = useState<string | null>(null);
   const [pendingEventId, setPendingEventId] = useState<string | null>(null);
 
@@ -960,7 +1018,7 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
           ) : canEdit ? (
             <a
               className={`${buttonVariants({ variant: "outline", size: "sm" })} mt-2`}
-              href="/api/integrations/linear-ingest/start?returnTo=/settings/plugins/linear%23events"
+              href="/api/integrations/linear-ingest/start?returnTo=/plugins/linear%23events"
             >
               Connect Linear events
             </a>
@@ -972,8 +1030,17 @@ function EventsSection({ plugin, canEdit }: { plugin: PluginInstallationDto; can
       {plugin.name === "granola" && canEdit ? (
         <GranolaIntegrationSetup initialState={integrations.granola} variant="modal" />
       ) : null}
+      {plugin.name === "posthog" && canEdit ? (
+        <PostHogEventsSetup initialAccount={posthogAccount} />
+      ) : null}
       {plugin.name === "jamie" && canEdit ? (
         <JamieEventsSetup initialState={integrations.jamie_events} />
+      ) : null}
+      {plugin.name === "convex" && canEdit ? (
+        <ConvexErrorEventsSetup
+          initialState={integrations.convex_events}
+          deployKeyConnected={integrations.convex.connected}
+        />
       ) : null}
       <ul className="overflow-hidden rounded-lg border border-border bg-surface">
         {plugin.events.map((event: PluginEventDefinitionDto) => {
@@ -1072,14 +1139,14 @@ function PluginSetupCallout({
   );
 }
 
-function PluginHeaderSection({
+export function PluginHeaderSection({
   config,
   state,
   previewState,
   updateAvailable,
   canEdit,
 }: {
-  config: OfficialMcpPluginConfig;
+  config: OfficialPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
   updateAvailable: boolean;
@@ -1103,7 +1170,7 @@ function PluginHeaderSection({
     setError(null);
     startTransition(async () => {
       try {
-        await installOfficialMcpPlugin(
+        await installOfficialPlugin(
           config,
           previewState.status === "ready" ? previewState.preview : undefined,
         );
@@ -1131,7 +1198,7 @@ function PluginHeaderSection({
     setError(null);
     startTransition(async () => {
       try {
-        await installOfficialMcpPlugin(config);
+        await installOfficialPlugin(config);
         toast.success(`${config.label} updated.`);
         router.refresh();
       } catch (cause) {
@@ -1258,8 +1325,8 @@ function PluginHeaderSection({
           <DialogHeader className="text-left">
             <DialogTitle className="text-[15px]">Uninstall {config.label}?</DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              {config.label} tools and plugin skills will be removed. Connected accounts will not be
-              changed.
+              {config.label} {config.kind === "mcp" ? "tools and plugin skills" : "plugin skills"}{" "}
+              will be removed. Connected accounts will not be changed.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -1671,13 +1738,86 @@ function ToolGroupCard({
   provider: string;
   permissionConnection: IntegrationAccountView<PluginConnectionProvider> | null;
 }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [open, setOpen] = useState(false);
+  const connectionProvider = permissionConnection?.provider ?? provider;
+  const storedCapabilityModes = permissionConnection?.capabilityModes;
+  // The package's declared default, not the registry's, is what the group toggle shows for an
+  // unset group, so the tool rows have to resolve against the same fallback or a tool would claim
+  // a mode its own group header contradicts.
+  const capabilityModes =
+    storedCapabilityModes && Object.hasOwn(storedCapabilityModes, group.modeKey)
+      ? storedCapabilityModes
+      : { ...storedCapabilityModes, [group.modeKey]: group.defaultMode };
+  const groupMode = effectiveCapabilityMode(connectionProvider, group.modeKey, capabilityModes);
+  const [toolModes, setOptimisticToolModes] = useOptimistic(
+    (permissionConnection?.toolModes ?? {}) as Record<string, unknown>,
+  );
+  const overrides = group.tools.filter((tool) => storedToolMode(toolModes, tool.toolName));
+  const editable = Boolean(permissionConnection) && !isPending;
+
+  const setToolMode = (toolName: string, mode: ToolMode) => {
+    if (!permissionConnection || isPending) return;
+    startTransition(async () => {
+      setOptimisticToolModes(nextToolModes(toolModes, { [toolName]: mode }));
+      const result = await setIntegrationToolModeAction(
+        permissionConnection.integrationId,
+        toolName,
+        mode,
+      );
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      router.refresh();
+    });
+  };
+
+  const clearOverrides = () => {
+    if (!permissionConnection || isPending || overrides.length === 0) return;
+    startTransition(async () => {
+      setOptimisticToolModes(
+        nextToolModes(
+          toolModes,
+          Object.fromEntries(overrides.map((tool) => [tool.toolName, "inherit" as const])),
+        ),
+      );
+      // Sequential on purpose: each write is a jsonb merge on the same connection row, so
+      // concurrent requests could drop one another's key.
+      for (const tool of overrides) {
+        const result = await setIntegrationToolModeAction(
+          permissionConnection.integrationId,
+          tool.toolName,
+          "inherit",
+        );
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
+      }
+      router.refresh();
+    });
+  };
+
   return (
     <Card className="gap-3 bg-surface py-3 shadow-none">
       <CardHeader className="grid-cols-[minmax(0,1fr)_auto] px-3">
         <div className="min-w-0">
-          <CardTitle className="text-[13px] font-medium leading-5 text-ink">
-            {group.label}
-          </CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-[13px] font-medium leading-5 text-ink">
+              {group.label}
+            </CardTitle>
+            {overrides.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                className="rounded-full border border-border px-1.5 py-0.5 text-[10.5px] font-medium leading-4 text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink"
+              >
+                {overrides.length} custom
+              </button>
+            ) : null}
+          </div>
           <p className="text-[12px] leading-4 text-ink-subtle">{group.description}</p>
         </div>
         <PluginCapabilityModeRow
@@ -1688,19 +1828,96 @@ function ToolGroupCard({
       </CardHeader>
       {group.tools.length > 0 ? (
         <CardContent className="px-3">
-          <details className="group rounded-md border border-border/70">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-[12px] font-medium text-ink-muted">
+          {overrides.length > 0 ? (
+            // Changing the group never silently discards an explicit tool decision, so say what
+            // stayed behind and offer the undo rather than resetting on the user's behalf.
+            <p className="mb-2 flex flex-wrap items-center gap-1.5 text-[11.5px] leading-4 text-ink-muted">
+              {overrides.length === 1
+                ? "1 tool keeps its own setting"
+                : `${overrides.length} tools keep their own setting`}
+              <button
+                type="button"
+                disabled={!editable}
+                onClick={clearOverrides}
+                className="inline-flex items-center gap-1 rounded px-1 py-0.5 font-medium text-ink-subtle transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
+              >
+                <RotateCcw className="size-3" />
+                Reset to group
+              </button>
+            </p>
+          ) : null}
+          <div className="rounded-md border border-border/70">
+            <button
+              type="button"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-[12px] font-medium text-ink-muted"
+            >
               {group.tools.length} {group.tools.length === 1 ? "tool" : "tools"}
-              <ChevronDown className="ml-auto size-3.5 transition-transform group-open:rotate-180" />
-            </summary>
-            <div className="border-t border-border/70 p-2">
-              <ToolRows tools={group.tools} />
-            </div>
-          </details>
+              {overrides.length > 0 ? (
+                <span className="text-ink-faint">· {overrides.length} custom</span>
+              ) : null}
+              <ChevronDown
+                className={cn("ml-auto size-3.5 transition-transform", open && "rotate-180")}
+              />
+            </button>
+            {open ? (
+              <div className="border-t border-border/70 p-2">
+                <ul className="overflow-hidden rounded-md border border-border/70">
+                  {group.tools.map((tool) => (
+                    <ToolPermissionRow
+                      key={tool.id}
+                      name={tool.name}
+                      description={tool.description}
+                      effectiveMode={effectiveToolMode({
+                        provider: connectionProvider,
+                        capabilityId: group.modeKey,
+                        curated: group.curated,
+                        toolId: tool.toolName,
+                        capabilityModes,
+                        toolModes,
+                      })}
+                      inheritedMode={group.curated ? groupMode : inheritedUncuratedMode(groupMode)}
+                      inheritLabel="Use group"
+                      overridden={Boolean(storedToolMode(toolModes, tool.toolName))}
+                      disabled={!editable}
+                      onChange={(mode) => setToolMode(tool.toolName, mode)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
         </CardContent>
       ) : null}
     </Card>
   );
+}
+
+// An uncurated tool cannot inherit a broad "on"; the gateway holds it at Ask until a reviewed
+// classification exists, and the menu has to name the mode the gateway will actually apply.
+function inheritedUncuratedMode(groupMode: CapabilityMode): CapabilityMode {
+  return groupMode === "off" ? "off" : "ask";
+}
+
+// Mirrors what the server does to the stored map, so the optimistic render matches the row that
+// comes back: "inherit" removes the key, any other mode writes it.
+function nextToolModes(
+  current: Record<string, unknown>,
+  changes: Record<string, ToolMode>,
+): Record<string, unknown> {
+  const next = { ...current };
+  for (const [toolName, mode] of Object.entries(changes)) {
+    if (mode === "inherit") delete next[toolName];
+    else next[toolName] = mode;
+  }
+  return next;
+}
+
+function storedToolMode(stored: unknown, toolName: string): CapabilityMode | undefined {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
+  const value = (stored as Record<string, unknown>)[toolName];
+  return value === "on" || value === "ask" || value === "off" ? value : undefined;
 }
 
 function PluginCapabilityModeRow({
@@ -1754,29 +1971,16 @@ function PluginCapabilityModeRow({
   );
 }
 
-function ToolRows({ tools }: { tools: PluginToolView[] }) {
-  return (
-    <ul className="overflow-hidden rounded-md border border-border/70">
-      {tools.map((tool) => (
-        <li key={tool.id} className="border-b border-border/70 px-3 py-2 last:border-b-0">
-          <p className="text-[12px] font-medium leading-4 text-ink">{tool.name}</p>
-          {tool.description ? (
-            <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">{tool.description}</p>
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function SkillsSection({
+export function SkillsSection({
   config,
   state,
   previewState,
+  description = "Workflows supplied by the integrity-pinned plugin package.",
 }: {
-  config: OfficialMcpPluginConfig;
+  config: OfficialPluginConfig;
   state: PluginLoadState;
   previewState: PluginPreviewState;
+  description?: string;
 }) {
   const plugin = state.status === "ready" ? state.plugin : null;
   const skills: PluginSkill[] = plugin
@@ -1797,12 +2001,7 @@ function SkillsSection({
   const headingId = `${config.name}-skills-heading`;
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <SectionHeading
-        id={headingId}
-        icon={Sparkles}
-        title="Skills"
-        description="Workflows supplied by the integrity-pinned plugin package."
-      />
+      <SectionHeading id={headingId} icon={Sparkles} title="Skills" description={description} />
       {state.status === "loading" ? (
         <SectionSkeleton label={`Loading ${config.label} skills`} rows={2} compact />
       ) : state.status === "error" ? (
@@ -2083,6 +2282,7 @@ function officialPluginToolsStateFromPlugin(
     for (const tool of server.tools) {
       tools.push({
         id: `${server.name}:${tool.name}`,
+        toolName: tool.name,
         name: displayToolName(tool.name),
         description: tool.description?.trim() || null,
         readOnly: tool.classification.bucket === "read",
@@ -2225,6 +2425,7 @@ function officialPluginToolsStateFromPreview(
         curated: true,
         tools: capability.tools.map((tool: string) => ({
           id: `${server.name}:${tool}`,
+          toolName: tool,
           name: displayToolName(tool),
           description: null,
           readOnly: capability.id === "read" || capability.id === "query",
@@ -2250,7 +2451,7 @@ function officialCapabilityDescription(
   capabilityId: CapabilityId,
 ): string | null {
   if (provider === "gmail" && capabilityId === "write") {
-    return "Add or remove labels, create labels, move mail to trash, and mark or unmark spam.";
+    return "Send email, add or remove labels, create labels, move mail to trash, and mark or unmark spam. Sending cannot be undone.";
   }
   return null;
 }
@@ -2325,4 +2526,8 @@ function formatDateTime(value: string) {
 
 function errorMessage(value: unknown) {
   return value instanceof Error ? value.message : "Something went wrong.";
+}
+
+export function defaultDash0ToolsState(): PluginToolsState {
+  return defaultOfficialPluginToolsState("dash0");
 }

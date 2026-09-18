@@ -48,6 +48,14 @@ export const CodexGoalModeSchema = z
   })
   .strict()
   .openapi("CodexGoalModeV1");
+export const ConversationComposerSettingsSchema = z
+  .object({
+    reasoningEffort: EngineReasoningEffortSchema,
+    planModeEnabled: z.boolean().optional(),
+    goalMode: CodexGoalModeSchema.nullable().optional(),
+  })
+  .strict()
+  .openapi("ConversationComposerSettingsV1");
 export const MessageEngineSchema = z
   .discriminatedUnion("type", [
     z
@@ -132,9 +140,11 @@ export const ConversationSchema = z
     title: z.string(),
     engine: ChatEngineSchema,
     model: z.string(),
+    composerSettings: ConversationComposerSettingsSchema.nullable(),
     runtime: ConversationRuntimeSchema.nullable(),
     activityState: ConversationActivityStateSchema,
     hasUnseen: z.boolean(),
+    awaitingInput: z.boolean(),
     pinnedAt: TimestampSchema.nullable().optional(),
     createdAt: TimestampSchema,
     updatedAt: TimestampSchema,
@@ -249,6 +259,21 @@ export const TaskSchema = z
   .openapi("Task");
 
 export const WorkflowStatusSchema = z.enum(["draft", "active"]);
+// Mirrors Skills: a company workflow belongs to the workspace, a personal one only to its creator.
+export const WorkflowScopeSchema = z.enum(["personal", "company"]).openapi("WorkflowScope");
+
+// Slack is the only workflow channel today. `enabled` decides whether a run is given the Slack
+// send tool at all; `displayName` and `avatarUrl` are cosmetic chat.postMessage identity overrides
+// and are empty when the workflow posts under the default bot identity.
+export const WorkflowSlackChannelSchema = z
+  .object({
+    enabled: z.boolean(),
+    // Trimmed before measuring, so this matches the Core rule the API delegates to.
+    displayName: z.string().trim().max(80),
+    avatarUrl: z.string().trim().max(2_048).default(""),
+  })
+  .strict()
+  .openapi("WorkflowSlackChannel");
 export const WorkflowStepSchema = z
   .object({
     id: ResourceIdSchema,
@@ -322,6 +347,60 @@ export const WorkflowTriggerInputSchema = z
   ])
   .openapi("WorkflowTriggerInput");
 
+export const WorkflowAutomationTriggerSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().min(1).max(10_000),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128),
+        prompt: z.string().min(1).max(10_000),
+        enabled: z.boolean(),
+        lastRunAt: TimestampSchema.nullable(),
+        nextRunAt: TimestampSchema.nullable(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTrigger");
+
+export const WorkflowAutomationTriggerInputSchema = z
+  .discriminatedUnion("type", [
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("event"),
+        provider: z.string().min(1).max(64),
+        event: z.string().min(1).max(128),
+        integrationId: ResourceIdSchema,
+        filters: z.record(z.string().max(64), WorkflowEventFilterValueSchema),
+        prompt: z.string().max(10_000).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        id: ResourceIdSchema,
+        type: z.literal("schedule"),
+        cron: z.string().min(1).max(128),
+        timezone: z.string().min(1).max(128).optional(),
+        prompt: z.string().max(10_000).optional(),
+        enabled: z.boolean().optional(),
+      })
+      .strict(),
+  ])
+  .openapi("WorkflowAutomationTriggerInput");
+
 export const WorkflowSchema = z
   .object({
     id: ResourceIdSchema,
@@ -332,7 +411,12 @@ export const WorkflowSchema = z
     // refuses to invoke an incomplete definition.
     steps: z.array(WorkflowStepSchema).max(20),
     status: WorkflowStatusSchema,
+    scope: WorkflowScopeSchema,
+    slackChannel: WorkflowSlackChannelSchema,
+    // Null for company workflows created before scopes existed; only an admin can take one personal.
+    createdByUserId: z.string().max(256).nullable(),
     trigger: WorkflowTriggerSchema,
+    triggers: z.array(WorkflowAutomationTriggerSchema).max(20).optional(),
     version: z.number().int().min(1),
     archivedAt: TimestampSchema.nullable(),
     createdAt: TimestampSchema,
@@ -340,24 +424,6 @@ export const WorkflowSchema = z
   })
   .strict()
   .openapi("Workflow");
-
-export const TaskScheduleSchema = z
-  .object({
-    id: ResourceIdSchema,
-    name: z.string().min(1).max(80),
-    sourceDescription: z.string().max(1_024),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128),
-    prompt: z.string().min(1).max(10_000),
-    enabled: z.boolean(),
-    lastRunAt: TimestampSchema.nullable(),
-    nextRunAt: TimestampSchema,
-    version: z.number().int().min(1),
-    createdAt: TimestampSchema,
-    updatedAt: TimestampSchema,
-  })
-  .strict()
-  .openapi("TaskSchedule");
 
 export const WorkflowScheduleReadModelSchema = z
   .object({
@@ -393,7 +459,6 @@ export const TaskReadModelNameSchema = z.literal("tasks-v1");
 export const TaskActivityReadModelNameSchema = z.literal("task-activities-v1");
 export const WorkflowReadModelNameSchema = z.literal("workflows-v1");
 export const WorkflowScheduleReadModelNameSchema = z.literal("workflow-schedules-v1");
-export const TaskScheduleReadModelNameSchema = z.literal("task-schedules-v1");
 export const BrainFolderReadModelNameSchema = z.literal("brain-folders-v1");
 export const BrainDocumentReadModelNameSchema = z.literal("brain-documents-v1");
 export const BrainTimelineReadModelNameSchema = z.literal("brain-timeline-v1");
@@ -410,7 +475,6 @@ export const ReadModelSchema = z.enum([
   TaskActivityReadModelNameSchema.value,
   WorkflowReadModelNameSchema.value,
   WorkflowScheduleReadModelNameSchema.value,
-  TaskScheduleReadModelNameSchema.value,
   BrainFolderReadModelNameSchema.value,
   BrainDocumentReadModelNameSchema.value,
   BrainTimelineReadModelNameSchema.value,
@@ -446,6 +510,7 @@ export const IntegrationAccountReadModelSchema = z
       "render",
       "vercel",
       "signoz",
+      "dash0",
       "stripe",
       "latitude",
       "posthog",
@@ -453,7 +518,9 @@ export const IntegrationAccountReadModelSchema = z
       "notion",
       "supabase",
       "resend",
+      "todoist",
       "x_account",
+      "custom_mcp",
     ]),
     workspaceId: z.string().min(1).max(128).nullable(),
     externalId: z.string().max(1_024),
@@ -465,6 +532,7 @@ export const IntegrationAccountReadModelSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
   })
   .strict()
   .openapi("IntegrationAccountReadModelV1");
@@ -499,6 +567,7 @@ export const ConversationReadModelSchema = ConversationReadModelV1Schema.extend(
   runtime: ConversationRuntimeSchema.nullable(),
   activityState: ConversationActivityStateSchema,
   hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
   messageShapeEpoch: z.number().int().min(0),
 })
   .strict()
@@ -595,11 +664,13 @@ export const EngineRuntimeAccessEnvelopeSchema = z
   .strict()
   .openapi("EngineRuntimeAccessEnvelope");
 
-// The streamed Task projection carries the unread flag that the Task resource itself does not:
-// it belongs to the Task's conversation and only ever matters to surfaces reading a live queue.
-export const TaskReadModelSchema = TaskSchema.extend({ hasUnseen: z.boolean() }).openapi(
-  "TaskReadModelV1",
-);
+// The streamed Task projection carries the unread and awaiting-input flags that the Task resource
+// itself does not: both belong to the Task's conversation and only ever matter to surfaces reading
+// a live queue.
+export const TaskReadModelSchema = TaskSchema.extend({
+  hasUnseen: z.boolean(),
+  awaitingInput: z.boolean(),
+}).openapi("TaskReadModelV1");
 export const TaskActivityAuthorSchema = z.enum(["user", "orchestrator", "system"]);
 export const TaskActivityKindSchema = z.enum([
   "created",
@@ -622,8 +693,11 @@ export const TaskActivityReadModelSchema = z
   })
   .strict()
   .openapi("TaskActivityReadModelV1");
-export const WorkflowReadModelSchema = WorkflowSchema.openapi("WorkflowReadModelV1");
-export const TaskScheduleReadModelSchema = TaskScheduleSchema.openapi("TaskScheduleReadModelV1");
+// The v1 read model projects the workflow list. Channel configuration is only read on the detail
+// route, which goes through the API, so it deliberately stays out of this replicated shape.
+export const WorkflowReadModelSchema = WorkflowSchema.omit({ slackChannel: true }).openapi(
+  "WorkflowReadModelV1",
+);
 
 export const BrainTimelineEntrySchema = z
   .object({
@@ -1092,6 +1166,7 @@ export const BrainSourceOptionsBodySchema = z.discriminatedUnion("provider", [
     })
     .strict(),
   z.object({ provider: z.literal("granola") }).strict(),
+  z.object({ provider: z.literal("gmail") }).strict(),
   z
     .object({
       provider: z.literal("google_drive"),
@@ -1133,6 +1208,12 @@ export const BrainSourceOptionsSchema = z
         provider: z.literal("granola"),
         folders: z.array(GranolaFolderRefSchema),
         partial: z.boolean(),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("gmail"),
+        labels: z.array(NamedSourceRefSchema),
       })
       .strict(),
     z
@@ -1624,6 +1705,21 @@ export const PluginSkillCollisionSchema = z
   .strict()
   .openapi("PluginSkillCollision");
 
+export const PluginActionPriceSchema = z
+  .object({
+    action: z.string().min(1).max(64),
+    label: z.string().min(1).max(120),
+    unit: z.enum(["per_call", "per_result"]),
+    amountUsdMicros: z.number().int().min(1),
+  })
+  .strict()
+  .openapi("PluginActionPrice");
+
+export const PluginPricingSchema = z
+  .object({ currency: z.literal("USD"), actions: z.array(PluginActionPriceSchema) })
+  .strict()
+  .openapi("PluginPricing");
+
 export const PluginValidationReportSchema = z
   .object({
     ignoredManifestFields: z.array(z.string()),
@@ -1649,6 +1745,25 @@ export const PluginValidationReportSchema = z
       ])
       .optional(),
     events: z
+      .discriminatedUnion("status", [
+        z.object({ status: z.literal("absent") }).strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("ignored"),
+            reason: z.string(),
+          })
+          .strict(),
+        z
+          .object({
+            present: z.literal(true),
+            status: z.literal("parsed"),
+            issues: z.array(z.string()),
+          })
+          .strict(),
+      ])
+      .optional(),
+    pricing: z
       .discriminatedUnion("status", [
         z.object({ status: z.literal("absent") }).strict(),
         z
@@ -1839,6 +1954,7 @@ const PluginBaseSchema = z
     integrity: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
     installReport: PluginInstallReportSchema,
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     eventModes: z.record(z.string(), z.boolean()),
     mcpApprovedIntegrity: z
       .string()
@@ -1898,6 +2014,7 @@ export const PluginImportPreviewSchema = z
     stdioServers: z.array(PluginStdioServerSchema),
     remoteMcpServers: z.array(PluginRemoteMcpPreviewServerSchema),
     events: z.array(PluginEventDefinitionSchema).max(64),
+    pricing: PluginPricingSchema.nullable(),
     report: PluginValidationReportSchema,
   })
   .strict()
@@ -2678,6 +2795,25 @@ export const ConversationPageSchema = z
   .strict()
   .openapi("ConversationPage");
 
+export const SessionPullRequestSchema = z
+  .object({
+    conversationId: z.string(),
+    repository: z.string(),
+    number: z.number().int().positive(),
+    url: z.string(),
+    state: z.enum(["draft", "open", "blocked", "merged", "closed"]),
+  })
+  .strict()
+  .openapi("SessionPullRequest");
+
+export const SessionPullRequestListSchema = z
+  .object({
+    data: z.array(SessionPullRequestSchema),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SessionPullRequestList");
+
 export const TaskPageSchema = z
   .object({
     data: z.array(TaskSchema),
@@ -2728,6 +2864,8 @@ export const CreateWorkflowBodySchema = z
   .object({
     name: z.string().min(1).max(64),
     description: z.string().max(1_024).optional(),
+    // Company keeps the pre-scope behavior for clients that do not send a scope yet.
+    scope: WorkflowScopeSchema.optional(),
   })
   .strict()
   .openapi("CreateWorkflowBody");
@@ -2739,10 +2877,36 @@ export const UpdateWorkflowBodySchema = z
     description: z.string().max(1_024),
     steps: z.array(WorkflowStepSchema).min(1).max(20),
     status: WorkflowStatusSchema,
+    // Omitted leaves the current visibility untouched.
+    scope: WorkflowScopeSchema.optional(),
+    // Omitted leaves the current channel configuration untouched.
+    slackChannel: WorkflowSlackChannelSchema.optional(),
     trigger: WorkflowTriggerInputSchema,
+    triggers: z.array(WorkflowAutomationTriggerInputSchema).max(20).optional(),
   })
   .strict()
   .openapi("UpdateWorkflowBody");
+
+// The workflow's single markdown memory. `updatedAt` is null until a run writes one.
+export const WorkflowMemorySchema = z
+  .object({
+    workflowId: ResourceIdSchema,
+    enabled: z.boolean(),
+    content: z.string(),
+    updatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("WorkflowMemory");
+
+export const WorkflowMemoryEnvelopeSchema = z
+  .object({ data: WorkflowMemorySchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WorkflowMemoryEnvelope");
+
+export const UpdateWorkflowMemoryBodySchema = z
+  .object({ enabled: z.boolean() })
+  .strict()
+  .openapi("UpdateWorkflowMemoryBody");
 
 export const ArchiveVersionBodySchema = z
   .object({ expectedVersion: z.number().int().min(1) })
@@ -2808,96 +2972,6 @@ export const InvokeWorkflowBodySchema = z
   })
   .strict()
   .openapi("InvokeWorkflowBody");
-
-export const TaskSchedulePageSchema = z
-  .object({
-    data: z.array(TaskScheduleSchema),
-    nextCursor: z.string().nullable(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskSchedulePage");
-
-export const TaskScheduleEnvelopeSchema = z
-  .object({ data: TaskScheduleSchema, meta: ProtocolMetadataSchema })
-  .strict()
-  .openapi("TaskScheduleEnvelope");
-
-export const CreateTaskScheduleBodySchema = z
-  .object({
-    name: z.string().max(80).optional(),
-    sourceDescription: z.string().max(1_024).optional(),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128).optional(),
-    prompt: z.string().min(1).max(10_000),
-  })
-  .strict()
-  .openapi("CreateTaskScheduleBody");
-
-export const UpdateTaskScheduleBodySchema = z
-  .object({
-    expectedVersion: z.number().int().min(1),
-    name: z.string().min(1).max(80),
-    sourceDescription: z.string().max(1_024).optional(),
-    cron: z.string().min(1).max(128),
-    timezone: z.string().min(1).max(128).optional(),
-    prompt: z.string().min(1).max(10_000),
-  })
-  .strict()
-  .openapi("UpdateTaskScheduleBody");
-
-export const SetTaskScheduleEnabledBodySchema = z
-  .object({
-    expectedVersion: z.number().int().min(1),
-    enabled: z.boolean(),
-  })
-  .strict()
-  .openapi("SetTaskScheduleEnabledBody");
-
-export const UpdateTaskScheduleCommandSchema = z
-  .union([UpdateTaskScheduleBodySchema, SetTaskScheduleEnabledBodySchema])
-  .openapi("UpdateTaskScheduleCommand");
-
-export const TaskScheduleMutationEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        schedule: TaskScheduleSchema,
-        transactionId: z.string().regex(/^[0-9]+$/u),
-        replayed: z.boolean(),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleMutationEnvelope");
-
-export const TaskScheduleUpdateEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        schedule: TaskScheduleSchema,
-        transactionId: z.string().regex(/^[0-9]+$/u),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleUpdateEnvelope");
-
-export const TaskScheduleArchiveEnvelopeSchema = z
-  .object({
-    data: z
-      .object({
-        scheduleId: ResourceIdSchema,
-        version: z.number().int().min(1),
-        transactionId: z.string().regex(/^[0-9]+$/u),
-      })
-      .strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("TaskScheduleArchiveEnvelope");
 
 export const LegacyTaskSchema = TaskSchema.omit({ conversationId: true }).openapi("LegacyTask");
 
@@ -3186,6 +3260,30 @@ export const AttachmentUploadEnvelopeSchema = z
   .strict()
   .openapi("AttachmentUploadEnvelope");
 
+export const WorkflowSlackAvatarUploadBodySchema = z
+  .object({
+    file: z
+      .file()
+      .max(1024 * 1024)
+      .openapi({ type: "string", format: "binary" }),
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadBody");
+
+export const WorkflowSlackAvatarUploadEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        // Absolute, unauthenticated URL. The caller saves it onto the workflow through the normal
+        // update command; uploading alone does not change the workflow.
+        avatarUrl: z.string().url().max(2_048),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkflowSlackAvatarUploadEnvelope");
+
 export const CreateMessageBodySchema = z
   .object({
     conversationId: ResourceIdSchema.optional(),
@@ -3250,6 +3348,18 @@ export const CancelRunEnvelopeSchema = z
   })
   .strict()
   .openapi("CancelRunEnvelope");
+
+export const SteerRunEnvelopeSchema = z
+  .object({
+    data: z.object({
+      // The queued Run whose message was promoted, and the running Run it was promoted into.
+      runId: ResourceIdSchema,
+      targetRunId: ResourceIdSchema,
+    }),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("SteerRunEnvelope");
 
 export const ResolveApprovalBodySchema = z
   .object({
@@ -3445,6 +3555,26 @@ export const CapabilitySessionBudgetEnvelopeSchema = z
   .strict()
   .openapi("CapabilitySessionBudgetEnvelope");
 
+export const PluginBillingSchema = z
+  .object({
+    pluginName: z.string().min(1).max(64),
+    pricing: PluginPricingSchema.nullable(),
+    dailyLimitUsdMicros: z.number().int().min(1).nullable(),
+    spentTodayUsdMicros: z.number().int().min(0),
+  })
+  .strict()
+  .openapi("PluginBilling");
+
+export const PluginBillingEnvelopeSchema = z
+  .object({ data: PluginBillingSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("PluginBillingEnvelope");
+
+export const SetPluginDailySpendLimitBodySchema = z
+  .object({ dailyLimitUsd: z.number().nullable() })
+  .strict()
+  .openapi("SetPluginDailySpendLimitBody");
+
 export const CapabilityApprovalStatusSchema = z.enum([
   "awaiting_approval",
   "approved",
@@ -3616,6 +3746,25 @@ export const WorkspaceRenameEnvelopeSchema = z
   .strict()
   .openapi("WorkspaceRenameEnvelope");
 
+// Machine size for the workspace's cloud coding sandboxes. Mirrors
+// `SANDBOX_SIZES` in @opencompany/core; the wire contract keeps its own literal
+// list so the protocol package stays dependency-free, like
+// ManagedCapabilitySourceSchema above.
+export const SandboxSizeSchema = z.enum(["small", "standard", "large"]);
+
+export const WorkspaceSandboxSizeEnvelopeSchema = z
+  .object({
+    data: z.object({ sandboxSize: SandboxSizeSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("WorkspaceSandboxSizeEnvelope");
+
+export const SetWorkspaceSandboxSizeBodySchema = z
+  .object({ sandboxSize: SandboxSizeSchema })
+  .strict()
+  .openapi("SetWorkspaceSandboxSizeBody");
+
 export const WorkspaceCommandEnvelopeSchema = z
   .object({
     data: z.object({ completed: z.literal(true) }).strict(),
@@ -3691,33 +3840,16 @@ export const OnboardingStateEnvelopeSchema = z
   .strict()
   .openapi("OnboardingStateEnvelope");
 
-export const CheckOnboardingWorkspaceSlugBodySchema = z
-  .object({ slug: z.string().max(256) })
-  .strict()
-  .openapi("CheckOnboardingWorkspaceSlugBody");
-
-export const OnboardingWorkspaceSlugEnvelopeSchema = z
-  .object({
-    data: z.object({ slug: z.string().max(40), available: z.boolean() }).strict(),
-    meta: ProtocolMetadataSchema,
-  })
-  .strict()
-  .openapi("OnboardingWorkspaceSlugEnvelope");
-
 export const SaveOnboardingProfileBodySchema = z
   .object({ role: OnboardingRoleSchema, companyUrl: z.url().max(2_048) })
   .strict()
   .openapi("SaveOnboardingProfileBody");
 
+// The slug is derived from the name server-side; onboarding never asks for one.
 export const SaveOnboardingWorkspaceBodySchema = z
   .object({
     workspaceId: WorkspaceCreationIdSchema,
     name: z.string().trim().min(1).max(80),
-    slug: z
-      .string()
-      .min(1)
-      .max(40)
-      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   })
   .strict()
   .openapi("SaveOnboardingWorkspaceBody");
@@ -3791,13 +3923,17 @@ export const IdentityUserSchema = z
     avatarUrl: z.string().max(4_096).nullable(),
     timezone: z.string().min(1).max(100),
     botsEnabled: z.boolean().optional(),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     autoModelRoutingEnabled: z.boolean(),
+    approveForMeEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
+    whatsappEnabled: z.boolean(),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
@@ -3856,16 +3992,20 @@ export const UserPreferencesSchema = z
   .object({
     botsEnabled: z.boolean(),
     timezone: z.string().min(1).max(100),
-    taskSpawningEnabled: z.boolean(),
+    /** @deprecated Tasks & Workflows is always enabled. */
+    taskSpawningEnabled: z.literal(true),
     /** @deprecated Wiki is always enabled. */
     wikiEnabled: z.literal(true),
     taskViewMode: TaskViewModeSchema,
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
+    approveForMeEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
+    imessageEnabled: z.boolean(),
+    whatsappEnabled: z.boolean(),
   })
   .strict()
   .openapi("UserPreferences");
@@ -3874,16 +4014,20 @@ export const UpdateUserPreferencesBodySchema = z
   .object({
     botsEnabled: z.boolean().optional(),
     timezone: z.string().min(1).max(100).optional(),
+    /** @deprecated Accepted for compatibility and ignored; Tasks & Workflows is always enabled. */
     taskSpawningEnabled: z.boolean().optional(),
     /** @deprecated Accepted for compatibility and ignored; Wiki is always enabled. */
     wikiEnabled: z.boolean().optional(),
     taskViewMode: TaskViewModeSchema.optional(),
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
+    approveForMeEnabled: z.boolean().optional(),
     reviewInboxEnabled: z.boolean().optional(),
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
     pastSessionAccessEnabled: z.boolean().optional(),
+    imessageEnabled: z.boolean().optional(),
+    whatsappEnabled: z.boolean().optional(),
   })
   .strict()
   .refine((body: Record<string, unknown>) => Object.keys(body).length > 0, {
@@ -3917,10 +4061,22 @@ export const McpSetupEnvelopeSchema = z
 
 export const FeedbackKindSchema = z.enum(["bug", "feedback", "idea"]);
 
+// What the reporter had open when they hit the feedback button. Only the two
+// references worth chasing a bug through — a chat session or a task — so triage
+// lands on the exact run instead of guessing from the message.
+export const FeedbackContextSchema = z
+  .object({
+    kind: z.enum(["chat", "task"]),
+    id: z.string().trim().min(1).max(128),
+  })
+  .strict()
+  .openapi("FeedbackContext");
+
 export const SubmitFeedbackBodySchema = z
   .object({
     kind: FeedbackKindSchema,
     message: z.string().trim().min(3).max(4_000),
+    context: FeedbackContextSchema.optional(),
   })
   .strict()
   .openapi("SubmitFeedbackBody");
@@ -4028,6 +4184,7 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "github_user",
   "slack",
   "hubspot",
+  "posthog",
   "granola",
   "fathom",
   "attio",
@@ -4036,10 +4193,12 @@ export const PersonalIntegrationProviderSchema = z.enum([
   "render",
   "vercel",
   "signoz",
+  "dash0",
   "latitude",
   "neon",
   "supabase",
   "resend",
+  "todoist",
   "x_account",
 ]);
 
@@ -4055,6 +4214,7 @@ export const IntegrationAccountSchema = z
     statusReason: z.string().max(2_000).nullable(),
     scopes: z.array(z.string().max(512)).max(1_000),
     capabilityModes: z.record(z.string(), z.unknown()),
+    toolModes: z.record(z.string(), z.unknown()),
   })
   .strict()
   .openapi("IntegrationAccount");
@@ -4076,6 +4236,7 @@ export const SlackBotWorkspaceSettingsSchema = z
     installed: z.boolean(),
     status: z.enum(["connected", "needs_reauth", "sync_failed", "not_connected"]),
     needsScopeUpgrade: z.boolean(),
+    canCustomizeIdentity: z.boolean(),
     teamName: z.string().max(512).nullable(),
     statusReason: z.string().max(2_000).nullable(),
     destinationCount: z.number().int().min(0),
@@ -4087,6 +4248,57 @@ export const SlackBotWorkspaceSettingsEnvelopeSchema = z
   .object({ data: SlackBotWorkspaceSettingsSchema, meta: ProtocolMetadataSchema })
   .strict()
   .openapi("SlackBotWorkspaceSettingsEnvelope");
+
+// Settings → Channels → iMessage. `binding` is null until the member asks for a link code.
+export const ImessageSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    lineHandle: z.string().max(64).nullable(),
+    binding: z
+      .object({
+        status: z.enum(["pending", "linked"]),
+        linkCode: z.string().max(12).nullable(),
+        linkCodeExpiresAt: TimestampSchema.nullable(),
+        handle: z.string().max(64).nullable(),
+        conversationId: z.string().max(128).nullable(),
+        linkedAt: TimestampSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("ImessageSettings");
+export type ImessageSettingsDto = z.infer<typeof ImessageSettingsSchema>;
+
+export const ImessageSettingsEnvelopeSchema = z
+  .object({ data: ImessageSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("ImessageSettingsEnvelope");
+
+export const WhatsappSettingsSchema = z
+  .object({
+    configured: z.boolean(),
+    lineHandle: z.string().max(64).nullable(),
+    binding: z
+      .object({
+        status: z.enum(["pending", "linked"]),
+        linkCode: z.string().max(12).nullable(),
+        linkCodeExpiresAt: TimestampSchema.nullable(),
+        handle: z.string().max(64).nullable(),
+        conversationId: z.string().max(128).nullable(),
+        linkedAt: TimestampSchema.nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict()
+  .openapi("WhatsappSettings");
+export type WhatsappSettingsDto = z.infer<typeof WhatsappSettingsSchema>;
+
+export const WhatsappSettingsEnvelopeSchema = z
+  .object({ data: WhatsappSettingsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("WhatsappSettingsEnvelope");
 
 export const SlackBotDestinationSchema = z
   .object({
@@ -4165,6 +4377,25 @@ export const SetIntegrationCapabilityModeBodySchema = z
   .strict()
   .openapi("SetIntegrationCapabilityModeBody");
 
+export const SetIntegrationToolModeBodySchema = z
+  .object({ mode: z.string().min(1).max(16) })
+  .strict()
+  .openapi("SetIntegrationToolModeBody");
+
+export const IntegrationToolModeEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        integrationId: IntegrationAccountIdSchema,
+        toolId: z.string().min(1).max(128),
+        mode: z.enum(["on", "ask", "off", "inherit"]),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("IntegrationToolModeEnvelope");
+
 export const IntegrationCapabilityModeEnvelopeSchema = z
   .object({
     data: z
@@ -4198,6 +4429,15 @@ export const IntegrationApiKeyBodySchema = z
   .object({ apiKey: z.string().min(1).max(4_000) })
   .strict()
   .openapi("IntegrationApiKeyBody");
+
+export const PostHogEventsConnectBodySchema = z
+  .object({
+    apiKey: z.string().min(1).max(4_000),
+    projectId: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    region: z.enum(["us", "eu"]),
+  })
+  .strict()
+  .openapi("PostHogEventsConnectBody");
 
 export const ConvexAccountStateSchema = z
   .object({
@@ -4305,6 +4545,43 @@ export const GranolaAccountStateEnvelopeSchema = z
   .strict()
   .openapi("GranolaAccountStateEnvelope");
 
+export const PostHogEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("posthog"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    projectId: z.string().nullable(),
+    region: z.enum(["us", "eu"]).nullable(),
+    connectionLabel: z.string().nullable(),
+    statusReason: z.string().nullable(),
+  })
+  .strict()
+  .openapi("PostHogEventsAccountState");
+
+export const PostHogEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: PostHogEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventsAccountStateEnvelope");
+
+export const PostHogEventDefinitionListEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        events: z
+          .array(z.object({ id: z.string().max(512), name: z.string().max(512) }).strict())
+          .max(500),
+        partial: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("PostHogEventDefinitionListEnvelope");
+
 // Jamie's event connection is a webhook the user creates in Jamie against opencompany's fixed
 // endpoint; only the digest of the key Jamie mints is stored. The URL is what the setup UI asks the
 // user to copy, and the last verified delivery is the only confirmation Jamie's key ever works,
@@ -4329,6 +4606,32 @@ export const JamieEventsAccountStateEnvelopeSchema = z
   })
   .strict()
   .openapi("JamieEventsAccountStateEnvelope");
+
+// Convex's event connection is a webhook log stream opencompany provisions in Convex with the
+// deploy key the plugin already holds, so nothing is pasted in either direction. The state names
+// the deployment the stream belongs to and the last signature-verified delivery, which is the only
+// confirmation that the stream reaches opencompany rather than only that Convex accepted it.
+export const ConvexEventsAccountStateSchema = z
+  .object({
+    provider: z.literal("convex"),
+    connected: z.boolean(),
+    status: IntegrationAccountStatusSchema,
+    integrationId: IntegrationAccountIdSchema.nullable(),
+    statusReason: z.string().nullable(),
+    deployment: z.string().nullable(),
+    webhookUrl: z.string().url().nullable(),
+    lastDeliveryAt: z.string().datetime().nullable(),
+  })
+  .strict()
+  .openapi("ConvexEventsAccountState");
+
+export const ConvexEventsAccountStateEnvelopeSchema = z
+  .object({
+    data: z.object({ state: ConvexEventsAccountStateSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("ConvexEventsAccountStateEnvelope");
 
 export const StripeAccountStateSchema = z
   .object({
@@ -4538,7 +4841,43 @@ export const InfisicalAuthFlowEnvelopeSchema = z
   .strict()
   .openapi("InfisicalAuthFlowEnvelope");
 
+export const DopplerAuthStatusSchema = z
+  .object({
+    status: z.enum(["connected", "needs_reauth", "disconnected"]).nullable(),
+    statusReason: z.string().nullable(),
+    accountName: z.string().nullable(),
+    lastValidatedAt: TimestampSchema.nullable(),
+  })
+  .strict()
+  .openapi("DopplerAuthStatus");
+
+export const DopplerAuthStatusEnvelopeSchema = z
+  .object({ data: DopplerAuthStatusSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("DopplerAuthStatusEnvelope");
+
+export const DopplerAuthFlowSchema = z
+  .object({
+    id: EngineAuthFlowIdSchema,
+    status: z.enum(["pending", "link_ready", "completed", "failed", "expired"]),
+    loginUrl: z.string().nullable(),
+    userCode: z.string().nullable(),
+    statusReason: z.string().nullable(),
+    expiresAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlow");
+
+export const DopplerAuthFlowEnvelopeSchema = z
+  .object({
+    data: z.object({ flow: DopplerAuthFlowSchema }).strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("DopplerAuthFlowEnvelope");
+
 export type ConversationDto = z.infer<typeof ConversationSchema>;
+export type SessionPullRequestDto = z.infer<typeof SessionPullRequestSchema>;
 export type ConversationRuntimeDto = z.infer<typeof ConversationRuntimeSchema>;
 export type AttachmentDto = z.infer<typeof AttachmentSchema>;
 export type ConversationShareDto = z.infer<typeof ConversationShareSchema>;
@@ -4560,10 +4899,11 @@ export type LegacyTaskHistoryDto = z.infer<typeof LegacyTaskHistoryEnvelopeSchem
 export type TaskReadModel = z.infer<typeof TaskReadModelSchema>;
 export type TaskActivityReadModel = z.infer<typeof TaskActivityReadModelSchema>;
 export type WorkflowDto = z.infer<typeof WorkflowSchema>;
+export type WorkflowScope = z.infer<typeof WorkflowScopeSchema>;
+export type WorkflowSlackChannel = z.infer<typeof WorkflowSlackChannelSchema>;
+export type WorkflowMemoryDto = z.infer<typeof WorkflowMemorySchema>;
 export type WorkflowReadModel = z.infer<typeof WorkflowReadModelSchema>;
 export type WorkflowScheduleReadModel = z.infer<typeof WorkflowScheduleReadModelSchema>;
-export type TaskScheduleDto = z.infer<typeof TaskScheduleSchema>;
-export type TaskScheduleReadModel = z.infer<typeof TaskScheduleReadModelSchema>;
 export type IntegrationAccountReadModel = z.infer<typeof IntegrationAccountReadModelSchema>;
 export type BrainSnapshotDto = z.infer<typeof BrainSnapshotSchema>;
 export type BrainOverviewDto = z.infer<typeof BrainOverviewSchema>;
@@ -4666,6 +5006,9 @@ export type PluginSourceDto = z.infer<typeof PluginSourceSchema>;
 export type PluginRemoteMcpServerDto = z.infer<typeof PluginRemoteMcpServerSchema>;
 export type PluginListItemDto = z.infer<typeof PluginListItemSchema>;
 export type PluginInstallationDto = z.infer<typeof PluginInstallationSchema>;
+export type PluginPricingDto = z.infer<typeof PluginPricingSchema>;
+export type PluginActionPriceDto = z.infer<typeof PluginActionPriceSchema>;
+export type PluginBillingDto = z.infer<typeof PluginBillingSchema>;
 export type PluginEventDefinitionDto = z.infer<typeof PluginEventDefinitionSchema>;
 export type PluginEventFilterDefinitionDto = z.infer<typeof PluginEventFilterDefinitionSchema>;
 export type PluginImportPreviewDto = z.infer<typeof PluginImportPreviewSchema>;
@@ -4677,19 +5020,20 @@ export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;
 export type InvokeWorkflowBody = z.infer<typeof InvokeWorkflowBodySchema>;
-export type CreateTaskScheduleBody = z.infer<typeof CreateTaskScheduleBodySchema>;
-export type UpdateTaskScheduleBody = z.infer<typeof UpdateTaskScheduleBodySchema>;
-export type SetTaskScheduleEnabledBody = z.infer<typeof SetTaskScheduleEnabledBodySchema>;
 export type ConversationReadModel = z.infer<typeof ConversationReadModelSchema>;
 export type ConversationReadModelV1 = z.infer<typeof ConversationReadModelV1Schema>;
 export type MessageReadModel = z.infer<typeof MessageReadModelSchema>;
 export type MessageSummaryReadModel = z.infer<typeof MessageSummaryReadModelSchema>;
 export type MessagePresentation = z.infer<typeof MessagePresentationSchema>;
+export type SteerRunResult = z.infer<typeof SteerRunEnvelopeSchema>["data"];
 export type RunReadModel = z.infer<typeof RunReadModelSchema>;
 export type EngineSessionReadModel = z.infer<typeof EngineSessionReadModelSchema>;
 export type EngineRuntimeStatus = z.infer<typeof EngineRuntimeStatusSchema>;
 export type EngineRuntimeAccess = z.infer<typeof EngineRuntimeAccessEnvelopeSchema>["data"];
 export type AttachmentUploadEnvelope = z.infer<typeof AttachmentUploadEnvelopeSchema>;
+export type WorkflowSlackAvatarUploadEnvelope = z.infer<
+  typeof WorkflowSlackAvatarUploadEnvelopeSchema
+>;
 export type CreateMessageBody = z.infer<typeof CreateMessageBodySchema>;
 export type CreateTaskBody = z.infer<typeof CreateTaskBodySchema>;
 export type CreateTaskCommentBody = z.infer<typeof CreateTaskCommentBodySchema>;

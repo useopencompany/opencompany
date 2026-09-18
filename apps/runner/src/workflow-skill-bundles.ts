@@ -1,6 +1,7 @@
 import {
   getWorkflowHarnessPluginIds,
   getWorkflowHarnessSkillBundleIds,
+  resolveLegacyWorkflowSkillAccess,
 } from "@opencompany/db/harness";
 import {
   type EnabledPluginRuntime,
@@ -23,10 +24,18 @@ export async function loadWorkflowTaskSkillBundles(
   if (!workspaceId) {
     throw new Error("Workflow Task Skill bundles require a workspace ID.");
   }
-  return loadImmutableSkillBundles(getDb(), {
+  const db = getDb();
+  const skillAccess =
+    harnessSpec.workflow?.skillAccess ??
+    (await resolveLegacyWorkflowSkillAccess(db, {
+      workspaceId,
+      workflowId: harnessSpec.workflow!.id,
+      userId,
+    }));
+  return loadImmutableSkillBundles(db, {
     workspaceId,
     userId,
-    skillAccess: "company",
+    ...(skillAccess === "company" ? { skillAccess: "company" as const } : {}),
     bundleIds,
   });
 }

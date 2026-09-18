@@ -21,67 +21,118 @@
   --color-danger-bg: #fff5f3;
   --color-danger-border: #f0c0b8;
   --color-success: #216b35;
+  /* Pull request states — GitHub's own Primer status colours, so a PR reads the same on a sidebar
+     row as it does on the GitHub page that row links to. */
+  --color-pr-open: #1a7f37;
+  --color-pr-blocked: #cf222e;
+  --color-pr-closed: #cf222e;
+  --color-pr-merged: #8250df;
+  --color-pr-draft: #59636e;
   /* Spend categories — validated categorical palette (see settings/usage chart). */
   --color-spend-chat: #3b6ea5;
   --color-spend-ingestion: #b07a2e;
   --color-spend-capabilities: #2e8968;
   --color-spend-sandbox: #8665ac;
   --color-spend-other: #b6b6b0;
+  /* Code syntax — used by the workspace file editor's CodeMirror theme. */
+  --color-code-comment: #6e7781;
+  --color-code-keyword: #b1332c;
+  --color-code-string: #0a3069;
+  --color-code-number: #0550ae;
+  --color-code-function: #7c3fbd;
+  --color-code-type: #8a3a00;
+  --color-code-tag: #116329;
+  --color-code-attribute: #0550ae;
+  --color-code-meta: #57606a;
+  --color-code-selection: #d5e2f0;
+  --color-code-active-line: #f0f0ed;
 }
 
 :root[data-theme="dark"] {
-  --color-canvas: #10120f;
-  --color-sidebar: #151713;
-  --color-ink: #f0f1ec;
-  --color-ink-muted: #a8aca2;
-  --color-ink-subtle: #7b8074;
-  --color-ink-faint: #5f635a;
-  --color-border: #2b2e28;
-  --color-border-subtle: #22251f;
-  --color-border-strong: #3c4237;
-  --color-surface: #1a1c18;
-  --color-surface-raised: #242720;
-  --color-surface-muted: #242720;
-  --color-surface-subtle: #2a2e27;
-  --color-surface-hover: #2f342b;
-  --color-surface-active: #3a4035;
+  --color-canvas: #111111;
+  --color-sidebar: #171717;
+  --color-ink: #f2f2f2;
+  --color-ink-muted: #a8a8a8;
+  --color-ink-subtle: #7d7d7d;
+  --color-ink-faint: #606060;
+  --color-border: #2c2c2c;
+  --color-border-subtle: #242424;
+  --color-border-strong: #404040;
+  --color-surface: #1b1b1b;
+  --color-surface-raised: #252525;
+  --color-surface-muted: #252525;
+  --color-surface-subtle: #2b2b2b;
+  --color-surface-hover: #313131;
+  --color-surface-active: #3c3c3c;
   --color-danger: #ffb4a8;
   --color-danger-bg: #3a1c18;
   --color-danger-border: #633128;
   --color-success: #9fdaa8;
+  --color-pr-open: #3fb950;
+  --color-pr-blocked: #f85149;
+  --color-pr-closed: #f85149;
+  --color-pr-merged: #a371f7;
+  --color-pr-draft: #8b949e;
   --color-spend-chat: #5b93d6;
   --color-spend-ingestion: #c1863a;
   --color-spend-capabilities: #3fa07f;
   --color-spend-sandbox: #b294d6;
-  --color-spend-other: #5f635a;
+  --color-spend-other: #606060;
+  --color-code-comment: #8b949e;
+  --color-code-keyword: #ff8a80;
+  --color-code-string: #a5d6ff;
+  --color-code-number: #79c0ff;
+  --color-code-function: #d2a8ff;
+  --color-code-type: #ffab70;
+  --color-code-tag: #7ee787;
+  --color-code-attribute: #79c0ff;
+  --color-code-meta: #9aa4ae;
+  --color-code-selection: #2f4a63;
+  --color-code-active-line: #242424;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-canvas: #10120f;
-    --color-sidebar: #151713;
-    --color-ink: #f0f1ec;
-    --color-ink-muted: #a8aca2;
-    --color-ink-subtle: #7b8074;
-    --color-ink-faint: #5f635a;
-    --color-border: #2b2e28;
-    --color-border-subtle: #22251f;
-    --color-border-strong: #3c4237;
-    --color-surface: #1a1c18;
-    --color-surface-raised: #242720;
-    --color-surface-muted: #242720;
-    --color-surface-subtle: #2a2e27;
-    --color-surface-hover: #2f342b;
-    --color-surface-active: #3a4035;
+    --color-canvas: #111111;
+    --color-sidebar: #171717;
+    --color-ink: #f2f2f2;
+    --color-ink-muted: #a8a8a8;
+    --color-ink-subtle: #7d7d7d;
+    --color-ink-faint: #606060;
+    --color-border: #2c2c2c;
+    --color-border-subtle: #242424;
+    --color-border-strong: #404040;
+    --color-surface: #1b1b1b;
+    --color-surface-raised: #252525;
+    --color-surface-muted: #252525;
+    --color-surface-subtle: #2b2b2b;
+    --color-surface-hover: #313131;
+    --color-surface-active: #3c3c3c;
     --color-danger: #ffb4a8;
     --color-danger-bg: #3a1c18;
     --color-danger-border: #633128;
     --color-success: #9fdaa8;
+    --color-pr-open: #3fb950;
+    --color-pr-blocked: #f85149;
+    --color-pr-closed: #f85149;
+    --color-pr-merged: #a371f7;
+    --color-pr-draft: #8b949e;
     --color-spend-chat: #5b93d6;
     --color-spend-ingestion: #c1863a;
     --color-spend-capabilities: #3fa07f;
     --color-spend-sandbox: #b294d6;
-    --color-spend-other: #5f635a;
+    --color-spend-other: #606060;
+    --color-code-comment: #8b949e;
+    --color-code-keyword: #ff8a80;
+    --color-code-string: #a5d6ff;
+    --color-code-number: #79c0ff;
+    --color-code-function: #d2a8ff;
+    --color-code-type: #ffab70;
+    --color-code-tag: #7ee787;
+    --color-code-attribute: #79c0ff;
+    --color-code-meta: #9aa4ae;
+    --color-code-selection: #2f4a63;
+    --color-code-active-line: #242424;
   }
 }
 
@@ -90,7 +141,7 @@ body {
   height: 100%;
   background: var(--color-canvas);
   color: var(--color-ink);
-  overscroll-behavior: none;
+  overscroll-behavior-y: none;
 }
 
 /* Keeps a container scrollable while hiding its scrollbar, for quiet list surfaces
@@ -499,4 +550,102 @@ html[data-opencompany-desktop="true"] .desktop-standalone-title-bar button {
   color: var(--color-ink-muted);
   border-style: dashed;
   background: transparent;
+}
+
+/* Shared inline references preserve ordinary Markdown links in storage. */
+.context-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  max-width: 100%;
+  border-radius: 0.2em;
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+/* An inline-flex box inherits its baseline from its first item, which here is the icon, so the
+   whole chip rides above the surrounding text. Aligning the label on the baseline instead hands
+   the chip the label's baseline while the icon stays optically centred on the line. */
+.context-reference > span {
+  align-self: baseline;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.context-reference:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.context-reference:focus-visible,
+.context-reference.ProseMirror-selectednode {
+  outline: 2px solid currentColor;
+}
+.reference-composer[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--color-ink-subtle);
+  pointer-events: none;
+  position: absolute;
+}
+
+/* A shared, spacious list for chat and workflow context pickers. */
+.context-mention-menu {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.5rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 1.25rem;
+  background: var(--color-surface);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 5%);
+}
+.context-mention-floating {
+  width: min(35rem, calc(100vw - 2rem));
+}
+.context-mention-heading {
+  padding: 0.5rem 0.75rem;
+  color: var(--color-ink-muted);
+  font-size: 0.8125rem;
+}
+.context-mention-menu [role="option"] {
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.875rem;
+}
+.context-mention-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+.context-mention-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70%;
+  flex-shrink: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+.context-mention-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  color: var(--color-ink-muted);
+}
+@media (max-width: 480px) {
+  .context-mention-label {
+    display: block;
+  }
+  .context-mention-name {
+    display: block;
+    max-width: 100%;
+  }
+  .context-mention-description {
+    display: block;
+    font-size: 0.75rem;
+  }
 }

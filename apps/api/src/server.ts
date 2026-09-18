@@ -11,6 +11,8 @@ import { createGoogleAdminMcpService } from "@opencompany/agent/integrations/goo
 import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
+import { imessageConfig } from "@opencompany/agent/integrations/imessage";
+import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
   createPluginGatewayLifecycle,
@@ -42,7 +44,8 @@ import { PostgresSkillBundleRepository } from "@opencompany/db/skill-bundle-repo
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { getWikiAccessForUser } from "@opencompany/db/wiki";
 import { PostgresWikiCommandRepository } from "@opencompany/db/wiki-command-repository";
-import { createLogger } from "@opencompany/observability";
+import { createLogger, flushObservability } from "@opencompany/observability";
+import { installBunExceptionReporter } from "@opencompany/observability/sentry-bun";
 import { registerNodeObservability, shutdownNodeObservability } from "@opencompany/telemetry/node";
 import { WorkOS } from "@workos-inc/node";
 import { createApiApp } from "./app";
@@ -61,6 +64,7 @@ import { createBrainControlService } from "./brain-control";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
+import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
@@ -69,6 +73,8 @@ import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createHubspotIngress } from "./hubspot-ingress";
 import { createIdentityService } from "./identity";
+import { createImessageIngress } from "./imessage-ingress";
+import { createImessageSettingsService } from "./imessage-settings";
 import { createIntegrationAccountService } from "./integration-accounts";
 import { createJamieIngress } from "./jamie-ingress";
 import { createLinearIngress } from "./linear-ingress";
@@ -76,23 +82,29 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createPluginBillingService } from "./plugin-billing";
 import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
 import { closeHttpServer, createDrainAwareFetch } from "./server-lifecycle";
 import { resolveApiPort } from "./server-port";
+import { listSessionPullRequestStatuses } from "./session-pull-requests";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
+import { createWhatsappIngress } from "./whatsapp-ingress";
+import { createWhatsappSettingsService } from "./whatsapp-settings";
 import { createWikiControlService } from "./wiki-control";
+import { createWorkflowAvatarService } from "./workflow-avatars";
 import { createWorkspaceCapabilityService } from "./workspace-capabilities";
 import { createWorkspaceControlService } from "./workspace-control";
 import { createXAccountIngress } from "./x-account-ingress";
 
 const logger = createLogger({ service: "opencompany-api", runtime: "server" });
+installBunExceptionReporter({ serviceName: "opencompany-api" });
 registerNodeObservability({ serviceName: "opencompany-api" });
 const shutdownController = new AbortController();
 
@@ -158,7 +170,6 @@ const app = createApiApp({
   chat,
   tasks,
   workflows: automations.workflows,
-  schedules: automations.schedules,
   knowledge,
   wikiCommands,
   resolveWikiServiceActor: (actorInput) => resolveWikiServiceActor(execute, actorInput),
@@ -173,6 +184,7 @@ const app = createApiApp({
   pluginImports,
   customMcp: createCustomMcpService(database.db),
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
+  workflowAvatars: createWorkflowAvatarService({ workflows: automations.workflows }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({
@@ -215,6 +227,7 @@ const app = createApiApp({
   userSettings: createUserSettingsService({ db: database.db }),
   feedback: createFeedbackService({ db: database.db }),
   repoConfigs: createRepoConfigService({ db: database.db }),
+  sessionPullRequests: (actor) => listSessionPullRequestStatuses({ userWorkosId: actor.userId }),
   integrationAccounts: createIntegrationAccountService({
     db: database.db,
     runner: runnerClient,
@@ -234,6 +247,15 @@ const app = createApiApp({
       }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  imessageSettings: createImessageSettingsService({
+    db: database.db,
+    lineHandle: () => imessageConfig()?.lineHandle ?? null,
+  }),
+  whatsappSettings: createWhatsappSettingsService({
+    db: database.db,
+    lineHandle: () =>
+      process.env.KAPSO_WEBHOOK_SECRET?.trim() ? (whatsappConfig()?.lineHandle ?? null) : null,
+  }),
   mcp: createMcpService({
     // The API-hosted MCP tool runs the same command service in-process — no
     // loopback HTTP. The gateway resolves wiki access and reauthorizes the actor
@@ -299,6 +321,7 @@ const app = createApiApp({
   }),
   engineSessions: createEngineSessionService({ db: database.db, runner: runnerClient }),
   workspaceCapabilities: createWorkspaceCapabilityService({ db: database.db }),
+  pluginBilling: createPluginBillingService({ db: database.db }),
   workspaceControl: createWorkspaceControlService({ db: database.db, workos }),
   identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
@@ -353,6 +376,7 @@ const app = createApiApp({
   hubspotIngress: createHubspotIngress({ db: database.db, identify: identityVerifier }),
   attioIngress: createAttioIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
+  convexIngress: createConvexIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({
     db: database.db,
     identify: identityVerifier,
@@ -379,6 +403,16 @@ const app = createApiApp({
     db: database.db,
     identify: identityVerifier,
     runner: runnerClient,
+  }),
+  imessageIngress: createImessageIngress({
+    db: database.db,
+    chat,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
+  }),
+  whatsappIngress: createWhatsappIngress({
+    db: database.db,
+    chat,
+    defaultModel: process.env.OPENCOMPANY_DEFAULT_CHAT_MODEL ?? "moonshotai/kimi-k3",
   }),
   stripeIngress: createStripeIngress({
     db: database.db,
@@ -416,7 +450,7 @@ async function close(signal: string) {
   await presentation?.close();
   await database.close();
   logger.info("API server stopped", { event: "opencompany.api_stopped", signal });
-  await shutdownNodeObservability();
+  await Promise.all([flushObservability(), shutdownNodeObservability()]);
 }
 
 function handleSignal(signal: "SIGINT" | "SIGTERM") {

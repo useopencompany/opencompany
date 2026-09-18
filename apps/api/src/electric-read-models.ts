@@ -21,7 +21,6 @@ import {
   TaskActivityReadModelSchema,
   TaskOutcomeSchema,
   TaskReadModelSchema,
-  TaskScheduleReadModelSchema,
   WikiPageReadModelSchema,
   WikiTimelineReadModelSchema,
   WorkflowReadModelSchema,
@@ -63,6 +62,7 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "attachments",
   "steps",
   "trigger",
+  "triggers",
   "timeline",
   "relations",
   "result",
@@ -70,7 +70,9 @@ const PREDECODED_READ_MODEL_FIELDS = new Set([
   "aliases",
   "scopes",
   "capabilityModes",
+  "toolModes",
   "hasUnseen",
+  "awaitingInput",
   "enabled",
   "metadata",
   "planPaused",
@@ -252,6 +254,7 @@ function readModelShape(input: {
         "last_seen_at",
         "activity_state",
         "has_unseen",
+        "awaiting_input",
         "runtime_status",
         "active_run_id",
         "runtime_has_error",
@@ -358,6 +361,7 @@ function readModelShape(input: {
           "reported_status",
           "outcome_comment",
           "has_unseen",
+          "awaiting_input",
           "archived_at",
           "created_at",
           "updated_at",
@@ -394,14 +398,18 @@ function readModelShape(input: {
           "description",
           "steps",
           "status",
+          "scope",
+          "created_by_workos_id",
           "trigger",
+          "triggers",
           "version",
           "archived_at",
           "created_at",
           "updated_at",
         ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
+        // Personal workflows stay out of the shape for everyone but their creator.
+        where: `"workspace_id" = $1 AND ("scope" = 'company' OR "created_by_workos_id" = $2)`,
+        params: [input.actor.workspaceId, input.actor.userId],
       };
     case "workflow-schedules-v1":
       return {
@@ -421,28 +429,10 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `"workspace_id" = $1`,
-        params: [input.actor.workspaceId],
-      };
-    case "task-schedules-v1":
-      return {
-        table: "goat.task_schedule_read_model_v1",
-        columns: [
-          "id",
-          "name",
-          "source_description",
-          "cron",
-          "timezone",
-          "prompt",
-          "enabled",
-          "last_run_at",
-          "next_run_at",
-          "version",
-          "created_at",
-          "updated_at",
-        ],
-        where: `"actor_id" = $1 AND ("workspace_id" = $2 OR "workspace_id" IS NULL)`,
-        params: [input.actor.userId, input.actor.workspaceId],
+        // A schedule inherits the visibility of its Workflow. Filtering in the Electric shape
+        // also removes an existing row from a teammate's live stream when its scope changes.
+        where: `"workspace_id" = $1 AND ("scope" = 'company' OR "created_by_workos_id" = $2)`,
+        params: [input.actor.workspaceId, input.actor.userId],
       };
     case "integration-accounts-v1":
       return {
@@ -460,6 +450,7 @@ function readModelShape(input: {
           "status_reason",
           "scopes",
           "capability_modes",
+          "tool_modes",
         ],
         where:
           `"user_workos_id" = $1 AND "workspace_id" IS NULL AND CAST($2 AS text) = CAST($2 AS text) ` +
@@ -810,10 +801,6 @@ function projectReadModelValue(
       return (
         partial ? WorkflowScheduleReadModelSchema.partial() : WorkflowScheduleReadModelSchema
       ).parse(projected);
-    case "task-schedules-v1":
-      return (partial ? TaskScheduleReadModelSchema.partial() : TaskScheduleReadModelSchema).parse(
-        projected,
-      );
     case "task-activities-v1":
       return (partial ? TaskActivityReadModelSchema.partial() : TaskActivityReadModelSchema).parse(
         projected,
@@ -862,7 +849,12 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
   if (name.endsWith("At") || name === "at" || name === "scheduledFor") {
     return timestampValue(value);
   }
-  if (name === "hasUnseen" || name === "enabled" || name === "planPaused") {
+  if (
+    name === "hasUnseen" ||
+    name === "awaitingInput" ||
+    name === "enabled" ||
+    name === "planPaused"
+  ) {
     return booleanValue(value);
   }
   if (
@@ -881,6 +873,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "presentationSummary" ||
     name === "steps" ||
     name === "trigger" ||
+    name === "triggers" ||
     name === "timeline" ||
     name === "relations" ||
     name === "sources" ||
@@ -890,6 +883,7 @@ function readModelFieldValue(readModel: ReadModel, name: string, value: unknown)
     name === "discoverySummary" ||
     name === "scopes" ||
     name === "capabilityModes" ||
+    name === "toolModes" ||
     name === "metadata"
   ) {
     return jsonValue(value);
@@ -1137,6 +1131,7 @@ const READ_MODEL_COLUMN_NAMES = {
     last_seen_at: "lastSeenAt",
     activity_state: "activityState",
     has_unseen: "hasUnseen",
+    awaiting_input: "awaitingInput",
     runtime_status: "",
     active_run_id: "",
     runtime_has_error: "",
@@ -1207,6 +1202,7 @@ const READ_MODEL_COLUMN_NAMES = {
     reported_status: "",
     outcome_comment: "",
     has_unseen: "hasUnseen",
+    awaiting_input: "awaitingInput",
     archived_at: "archivedAt",
     created_at: "createdAt",
     updated_at: "updatedAt",
@@ -1228,7 +1224,10 @@ const READ_MODEL_COLUMN_NAMES = {
     description: "description",
     steps: "steps",
     status: "status",
+    scope: "scope",
+    created_by_workos_id: "createdByUserId",
     trigger: "trigger",
+    triggers: "triggers",
     version: "version",
     archived_at: "archivedAt",
     created_at: "createdAt",
@@ -1239,20 +1238,6 @@ const READ_MODEL_COLUMN_NAMES = {
     workflow_id: "workflowId",
     workflow_slug: "workflowSlug",
     name: "name",
-    cron: "cron",
-    timezone: "timezone",
-    prompt: "prompt",
-    enabled: "enabled",
-    last_run_at: "lastRunAt",
-    next_run_at: "nextRunAt",
-    version: "version",
-    created_at: "createdAt",
-    updated_at: "updatedAt",
-  },
-  "task-schedules-v1": {
-    id: "id",
-    name: "name",
-    source_description: "sourceDescription",
     cron: "cron",
     timezone: "timezone",
     prompt: "prompt",
@@ -1276,6 +1261,7 @@ const READ_MODEL_COLUMN_NAMES = {
     status_reason: "statusReason",
     scopes: "scopes",
     capability_modes: "capabilityModes",
+    tool_modes: "toolModes",
   },
   "brain-folders-v1": {
     id: "id",

@@ -1,9 +1,15 @@
 import {
+  type GmailLabelListResult,
   type GranolaFolderListResult,
   type LinearTeamListResult,
+  listGmailLabelsAction,
   listGranolaFoldersAction,
   listLinearTeamsAction,
 } from "@/lib/brain-source-actions";
+import {
+  listPostHogEventDefinitionsAction,
+  type PostHogEventDefinitionListResult,
+} from "@/lib/integrations/posthog-events-actions";
 
 // An `integration_resource` filter offers the resources of one connected account. Plugins declare
 // which resource type a filter picks from; resolving that type to real options is platform code,
@@ -50,11 +56,26 @@ const WORKFLOW_EVENT_FILTER_LOADERS: Record<string, WorkflowEventFilterLoader> =
     });
     return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
   },
+  "gmail:label": async ({ integrationId }) => {
+    const result: GmailLabelListResult = await listGmailLabelsAction(integrationId);
+    if (!result.ok) return result;
+    return { ok: true, options: result.labels };
+  },
   "granola:folder": async ({ integrationId }) => {
     const result: GranolaFolderListResult = await listGranolaFoldersAction(integrationId);
     if (!result.ok) return result;
     const options = granolaFolderOptions(result.folders);
     return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
+  },
+  "posthog:event": async ({ integrationId }) => {
+    const result: PostHogEventDefinitionListResult =
+      await listPostHogEventDefinitionsAction(integrationId);
+    if (!result.ok) return result;
+    return {
+      ok: true,
+      options: result.events,
+      ...(result.partial ? { partial: true } : {}),
+    };
   },
 };
 

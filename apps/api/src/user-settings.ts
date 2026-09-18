@@ -16,19 +16,27 @@ type DbLike = any;
 export type UserPreferenceSet = {
   timezone: string;
   botsEnabled: boolean;
-  taskSpawningEnabled: boolean;
+  /** @deprecated Always true; retained so existing clients keep a stable contract. */
+  taskSpawningEnabled: true;
+  /** @deprecated Always true; retained so existing clients keep a stable contract. */
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
-export type UpdateUserPreferencesCommand = Partial<Omit<UserPreferenceSet, "wikiEnabled">> & {
+export type UpdateUserPreferencesCommand = Partial<
+  Omit<UserPreferenceSet, "wikiEnabled" | "taskSpawningEnabled">
+> & {
   wikiEnabled?: boolean;
+  taskSpawningEnabled?: boolean;
 };
 
 export type McpSetupStatus = {
@@ -49,14 +57,16 @@ export type UserSettingsService = {
 const PREFERENCE_COLUMNS = {
   timezone: users.timezone,
   botsEnabled: users.botsEnabled,
-  taskSpawningEnabled: users.taskSpawningEnabled,
   taskViewMode: users.taskViewMode,
   taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
+  approveForMeEnabled: users.approveForMeEnabled,
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
   pastSessionAccessEnabled: users.pastSessionAccessEnabled,
+  imessageEnabled: users.imessageEnabled,
+  whatsappEnabled: users.whatsappEnabled,
 };
 
 export function createUserSettingsService(input: {
@@ -75,12 +85,14 @@ export function createUserSettingsService(input: {
       }
       for (const field of [
         "botsEnabled",
-        "taskSpawningEnabled",
         "autoModelRoutingEnabled",
+        "approveForMeEnabled",
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
         "subagentsEnabled",
         "pastSessionAccessEnabled",
+        "imessageEnabled",
+        "whatsappEnabled",
       ] as const) {
         const value = command[field];
         if (value !== undefined && value !== current[field]) changes[field] = value;
@@ -101,7 +113,7 @@ export function createUserSettingsService(input: {
         .where(eq(users.workosUserId, actor.userId))
         .returning(PREFERENCE_COLUMNS);
       if (!updated) throw missingUser();
-      return alwaysOnWikiPreferences(updated);
+      return withAlwaysOnPreferences(updated);
     },
 
     async getMcpSetup(actor) {
@@ -139,11 +151,15 @@ async function currentPreferences(db: DbLike, actor: Actor): Promise<UserPrefere
     .where(eq(users.workosUserId, actor.userId))
     .limit(1);
   if (!row) throw missingUser();
-  return alwaysOnWikiPreferences(row);
+  return withAlwaysOnPreferences(row);
 }
 
-function alwaysOnWikiPreferences(row: Omit<UserPreferenceSet, "wikiEnabled">): UserPreferenceSet {
-  return { ...row, wikiEnabled: true };
+// Wiki and Tasks & Workflows shipped to everyone; the fields stay in the contract so clients that
+// still read them keep working.
+function withAlwaysOnPreferences(
+  row: Omit<UserPreferenceSet, "wikiEnabled" | "taskSpawningEnabled">,
+): UserPreferenceSet {
+  return { ...row, wikiEnabled: true, taskSpawningEnabled: true };
 }
 
 function mcpSetupStatus(row: {

@@ -1,6 +1,10 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { ACTION_EFFECTS_READ, type ResolvedActionCatalog } from "@opencompany/agent/actions/types";
+import {
+  ACTION_EFFECTS_READ,
+  ACTION_EFFECTS_WRITE,
+  type ResolvedActionCatalog,
+} from "@opencompany/agent/actions/types";
 import type { ActionGatewayServiceDependencies } from "@opencompany/agent/application/action-gateway";
 import {
   createActionGateway,
@@ -9,6 +13,7 @@ import {
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
+  ACTION_MAX_CALLS_PER_TURN,
   createExternalEngineGatewayTicket,
 } from "@opencompany/agent-runtime";
 import { CODEX_BRAIN_TOOL_CONTRACT_VERSION } from "@opencompany/brain";
@@ -36,6 +41,7 @@ const capability = {
 const apps: ReturnType<typeof Fastify>[] = [];
 const authorized = {
   skillToolsEnabled: false,
+  slackChannelEnabled: false,
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Acme",
@@ -56,6 +62,149 @@ afterEach(async () => {
 });
 
 describe("runner ACP tools MCP", () => {
+  it.each(["codex", "claude_code"] as const)(
+    "exposes the Slack bot to %s only when the workflow channel is enabled",
+    async (engine) => {
+      const authorize = vi.fn(async () => ({
+        ...authorized,
+        engine,
+        taskConversation: true,
+        slackChannelEnabled: true,
+      }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, { authorize });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "slack-channel-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.map(({ name }) => name)).toContain(
+          "opencompany_slack_bot_send_message",
+        );
+      } finally {
+        await client.close();
+      }
+
+      authorize.mockResolvedValue({
+        ...authorized,
+        engine,
+        taskConversation: true,
+        slackChannelEnabled: false,
+      });
+      const disabledClient = new Client({ name: "slack-channel-disabled-test", version: "1" });
+      const disabledTransport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await disabledClient.connect(disabledTransport as Parameters<typeof client.connect>[0]);
+        expect((await disabledClient.listTools()).tools.map(({ name }) => name)).not.toContain(
+          "opencompany_slack_bot_send_message",
+        );
+      } finally {
+        await disabledClient.close();
+      }
+    },
+  );
+
+  it.each(["codex", "claude_code"] as const)(
+    "admits fresh %s clients in one run without losing duplicate-write protection",
+    async (engine) => {
+      const catalog: ResolvedActionCatalog = {
+        providers: [{ id: "gmail", label: "Gmail", description: "Email" }],
+        actions: ["gmail.list_labels", "gmail.create_draft"].map((id) => ({
+          id,
+          provider: "gmail",
+          capability: id === "gmail.list_labels" ? "read" : "write",
+          effects: id === "gmail.list_labels" ? ACTION_EFFECTS_READ : ACTION_EFFECTS_WRITE,
+          description: id,
+          params: { type: "object" },
+          permissionMode: "on",
+          execute: vi.fn(),
+        })),
+      };
+      const admitted = new Set<string>();
+      let callCount = 0;
+      const providerExecute = vi.fn<ActionGatewayServiceDependencies["executeAction"]>(
+        async ({ actionId }) => ({ ok: true, action: actionId, result: {} }),
+      );
+      const dependencies: Partial<ActionGatewayServiceDependencies> = {
+        actionsKilled: () => false,
+        loadContext: async () => ({ ...authorized, userTimezone: "UTC" }),
+        resolveCatalog: async () => catalog,
+        recordSourceDiscovery: async () => undefined,
+        evaluateApproval: async () => false,
+        claimInvocation: async ({ invocationId, deduplicationKey }) => {
+          const keys = [invocationId, ...(deduplicationKey ? [deduplicationKey] : [])];
+          const duplicate = keys.some((key) => admitted.has(key));
+          if (!duplicate) {
+            for (const key of keys) admitted.add(key);
+            callCount += 1;
+          }
+          return { ok: true, duplicate, callCount };
+        },
+        executeAction: providerExecute,
+      };
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize: async () => ({ ...authorized, engine, taskConversation: true }),
+        executeAction: createActionGateway(dependencies),
+        evaluateApproval: createActionHostGateway(dependencies),
+        taskActions: { requests: async () => [], stage: vi.fn() },
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected a TCP test server.");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const callFromFreshClient = async (action: string, params: Record<string, unknown> = {}) => {
+        // Every new client restarts its JSON-RPC counter, including within the same attempt.
+        const client = new Client({ name: "restarted-engine", version: "1" });
+        const transport = new StreamableHTTPClientTransport(
+          new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+          { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+        );
+        try {
+          await client.connect(transport as Parameters<typeof client.connect>[0]);
+          expect(transport.sessionId).toBeUndefined();
+          await client.callTool({ name: "describe_actions", arguments: { actions: [action] } });
+          return await client.callTool({ name: "use_action", arguments: { action, params } });
+        } finally {
+          await client.close();
+        }
+      };
+
+      expect((await callFromFreshClient("gmail.create_draft", { subject: "First" })).isError).toBe(
+        false,
+      );
+      expect((await callFromFreshClient("gmail.list_labels")).isError).toBe(false);
+      expect((await callFromFreshClient("gmail.list_labels")).isError).toBe(false);
+      expect((await callFromFreshClient("gmail.create_draft", { subject: "Second" })).isError).toBe(
+        false,
+      );
+      const duplicate = await callFromFreshClient("gmail.create_draft", { subject: "First" });
+      expect(duplicate.structuredContent).toMatchObject({
+        ok: false,
+        error: { code: "duplicate_invocation" },
+        budget: { used: 4 },
+      });
+      expect(providerExecute).toHaveBeenCalledTimes(4);
+    },
+  );
+
   it.each(["codex", "claude_code"] as const)(
     "saves a %s task approval without executing or holding an interactive waiter",
     async (engine) => {
@@ -94,6 +243,51 @@ describe("runner ACP tools MCP", () => {
       expect(deps.waitForApproval).not.toHaveBeenCalled();
     },
   );
+
+  it("dispatches an automatically approved task using its reviewed invocation", async () => {
+    const deps = {
+      executeAction: vi.fn(async () => ({
+        ok: true as const,
+        action: "plugin:gmail:gmail.create_draft",
+        result: { draftId: "draft" },
+      })),
+      evaluateApproval: vi.fn(async () => ({
+        ok: true as const,
+        needsApproval: false,
+        automaticApproval: { reason: "routine_action" },
+      })),
+      requestApproval: vi.fn(),
+      waitForApproval: vi.fn(),
+      resolveApproval: vi.fn(),
+      taskActions: { requests: vi.fn(async () => []), stage: vi.fn(async () => true) },
+    };
+    await executeExternalActionWithApproval({
+      request: {
+        operation: "execute",
+        sessionId: capability.codexChatSessionId,
+        turnId: capability.codexChatTurnId,
+        invocationId: "http-request",
+        action: "plugin:gmail:gmail.create_draft",
+        params: { subject: "Ready" },
+      },
+      signal: new AbortController().signal,
+      capability: { ...capability, v: 2, expiresAt: Date.now() + 60_000 },
+      authorizedContext: { ...authorized, taskConversation: true },
+      authorizeOperation: async () => authorized,
+      dependencies: deps,
+    });
+    const checked = deps.evaluateApproval.mock.calls[0] as unknown as [
+      { request: { invocationId: string } },
+    ];
+    expect(deps.executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        request: expect.objectContaining({ invocationId: checked[0].request.invocationId }),
+      }),
+    );
+    expect(checked[0].request.invocationId).toMatch(/^task_action_/);
+    expect(deps.taskActions.stage).not.toHaveBeenCalled();
+    expect(deps.waitForApproval).not.toHaveBeenCalled();
+  });
 
   it("rejects a missing sandbox capability", async () => {
     const app = Fastify();
@@ -324,7 +518,11 @@ describe("runner ACP tools MCP", () => {
       ok: true,
       action: "gmail.search",
       result: { messages: [] },
-      budget: { limit: 16, used: 1, remaining: 15 },
+      budget: {
+        limit: ACTION_MAX_CALLS_PER_TURN,
+        used: 1,
+        remaining: ACTION_MAX_CALLS_PER_TURN - 1,
+      },
     });
     expect(executeAction).toHaveBeenCalledWith({ request, signal });
     expect(providerExecuteAction).toHaveBeenCalledOnce();
@@ -792,4 +990,74 @@ describe("runner ACP tools MCP", () => {
       await client.close();
     }
   });
+});
+
+describe("workflow authoring over MCP", () => {
+  it.each([
+    [false, true],
+    [true, true],
+    [false, false],
+  ])(
+    "only exposes authoring in authorized interactive chat (task=%s, allowed=%s)",
+    async (taskConversation, automationToolsEnabled) => {
+      let currentTask = taskConversation;
+      let currentAllowed = automationToolsEnabled;
+      const executeWorkflowCommand = vi.fn(async () => ({ ok: true, operation: "created" }));
+      const app = Fastify();
+      apps.push(app);
+      registerAcpToolsMcpRoute(app, env, {
+        authorize: async () => ({
+          ...authorized,
+          taskConversation: currentTask,
+          automationToolsEnabled: currentAllowed,
+        }),
+        executeWorkflowCommand,
+      });
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Expected TCP server");
+      const ticket = createExternalEngineGatewayTicket({
+        ...capability,
+        secret: env.internalToken,
+      }).ticket;
+      const client = new Client({ name: "workflow-test", version: "1" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+        { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+      );
+      try {
+        await client.connect(transport as Parameters<typeof client.connect>[0]);
+        expect((await client.listTools()).tools.some((tool) => tool.name === "workflows")).toBe(
+          !taskConversation && automationToolsEnabled,
+        );
+        if (!taskConversation && automationToolsEnabled) {
+          const result = await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Draft" } },
+          });
+          expect(result.isError).not.toBe(true);
+          expect(executeWorkflowCommand).toHaveBeenCalledWith(
+            expect.objectContaining({
+              actorId: "user_1",
+              workspaceId: "workspace_1",
+              toolInput: { command: "create", name: "Draft" },
+              idempotencyKey: expect.stringMatching(/^agent-workflow:/),
+            }),
+          );
+          currentAllowed = false;
+          await client.callTool({ name: "workflows", arguments: { command: "list" } });
+          expect(executeWorkflowCommand).toHaveBeenCalledOnce();
+          currentAllowed = true;
+          currentTask = true;
+          await client.callTool({
+            name: "workflows",
+            arguments: { command: "create", workflow: { name: "Blocked" } },
+          });
+          expect(executeWorkflowCommand).toHaveBeenCalledOnce();
+        }
+      } finally {
+        await client.close();
+      }
+    },
+  );
 });

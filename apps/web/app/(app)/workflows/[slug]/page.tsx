@@ -1,12 +1,14 @@
 import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
-import { TasksWorkflowsDisabledRoute } from "@/components/Routes";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
-import { getHeadlessWorkflow } from "@/lib/headless-automation-server";
+import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-automation-server";
+import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getSlackBotWorkspaceSettingsAction } from "@/lib/slack-bot-actions";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
+import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
 type WorkflowEditorPageProps = {
   params: Promise<{ slug: string }>;
@@ -15,16 +17,16 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentUser();
-  if (!context.user.taskSpawningEnabled) {
-    return <TasksWorkflowsDisabledRoute />;
-  }
-
-  const [workflow, skillCatalog, personalAccounts, plugins] = await Promise.all([
-    getHeadlessWorkflow(slug),
-    listHeadlessSkillCatalog(),
-    getPersonalAccounts(),
-    listHeadlessPlugins(),
-  ]);
+  const [workflow, memory, skillCatalog, personalAccounts, plugins, members, slackBotSettings] =
+    await Promise.all([
+      getHeadlessWorkflow(slug),
+      getHeadlessWorkflowMemory(slug),
+      listHeadlessSkillCatalog(),
+      getPersonalAccounts(),
+      listHeadlessPlugins(),
+      listWorkspaceMembersAction(),
+      getSlackBotWorkspaceSettingsAction(),
+    ]);
 
   if (!workflow) {
     return (
@@ -49,13 +51,37 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
   }
 
   const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
+  const owner =
+    members.find(
+      (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
+    ) ??
+    (workflow.createdByUserId === context.user.workosUserId
+      ? {
+          name:
+            [context.user.firstName, context.user.lastName].filter(Boolean).join(" ") ||
+            context.user.email,
+          avatarUrl: context.user.avatarUrl,
+        }
+      : {
+          name: workflow.createdByUserId ? "Former member" : "Workspace",
+          avatarUrl: null,
+        });
   return (
     <WorkflowEditor
       workflow={workflow}
       workspaceId={context.workspace.id}
       canEdit
-      skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
+      canManageScope={canManageWorkflowScope(workflow, {
+        userId: context.user.workosUserId,
+        role: context.role,
+      })}
+      skillCatalog={skillCatalog.filter(
+        (skill: SkillCatalogItemDto) => workflow.scope === "personal" || skill.scope !== "personal",
+      )}
       eventProviders={eventProviders}
+      slackBotSettings={slackBotSettings}
+      owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}
+      memory={memory ?? { workflowId: workflow.id, enabled: false, content: "", updatedAt: null }}
     />
   );
 }

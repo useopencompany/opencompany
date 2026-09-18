@@ -357,7 +357,7 @@ export class PostgresTaskRepository implements TaskRepository {
     const requestHash = hashTaskCommand(input.command);
     const [preflight] = await this.rows<TaskCreateRow>(sql`
       WITH actor_scope AS MATERIALIZED (
-        SELECT "user".task_spawning_enabled AS "featureEnabled"
+        SELECT "user".workos_user_id
         FROM goat.users AS "user"
         JOIN goat.workspace_members AS member
           ON member.user_workos_id = "user".workos_user_id
@@ -366,7 +366,6 @@ export class PostgresTaskRepository implements TaskRepository {
       )
       SELECT
         EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-        COALESCE((SELECT "featureEnabled" FROM actor_scope), false) AS "featureEnabled",
         reservation.command_id AS "commandId",
         reservation.request_hash AS "requestHash",
         reservation.task_id AS "taskId",
@@ -420,9 +419,6 @@ export class PostgresTaskRepository implements TaskRepository {
     }
     if (preflight.commandId) {
       return taskCreateResult(preflight, requestHash);
-    }
-    if (!preflight.featureEnabled) {
-      throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
     }
 
     const resolvedAttachments =
@@ -482,9 +478,7 @@ export class PostgresTaskRepository implements TaskRepository {
     try {
       rows = await this.rows<TaskCreateRow>(sql`
         WITH actor_scope AS MATERIALIZED (
-          SELECT
-            "user".workos_user_id,
-            "user".task_spawning_enabled AS feature_enabled
+          SELECT "user".workos_user_id
           FROM goat.users AS "user"
           JOIN goat.workspace_members AS member
             ON member.user_workos_id = "user".workos_user_id
@@ -498,13 +492,6 @@ export class PostgresTaskRepository implements TaskRepository {
           WHERE plugin.workspace_id = ${input.actor.workspaceId}
             AND plugin.status = 'enabled'
             AND plugin.owner_user_id = ${input.actor.userId}
-        ),
-        prior AS MATERIALIZED (
-          SELECT *
-          FROM goat.task_command_idempotency
-          WHERE user_workos_id = ${input.actor.userId}
-            AND workspace_id = ${input.actor.workspaceId}
-            AND idempotency_key = ${input.command.idempotencyKey}
         ),
         locked_attachment_commands AS MATERIALIZED (
           -- Completion and cleanup also lock keyed commands before their upload row.
@@ -537,7 +524,6 @@ export class PostgresTaskRepository implements TaskRepository {
             ${input.command.idempotencyKey}, ${requestHash}, ${taskId}, ${conversationId},
             ${messageId}, ${assistantMessageId}, ${runtimeId}, ${runId}, ${now}, ${now}
           FROM actor_scope
-          WHERE actor_scope.feature_enabled = true OR EXISTS (SELECT 1 FROM prior)
           ON CONFLICT (user_workos_id, workspace_id, idempotency_key)
           DO UPDATE SET touched_at = EXCLUDED.touched_at
           RETURNING *
@@ -581,7 +567,7 @@ export class PostgresTaskRepository implements TaskRepository {
           SELECT
             winner.task_id, ${input.command.name}, ${input.actor.userId},
             ${input.actor.workspaceId}, ${input.command.goal}, ${input.command.source},
-            ${model}, conversation.id, ${input.command.scheduleId ?? null},
+            ${model}, conversation.id, NULL,
             ${input.command.scheduledFor ?? null}, ${input.command.workflowId ?? null},
             ${this.options.compatibility?.workflowBrainRef ?? null},
             'queued', 'queued', ${now},
@@ -683,17 +669,19 @@ export class PostgresTaskRepository implements TaskRepository {
             winner.run_id, 'queued', ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
-          RETURNING id
+          RETURNING id, execution_backend, execution_backend_version
         ),
         inserted_run AS MATERIALIZED (
           INSERT INTO goat.codex_chat_turns (
             id, user_workos_id, codex_chat_session_id, chat_session_id, user_message_id,
-            assistant_message_id, status, prompt, settings, event_sequence, created_at, updated_at
+            assistant_message_id, status, prompt, settings,
+            execution_backend, execution_backend_version, event_sequence, created_at, updated_at
           )
           SELECT
             winner.run_id, ${input.actor.userId}, runtime.id, task.session_id,
             winner.message_id, winner.assistant_message_id, 'queued', ${initialMessageContent},
-            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb, 1, ${now}, ${now}
+            ${stringifyPostgresJson(turnSettingsFromHarness(harness))}::jsonb,
+            runtime.execution_backend, runtime.execution_backend_version, 1, ${now}, ${now}
           FROM winner
           JOIN created_task AS task ON task.id = winner.task_id
           JOIN inserted_runtime AS runtime ON true
@@ -726,7 +714,6 @@ export class PostgresTaskRepository implements TaskRepository {
         )
         SELECT
           EXISTS (SELECT 1 FROM actor_scope) AS authorized,
-          COALESCE((SELECT feature_enabled FROM actor_scope), false) AS "featureEnabled",
           reservation.command_id AS "commandId",
           reservation.request_hash AS "requestHash",
           reservation.task_id AS "taskId",
@@ -780,9 +767,6 @@ export class PostgresTaskRepository implements TaskRepository {
     const [row] = rows;
     if (!row?.authorized) throw new CoreError("not_found", "Workspace membership not found.");
     if (!row.commandId) {
-      if (!row.featureEnabled) {
-        throw new CoreError("forbidden", "Tasks & Workflows is disabled for this actor.");
-      }
       throw new Error("The Task command reservation was not materialized.");
     }
     if (row.replayed && !row.id) {
@@ -821,6 +805,14 @@ export class PostgresTaskRepository implements TaskRepository {
     const now = this.options.now?.() ?? new Date();
     const assistantCreatedAt = new Date(now.getTime() + 1);
     const statusChangedAt = new Date(now.getTime() + 2);
+    // Reopening a settled Task is three writes that must all land: the Task row, its "resumed"
+    // activity, and the runtime handoff. A message queued behind a Task that is already working
+    // does none of them, so the Message and Run inserts require them only on the reopen path.
+    const reopenLanded = sql`(NOT task.resume OR (
+      EXISTS (SELECT 1 FROM reopened_task)
+      AND EXISTS (SELECT 1 FROM resumed_task_activity)
+      AND EXISTS (SELECT 1 FROM queued_runtime)
+    ))`;
     let rows: TaskCommentCreateRow[];
     try {
       rows = await this.rows<TaskCommentCreateRow>(sql`
@@ -848,7 +840,11 @@ export class PostgresTaskRepository implements TaskRepository {
           conversation.engine,
           runtime.id AS runtime_id,
           runtime.model AS runtime_model,
-          runtime.status AS runtime_status
+          runtime.status AS runtime_status,
+          -- A Run copies its execution binding from the Session it will run on, whether it is
+          -- reopening the Task or queueing behind a turn that is already working.
+          runtime.execution_backend,
+          runtime.execution_backend_version
         FROM goat.tasks AS task
         JOIN goat.chat_sessions AS conversation
           ON conversation.id = task.session_id
@@ -897,12 +893,19 @@ export class PostgresTaskRepository implements TaskRepository {
           AND NULLIF(activity.metadata->>'assistantMessageId', '') IS NOT NULL
           AND NULLIF(activity.metadata->>'runId', '') IS NOT NULL
       ),
+      -- A Task conversation accepts a message whether or not it is working. A settled Task is
+      -- reopened and runs the message now; a working one keeps its turn and the message becomes a
+      -- queued Run behind it, exactly like a Chat. The resume flag separates the two, and every
+      -- reopen-only step below keys off it.
       eligible AS MATERIALIZED (
-        SELECT task.*
+        SELECT
+          task.*,
+          (
+            task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
+            AND task.runtime_status NOT IN ('queued', 'starting', 'running')
+          ) AS resume
         FROM authorized AS task
         WHERE task.archived_at IS NULL
-          AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
-          AND task.runtime_status NOT IN ('queued', 'starting', 'running')
           AND NOT EXISTS (SELECT 1 FROM existing_activity)
       ),
       reopened_task AS MATERIALIZED (
@@ -921,6 +924,7 @@ export class PostgresTaskRepository implements TaskRepository {
             updated_at = ${now}
         FROM eligible
         WHERE task.id = eligible.id
+          AND eligible.resume
           AND task.status IN ('waiting', 'succeeded', 'failed', 'canceled')
           AND task.archived_at IS NULL
         RETURNING task.id, eligible.status AS previous_status
@@ -939,7 +943,8 @@ export class PostgresTaskRepository implements TaskRepository {
             'attachmentIds', ${stringifyPostgresJson(attachmentIds)}::jsonb
           ),
           ${now}
-        FROM reopened_task AS task
+        FROM eligible AS task
+        WHERE NOT task.resume OR EXISTS (SELECT 1 FROM reopened_task)
         RETURNING *
       ),
       resumed_task_activity AS MATERIALIZED (
@@ -1004,13 +1009,12 @@ export class PostgresTaskRepository implements TaskRepository {
           ${attachmentTextsJson(resolvedAttachments.attachmentTexts)}::jsonb,
           ${now}, ${now}
         FROM eligible AS task
-        JOIN reopened_task AS reopened ON reopened.id = task.id
-        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
         JOIN created_comment AS comment ON comment.task_id = task.id
-        WHERE (
-          NOT ${attachmentsRequireClaim}::boolean
-          OR (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
-        )
+        WHERE ${reopenLanded}
+          AND (
+            NOT ${attachmentsRequireClaim}::boolean
+            OR (SELECT COUNT(*) FROM claimed_attachments) = ${attachmentIds.length}
+          )
         RETURNING id
       ),
       inserted_assistant_message AS MATERIALIZED (
@@ -1034,16 +1038,15 @@ export class PostgresTaskRepository implements TaskRepository {
           END,
           ${assistantCreatedAt}, ${assistantCreatedAt}
         FROM eligible AS task
-        JOIN reopened_task AS reopened ON reopened.id = task.id
-        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
         JOIN inserted_user_message AS message ON message.id = ${messageId}
+        WHERE ${reopenLanded}
         RETURNING id
       ),
       inserted_run AS MATERIALIZED (
         INSERT INTO goat.codex_chat_turns (
           id, user_workos_id, codex_chat_session_id, chat_session_id,
-          user_message_id, assistant_message_id, status, prompt, settings, event_sequence,
-          created_at, updated_at
+          user_message_id, assistant_message_id, status, prompt, settings,
+          execution_backend, execution_backend_version, event_sequence, created_at, updated_at
         )
         SELECT
           ${runId}, task.user_workos_id, task.runtime_id, task.session_id,
@@ -1053,13 +1056,12 @@ export class PostgresTaskRepository implements TaskRepository {
             'goalMode', task.harness_spec #> '{codex,goalMode}',
             'taskResultMode', 'assistant_final'
           )),
-          1, ${now}, ${now}
+          task.execution_backend, task.execution_backend_version, 1, ${now}, ${now}
         FROM eligible AS task
-        JOIN reopened_task AS reopened ON reopened.id = task.id
-        JOIN queued_runtime AS runtime ON runtime.id = task.runtime_id
         JOIN inserted_user_message AS user_message ON user_message.id = ${messageId}
         JOIN inserted_assistant_message AS assistant_message
           ON assistant_message.id = ${assistantMessageId}
+        WHERE ${reopenLanded}
         RETURNING id
       ),
       inserted_event AS MATERIALIZED (
@@ -1099,9 +1101,7 @@ export class PostgresTaskRepository implements TaskRepository {
       SELECT
         EXISTS (SELECT 1 FROM existing_activity) AS "idExists",
         EXISTS (SELECT 1 FROM matching_replay) AS replayed,
-        authorized.status IN ('queued', 'running') AS active,
         authorized.archived_at IS NOT NULL AS archived,
-        authorized.runtime_status IN ('queued', 'starting', 'running') AS "runtimeActive",
         CASE
           WHEN EXISTS (SELECT 1 FROM matching_replay) THEN (
             EXISTS (
@@ -1120,7 +1120,10 @@ export class PostgresTaskRepository implements TaskRepository {
             CASE
               WHEN EXISTS (SELECT 1 FROM inserted_event)
                 AND EXISTS (SELECT 1 FROM updated_conversation)
-                AND EXISTS (SELECT 1 FROM resumed_task_activity)
+                AND (
+                  NOT EXISTS (SELECT 1 FROM eligible WHERE eligible.resume)
+                  OR EXISTS (SELECT 1 FROM resumed_task_activity)
+                )
                 THEN true
               ELSE jsonb_array_length(jsonb_build_object('reason', 'unmaterialized')) = 0
             END
@@ -1190,9 +1193,6 @@ export class PostgresTaskRepository implements TaskRepository {
     }
     if (!row.replayed && row.archived) {
       throw new CoreError("conflict", "Archived Tasks cannot receive comments.");
-    }
-    if (!row.replayed && (row.active || row.runtimeActive)) {
-      throw new CoreError("conflict", "Wait for the active Task run to finish before commenting.");
     }
     if (!row.materialized) {
       throw new Error("The Task comment, Message, and Run were not materialized.");
@@ -1365,7 +1365,6 @@ type TaskRow = {
 
 type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
   authorized: boolean;
-  featureEnabled: boolean;
   commandId: string | null;
   requestHash: string | null;
   taskId: string | null;
@@ -1382,9 +1381,7 @@ type TaskCreateRow = Omit<TaskRow, "conversationId"> & {
 type TaskCommentCreateRow = TaskRow & {
   idExists: boolean;
   replayed: boolean;
-  active: boolean;
   archived: boolean;
-  runtimeActive: boolean;
   materialized: boolean;
   commentId: string | null;
   commentTaskId: string | null;
@@ -1632,7 +1629,9 @@ function hashTaskCommand(command: CreateTaskCommand) {
         attachmentIds: command.attachmentIds ?? [],
         source: command.source,
         workflowId: command.workflowId ?? null,
-        scheduleId: command.scheduleId ?? null,
+        // Always null since Recurring Tasks were removed. Kept in the hash so keys minted by a
+        // pre-removal deploy still replay to the same Task instead of creating a duplicate.
+        scheduleId: null,
         scheduledFor: command.scheduledFor?.toISOString() ?? null,
       }),
     )

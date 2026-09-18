@@ -8,6 +8,7 @@ import {
   disconnectCustomMcp,
   previewCustomMcp,
   refreshCustomMcp,
+  setCustomMcpToolMode,
 } from "@/lib/headless-knowledge-commands";
 import { AddCustomMcpPlugin, CustomMcpPluginDetail } from "./CustomMcpPluginSettings";
 
@@ -68,7 +69,7 @@ it("tests before installation and invalidates the preview when the endpoint chan
       expect.any(String),
     ),
   );
-  expect(router.push).toHaveBeenCalledWith("/settings/plugins/custom-test");
+  expect(router.push).toHaveBeenCalledWith("/plugins/custom-test");
 });
 
 it("shows a connection failure and lets the user retry without installing", async () => {
@@ -109,4 +110,51 @@ it("requires plugin write permission for installation", () => {
   render(<AddCustomMcpPlugin canEdit={false} />);
   expect(screen.getByText(/You need plugin write permission/)).toBeVisible();
   expect(screen.queryByLabelText("Server URL")).not.toBeInTheDocument();
+});
+
+it("uses the shared tool permission control, defaulting each tool to Ask", async () => {
+  const user = userEvent.setup();
+  const withTools: CustomMcpStatusDto = {
+    ...status,
+    account: {
+      ...status.account!,
+      tools: [
+        { name: "run_query", description: "Run a read-only query." },
+        { name: "drop_table", description: "Delete a table and its rows." },
+      ],
+      toolModes: { drop_table: "off" },
+    },
+  };
+  vi.mocked(setCustomMcpToolMode).mockResolvedValue(withTools);
+  render(<CustomMcpPluginDetail plugin={plugin} initialStatus={withTools} canEdit />);
+
+  // A custom server has no capability group, so an unset tool reads Ask and only the tool the
+  // user moved off that default carries the marker.
+  expect(screen.getByRole("combobox", { name: "Permission for run_query" })).toHaveTextContent(
+    "Ask",
+  );
+  expect(screen.getByRole("combobox", { name: "Permission for drop_table" })).toHaveTextContent(
+    "Off",
+  );
+
+  await user.click(screen.getByRole("combobox", { name: "Permission for run_query" }));
+  await user.click(await screen.findByRole("option", { name: "On" }));
+  await waitFor(() =>
+    expect(setCustomMcpToolMode).toHaveBeenCalledWith("custom-test", {
+      tool: "run_query",
+      mode: "on",
+      revision: "rev-1",
+    }),
+  );
+
+  // "Default" has to reach the store as Ask, since there is no group key to clear here.
+  await user.click(screen.getByRole("combobox", { name: "Permission for drop_table" }));
+  await user.click(await screen.findByRole("option", { name: "Default (Ask)" }));
+  await waitFor(() =>
+    expect(setCustomMcpToolMode).toHaveBeenLastCalledWith("custom-test", {
+      tool: "drop_table",
+      mode: "ask",
+      revision: "rev-1",
+    }),
+  );
 });

@@ -526,6 +526,8 @@ export async function connectSlackBotIntegration(input: {
 
 export type LinearOAuthCredentialPayload = {
   access_token: string;
+  refresh_token: string;
+  token_type: "bearer";
   organization_id: string;
   organization_name?: string;
   organization_url_key?: string;
@@ -547,6 +549,9 @@ export async function connectLinearIngestIntegration(input: {
   viewerName: string | null;
   viewerEmail: string | null;
   accessToken: string;
+  refreshToken: string;
+  tokenType: "bearer";
+  accessTokenExpiresAt: Date;
   scopes: string[];
   db?: IntegrationDb;
   now?: Date;
@@ -597,6 +602,8 @@ export async function connectLinearIngestIntegration(input: {
 
   const payload: LinearOAuthCredentialPayload = {
     access_token: input.accessToken,
+    refresh_token: input.refreshToken,
+    token_type: input.tokenType,
     organization_id: input.organizationId,
     ...(input.organizationName ? { organization_name: input.organizationName } : {}),
     ...(input.organizationUrlKey ? { organization_url_key: input.organizationUrlKey } : {}),
@@ -612,8 +619,7 @@ export async function connectLinearIngestIntegration(input: {
       provider: "linear",
       kind: "oauth_token",
       payload,
-      // Linear OAuth access tokens do not expire.
-      expiresAt: null,
+      expiresAt: input.accessTokenExpiresAt,
       db,
       now,
     });
@@ -1116,6 +1122,32 @@ export async function applyIntegrationCapabilityMode(input: {
       capabilityModes: sql`${integrations.capabilityModes} || ${stringifyPostgresJson({
         [input.capabilityId]: input.mode,
       })}::jsonb`,
+      updatedAt: input.now ?? new Date(),
+    })
+    .where(inArray(integrations.id, input.integrationIds));
+}
+
+// Settings control: applies or clears one per-tool override layered over the connection's
+// capability modes. Passing `null` removes the key so the tool goes back to inheriting its
+// capability group, which is why this cannot reuse the capability-mode merge above. Tool id and
+// mode validation is the caller's responsibility.
+export async function applyIntegrationToolMode(input: {
+  integrationIds: readonly string[];
+  toolId: string;
+  mode: string | null;
+  db?: Pick<IntegrationDb, "update">;
+  now?: Date;
+}) {
+  if (input.integrationIds.length === 0) return;
+  await (input.db ?? getDb())
+    .update(integrations)
+    .set({
+      toolModes:
+        input.mode === null
+          ? sql`${integrations.toolModes} - ${input.toolId}::text`
+          : sql`${integrations.toolModes} || ${stringifyPostgresJson({
+              [input.toolId]: input.mode,
+            })}::jsonb`,
       updatedAt: input.now ?? new Date(),
     })
     .where(inArray(integrations.id, input.integrationIds));

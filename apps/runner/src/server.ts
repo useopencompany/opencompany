@@ -1,4 +1,3 @@
-import { parseSlackBotEventCommand } from "@opencompany/agent/integrations/slack-bot-events";
 import { INFISICAL_US_HOST, isInfisicalHost } from "@opencompany/db/infisical-auth";
 import { createLogger } from "@opencompany/observability";
 import Fastify from "fastify";
@@ -11,14 +10,15 @@ import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { CodingWorkspaceAccessError, mintCodingWorkspaceAccess } from "./coding-workspace-runtime";
 import { createCodingWorkspaceTransport } from "./coding-workspace-runtime-transport";
 import { createDictationTicket } from "./dictation-auth";
+import { cancelDopplerAuth, pollDopplerAuthFlow, startDopplerAuthFlow } from "./doppler-auth";
 import type { RunnerEnv } from "./env";
+import { registerGitHubBrokerRoutes } from "./github-broker";
 import { wakeGoogleDriveSyncWorker } from "./google-drive-sync-worker";
 import { planHarnessForTask } from "./harness";
 import { getHarnessPlannerContextForRunner } from "./harness-planner";
 import { completeInfisicalAuthFlow, startInfisicalAuthFlow } from "./infisical-auth";
 import { type LlmBrokerOptions, registerLlmBrokerRoutes } from "./llm-broker";
 import { getSandboxLifecycleStatus, killSandbox } from "./sandbox";
-import { enqueueSlackBotEvent } from "./slack-bot-events";
 
 const logger = createLogger({
   service: "opencompany-runner",
@@ -29,7 +29,6 @@ export function createServer(
   env: RunnerEnv,
   options: {
     llmBroker?: Pick<LlmBrokerOptions, "store" | "fetchImpl">;
-    slackBotEvents?: { enqueue: typeof enqueueSlackBotEvent };
     actionPermissions?: { alwaysAllow: typeof alwaysAllowAction };
   } = {},
 ) {
@@ -63,6 +62,7 @@ export function createServer(
   });
 
   registerAcpToolsMcpRoute(app, env);
+  registerGitHubBrokerRoutes(app, { secret: env.internalToken });
 
   app.get("/healthz", async () => ({
     ok: true,
@@ -174,17 +174,10 @@ export function createServer(
 
   app.post("/internal/goat/slack-bot/events", async (request, reply) => {
     requireInternalAuth(request.headers.authorization, env.internalToken);
-    if (!env.taskWorkerEnabled) {
-      reply.status(503).send({ error: "opencompany workers are disabled." });
-      return;
-    }
-    const command = parseSlackBotEventCommand(request.body);
-    if (!command) {
-      reply.status(400).send({ error: "A valid Slack bot event command is required." });
-      return;
-    }
-    (options.slackBotEvents?.enqueue ?? enqueueSlackBotEvent)(command);
-    reply.status(202).send({ ok: true });
+    return reply.code(410).send({
+      error:
+        "Legacy Slack bot dispatch has been retired. Thread replies use the durable subscription inbox.",
+    });
   });
 
   app.post("/internal/goat/actions/always-allow", async (request, reply) => {
@@ -385,6 +378,47 @@ export function createServer(
       });
     }
   });
+
+  for (const operation of ["start", "cancel", ":flowId/poll"] as const) {
+    app.post(`/internal/goat/doppler-auth/${operation}`, async (request, reply) => {
+      requireInternalAuth(request.headers.authorization, env.internalToken);
+      const body = request.body as
+        | { workspaceId?: unknown; requestedByWorkosId?: unknown; disconnect?: unknown }
+        | undefined;
+      const workspaceId = boundedString(body?.workspaceId, 256);
+      const requestedByWorkosId = boundedString(body?.requestedByWorkosId, 256);
+      if (
+        !workspaceId ||
+        !requestedByWorkosId ||
+        (operation === "cancel" && typeof body?.disconnect !== "boolean")
+      )
+        return reply.status(400).send({ error: "Invalid Doppler connection request." });
+      try {
+        if (operation === "cancel") {
+          await cancelDopplerAuth({
+            workspaceId,
+            requestedByWorkosId,
+            disconnect: body?.disconnect === true,
+          });
+          return reply.send({ ok: true });
+        }
+        const flow =
+          operation === "start"
+            ? await startDopplerAuthFlow({ workspaceId, requestedByWorkosId, env })
+            : await pollDopplerAuthFlow({
+                workspaceId,
+                requestedByWorkosId,
+                flowId: (request.params as { flowId: string }).flowId,
+              });
+        if (!flow) return reply.status(404).send({ error: "Doppler sign-in was not found." });
+        return reply.send({ ok: true, flow });
+      } catch {
+        return reply
+          .status(502)
+          .send({ error: "Doppler connection could not be prepared. Please try again." });
+      }
+    });
+  }
 
   return app;
 }

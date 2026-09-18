@@ -8,7 +8,6 @@ import { listCurrentUserRecentChats } from "@/lib/chat";
 import { loadCurrentClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
 import { loadCurrentCodexAuthSettings } from "@/lib/codex-auth";
 import { featureFlagsFromUser } from "@/lib/feature-flags";
-import { listHeadlessTaskSchedules } from "@/lib/headless-automation-server";
 import { loadCurrentInfisicalAuthSettings } from "@/lib/infisical-auth";
 import {
   type ClaudeCodeProviderState,
@@ -18,6 +17,8 @@ import {
   integrationStateFromRows,
 } from "@/lib/integration-state";
 import { getAttioMcpIntegrationState } from "@/lib/integrations/attio-mcp";
+import { getConvexEventsIntegrationState } from "@/lib/integrations/convex-events";
+import { getConvexIntegrationState } from "@/lib/integrations/convex-mcp";
 import { getFathomIntegrationState } from "@/lib/integrations/fathom";
 import { getGoogleIntegrationState } from "@/lib/integrations/google-data";
 import { getGranolaIntegrationState } from "@/lib/integrations/granola";
@@ -40,7 +41,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
   });
   const emptyIntegrations = integrationStateFromRows([]);
   const [
-    schedules,
     recentChats,
     googleIntegrations,
     linear,
@@ -48,6 +48,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
     posthog,
     jamie,
     jamieEvents,
+    convex,
+    convexEvents,
     slack,
     granola,
     granolaMcp,
@@ -60,9 +62,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     workspaceSettings,
     personalAccounts,
   ] = await Promise.all([
-    featureFlags.taskSpawning
-      ? loadOptionalAppShellData("schedules", listHeadlessTaskSchedules, [])
-      : Promise.resolve([]),
     loadOptionalAppShellData("recent_chats", listCurrentUserRecentChats, []),
     loadOptionalAppShellData(
       "google_integrations",
@@ -93,6 +92,16 @@ export async function AppShell({ children }: { children: ReactNode }) {
       "jamie_events_integration",
       () => getJamieEventsIntegrationState(user.workosUserId),
       emptyIntegrations.jamie_events,
+    ),
+    loadOptionalAppShellData(
+      "convex_integration",
+      () => getConvexIntegrationState(user.workosUserId),
+      emptyIntegrations.convex,
+    ),
+    loadOptionalAppShellData(
+      "convex_events_integration",
+      () => getConvexEventsIntegrationState(user.workosUserId),
+      emptyIntegrations.convex_events,
     ),
     loadOptionalAppShellData(
       "slack_integration",
@@ -183,7 +192,6 @@ export async function AppShell({ children }: { children: ReactNode }) {
     // Task metadata hydrates from the API-owned Electric read model. Keeping the server snapshot
     // empty prevents the Next.js composition root from regaining a direct Task database reader.
     tasks: [],
-    schedules,
     recentChats,
     integrations: buildIntegrationState({
       googleIntegrations,
@@ -192,6 +200,8 @@ export async function AppShell({ children }: { children: ReactNode }) {
       posthog,
       jamie,
       jamieEvents,
+      convex,
+      convexEvents,
       slack,
       granola,
       granolaMcp,
@@ -228,6 +238,7 @@ export async function AppShell({ children }: { children: ReactNode }) {
     featureFlags,
     codexConnected: codex.status === "connected",
     claudeCodeConnected: claudeCode.status === "connected",
+    sharedModelAccessEnabled: codex.workspaceEngine?.enabled === true,
     mcpSetup: {
       preferredClient: user.preferredMcpClient,
       completedAt: user.mcpSetupCompletedAt?.toISOString() ?? null,
@@ -274,6 +285,8 @@ function buildIntegrationState(input: {
   posthog: IntegrationState["posthog"];
   jamie: IntegrationState["jamie"];
   jamieEvents: IntegrationState["jamie_events"];
+  convex: IntegrationState["convex"];
+  convexEvents: IntegrationState["convex_events"];
   slack: IntegrationState["slack"];
   granola: IntegrationState["granola"];
   granolaMcp: IntegrationState["granola_mcp"];
@@ -295,6 +308,8 @@ function buildIntegrationState(input: {
     posthog: input.posthog,
     jamie: input.jamie,
     jamie_events: input.jamieEvents,
+    convex: input.convex,
+    convex_events: input.convexEvents,
     slack: input.slack,
     granola: input.granola,
     granola_mcp: input.granolaMcp,

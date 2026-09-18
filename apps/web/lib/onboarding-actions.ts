@@ -5,7 +5,10 @@ import type { OnboardingStateDto } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { currentIdentity } from "@/lib/auth";
+import { loadCurrentClaudeCodeAuthSettings } from "@/lib/claude-code-auth";
+import { loadCurrentCodexAuthSettings } from "@/lib/codex-auth";
 import { enrollOwnerInOnboardingEmails } from "@/lib/email/onboarding-emails";
+import { listHeadlessPlugins } from "@/lib/headless-knowledge-server";
 import { parseOnboardingProfile } from "@/lib/onboarding-profile";
 import { serverApiClient, serverApiError, serverApiErrorMessage } from "@/lib/server-api-client";
 import { activateWorkspace } from "@/lib/workspace-session";
@@ -17,51 +20,24 @@ export type OnboardingWorkspaceActionResult =
 
 const WORKSPACE_SAVE_ERROR = "Could not save your workspace. Please try again.";
 
-function normalizeWorkspaceSlug(value: unknown): string {
-  if (typeof value !== "string") return "";
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/g, "");
-}
-
 export async function getOnboardingState(): Promise<OnboardingStateDto> {
   const response = await (await serverApiClient()).v1.onboarding.$get();
   if (!response.ok) throw await serverApiError(response, "Could not load onboarding.");
   return (await response.json()).data;
 }
 
-export async function checkWorkspaceSlugAction(
-  rawSlug: unknown,
-): Promise<{ slug: string; available: boolean }> {
-  const slug = normalizeWorkspaceSlug(rawSlug);
-  if (!slug) return { slug, available: false };
-  const response = await (await serverApiClient()).v1.onboarding["workspace-slug"].check.$post({
-    json: { slug },
-  });
-  if (!response.ok) return { slug, available: false };
-  return (await response.json()).data;
-}
-
 export async function saveOnboardingWorkspaceAction(input: {
   name: string;
-  slug: string;
 }): Promise<OnboardingWorkspaceActionResult> {
   const candidate = input as Partial<typeof input> | null | undefined;
   const name = typeof candidate?.name === "string" ? candidate.name.trim() : "";
   if (!name) return { ok: false, error: "Enter a company name." };
   if (name.length > 80) return { ok: false, error: "Name is too long (max 80 chars)." };
 
-  const slug = normalizeWorkspaceSlug(candidate?.slug);
-  if (!slug) return { ok: false, error: "Enter a valid workspace URL." };
-
   const workspaceId = newResourceId("workspace");
   try {
     const response = await (await serverApiClient()).v1.onboarding.workspace.$put({
-      json: { workspaceId, name, slug },
+      json: { workspaceId, name },
     });
     if (!response.ok) {
       return {
@@ -154,5 +130,42 @@ export async function finishOnboardingAction(input: {
       ok: false,
       error: error instanceof Error ? error.message : "Could not finish onboarding.",
     };
+  }
+}
+
+export type OnboardingSubscriptionsState = {
+  claudeCode: { connected: boolean; needsReauth: boolean };
+  codex: { connected: boolean; needsReauth: boolean };
+};
+
+// Onboarding reads connection status rather than receiving it as a prop: the
+// page renders before the workspace exists, and both providers can be connected
+// from a popup/device flow while the wizard stays mounted. A read failure must
+// not block setup, so an unreachable provider reads as "not connected".
+export async function getOnboardingSubscriptionsAction(): Promise<OnboardingSubscriptionsState> {
+  const [claudeCode, codex] = await Promise.all([
+    loadCurrentClaudeCodeAuthSettings().catch(() => null),
+    loadCurrentCodexAuthSettings().catch(() => null),
+  ]);
+  return {
+    claudeCode: {
+      connected: claudeCode?.status === "connected",
+      needsReauth: claudeCode?.status === "needs_reauth",
+    },
+    codex: {
+      connected: codex?.status === "connected",
+      needsReauth: codex?.status === "needs_reauth",
+    },
+  };
+}
+
+// Names of the plugins already installed in the workspace, so a resumed
+// onboarding shows what is really there instead of an empty catalog.
+export async function getOnboardingInstalledPluginsAction(): Promise<string[]> {
+  try {
+    const plugins = await listHeadlessPlugins();
+    return plugins.map((plugin) => plugin.name);
+  } catch {
+    return [];
   }
 }

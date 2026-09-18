@@ -14,6 +14,7 @@ import {
 } from "./assistant-items";
 import type { HistoricalPresentationDetailController } from "./HistoricalPresentationDetail";
 import { ReasoningItem } from "./ReasoningItem";
+import { SteeringItem } from "./SteeringItem";
 import { TaskCard } from "./TaskCard";
 import { TurnDuration } from "./ThinkingIndicator";
 import {
@@ -180,6 +181,9 @@ function AssistantTurn({
         />
       );
     }
+    if (item.type === "steering") {
+      return <SteeringItem key={item.key} text={item.text} />;
+    }
     if (item.type === "artifact") {
       const href =
         artifactHref?.(item.artifact) ??
@@ -290,7 +294,14 @@ function compactAssistantTrace(items: AssistantRenderItem[]): CompactedAssistant
   const hiddenItems: AssistantRenderItem[] = [];
   const visibleItems: AssistantRenderItem[] = [];
   for (const [index, item] of items.entries()) {
-    if (index === finalMessageIndex || item.type === "artifact" || item.type === "task") {
+    // A steered instruction is the user's own words, and it changes how the rest of the turn
+    // reads. It stays out of the collapsed trace for the same reason artifacts and tasks do.
+    if (
+      index === finalMessageIndex ||
+      item.type === "artifact" ||
+      item.type === "task" ||
+      item.type === "steering"
+    ) {
       visibleItems.push(item);
     } else {
       hiddenItems.push(item);

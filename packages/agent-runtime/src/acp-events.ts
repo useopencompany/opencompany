@@ -23,6 +23,11 @@ export type AcpGoalSummary = {
   timeUsedSeconds: number | null;
 };
 
+// The MCP server the runner exposes to a coding engine for opencompany's own host tools
+// (actions, artifacts, wiki, Skills). A tool call on this server is an opencompany capability
+// rather than a third-party integration, and the UI names it accordingly.
+export const ACP_TOOLS_MCP_SERVER_NAME = "opencompany";
+
 // Upper bound on the MCP tool result echoed into the assistant part. Matches the command output
 // preview budget so a large tool result cannot bloat the persisted message row.
 const MCP_TOOL_RESULT_LIMIT = 4_000;
@@ -82,6 +87,20 @@ export function createAcpEventNormalizer(
           threadId: currentSessionId,
           turnId: currentSessionId,
           status: "running",
+        }),
+      ];
+    }
+
+    // Synthesised by the runner once the steering extension confirms the message joined the live
+    // turn. The adapters echo steered input as `user_message_chunk`, which opencompany does not
+    // project, so this is the only record of what the user injected mid-turn.
+    if (method === "session/steering_delivered") {
+      const text = readString(params.text);
+      if (!text) return [];
+      return [
+        normalized("steering.delivered", raw, {
+          itemId: readString(params.steeringMessageId) ?? `acp-steering-${attemptScopeId}`,
+          text,
         }),
       ];
     }

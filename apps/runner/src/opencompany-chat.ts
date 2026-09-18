@@ -30,8 +30,14 @@ import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import { createSubagentBudget } from "@opencompany/agent/subagent";
 import {
+  readWorkflowMemory,
+  updateWorkflowMemory,
+  workflowMemorySystemBlock,
+} from "@opencompany/agent/workflow-memory";
+import {
   AGENT_MODEL_CATALOG,
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
   modelSupportsAttachments,
   parsePublishedChatArtifact,
@@ -82,6 +88,7 @@ import {
   CodexChatRetryableInfrastructureError,
   TaskTurnTerminalError,
 } from "./codex-chat-errors";
+import { createProductSteeringChannel } from "./coding-chat-steering";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { createActionDispatcher } from "./opencompany-action-gateway";
@@ -96,6 +103,7 @@ import {
 import {
   CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
+  ContextCompactionCapacityError,
   compactProductChatContextIfNeeded,
 } from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
@@ -126,10 +134,6 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "goat-opencompany-chat",
 });
-
-// Main turn steps index from 0 and context compaction uses -1, so subagent usage rows start well
-// below both and descend.
-const SUBAGENT_USAGE_STEP_INDEX_BASE = -1_000;
 
 export function productChatGatewayProviderOptions(attribution: GatewayAttribution) {
   return gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
@@ -264,10 +268,9 @@ export async function runProductChatTurn(input: {
     const prelistedActionSourceIds = listedActionSourceIdsFromMessages(storedUiMessages);
     const prelistedSkillIds = listedSkillIdsFromMessages(storedUiMessages);
     const subagentTrace = createSubagentTraceChannel();
-    // Subagent steps bill against this turn but are not turn steps. They take their own descending
-    // index so they never collide with a main step's subscription-covered idempotency key, and so
-    // they never become the "latest step" the context-window meter reads.
-    let subagentUsageStepIndex = SUBAGENT_USAGE_STEP_INDEX_BASE;
+    // Summary and subagent calls share descending indices, separate from main steps (0+).
+    // Keep each provider request separate: aggregating input tokens can change the billing tier.
+    let auxiliaryUsageStepIndex = -1;
     const runtime = await resolveProductChatRuntime({
       turn,
       session,
@@ -278,7 +281,7 @@ export async function runProductChatTurn(input: {
       taskContext: input.taskContext,
       subagentTrace,
       recordSubagentUsage: (usage) =>
-        projector.recordStepUsage({ stepIndex: subagentUsageStepIndex--, usage }),
+        projector.recordStepUsage({ stepIndex: auxiliaryUsageStepIndex--, usage }),
     });
     runtimeCleanup = runtime.cleanup;
     throwIfAborted(generationController.signal);
@@ -311,16 +314,20 @@ export async function runProductChatTurn(input: {
             blobToken: env.blobReadWriteToken,
             activeSkills: runtime.activeSkills,
           }),
-        summarize: async (prompt) => {
+        summarize: async (messages) => {
           const result = await generateText({
             model: modelResolution.model,
-            system: `${runtime.system}\n\n${CONTEXT_COMPACTION_SYSTEM_PROMPT}`,
-            prompt,
+            system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
+            messages,
             maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
             abortSignal: generationController.signal,
             providerOptions,
           });
-          return { text: result.text, usage: result.usage };
+          await projector.recordStepUsage({
+            stepIndex: auxiliaryUsageStepIndex--,
+            usage: result.usage,
+          });
+          return { text: result.text };
         },
         persist: (state) =>
           persistProductChatContextCompaction({
@@ -339,6 +346,16 @@ export async function runProductChatTurn(input: {
         chat_session_id: session.chatSessionId,
         model: runtime.model,
         error: errorMessage(error),
+        ...(error instanceof ContextCompactionCapacityError
+          ? {
+              context_window_tokens: error.diagnostics.contextWindowTokens,
+              fixed_context_tokens: error.diagnostics.fixedContextTokens,
+              available_tail_tokens: error.diagnostics.availableTailTokens,
+              retained_message_count: error.diagnostics.retainedMessageCount,
+              estimated_tokens_before: error.diagnostics.estimatedTokensBefore,
+              estimated_tokens_after: error.diagnostics.estimatedTokensAfter,
+            }
+          : {}),
       });
       throw error;
     }
@@ -355,26 +372,44 @@ export async function runProductChatTurn(input: {
         estimated_tokens_before: context.state.estimatedTokensBefore,
         estimated_tokens_after: context.state.estimatedTokensAfter,
       });
-      if (context.usage) {
-        await projector.recordStepUsage({ stepIndex: -1, usage: context.usage });
-      }
     }
     const messages = context.messages;
+    // Steering rides alongside the turn that is already producing work. The product agent has no
+    // adapter session to inject into, so a promoted message joins the next model step's message
+    // list instead; a step that is mid-tool-call finishes first. Polling once per step costs less
+    // than the ACP path's one-second timer and, like it, can never fail the turn it rides on.
+    const steeringTrace = createSteeringTraceChannel();
+    const steering = createProductSteeringChannel({
+      runId: turn.id,
+      leaseId,
+      leaseOwner,
+      onSteered: (message) => steeringTrace.publish(message),
+    });
     const stream = streamText({
       model: guardKimiOutput(modelResolution.model, runtime.model),
       system: runtime.system,
       messages,
       tools: runtime.toolContext.tools,
       stopWhen: stepCountIs(runtime.maxSteps),
-      prepareStep: ({ stepNumber }) =>
-        prepareProductChatStep({
+      prepareStep: async ({ stepNumber, messages: stepMessages }) => {
+        const prepared = prepareProductChatStep({
           stepNumber,
           maxSteps: runtime.maxSteps,
           system: runtime.system,
           wikiContext: runtime.toolContext.getSelectedWikiContext(),
           actionCallsExhausted: runtime.toolContext.areActionCallsExhausted(),
           toolNames: Object.keys(runtime.toolContext.tools),
-        }),
+        });
+        const steered = await steering.take();
+        if (steered.length === 0) return prepared;
+        return {
+          ...prepared,
+          messages: [
+            ...stepMessages,
+            ...steered.map((text) => ({ role: "user" as const, content: text })),
+          ],
+        };
+      },
       ...(runtime.toolContext.repairToolCall
         ? { experimental_repairToolCall: runtime.toolContext.repairToolCall }
         : {}),
@@ -385,6 +420,7 @@ export async function runProductChatTurn(input: {
     projection = await consumeProductChatStream({
       fullStream: stream.fullStream,
       signal: generationController.signal,
+      steeringTrace,
       sink: {
         project: async (nextProjection) => {
           projection = nextProjection;
@@ -540,6 +576,36 @@ export async function hasHostedTurnCredits(workspaceId: string, db = getDb()) {
   return hasPositiveCreditBalance(workspaceId, db);
 }
 
+// A message the user steered into the turn that is running, carried from the step boundary that
+// injected it to the projection that records it.
+export type SteeredMessage = { id: string; text: string };
+
+export function createSteeringTraceChannel() {
+  let listener: ((message: SteeredMessage) => void) | null = null;
+  // streamText starts the first model step eagerly, so a message steered in before this turn's
+  // consumer subscribes would otherwise reach the model without reaching the transcript. Buffer
+  // until there is somewhere to put it.
+  const buffered: SteeredMessage[] = [];
+  return {
+    publish: (message: SteeredMessage) => {
+      if (!listener) {
+        buffered.push(message);
+        return;
+      }
+      listener(message);
+    },
+    subscribe: (next: (message: SteeredMessage) => void) => {
+      // One channel belongs to one turn's projection. A second subscriber would silently replace
+      // the first and drop its messages, so make that state impossible rather than debuggable.
+      if (listener) throw new Error("A steering trace channel accepts one subscriber per turn.");
+      listener = next;
+      for (const message of buffered.splice(0)) next(message);
+    },
+  };
+}
+
+export type SteeringTraceChannel = ReturnType<typeof createSteeringTraceChannel>;
+
 export async function consumeProductChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
@@ -551,6 +617,7 @@ export async function consumeProductChatStream(input: {
   now?: () => number;
   initialProjection?: ProductChatProjection;
   subagentTrace?: SubagentTraceChannel;
+  steeringTrace?: SteeringTraceChannel;
 }): Promise<ProductChatProjection> {
   const parts: ProductChatUiPart[] = cloneParts(input.initialProjection?.parts ?? []);
   const textPartIndexes = new Map<string, number>();
@@ -625,6 +692,17 @@ export async function consumeProductChatStream(input: {
     if (!next) return;
     parts.splice(0, parts.length, ...next);
     dirty = true;
+    void flush(false);
+  });
+
+  // A steered message arrives between model steps, while this loop is parked waiting for the next
+  // chunk. Writing it straight into the parts is what puts it in the transcript at the point the
+  // agent received it, instead of leaving the change of direction unexplained.
+  input.steeringTrace?.subscribe((message) => {
+    appendPart({
+      type: CHAT_STEERING_DATA_PART_TYPE,
+      data: { text: message.text, itemId: message.id },
+    });
     void flush(false);
   });
 
@@ -945,7 +1023,7 @@ function replayMessagesThroughCurrent(
   );
 }
 
-async function productModelMessagesFromReplay(
+export async function productModelMessagesFromReplay(
   replayMessages: readonly StoredChatMessage[],
   currentUserMessageId: string,
   options?: {
@@ -980,7 +1058,7 @@ async function productModelMessagesFromReplay(
   );
 }
 
-async function loadProductChatStoredMessages(input: {
+export async function loadProductChatStoredMessages(input: {
   chatSessionId: string;
   currentUserMessageId: string;
   includeCurrentAssistantMessage: boolean;
@@ -1009,13 +1087,25 @@ async function loadProductChatStoredMessages(input: {
     taskStatus: null,
   }));
   return replayMessagesThroughCurrent(
-    storedMessages,
+    storedMessages.filter((message) => !isUnansweredAssistantMessage(message)),
     input.currentUserMessageId,
     input.includeCurrentAssistantMessage,
   );
 }
 
-async function loadProductChatContextCompaction(
+// A Run that never executed -- a queued message the user steered into the live turn, or one they
+// removed from the queue -- leaves an assistant row with nothing in it. Replaying that row would
+// hand the model an empty assistant turn between two user messages, so drop it and keep the user's
+// words, which are what the next turn actually has to answer.
+function isUnansweredAssistantMessage(message: StoredChatMessage) {
+  return (
+    message.role === "assistant" &&
+    !message.content.trim() &&
+    !message.debugTrace?.uiMessageParts?.length
+  );
+}
+
+export async function loadProductChatContextCompaction(
   chatSessionId: string,
 ): Promise<ProductChatContextCompactionState | null> {
   const [row] = await getDb()
@@ -1035,7 +1125,7 @@ async function loadProductChatContextCompaction(
   return row ?? null;
 }
 
-async function persistProductChatContextCompaction(input: {
+export async function persistProductChatContextCompaction(input: {
   state: ProductChatContextCompactionState;
   chatSessionId: string;
   codexChatSessionId: string;
@@ -1354,21 +1444,35 @@ async function resolveProductChatRuntime(input: {
       })
     : null;
 
+  // A workflow run gets memory tools only while its workflow has memory switched on. The flag is
+  // read live rather than baked into the harness spec, so toggling memory takes effect on the next
+  // run even for a workflow whose scheduled harness spec was planned earlier.
+  const workflowMemory = taskContext?.harnessSpec.workflow
+    ? await readWorkflowMemory({
+        workspaceId: taskContext.harnessSpec.workflow.workspaceId,
+        workflowSlug: taskContext.harnessSpec.workflow.id,
+        db: getDb(),
+      })
+    : null;
+  const workflowMemoryRef =
+    workflowMemory?.enabled && taskContext?.harnessSpec.workflow
+      ? {
+          workspaceId: taskContext.harnessSpec.workflow.workspaceId,
+          workflowSlug: taskContext.harnessSpec.workflow.id,
+        }
+      : null;
+
   const toolContext = createProductChatToolContext({
     model,
-    latestUserMessage: turn.prompt,
     ...(runBrainCli ? { runBrainCli } : {}),
     ...(brainCapture ? { saveToBrain: brainCapture } : {}),
-    ...(hostTools?.startTask ? { startTask: hostTools.startTask } : {}),
-    ...(hostTools?.scheduleTask ? { scheduleTask: hostTools.scheduleTask } : {}),
-    ...(hostTools?.editTaskSchedule ? { editTaskSchedule: hostTools.editTaskSchedule } : {}),
-    ...(hostTools?.deleteTaskSchedule ? { deleteTaskSchedule: hostTools.deleteTaskSchedule } : {}),
     ...(hostTools?.workspaceSkills ? { workspaceSkills: hostTools.workspaceSkills } : {}),
     ...(hostTools?.createWorkspaceSkill
       ? { createWorkspaceSkill: hostTools.createWorkspaceSkill }
       : {}),
     ...(hostTools?.editWorkspaceSkill ? { editWorkspaceSkill: hostTools.editWorkspaceSkill } : {}),
     ...(hostTools?.runWiki ? { runWiki: hostTools.runWiki as never } : {}),
+    ...(hostTools?.postSlackMessage ? { postSlackMessage: hostTools.postSlackMessage } : {}),
     ...(hostTools?.writeArtifact ? { writeArtifact: hostTools.writeArtifact } : {}),
     ...(hostTools?.browserTools ? { browserTools: hostTools.browserTools } : {}),
     ...(hostTools?.browserProfiles ? { browserProfiles: hostTools.browserProfiles } : {}),
@@ -1377,6 +1481,23 @@ async function resolveProductChatRuntime(input: {
     ...(webSearch ? { webSearch } : {}),
     ...(webFetch ? { webFetch } : {}),
     ...(subagentRunner ? { runSubagent: subagentRunner } : {}),
+    ...(workflowMemoryRef
+      ? {
+          readWorkflowMemory: async () => {
+            const current = await readWorkflowMemory({ ...workflowMemoryRef, db: getDb() });
+            if (!current?.enabled) {
+              return { ok: false as const, error: "Memory is not enabled for this workflow." };
+            }
+            return {
+              ok: true as const,
+              content: current.content,
+              updatedAt: current.updatedAt?.toISOString() ?? null,
+            };
+          },
+          updateWorkflowMemory: ({ content }: { content: string }) =>
+            updateWorkflowMemory({ ...workflowMemoryRef, content, db: getDb() }),
+        }
+      : {}),
     ...(actionDispatcher ? { actions: actionDispatcher } : {}),
     ...(taskContext
       ? {
@@ -1392,8 +1513,7 @@ async function resolveProductChatRuntime(input: {
     webFetchEnabled: Boolean(exaApiKey),
     webSearchEnabled: Boolean(exaApiKey),
     browserToolsEnabled: Boolean(hostTools?.browserTools),
-    taskToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
-    scheduleToolsEnabled: Boolean(hostTools?.bootstrap.taskToolsEnabled),
+    automationToolsEnabled: Boolean(hostTools?.bootstrap.automationToolsEnabled),
     wikiToolEnabled: Boolean(hostTools?.runWiki),
     artifactToolEnabled: Boolean(hostTools?.writeArtifact),
     subagentsEnabled: Boolean(subagentRunner),
@@ -1407,7 +1527,6 @@ async function resolveProductChatRuntime(input: {
     ...(hostTools
       ? {
           userContext: hostTools.bootstrap.userContext,
-          recurringSchedules: hostTools.bootstrap.recurringSchedules,
           skillsAvailable: hostTools.bootstrap.skills.length > 0,
           workflows: hostTools.bootstrap.workflows,
         }
@@ -1427,6 +1546,9 @@ async function resolveProductChatRuntime(input: {
     ? [
         TASK_SYSTEM_BLOCK,
         TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+        // Injected so a repeating workflow starts with what it already knows instead of spending a
+        // tool call reading memory on every run.
+        ...(workflowMemory?.enabled ? [workflowMemorySystemBlock(workflowMemory)] : []),
         ...(taskContext.harnessSpec.systemBlocks?.length
           ? taskContext.harnessSpec.systemBlocks
           : taskContext.harnessSpec.systemPrompt.trim()
@@ -1459,7 +1581,7 @@ async function resolveProductChatRuntime(input: {
   };
 }
 
-function createProductAbortWatcher(input: {
+export function createProductAbortWatcher(input: {
   signalController: AbortController;
   projector: Pick<ProductChatProjector, "checkAbort">;
   shouldAbort?: () => Error | null;
@@ -1543,7 +1665,7 @@ function providerMetadataFrom(part: Record<string, unknown>) {
 // Only text and reasoning are finalized. Tool parts deliberately keep `input-streaming` so
 // isReplaySafeProductChatInfrastructureFailure can still tell a partial tool input apart from one
 // that crossed the execute boundary.
-function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
+export function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   return parts.map((part) =>
     (part.type === "text" || part.type === "reasoning") && part.state === "streaming"
       ? { ...part, state: "done" }
@@ -1551,7 +1673,9 @@ function finalizeStreamingParts(parts: readonly ProductChatUiPart[]) {
   );
 }
 
-function withCompletedResponseFallback(projection: ProductChatProjection): ProductChatProjection {
+export function withCompletedResponseFallback(
+  projection: ProductChatProjection,
+): ProductChatProjection {
   if (
     projection.parts.some(
       (part) => part.type === "text" && typeof part.text === "string" && part.text.trim(),
@@ -1582,7 +1706,7 @@ function partAt(parts: readonly ProductChatUiPart[], index: number) {
   return part;
 }
 
-function recognizedAbortError(value: unknown): value is Error {
+export function recognizedAbortError(value: unknown): value is Error {
   return (
     value instanceof CodexChatHandoffError ||
     value instanceof ProductChatInterruptedError ||
@@ -1611,7 +1735,7 @@ function readStringAllowEmpty(value: unknown) {
   return typeof value === "string" ? value : null;
 }
 
-function errorMessage(error: unknown) {
+export function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -1637,7 +1761,7 @@ export function isReplaySafeProductChatInfrastructureFailure(
   );
 }
 
-function productChatInfrastructureFailureDiagnostic(error: APICallError) {
+export function productChatInfrastructureFailureDiagnostic(error: APICallError) {
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);
   const cause =
     error.cause instanceof Error
@@ -1648,7 +1772,7 @@ function productChatInfrastructureFailureDiagnostic(error: APICallError) {
   return `[run_turn] ${error.name} (${status}): ${error.message}; cause: ${cause}`;
 }
 
-function projectionText(projection: ProductChatProjection) {
+export function projectionText(projection: ProductChatProjection) {
   return projection.parts
     .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
     .join("")

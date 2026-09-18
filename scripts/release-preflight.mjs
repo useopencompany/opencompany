@@ -110,6 +110,15 @@ const groups = {
       "OPENCOMPANY_SLACK_BOT_CLIENT_SECRET",
       "OPENCOMPANY_SLACK_BOT_SIGNING_SECRET",
       "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
+      // iMessage personal assistant: webhook ingress and pairing replies (messages.dev).
+      "MESSAGES_API_KEY",
+      "MESSAGES_WEBHOOK_SECRET",
+      "MESSAGES_LINE_HANDLE",
+      // WhatsApp personal assistant: Kapso ingress and pairing replies.
+      "KAPSO_API_KEY",
+      "KAPSO_PHONE_NUMBER_ID",
+      "KAPSO_WEBHOOK_SECRET",
+      "WHATSAPP_LINE_HANDLE",
       // Engine auth control calls use the runner's internal transport. The
       // public URL is the guaranteed fallback; the internal URL is optional.
       "RUNNER_PUBLIC_URL",
@@ -121,6 +130,8 @@ const groups = {
       "OPENCOMPANY_STRIPE_WEBHOOK_SECRET",
       "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
       "MONID_API_KEY",
+      // Sentry-compatible Better Stack DSN; without it API exceptions never leave platform logs.
+      "BETTER_STACK_ERRORS_DSN",
     ],
     // Browser profiles are feature-flag gated: the Browserbase credentials are
     // required only when OPENCOMPANY_BROWSER_PROFILES_ENABLED is "true" in this env.
@@ -199,8 +210,17 @@ const groups = {
   runner: {
     label: "Render runner",
     required: [
+      // Sentry-compatible Better Stack DSN; without it runner exceptions never leave platform logs.
+      "BETTER_STACK_ERRORS_DSN",
       "DATABASE_URL",
       "RUNNER_INTERNAL_TOKEN",
+      // iMessage personal assistant sends from the runner (messages.dev).
+      "MESSAGES_API_KEY",
+      "MESSAGES_LINE_HANDLE",
+      // WhatsApp personal assistant sends through Kapso.
+      "KAPSO_API_KEY",
+      "KAPSO_PHONE_NUMBER_ID",
+      "WHATSAPP_LINE_HANDLE",
       // Runner→API canonical origin and bearer for the internal wiki command
       // endpoint. Agent wiki writes fail closed if either is missing.
       "OPENCOMPANY_API_ORIGIN",
@@ -227,6 +247,12 @@ const groups = {
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
       "RUNNER_SANDBOX_NAMESPACE",
+      // One built template per user-selectable sandbox size. A missing alias would
+      // silently fall back to E2B's stock template, so a workspace would get — and
+      // be billed for — a machine other than the one it picked.
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
+      "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
     ],
     // Agent turns and the crash reconciler both call Browserbase from the
     // runner when browser profiles are enabled.
@@ -245,7 +271,6 @@ const groups = {
       "RUNNER_DB_POOL_MAX",
       "RUNNER_WORKER_CONCURRENCY",
       "RUNNER_JOB_LEASE_TTL_MS",
-      "OPENCOMPANY_CODEX_E2B_TEMPLATE",
       "RUNNER_CODEX_MODEL",
       "RUNNER_CODEX_TIMEOUT_MS",
       "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",
@@ -275,7 +300,6 @@ const groups = {
       "OPENCOMPANY_DICTATION_REALTIME_MODEL",
       "OPENCOMPANY_DICTATION_FINAL_MODEL",
       "OPENAI_API_KEY",
-      "BETTER_STACK_ERRORS_DSN",
       "OBSERVABILITY_ENABLED",
       "OBSERVABILITY_ENV",
       "OBSERVABILITY_RELEASE",

@@ -15,12 +15,13 @@ import { newResourceId } from "@opencompany/core/resource-ids";
 import { getDb } from "@opencompany/db/client";
 import {
   type HarnessSpec,
+  type WorkflowScope,
   type WorkflowStatus,
   type WorkflowStep,
   type WorkflowTrigger,
   workflows,
 } from "@opencompany/db/product-schema";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import {
   isWorkflowCloudRuntime,
   isWorkflowModelToken,
@@ -95,6 +96,8 @@ export type WorkspaceWorkflow = {
   name: string;
   description: string;
   steps: WorkflowStep[];
+  scope?: WorkflowScope;
+  createdByUserId?: string | null;
 };
 
 export type WorkflowListItem = {
@@ -147,8 +150,18 @@ export function readWorkflowMentionRef(
   return { ok: true, mention: unique[0] ?? null };
 }
 
+// `userId` is the reader: company workflows belong to the workspace, personal ones only to their
+// creator. Callers that cannot name a reader have no business seeing personal workflows.
+export function visibleWorkflows(workspaceId: string, userId: string) {
+  return and(
+    eq(workflows.workspaceId, workspaceId),
+    or(eq(workflows.scope, "company"), eq(workflows.createdByWorkosId, userId)),
+  );
+}
+
 export async function listWorkflowCatalog(
   workspaceId: string,
+  userId: string,
   db: Db = getDb(),
 ): Promise<WorkflowCatalogItem[]> {
   const rows = await db
@@ -163,7 +176,7 @@ export async function listWorkflowCatalog(
     .from(workflows)
     .where(
       and(
-        eq(workflows.workspaceId, workspaceId),
+        visibleWorkflows(workspaceId, userId),
         eq(workflows.status, "active"),
         isNull(workflows.archivedAt),
       ),
@@ -181,6 +194,7 @@ export async function listWorkflowCatalog(
 
 export async function listWorkflows(
   workspaceId: string,
+  userId: string,
   db: Db = getDb(),
 ): Promise<WorkflowListItem[]> {
   const rows = await db
@@ -199,7 +213,7 @@ export async function listWorkflows(
       updatedAt: workflows.updatedAt,
     })
     .from(workflows)
-    .where(and(eq(workflows.workspaceId, workspaceId), isNull(workflows.archivedAt)))
+    .where(and(visibleWorkflows(workspaceId, userId), isNull(workflows.archivedAt)))
     .orderBy(desc(workflows.updatedAt));
   return rows.map((row) => ({
     slug: row.slug,
@@ -213,6 +227,7 @@ export async function listWorkflows(
 
 export async function getWorkflow(
   workspaceId: string,
+  userId: string,
   slug: string,
   db: Db = getDb(),
 ): Promise<WorkflowDetail | null> {
@@ -232,11 +247,13 @@ export async function getWorkflow(
       scheduleLastRunAt: workflows.scheduleLastRunAt,
       scheduleNextRunAt: workflows.scheduleNextRunAt,
       status: workflows.status,
+      scope: workflows.scope,
+      createdByUserId: workflows.createdByWorkosId,
     })
     .from(workflows)
     .where(
       and(
-        eq(workflows.workspaceId, workspaceId),
+        visibleWorkflows(workspaceId, userId),
         eq(workflows.slug, slug),
         isNull(workflows.archivedAt),
       ),
@@ -248,6 +265,8 @@ export async function getWorkflow(
     name: row.name,
     description: row.description,
     steps: workflowStepsWithLegacyFallback(row),
+    scope: row.scope,
+    createdByUserId: row.createdByUserId,
     status: row.status,
     trigger: workflowTriggerFromRow(row),
   };
@@ -255,13 +274,19 @@ export async function getWorkflow(
 
 export async function resolveWorkflowMention(input: {
   workspaceId: string | null;
+  userId: string;
   mention: WorkflowMentionRef;
   db?: Db;
 }): Promise<WorkspaceWorkflow> {
   if (!input.workspaceId) {
     throw new WorkflowMentionError("No active workspace is available for workflow mentions.");
   }
-  const workflow = await getWorkflow(input.workspaceId, input.mention.id, input.db ?? getDb());
+  const workflow = await getWorkflow(
+    input.workspaceId,
+    input.userId,
+    input.mention.id,
+    input.db ?? getDb(),
+  );
   if (
     !workflow ||
     workflow.status !== "active" ||
@@ -337,6 +362,7 @@ export async function createWorkflow(input: {
   createdByWorkosId: string;
   name: string;
   description?: string;
+  scope?: WorkflowScope;
 }): Promise<WorkflowMutationResult> {
   const steps = [emptyWorkflowStep()];
   const invalid = validateWorkflowFields({
@@ -365,6 +391,7 @@ export async function createWorkflow(input: {
     scheduleUserWorkosId: null,
     scheduleNextRunAt: null,
     status: "draft",
+    scope: input.scope ?? "company",
     createdByWorkosId: input.createdByWorkosId,
   });
   return { ok: true, slug };
@@ -372,6 +399,7 @@ export async function createWorkflow(input: {
 
 export async function updateWorkflow(input: {
   workspaceId: string;
+  userId: string;
   slug: string;
   name: string;
   description: string;
@@ -435,7 +463,7 @@ export async function updateWorkflow(input: {
     })
     .where(
       and(
-        eq(workflows.workspaceId, input.workspaceId),
+        visibleWorkflows(input.workspaceId, input.userId),
         eq(workflows.slug, input.slug),
         isNull(workflows.archivedAt),
       ),
@@ -564,6 +592,7 @@ function normalizeWorkflowTriggerInput(
 
 export async function archiveWorkflow(input: {
   workspaceId: string;
+  userId: string;
   slug: string;
 }): Promise<WorkflowMutationResult> {
   const db = getDb();
@@ -572,7 +601,7 @@ export async function archiveWorkflow(input: {
     .set({ archivedAt: new Date(), updatedAt: new Date() })
     .where(
       and(
-        eq(workflows.workspaceId, input.workspaceId),
+        visibleWorkflows(input.workspaceId, input.userId),
         eq(workflows.slug, input.slug),
         isNull(workflows.archivedAt),
       ),

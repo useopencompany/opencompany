@@ -1,5 +1,7 @@
-import { CODEX_DYNAMIC_TOOL_NAME } from "@opencompany/agent-runtime";
+import { ACP_TOOLS_MCP_SERVER_NAME, CODEX_DYNAMIC_TOOL_NAME } from "@opencompany/agent-runtime";
+import { actionRowLabel, actionSource } from "@/lib/action-identity";
 import {
+  BRAIN_TOOL_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
@@ -9,6 +11,8 @@ import {
   CODEX_QUESTION_TOOL_NAME,
   CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
+  USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 
 export type CodingToolPresentation = {
@@ -16,6 +20,8 @@ export type CodingToolPresentation = {
   detail: string | null;
   detailChips: string[];
   category: "search" | "tool";
+  /** Set when the row is a connected action, so the row can badge it with the service's mark. */
+  actionSource: string | null;
 };
 
 type CodingToolPresentationInput = {
@@ -44,6 +50,12 @@ const FIXED_CODING_TOOL_LABELS: Readonly<Record<string, string>> = {
   [CODEX_PLAN_TOOL_NAME]: "Plan",
   [CODEX_QUESTION_TOOL_NAME]: "Question",
   [CODEX_SUBAGENT_TOOL_NAME]: "Subagent",
+};
+
+// opencompany's own host tools, where the registered tool name does not read as a label.
+const HOST_TOOL_LABELS: Readonly<Record<string, string>> = {
+  [BRAIN_TOOL_NAME]: "Brain",
+  [SLACK_BOT_TOOL_NAME]: "Slack bot",
 };
 
 const INTERNAL_LABELS = new Set([
@@ -115,6 +127,8 @@ export function codingToolPresentation({
   if (!isCodingBucket) return null;
 
   if (mcpTarget) {
+    const hostTool = hostToolPresentation(mcpTarget, inputRecord, outputRecord, error);
+    if (hostTool) return hostTool;
     const detailChips = [`${mcpTarget.server} · ${mcpTarget.tool}`, ...(error ? [error] : [])];
     return presentation(
       safeHumanLabel(title, identity) ?? safeHumanLabel(labelHint, identity) ?? "Tool",
@@ -215,10 +229,53 @@ function repoRelativeSandboxPath(value: string) {
   return normalized;
 }
 
+/**
+ * A tool call on opencompany's own MCP server is a host capability, not a third-party server, so
+ * the row names the capability instead of the `server · tool` plumbing that carried it. A
+ * connected action goes one better and names the service it reached: "Linear · Create issue".
+ */
+function hostToolPresentation(
+  mcpTarget: { server: string; tool: string },
+  inputRecord: Record<string, unknown> | null,
+  outputRecord: Record<string, unknown> | null,
+  error: string | null,
+) {
+  if (mcpTarget.server !== ACP_TOOLS_MCP_SERVER_NAME) return null;
+  const errorChips = error ? [error] : [];
+  if (mcpTarget.tool === USE_ACTION_TOOL_NAME) {
+    // The envelope above already established which tool ran, so the call's own arguments are
+    // safe to read for what it ran against.
+    const action = firstString(
+      compactRecords([nestedRecord(inputRecord, "arguments"), outputRecord]),
+      ["action"],
+    );
+    if (action) {
+      return presentation(actionRowLabel(action), errorChips, "tool", actionSource(action));
+    }
+  }
+  if (mcpTarget.tool === "workflows") {
+    const args = nestedRecord(inputRecord, "arguments");
+    const command = firstString(compactRecords([args]), ["command"]);
+    const target = firstString(compactRecords([nestedRecord(args, "workflow"), args]), [
+      "name",
+      "workflowId",
+    ]);
+    return presentation(
+      "Workflow",
+      errorChips.length
+        ? errorChips
+        : [command, target].filter((value): value is string => Boolean(value)),
+    );
+  }
+  const label = HOST_TOOL_LABELS[mcpTarget.tool] ?? sentenceCase(mcpTarget.tool);
+  return presentation(label, errorChips);
+}
+
 function presentation(
   label: string,
   detailChips: string[],
   category: CodingToolPresentation["category"] = "tool",
+  source: string | null = null,
 ): CodingToolPresentation {
   const visibleChips = detailChips.map((chip) => chip.trim()).filter(Boolean);
   return {
@@ -226,7 +283,16 @@ function presentation(
     detail: visibleChips.length > 0 ? visibleChips.join(", ") : null,
     detailChips: visibleChips,
     category,
+    actionSource: source,
   };
+}
+
+function sentenceCase(toolName: string) {
+  const words = toolName
+    .split(/[._-]+/u)
+    .filter(Boolean)
+    .join(" ");
+  return words ? `${words.slice(0, 1).toUpperCase()}${words.slice(1)}` : "Tool";
 }
 
 function unwrapShellArgument(value: string) {

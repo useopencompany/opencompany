@@ -13,7 +13,6 @@ import {
   type AutomationTaskCreator,
   CoreError,
   TaskApplicationService,
-  TaskScheduleApplicationService,
   taskNameFromGoal,
   WorkflowApplicationService,
 } from "@opencompany/core";
@@ -22,7 +21,6 @@ import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { validateWorkflowEventSubscription } from "@opencompany/db/workflow-event-subscriptions";
 import {
-  PostgresTaskScheduleRepository,
   PostgresWorkflowRepository,
   type WorkflowSqlExecute,
 } from "@opencompany/db/workflow-repository";
@@ -62,15 +60,6 @@ export function createAutomationServices(input: AutomationServicesInput) {
         payload: prepared.harnessSpec,
       } satisfies AutomationExecutionPlan;
     },
-    prepareTaskSchedule: async ({ actor, prompt }) =>
-      planTaskScheduleHarness(
-        { actorId: actor.userId, prompt },
-        {
-          ...(input.fetch ? { fetch: input.fetch } : {}),
-          ...(runnerUrl ? { runnerUrl } : {}),
-          ...(runnerToken ? { runnerToken } : {}),
-        },
-      ),
   };
   const taskCreator = createAutomationTaskCreator({
     execute: input.execute,
@@ -96,10 +85,6 @@ export function createAutomationServices(input: AutomationServicesInput) {
       validateEventSubscription: (subscription) =>
         validateWorkflowEventSubscription(input.execute, subscription),
     }),
-    schedules: new TaskScheduleApplicationService(
-      new PostgresTaskScheduleRepository(input.execute),
-      options,
-    ),
   };
 }
 
@@ -124,12 +109,9 @@ export function createAutomationTaskCreator(
           resolveAttachments: ({ actor, attachmentIds }) =>
             input.resolveAttachments({ actor, attachmentIds }),
           resolveHarness: async () => harness,
-          // Workflow harnesses frame the first turn as "Task: <name>\n\n<goal>",
-          // so the persisted user message must match that framing. Without this
-          // the repository's canonical-command check compares the framed harness
-          // message against the bare goal and throws, masking every workflow
-          // invocation as a generic 500. Mirrors the runner scheduler and the
-          // shared task-creation helper.
+          // The workflow harness owns the visible request: this is explicit run context when
+          // supplied, or the first step's instructions otherwise. Persist that same message so
+          // the repository's canonical-command check and the conversation stay aligned.
           compatibility: {
             initialMessageContent: harness.initialUserMessage.trim() || command.goal,
           },
@@ -144,7 +126,6 @@ export function createAutomationTaskCreator(
         model: command.execution.model,
         source: command.source,
         ...(command.workflowId ? { workflowId: command.workflowId } : {}),
-        ...(command.scheduleId ? { scheduleId: command.scheduleId } : {}),
         ...(command.attachmentIds ? { attachmentIds: command.attachmentIds } : {}),
       });
       if (
@@ -201,6 +182,13 @@ async function prepareWorkflow(
         name: input.workflow.name,
         description: input.workflow.description,
         steps: input.workflow.steps as never,
+        scope: input.workflow.scope,
+        // Claiming a creator-less legacy workflow as Personal assigns this actor in the same
+        // update. The planner must use that effective owner before the repository write lands.
+        createdByUserId:
+          input.workflow.scope === "personal"
+            ? (input.workflow.createdByUserId ?? input.actor.userId)
+            : input.workflow.createdByUserId,
       },
       description: input.prompt,
       ...(input.skillIds?.length ? { skillMentions: input.skillIds.map((id) => ({ id })) } : {}),
@@ -227,31 +215,6 @@ export function mapWorkflowPreparationError(error: unknown): unknown {
     return new CoreError("unavailable", error.message);
   }
   return error;
-}
-
-async function planTaskScheduleHarness(
-  command: { actorId: string; prompt: string },
-  options: {
-    fetch?: typeof globalThis.fetch;
-    runnerUrl?: string;
-    runnerToken?: string;
-  },
-): Promise<AutomationExecutionPlan> {
-  const runnerUrl = options.runnerUrl?.trim().replace(/\/+$/u, "");
-  const token = options.runnerToken?.trim();
-  if (!runnerUrl || !token) throw new Error("Task schedule planning is not configured.");
-  const fetchImpl = (options.fetch ?? globalThis.fetch).bind(globalThis);
-  const response = await fetchImpl(`${runnerUrl}/internal/goat/task-harness/plan`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ userWorkosId: command.actorId, prompt: command.prompt }),
-  });
-  if (!response.ok) {
-    throw new Error(`Task schedule planning failed with status ${response.status}.`);
-  }
-  const body = (await response.json()) as { harnessSpec?: unknown };
-  const harness = harnessSpec(body.harnessSpec);
-  return { engine: harness.engine, model: harness.model, payload: harness };
 }
 
 function harnessSpec(value: unknown): HarnessSpec {

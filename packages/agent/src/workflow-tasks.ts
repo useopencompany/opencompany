@@ -14,6 +14,7 @@ import {
 import { getAvailableHarnessTools } from "./integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "./skills";
 import { resolveWorkflowStepModelSelection } from "./workflow-model-options";
+import { DEFAULT_WORKFLOW_SCHEDULE_PROMPT } from "./workflow-schedule-defaults";
 import { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
 import {
   resolveWorkflowMention,
@@ -74,6 +75,7 @@ export function compileWorkflowHarnessSpec(input: {
   invokedSkillIds?: readonly string[];
   tools: TaskToolName[];
   description: string;
+  skillAccess?: "company" | "actor";
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
   for (const skill of input.skills) {
@@ -126,6 +128,11 @@ export function compileWorkflowHarnessSpec(input: {
   if (!firstStep) {
     throw new WorkflowMentionError("This workflow has no steps to run.");
   }
+  const runContext = input.description.trim();
+  const initialUserMessage =
+    runContext && runContext !== DEFAULT_WORKFLOW_SCHEDULE_PROMPT
+      ? runContext
+      : input.workflow.steps[0]!.instructions.trim();
   return {
     schemaVersion: "goat.harness.v1",
     // Mirror step 0 so an older runner degrades to executing the first step.
@@ -134,7 +141,7 @@ export function compileWorkflowHarnessSpec(input: {
     ...(firstStep.reasoningEffort ? { codex: { reasoningEffort: firstStep.reasoningEffort } } : {}),
     systemPrompt: firstStep.systemPrompt,
     systemBlocks: firstStep.systemBlocks,
-    initialUserMessage: [`Task: ${input.workflow.name}`, "", input.description].join("\n"),
+    initialUserMessage,
     tools: input.tools,
     skills: [],
     maxModelSteps: 16,
@@ -142,6 +149,7 @@ export function compileWorkflowHarnessSpec(input: {
     workflow: {
       id: input.workflow.id,
       workspaceId: input.workspaceId,
+      skillAccess: input.skillAccess ?? "company",
       skillIds: input.skills.map((skill) => skill.id),
       skillBundleIds: input.skills.map((skill) => skill.bundleId),
       // Task creation replaces this placeholder with the currently enabled immutable Plugin IDs.
@@ -181,6 +189,7 @@ export async function createTaskFromWorkflow(
 ): Promise<Task> {
   const workflow = await (dependencies.resolveWorkflow ?? resolveWorkflowMention)({
     workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
     mention: input.mention,
   });
   // resolveWorkflowMention throws when workspaceId is null, so it is set here.
@@ -267,8 +276,11 @@ export async function prepareWorkflowRunForUser(
       [...workflowSkillRefs, ...invokedSkillRefs].map((mention) => [mention.id, mention]),
     ).values(),
   ];
+  const skillAccess = workflowSkillAccess(workflow, input.userWorkosId);
   const skills = await dependencies.resolveSkills({
     workspaceId: input.workspaceId,
+    userId: input.userWorkosId,
+    ...(skillAccess === "company" ? { skillAccess: "company" as const } : {}),
     mentions: skillRefs,
   });
   let tools: TaskToolName[];
@@ -280,7 +292,8 @@ export async function prepareWorkflowRunForUser(
       { cause: error },
     );
   }
-  const description = input.description.trim() || workflow.name;
+  const description =
+    input.description.trim() || workflow.steps[0]?.instructions.trim() || workflow.name;
 
   const harnessSpec = compileWorkflowHarnessSpec({
     workflow,
@@ -289,7 +302,19 @@ export async function prepareWorkflowRunForUser(
     invokedSkillIds: invokedSkillRefs.map((mention) => mention.id),
     tools,
     description,
+    skillAccess,
   });
 
   return { description, stepSelections, harnessSpec };
+}
+
+function workflowSkillAccess(
+  workflow: WorkspaceWorkflow,
+  userWorkosId: string,
+): "company" | "actor" {
+  if (workflow.scope !== "personal") return "company";
+  if (workflow.createdByUserId !== userWorkosId) {
+    throw new WorkflowMentionError(`Workflow "#${workflow.id}" is unavailable.`);
+  }
+  return "actor";
 }

@@ -124,10 +124,14 @@ async function requestGitHubRepositoryAccess(input: {
   const search = new URLSearchParams();
   if (input.owner) search.set("owner", input.owner);
   const query = search.size > 0 ? `?${search.toString()}` : "";
-  const response = await input.fetcher(`/api/integrations/github-user/installations${query}`, {
-    method: "GET",
-    signal: input.signal,
-  });
+  const response = await input.fetcher.call(
+    globalThis,
+    `/api/integrations/github-user/installations${query}`,
+    {
+      method: "GET",
+      signal: input.signal,
+    },
+  );
   const value = (await response.json().catch(() => null)) as unknown;
   if (!response.ok) {
     const envelope = ErrorEnvelopeSchema.safeParse(value);

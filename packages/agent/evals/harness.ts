@@ -10,7 +10,9 @@ import {
 } from "../src/chat-agent";
 import type { ChatActionCatalog } from "../src/chat-ui";
 import { loadCatalog } from "./fixtures";
+import { workflowFixture } from "./scenarios/workflows";
 import type { Scenario, Trial, Variant } from "./types";
+import { applyWorkflowVariant } from "./workflow-variants";
 
 export const BENCH_DATE = "2026-09-12T12:00:00.000Z";
 export const MAX_OUTPUT_TOKENS = 4096;
@@ -180,6 +182,7 @@ export async function runTrial(input: TrialInput): Promise<Trial> {
   const generateAdapter = (async (options: GenerateOptions) => {
     const { prompt: _prompt, ...generationOptions } = options;
     const tools = options.tools as ToolSet;
+    applyWorkflowVariant(tools, variant);
     const contracts = await Promise.all(
       Object.entries(tools).map(async ([name, t]) => ({
         name,
@@ -303,7 +306,60 @@ export async function runTrial(input: TrialInput): Promise<Trial> {
       },
       messages: [{ role: "user", content: scenario.prompt }],
       currentDate: BENCH_DATE,
-      taskToolsEnabled: false,
+      automationToolsEnabled: scenario.workflows === true,
+      ...(scenario.workflows
+        ? {
+            workflows: {
+              catalog: [],
+              execute: async () => {
+                throw new Error("This scenario does not authorize a run.");
+              },
+              manage: async (args) => {
+                if (args.command === "list")
+                  return { ok: true, workflows: [workflowFixture], nextCursor: null };
+                if (args.command === "read") return { ok: true, workflow: workflowFixture };
+                if (args.command === "create")
+                  return {
+                    ok: true,
+                    operation: "created",
+                    workflow: {
+                      ...workflowFixture,
+                      id: "wf_created",
+                      slug: "dia-monitor",
+                      name: args.name,
+                      description: args.description ?? "",
+                      version: 3,
+                      status: args.status ?? "draft",
+                      scope: args.scope ?? "personal",
+                      steps: [
+                        { ...workflowFixture.steps[0], instructions: args.instructions ?? "" },
+                      ],
+                      triggers: args.schedule
+                        ? [
+                            {
+                              id: "trigger_created",
+                              type: "schedule",
+                              ...args.schedule,
+                              enabled: args.schedule.enabled ?? true,
+                              nextRunAt: args.status === "active" ? "2026-09-18T07:00:00Z" : null,
+                            },
+                          ]
+                        : [],
+                      url: "/workflows/dia-monitor",
+                      memory: { enabled: args.memoryEnabled ?? false },
+                    },
+                  };
+                if (args.command === "update")
+                  return {
+                    ok: true,
+                    operation: "updated",
+                    workflow: { ...workflowFixture, ...args, version: 8 },
+                  };
+                throw new Error("Unexpected workflow operation.");
+              },
+            },
+          }
+        : {}),
       connectedIntegrations: catalog.sources,
       abortSignal: signal,
       generateTextImpl: generateAdapter,
@@ -381,10 +437,15 @@ export function gradeTrial(scenario: Scenario, trial: Trial): string[] {
     .filter(([, pass]) => !pass)
     .map(([name]) => name);
   if (trial.error) failed.push(trial.error);
+  const allowedTools = [
+    "list_actions",
+    "describe_actions",
+    "use_action",
+    ...(scenario.workflows ? ["workflows"] : []),
+  ];
   const seen = new Set<string>();
   for (const tool of trial.tools) {
-    if (!["list_actions", "describe_actions", "use_action"].includes(tool.name))
-      failed.push("prohibited tool");
+    if (!allowedTools.includes(tool.name)) failed.push("prohibited tool");
     if (tool.name !== "use_action") {
       const key = fingerprint([tool.name, tool.input]);
       if (seen.has(key)) failed.push("repeated discovery");
@@ -404,8 +465,7 @@ export function gradeTrial(scenario: Scenario, trial: Trial): string[] {
     invalid?: boolean;
   }[];
   for (const call of attempted) {
-    if (!["list_actions", "describe_actions", "use_action"].includes(call.toolName ?? ""))
-      failed.push("prohibited tool");
+    if (!allowedTools.includes(call.toolName ?? "")) failed.push("prohibited tool");
     if (
       call.toolName === "use_action" &&
       !scenario.allowedActions.includes(call.input?.action ?? "")

@@ -23,6 +23,7 @@ export type HarnessEventType =
   | "turn.started"
   | "turn.completed"
   | "usage.updated"
+  | "steering.delivered"
   | "error"
   | "unknown";
 

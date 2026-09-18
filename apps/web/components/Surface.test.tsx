@@ -5,7 +5,14 @@ import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { composerDraftKey, persistComposerDraft } from "@/lib/chat-composer-draft";
-import { persistLastChatSelection, readLastChatSelection } from "@/lib/chat-composer-selection";
+import {
+  persistLastChatSelection,
+  persistLastEngineModel,
+  persistLastReasoningEffort,
+  readLastChatSelection,
+  readLastEngineModel,
+  readLastReasoningEffort,
+} from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
   HOME_NAVIGATION_EVENT,
@@ -35,6 +42,62 @@ import {
   useOptimisticChatSummaries,
 } from "@/lib/optimistic-chat-summaries";
 import { Surface, type TaskView } from "./Surface";
+
+// Surface exercises submission/routing through the composer's text contract. The real
+// rich editor, selection mapping, clipboard, and undo are covered by its own tests.
+vi.mock("@/components/chat/ReferenceComposerInput", () => ({
+  ReferenceComposerInput: (
+    props: import("react").ComponentProps<
+      typeof import("@/components/chat/ReferenceComposerInput").ReferenceComposerInput
+    >,
+  ) => (
+    <>
+      <textarea
+        ref={(element) => {
+          if (element)
+            Object.defineProperty(element, "element", { configurable: true, value: element });
+          if (typeof props.ref === "function") props.ref(element as never);
+          else if (props.ref) props.ref.current = element as never;
+        }}
+        id={props.id}
+        value={props.value}
+        placeholder={props.placeholder}
+        maxLength={10_000}
+        disabled={props.disabled}
+        readOnly={props.readOnly}
+        onChange={props.onChange}
+        onBlur={props.onBlur}
+        onSelect={(event) =>
+          props.onSelectionChange(event.currentTarget.value, event.currentTarget.selectionStart)
+        }
+        onKeyDown={props.onKeyDown as never}
+        onPaste={props.onPaste as never}
+      />
+      <div data-testid="composer-mention-overlay">
+        {props.highlights.map((range) => (
+          <span
+            key={range.start}
+            {...(range.mention
+              ? { "data-opencompany-chat-mention": range.mention.kind }
+              : { "data-opencompany-chat-directive": "background" })}
+          >
+            {props.value.slice(range.start, range.end)}
+          </span>
+        ))}
+      </div>
+    </>
+  ),
+}));
+const referenceCatalogMock = vi.hoisted(() => ({
+  items: [] as import("@/lib/context-reference-catalog").ContextReferenceOption[],
+}));
+vi.mock("@/components/useContextReferenceCatalog", () => ({
+  useContextReferenceCatalog: () => ({
+    items: referenceCatalogMock.items,
+    loading: false,
+    error: null,
+  }),
+}));
 
 const chatMock = vi.hoisted(() => ({
   status: "ready" as "ready" | "submitted" | "streaming" | "error",
@@ -125,6 +188,16 @@ const knowledgeCommandMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatMocks = vi.hoisted(() => ({
+  enqueue: vi.fn(
+    async (input: { conversationId: string; content: string; clientMessageId: string }) => ({
+      conversationId: input.conversationId,
+      messageId: input.clientMessageId,
+      assistantMessageId: "message_assistant_queued",
+      runId: "run_queued",
+      transactionId: "42",
+      replayed: false,
+    }),
+  ),
   startBackground: vi.fn(
     async (input: {
       content: string;
@@ -141,7 +214,9 @@ const headlessChatMocks = vi.hoisted(() => ({
 }));
 
 const headlessChatCommandMocks = vi.hoisted(() => ({
-  cancel: vi.fn(async () => ({})),
+  cancel: vi.fn(async (runId: string) => ({ runId, status: "canceled", replayed: false })),
+  waitForSettlement: vi.fn(async (runId: string) => ({ id: runId, status: "canceled" })),
+  steer: vi.fn(async () => ({ runId: "run_queued", targetRunId: "run_active" })),
   getRuntimeStatus: vi.fn(async () => null),
   resolveQuestions: vi.fn(async () => ({})),
   updateConversation: vi.fn(async () => ({ transactionId: "1" })),
@@ -167,9 +242,11 @@ vi.mock("@/lib/chat-actions", () => ({
 
 vi.mock("@/lib/headless-chat-commands", () => ({
   cancelHeadlessChatRun: headlessChatCommandMocks.cancel,
+  steerHeadlessChatRun: headlessChatCommandMocks.steer,
   getEngineRuntimeStatus: headlessChatCommandMocks.getRuntimeStatus,
   resolveEngineQuestions: headlessChatCommandMocks.resolveQuestions,
   updateHeadlessChatConversation: headlessChatCommandMocks.updateConversation,
+  waitForHeadlessChatRunSettlement: headlessChatCommandMocks.waitForSettlement,
 }));
 
 // Server action module; importing it for real drags authkit into jsdom.
@@ -183,6 +260,7 @@ vi.mock("@/lib/headless-chat-attachment-upload", () => ({
 
 vi.mock("@/lib/headless-chat-transport", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/headless-chat-transport")>()),
+  enqueueHeadlessChatMessage: headlessChatMocks.enqueue,
   startHeadlessBackgroundChat: headlessChatMocks.startBackground,
 }));
 
@@ -428,6 +506,7 @@ function installDictationBrowserMocks() {
 
 describe("Surface chat streaming UI", () => {
   beforeEach(() => {
+    referenceCatalogMock.items = [];
     window.localStorage.clear();
     window.sessionStorage.clear();
     pathnameMock.value = "/";
@@ -450,6 +529,8 @@ describe("Surface chat streaming UI", () => {
     vi.spyOn(window.history, "replaceState").mockImplementation(historyMock.replaceState);
     vi.spyOn(HeadlessChatTransport.prototype, "setEventHandlers");
     headlessChatCommandMocks.cancel.mockClear();
+    headlessChatCommandMocks.waitForSettlement.mockClear();
+    headlessChatCommandMocks.steer.mockClear();
     headlessChatCommandMocks.getRuntimeStatus.mockClear();
     headlessChatCommandMocks.resolveQuestions.mockClear();
     headlessChatCommandMocks.updateConversation.mockClear();
@@ -466,6 +547,7 @@ describe("Surface chat streaming UI", () => {
     automationCommandMocks.updateSchedule.mockClear();
     knowledgeCommandMocks.listSkillCatalog.mockReset();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
+    headlessChatMocks.enqueue.mockClear();
     headlessChatMocks.startBackground.mockClear();
     attachmentUploadMock.canonicalUpload.mockReset();
     attachmentUploadMock.canonicalUpload.mockResolvedValue({ id: "attachment_1" });
@@ -492,7 +574,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Hello opencompany");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -609,7 +691,7 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     const transportCancel = vi
       .spyOn(HeadlessChatTransport.prototype, "cancel")
-      .mockResolvedValue(false);
+      .mockResolvedValue(null);
 
     render(
       <Surface
@@ -670,8 +752,200 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Claude Code status: Working")).toHaveTextContent("Working");
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
     expect(screen.getByRole("button", { name: "Interrupt Claude Code" })).toBeInTheDocument();
+  });
+
+  it("shows Stop immediately and confirms settlement even when Electric stays stale", async () => {
+    const user = userEvent.setup();
+    let confirmSettlement: ((value: { id: string; status: "canceled" }) => void) | undefined;
+    headlessChatCommandMocks.cancel.mockResolvedValueOnce({
+      runId: "run_codex_stale",
+      status: "running",
+      replayed: false,
+    });
+    headlessChatCommandMocks.waitForSettlement.mockReturnValueOnce(
+      new Promise((resolve) => {
+        confirmSettlement = resolve;
+      }),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_stale",
+          title: "Stale cancellation projection",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_stale",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(screen.getByRole("button", { name: "Stopping Codex" })).toBeDisabled();
+    expect(screen.getByLabelText("Codex sandbox status: Stopping")).toHaveTextContent("Stopping");
+    expect(screen.getByText("Stopping response…")).toBeInTheDocument();
+    expect(headlessChatCommandMocks.waitForSettlement).toHaveBeenCalledWith(
+      "run_codex_stale",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+
+    act(() => confirmSettlement?.({ id: "run_codex_stale", status: "canceled" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Codex sandbox status: Stopped")).toHaveTextContent("Stopped"),
+    );
+    expect(screen.queryByText("Stopping response…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
+  });
+
+  it("queues a coding message without replacing the running turn as the Interrupt target", async () => {
+    const user = userEvent.setup();
+    const conversationId = "goat_chat_codex_queueing";
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: conversationId,
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    // Interrupting stays a separate, explicit action; typing no longer has to wait for the turn.
+    expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Queue a follow-up...")).toBeInTheDocument();
+    const send = screen.getByRole("button", { name: "Queue message" });
+    expect(send).toBeDisabled();
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.");
+
+    expect(send).toBeEnabled();
+    await user.click(send);
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId,
+          content: "Also update the changelog.",
+          engine: expect.objectContaining({ type: "codex" }),
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Interrupt Codex" }));
+
+    expect(headlessChatCommandMocks.cancel).toHaveBeenCalledWith("run_codex_active");
+    expect(chatMock.stop).toHaveBeenCalledOnce();
+  });
+
+  it("queues a coding message with Enter while the engine is still working", async () => {
+    const user = userEvent.setup();
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_queue_enter",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_codex_active",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        codexConnected
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "" }), "Also update the changelog.{Enter}");
+
+    await waitFor(() =>
+      expect(headlessChatMocks.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          conversationId: "conversation_codex_queue_enter",
+          content: "Also update the changelog.",
+        }),
+      ),
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a reloaded engine Conversation active while its Run id is still syncing", async () => {
+    const user = userEvent.setup();
+    const transportCancel = vi
+      .spyOn(HeadlessChatTransport.prototype, "cancel")
+      .mockResolvedValue({ runId: "run_claude_syncing", status: "canceled", replayed: false });
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_claude_syncing",
+          title: "Active coding",
+          model: DEFAULT_MODEL,
+          engine: "claude_code",
+          runtime: {
+            status: "running",
+            activeRunId: null,
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          activityState: "working",
+          hasUnseen: false,
+          messages: [],
+        }}
+        claudeCodeConnected
+      />,
+    );
+
+    expect(screen.getByLabelText("Claude Code sandbox status: Working")).toHaveTextContent(
+      "Working",
+    );
+    expect(screen.getByRole("status", { name: "Claude Code is working" })).toBeInTheDocument();
+    const stop = screen.getByRole("button", { name: "Interrupt Claude Code" });
+
+    await user.click(stop);
+
+    expect(transportCancel).toHaveBeenCalledOnce();
+    expect(headlessChatCommandMocks.cancel).not.toHaveBeenCalled();
+    expect(chatMock.stop).toHaveBeenCalledOnce();
   });
 
   it("resolves action approvals as durable Run commands before resuming the stream", async () => {
@@ -733,11 +1007,11 @@ describe("Surface chat streaming UI", () => {
   });
 
   it.each([
-    { decision: "Always allow", save: "success", expectedIds: [0, 1] },
+    { decision: "Always allow this tool", save: "success", expectedIds: [0, 1] },
     { decision: "Allow once", save: "success", expectedIds: [0] },
     { decision: "Deny", save: "success", expectedIds: [0] },
-    { decision: "Always allow", save: "failure", expectedIds: [0] },
-    { decision: "Always allow", save: "rejected", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "failure", expectedIds: [0] },
+    { decision: "Always allow this tool", save: "rejected", expectedIds: [0] },
   ])(
     "resolves pending action approvals for $decision with permission save $save",
     async ({ decision, save, expectedIds }) => {
@@ -816,7 +1090,7 @@ describe("Surface chat streaming UI", () => {
           approved: decision !== "Deny",
         });
       }
-      if (decision === "Always allow") {
+      if (decision === "Always allow this tool") {
         expect(savePermission).toHaveBeenCalledExactlyOnceWith(action);
         expect(savePermission.mock.invocationCallOrder[0]).toBeLessThan(
           resolveApproval.mock.invocationCallOrder[0]!,
@@ -873,7 +1147,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "& Research Q3");
     expect(screen.getByTestId("background-chat-hint")).toHaveTextContent(
       "Sending starts this as a new chat in the background.",
@@ -883,7 +1157,6 @@ describe("Surface chat streaming UI", () => {
     );
     const directiveChip = overlay?.querySelector('[data-opencompany-chat-directive="background"]');
     expect(directiveChip).toHaveTextContent("&");
-    expect(textarea).toHaveClass("text-transparent");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledTimes(1));
@@ -947,7 +1220,7 @@ describe("Surface chat streaming UI", () => {
     });
     await waitFor(() => expect(screen.getByTestId("local-chat-states")).toHaveTextContent("none"));
     expect(textarea).toHaveValue("");
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("keeps an accepted background chat when live completion monitoring fails", async () => {
@@ -976,7 +1249,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "& Research Q3");
     await user.keyboard("{Enter}");
 
@@ -990,6 +1263,44 @@ describe("Surface chat streaming UI", () => {
       `${body.clientConversationId}:Research Q3`,
     );
     expect(textarea).toHaveValue("Keep this new draft");
+  });
+
+  it("marks the composer as sandboxed only while a cloud coding agent is selected", async () => {
+    const { unmount } = render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_codex_sandbox",
+          title: "Codex",
+          model: CODEX_CHAT_DEFAULT_MODEL_ID,
+          engine: "codex",
+          messages: [],
+        }}
+        codexConnected
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
   });
 
   it("starts a bare ampersand message from Home defaults instead of the active Codex runtime", async () => {
@@ -1019,7 +1330,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
 
     await user.type(textarea, "& summarize the release notes");
@@ -1065,11 +1376,10 @@ describe("Surface chat streaming UI", () => {
         }}
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "& @codex refactor the parser");
@@ -1122,6 +1432,16 @@ describe("Surface chat streaming UI", () => {
               id: "ship-feature",
               name: "Ship feature",
               description: "Use this to ship features.",
+              steps: [
+                {
+                  id: "build",
+                  title: "Build",
+                  model: "codex",
+                  runtimeModel: CODEX_CHAT_DEFAULT_MODEL_ID,
+                  reasoningEffort: "high",
+                  instructions: "Build the requested feature.",
+                },
+              ],
             },
           ],
         });
@@ -1150,11 +1470,10 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Reply...");
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
     expect(screen.getByRole("button", { name: "Interrupt Codex" })).toBeInTheDocument();
 
     await user.type(textarea, "#");
@@ -1164,6 +1483,9 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByTestId("workflow-task-hint")).toHaveTextContent(
       "Sending runs workflow Ship feature as a background task.",
     );
+    expect(
+      screen.getByRole("button", { name: "Runs in an isolated cloud sandbox" }),
+    ).toBeInTheDocument();
     const submit = screen.getByRole("button", { name: "Start task" });
     expect(submit).toBeEnabled();
 
@@ -1203,7 +1525,6 @@ describe("Surface chat streaming UI", () => {
             },
           ],
         }}
-        taskSpawningEnabled
       />,
     );
 
@@ -1239,7 +1560,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Draft before mic");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -1264,7 +1585,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Please");
     await user.click(screen.getByRole("button", { name: "Start voice dictation" }));
 
@@ -1403,8 +1724,6 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("The workflow is complete.")).toBeInTheDocument();
     expect(screen.queryByText("TASK-1 · Done")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Share task run" })).toBeInTheDocument();
-
-    expect(screen.getByText("Sending a message resumes this task.")).toBeVisible();
 
     const body = "  Please check the afternoon too.\n  Preserve this indent.  ";
     fireEvent.change(screen.getByPlaceholderText("Reply..."), { target: { value: body } });
@@ -1558,7 +1877,7 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("keeps the composer typeable but unsendable while the Task run is active", async () => {
+  it("queues a message sent while the Task run is still working", async () => {
     const user = userEvent.setup();
     render(
       <Surface
@@ -1582,7 +1901,6 @@ describe("Surface chat streaming UI", () => {
           status: "running",
           startedAtMs: Date.now(),
         }}
-        taskSpawningEnabled
       />,
     );
 
@@ -1590,14 +1908,18 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toBeEnabled();
     await user.type(composer, "also check the staging deploy{Enter}");
 
-    expect(composer).toHaveValue("also check the staging deploy");
-    expect(
-      screen.getByText("Draft your reply now — you can send it when the current run finishes."),
-    ).toBeVisible();
+    // A working Task is a session, not a form: the message goes now and waits behind the live turn.
+    await waitFor(() =>
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        "goat_task_1",
+        { id: "task_activity_comment_test", body: "also check the staging deploy" },
+        { scopeKey: "" },
+      ),
+    );
+    expect(composer).toHaveValue("");
     expect(screen.queryByTestId("ad-hoc-task-hint")).not.toBeInTheDocument();
     expect(taskCommandMocks.create).not.toHaveBeenCalled();
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(taskCommandMocks.comment).not.toHaveBeenCalled();
   });
 
   it("uses the chat stop control for an active workflow task", async () => {
@@ -1636,13 +1958,15 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    // The Task's stop control sits beside the composer, exactly like a coding chat's, so Send stays
+    // free to queue a message into the turn that is still working.
+    expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     expect(taskCommandMocks.cancel).toHaveBeenCalledWith("run_1");
     await waitFor(() => expect(chatMock.stop).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("status", { name: "Stopping task…" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Stopping task" })).toBeDisabled();
-    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stopping this task" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Interrupt this task" })).not.toBeInTheDocument();
 
     rerender(
       <Surface
@@ -1677,7 +2001,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: "Stopping task…" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("button", { name: /this task/ })).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("button", { name: "Send message" })).toBeInTheDocument();
   });
@@ -1706,10 +2030,10 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Stop response" }));
+    await user.click(screen.getByRole("button", { name: "Interrupt this task" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Stop response" })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: "Interrupt this task" })).toBeEnabled(),
     );
   });
 
@@ -1756,7 +2080,10 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Start now",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
@@ -1785,14 +2112,14 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "Start now");
     await user.keyboard("{Shift>}{Enter}{/Shift}");
 
     expect(textarea).toHaveValue("Start now\n");
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(chatMock.preparedRequestBodies).toHaveLength(0);
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(routerMock.push).not.toHaveBeenCalled();
   });
 
@@ -1811,7 +2138,10 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Try again");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Try again",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Try again"));
@@ -1863,17 +2193,17 @@ describe("Surface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Reply..."), "Unsent draft");
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
-    const composer = screen.getByPlaceholderText("Ask opencompany anything...");
+    const composer = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(composer).toHaveValue("");
     expect(composer).toHaveFocus();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it.each([null, { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] }])(
     "restores the composer after a reload for %j",
     (initialChat) => {
       const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat };
-      const placeholder = initialChat ? "Reply..." : "Ask opencompany anything...";
+      const placeholder = initialChat ? "Reply..." : "Ask a question or describe a task...";
       const first = render(
         <StrictMode>
           <Surface {...props} />
@@ -1899,7 +2229,7 @@ describe("Surface chat streaming UI", () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL };
     const chat = { id: "chat_1", title: "Chat", model: DEFAULT_MODEL, messages: [] };
     const view = render(<Surface {...props} initialChat={null} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Home draft" },
     });
     view.rerender(<Surface {...props} initialChat={chat} />);
@@ -1909,7 +2239,9 @@ describe("Surface chat streaming UI", () => {
       target: { value: "Session draft" },
     });
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Home draft");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Home draft",
+    );
     view.unmount();
     render(<Surface {...props} initialChat={chat} />);
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Session draft");
@@ -1937,7 +2269,7 @@ describe("Surface chat streaming UI", () => {
     chatMock.sendError = new Error("Send failed");
     const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
     const view = render(<Surface {...props} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Try this message" },
     });
     await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
@@ -1949,13 +2281,15 @@ describe("Surface chat streaming UI", () => {
     });
     view.unmount();
     render(<Surface {...props} />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Edited retry");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Edited retry",
+    );
   });
 
   it("moves a follow-up draft to the accepted session without leaving it on Home", async () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL };
     const view = render(<Surface {...props} initialChat={null} />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Start a chat" },
     });
     await userEvent.setup().click(screen.getByRole("button", { name: "Send message" }));
@@ -1977,21 +2311,23 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByPlaceholderText("Reply...")).toHaveValue("Follow up");
     chatView.unmount();
     render(<Surface {...props} initialChat={null} />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
   });
 
   it("isolates drafts by user and workspace", () => {
     const props = { tasks: [], defaultModel: DEFAULT_MODEL, initialChat: null };
     const view = render(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
-    fireEvent.change(screen.getByPlaceholderText("Ask opencompany anything..."), {
+    fireEvent.change(screen.getByPlaceholderText("Ask a question or describe a task..."), {
       target: { value: "Private draft" },
     });
     view.rerender(<Surface {...props} userWorkosId="user_2" workspaceId="workspace_1" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_2" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue("");
     view.rerender(<Surface {...props} userWorkosId="user_1" workspaceId="workspace_1" />);
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveValue("Private draft");
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveValue(
+      "Private draft",
+    );
   });
 
   it("restores selected mentions with a saved draft", async () => {
@@ -2120,15 +2456,15 @@ describe("Surface chat streaming UI", () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
     const request = chatMock.preparedRequestBodies[0] as { newSessionId: string };
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
     acceptHeadlessConversation(request.newSessionId);
 
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toHaveFocus();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     expect(routerMock.replace).not.toHaveBeenCalled();
     expect(routerMock.refresh).not.toHaveBeenCalled();
@@ -2163,7 +2499,7 @@ describe("Surface chat streaming UI", () => {
 
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByTestId("local-chat-state")).toHaveTextContent("working");
 
     act(() => chatMock.finishWithSessionId?.("chat_1"));
@@ -2171,14 +2507,12 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() => expect(screen.getByTestId("local-chat-state")).toHaveTextContent("none"));
   });
 
-  it("renders composer input as native textarea text", async () => {
+  it("keeps unselected mention-looking text as ordinary composer text", async () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@codex inspect this long prompt");
-    expect(textarea).toHaveClass("text-ink");
-    expect(textarea).not.toHaveClass("text-transparent");
     expect(textarea.parentElement?.querySelector('[aria-hidden="true"]')).toBeNull();
   });
 
@@ -2206,7 +2540,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
     await user.click(screen.getByText("Qwen 3.8 Max"));
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Compare");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
@@ -2231,10 +2565,16 @@ describe("Surface chat streaming UI", () => {
         autoModelRoutingEnabled
       />,
     );
+    // Auto leads the single model list rather than sitting in a "Routing" section of its own.
+    expect(screen.queryByText("Routing")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Auto");
     await user.click(screen.getByText("Picks once from your first message"));
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Auto");
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "What is 2 + 2?");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "What is 2 + 2?",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({ model: "auto" });
@@ -2245,6 +2585,37 @@ describe("Surface chat streaming UI", () => {
       expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K2.6"),
     );
     expect(screen.getByRole("button", { name: "Model" })).toBeDisabled();
+  });
+
+  it("marks the GPT models a shared ChatGPT subscription covers as included", async () => {
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Included")).not.toBeInTheDocument();
+
+    rerender(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        sharedModelAccessEnabled
+      />,
+    );
+
+    expect(screen.getAllByText("Included")).toHaveLength(2);
+    expect(screen.getByText("GPT 5.6 Sol").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    expect(screen.getByText("GPT 5.6 Terra").closest('[role="option"]')).toHaveTextContent(
+      "Included",
+    );
+    // Metered models stay unlabelled, including the other OpenAI entry.
+    expect(screen.getByText("GPT 5.5").closest('[role="option"]')).not.toHaveTextContent(
+      "Included",
+    );
   });
 
   it("remembers the last main chat model when returning Home and remounting", async () => {
@@ -2259,7 +2630,10 @@ describe("Surface chat streaming UI", () => {
 
     await user.click(screen.getByRole("button", { name: "Model" }));
     await user.click(screen.getByText("Claude Sonnet 5"));
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Use Sonnet");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Use Sonnet",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
@@ -2279,7 +2653,10 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start with Kimi");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Start with Kimi",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     const modelPicker = screen.getByRole("button", { name: "Model" });
@@ -2318,7 +2695,10 @@ describe("Surface chat streaming UI", () => {
     const { unmount } = render(<Surface {...sharedProps} initialChat={null} />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
 
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
@@ -2331,19 +2711,91 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("shows the Codex engine only when Codex is connected", async () => {
+  it("shows a Connect Codex prompt until Codex is connected, then the Codex option", async () => {
     const user = userEvent.setup();
 
     const { unmount } = render(
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
     await user.click(screen.getByRole("button", { name: "Model" }));
-    expect(screen.queryByText("Cloud Codex sandbox")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(screen.getByRole("button", { name: "Connect Codex" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).not.toBeInTheDocument();
     unmount();
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
     await user.click(screen.getByRole("button", { name: "Model" }));
-    expect(screen.getByText("Cloud Codex sandbox")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect Codex" })).not.toBeInTheDocument();
+  });
+
+  it("shows a Connect Claude Code prompt until Claude Code is connected, then the option", async () => {
+    const user = userEvent.setup();
+
+    const { unmount } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(screen.getByRole("button", { name: "Connect Claude Code" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} claudeCodeConnected />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    expect(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect Claude Code" })).not.toBeInTheDocument();
+  });
+
+  it("sends a disconnected coding agent's Connect button to the Inference settings page", async () => {
+    const user = userEvent.setup();
+
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(screen.getByRole("button", { name: "Connect Codex" }));
+
+    expect(routerMock.push).toHaveBeenCalledWith("/settings/workspace/inference");
+    expect(screen.queryByRole("button", { name: "Connect Codex" })).not.toBeInTheDocument();
+  });
+
+  it("reopens the model picker on the tab matching the current selection", async () => {
+    const user = userEvent.setup();
+
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+
+    // Reopening after picking Codex should land back on the Coding agents tab.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).toBeInTheDocument();
+
+    // Switching to Chat and picking a plain model, then reopening, lands on Chat.
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    await user.click(screen.getByRole("option", { name: /Claude Sonnet 5/ }));
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.getByPlaceholderText("Search models...")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows Codex controls only for Codex engine chats", async () => {
@@ -2356,7 +2808,10 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByRole("button", { name: "Goal mode" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     expect(
       screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
@@ -2401,13 +2856,19 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const codexModelPicker = screen.getByRole("button", { name: "Codex model: GPT 6 Astra" });
     expect(codexModelPicker).toBeInTheDocument();
     await user.click(codexModelPicker);
     await user.click(screen.getByText("GPT 5.6 Terra"));
     expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Clone my repo");
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.sendMessage).toHaveBeenCalledWith({ text: "Clone my repo" });
@@ -2484,7 +2945,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
 
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
@@ -2507,7 +2971,7 @@ describe("Surface chat streaming UI", () => {
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2545,7 +3009,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Claude Code sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
     await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
 
@@ -2557,7 +3024,7 @@ describe("Surface chat streaming UI", () => {
     ).toBeInTheDocument();
 
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2605,8 +3072,11 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await user.click(await screen.findByRole("option", { name: /coding-work/i }));
     await user.type(textarea, "implement this");
@@ -2647,7 +3117,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).not.toBeNull();
@@ -2684,7 +3157,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(fileInput!, {
       target: {
@@ -2716,7 +3192,10 @@ describe("Surface chat streaming UI", () => {
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     const reasoningControl = screen.getByRole("button", {
       name: "Codex reasoning effort: XHigh (click to cycle)",
     });
@@ -2729,7 +3208,7 @@ describe("Surface chat streaming UI", () => {
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
     await user.type(screen.getByPlaceholderText("Token budget"), "200000");
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Run the failing suite",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -2994,7 +3473,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Ready")).toHaveTextContent("Ready");
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
     expect(screen.queryByText("Sleeping")).not.toBeInTheDocument();
     expect(screen.queryByText("Expired")).not.toBeInTheDocument();
   });
@@ -3026,8 +3505,40 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Working")).toHaveTextContent("Working");
-    expect(screen.queryByLabelText("Codex status: Connecting")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Codex sandbox status: Working")).toHaveTextContent("Working");
+    expect(screen.queryByLabelText("Codex sandbox status: Connecting")).not.toBeInTheDocument();
+  });
+
+  it("does not keep a settled Task working on a stale engine session projection", () => {
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        codexConnected
+        initialChat={{
+          id: "conversation_task_codex_settled",
+          title: "Codex task",
+          model: DEFAULT_MODEL,
+          engine: "codex",
+          runtime: {
+            status: "running",
+            activeRunId: "run_1",
+            hasError: false,
+            updatedAt: currentTimestamp(),
+          },
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_codex_settled",
+          status: "succeeded",
+          startedAtMs: Date.now() - 200_000,
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Codex sandbox status: Ready")).toHaveTextContent("Ready");
+    expect(screen.queryByRole("status", { name: /is working/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Interrupt Codex" })).not.toBeInTheDocument();
   });
 
   it("shows the context token usage in a tooltip", async () => {
@@ -3104,40 +3615,269 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    expect(screen.getByLabelText("Codex status: Queued")).toHaveTextContent("Queued");
+    expect(screen.getByLabelText("Codex sandbox status: Queued")).toHaveTextContent("Queued");
   });
 
-  it("restores Codex composer controls when returning to a Codex chat", async () => {
+  it("opens new chats on the reasoning effort last picked for each engine", async () => {
     const user = userEvent.setup();
-
     render(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        codexConnected
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Codex reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    // Each engine keeps its own level: Codex dropping to Low must not pull Claude off its default.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
+
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("low");
+    expect(readLastReasoningEffort("user_1", "claude_code")).toBe("xhigh");
+  });
+
+  it("opens new chats on the model last picked for each engine", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (_input: RequestInfo | URL, init?: RequestInit) =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              sessionId: requestChatSessionId(init, "conversation_engine_model_1"),
+              userMessageId: "message_engine_model_user",
+              assistantMessageId: "message_engine_model_assistant",
+              mode: "started",
+            }),
+            { status: 202, headers: { "Content-Type": "application/json" } },
+          ),
+      ),
+    );
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        codexConnected
+        claudeCodeConnected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" }));
+    await user.click(screen.getByText("GPT 5.6 Terra"));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Terra" })).toBeInTheDocument();
+
+    // Each engine keeps its own model: choosing a Codex one must not touch Claude's.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Claude Code: included with your Claude subscription" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }));
+    await user.click(screen.getByRole("option", { name: /Claude Fable 5\.1/ }));
+
+    act(() => window.dispatchEvent(new Event(HOME_NAVIGATION_EVENT)));
+    expect(
+      screen.getByRole("button", { name: "Claude model: Claude Fable 5.1" }),
+    ).toBeInTheDocument();
+
+    expect(readLastEngineModel("user_1", "codex")).toBe("openai/gpt-5.6-terra");
+    expect(readLastEngineModel("user_1", "claude_code")).toBe("anthropic/claude-fable-5.1");
+
+    // The picker reading right is not enough: the send has to carry the remembered model.
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
+    await user.type(
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
+      "Clone my repo",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.preparedRequestBodies.at(-1)).toMatchObject({
+      model: "openai/gpt-5.6-terra",
+      engine: { type: "codex", schemaVersion: 1 },
+    });
+  });
+
+  it("keeps a saved chat's own model ahead of the remembered one", () => {
+    persistLastEngineModel("user_1", "codex", "openai/gpt-5.6-terra");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        userWorkosId="user_1"
         codexConnected
         initialChat={{
-          id: "goat_chat_codex_1",
+          id: "conversation_codex_model_1",
+          title: "Codex chat",
+          model: "openai/gpt-5.6-sol",
+          engine: "codex" as const,
+          messages: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Codex model: GPT 5.6 Sol" })).toBeInTheDocument();
+  });
+
+  it("reads but does not move the remembered model from the quick composer", async () => {
+    const user = userEvent.setup();
+    persistLastEngineModel("user_1", "codex", "openai/gpt-5.6-terra");
+    persistLastChatSelection("user_1", "codex");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Codex model: GPT 5.6 Terra" }));
+    // The model listbox portals out of the dialog.
+    await user.click(screen.getByText("GPT 5.6 Sol"));
+    expect(
+      within(dialog).getByRole("button", { name: "Codex model: GPT 5.6 Sol" }),
+    ).toBeInTheDocument();
+    expect(readLastEngineModel("user_1", "codex")).toBe("openai/gpt-5.6-terra");
+  });
+
+  it("keeps a saved chat's own reasoning effort ahead of the remembered one", () => {
+    persistLastReasoningEffort("user_1", "codex", "low");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        userWorkosId="user_1"
+        codexConnected
+        initialChat={{
+          id: "conversation_codex_preference_1",
           title: "Codex chat",
           model: DEFAULT_MODEL,
-          engine: "codex",
+          engine: "codex" as const,
           codexComposerSettings: {
-            reasoningEffort: "high",
-            planModeEnabled: true,
-            goalMode: { objective: "Fix flaky tests", tokenBudget: 200000 },
+            reasoningEffort: "medium" as const,
+            planModeEnabled: false,
+            goalMode: null,
           },
           messages: [],
         }}
-        recentChats={[
-          {
-            id: "goat_chat_codex_1",
-            title: "Codex chat",
-            model: DEFAULT_MODEL,
-            engine: "codex",
-            preview: "Run the failing suite",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
       />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+  });
+
+  it("reads but does not move the remembered reasoning effort from the quick composer", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+    persistLastChatSelection("user_1", "codex");
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        userWorkosId="user_1"
+        workspaceId="workspace_1"
+        codexConnected
+      />,
+    );
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("option", { name: "Start new chat" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", {
+        name: "Codex reasoning effort: Medium (click to cycle)",
+      }),
+    );
+    expect(
+      within(dialog).getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
+    ).toBeInTheDocument();
+    expect(readLastReasoningEffort("user_1", "codex")).toBe("medium");
+  });
+
+  it("restores Codex composer controls when returning to a Codex chat", async () => {
+    const user = userEvent.setup();
+    const codexChat = {
+      id: "goat_chat_codex_1",
+      title: "Codex chat",
+      model: DEFAULT_MODEL,
+      engine: "codex" as const,
+      codexComposerSettings: {
+        reasoningEffort: "high" as const,
+        planModeEnabled: true,
+        goalMode: { objective: "Fix flaky tests", tokenBudget: 200000 },
+      },
+      messages: [],
+    };
+
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={codexChat} />,
     );
 
     expect(
@@ -3154,7 +3894,14 @@ describe("Surface chat streaming UI", () => {
 
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
-    await user.click(screen.getByRole("link", { name: /Codex chat/ }));
+    // Escape only resets local state; the route props follow, and navigating back to the chat is
+    // what has to restore the remembered composer settings.
+    rerender(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={null} />);
+    await nextAnimationFrame();
+    rerender(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} codexConnected initialChat={codexChat} />,
+    );
+    await nextAnimationFrame();
 
     expect(
       screen.getByRole("button", { name: "Codex reasoning effort: High (click to cycle)" }),
@@ -3177,7 +3924,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "First message");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -3239,7 +3986,7 @@ describe("Surface chat streaming UI", () => {
       </>,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -3252,7 +3999,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@codex");
-    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Codex");
     expect(screen.getByRole("button", { name: "Codex model: GPT 6 Astra" })).toBeInTheDocument();
 
@@ -3278,7 +4024,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
@@ -3310,7 +4056,7 @@ describe("Surface chat streaming UI", () => {
       />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
     await user.type(textarea, "@");
 
@@ -3323,7 +4069,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="engine"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("@claude");
-    expect(textarea).toHaveClass("text-transparent");
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Claude Code");
     expect(
       screen.getByRole("button", { name: "Claude model: Claude Sonnet 5" }),
@@ -3348,7 +4093,7 @@ describe("Surface chat streaming UI", () => {
     await user.keyboard("{Escape}");
     await nextAnimationFrame();
 
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Model" })).toHaveTextContent("Kimi K3");
   });
 
@@ -3402,7 +4147,6 @@ describe("Surface chat streaming UI", () => {
         }}
         workspaceId="workspace_1"
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3415,7 +4159,6 @@ describe("Surface chat streaming UI", () => {
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
     expect(overlay).toHaveTextContent("#morning-test");
-    expect(textarea).toHaveClass("text-transparent");
     await user.type(textarea, "run today's checks with /");
     await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
     await user.type(textarea, "{Enter}");
@@ -3473,7 +4216,6 @@ describe("Surface chat streaming UI", () => {
           userWorkosId="user_1"
           workspaceId="workspace_1"
           codexConnected
-          taskSpawningEnabled
         />,
       );
       if (quick) {
@@ -3487,7 +4229,7 @@ describe("Surface chat streaming UI", () => {
         : screen.getByRole("textbox");
       await user.type(textarea, "#");
       await user.click(await screen.findByRole("option", { name: /Ship feature/i }));
-      expect(screen.getByRole("button", { name: "Runtime: Codex" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" })).toBeEnabled();
       expect(screen.getByRole("button", { name: /Codex model:/ })).toHaveTextContent("GPT 5.6 Sol");
       fireEvent.drop(window, {
         dataTransfer: {
@@ -3496,8 +4238,9 @@ describe("Surface chat streaming UI", () => {
         },
       });
       await waitFor(() => expect(attachmentUploadMock.canonicalUpload).toHaveBeenCalledTimes(1));
-      await user.click(screen.getByRole("button", { name: "Runtime: Codex" }));
-      await user.click(screen.getByRole("button", { name: /GPT 5.5.*Coding and sharp analysis/ }));
+      await user.click(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" }));
+      await user.click(screen.getByRole("button", { name: "Models" }));
+      await user.click(screen.getByRole("option", { name: /GPT 5.5.*OpenAI/ }));
       expect(screen.getByText("This run only")).toBeInTheDocument();
       await user.type(textarea, "fix this");
       await user.click(screen.getByRole("button", { name: "Start task" }));
@@ -3561,7 +4304,6 @@ describe("Surface chat streaming UI", () => {
         }}
         workspaceId="workspace_1"
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3645,12 +4387,14 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "#");
@@ -3699,7 +4443,6 @@ describe("Surface chat streaming UI", () => {
           messages: [],
         }}
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -3728,47 +4471,15 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("does not load or offer workflow mentions when Tasks & Workflows is disabled", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      return Response.json(
-        String(input) === "/api/workflows"
-          ? {
-              workflows: [
-                {
-                  id: "morning-test",
-                  name: "Morning Test",
-                  description: "Run the morning checks.",
-                },
-              ],
-            }
-          : {},
-      );
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "#morning");
-    await new Promise((resolve) => setTimeout(resolve, 120));
-
-    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls.some(([input]) => String(input) === "/api/workflows")).toBe(false);
-    expect(screen.queryByRole("option", { name: /Morning Test/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /#task/i })).not.toBeInTheDocument();
-  });
-
   it("does not show Codex mention options when Codex is not connected", async () => {
     const user = userEvent.setup();
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@");
 
-    expect(screen.queryByRole("listbox", { name: "Mention menu" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /codex/i })).not.toBeInTheDocument();
   });
 
   it("does not send steering metadata for manually typed @codex", async () => {
@@ -3776,7 +4487,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@codex check repo access");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
@@ -3790,7 +4501,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} codexConnected />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "@");
     await user.click(screen.getByRole("option", { name: /@codex/i }));
     await user.clear(textarea);
@@ -3821,7 +4532,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/verification");
     const codingOption = await screen.findByRole("option", { name: /coding-work/i });
     await user.click(codingOption);
@@ -3833,8 +4544,6 @@ describe("Surface chat streaming UI", () => {
       '[data-testid="composer-mention-overlay"]',
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="skill"]')).toHaveLength(2);
-    expect(overlay).toHaveTextContent("/coding-work then /writing-work");
-    expect(textarea).toHaveClass("text-transparent");
 
     fireEvent.change(textarea, { target: { value: "/coding-work then continue" } });
     expect(textarea).toHaveValue("/coding-work then continue");
@@ -3854,6 +4563,30 @@ describe("Surface chat streaming UI", () => {
     });
   });
 
+  it("sends cosmetic plugin references as readable links without invocation metadata", async () => {
+    referenceCatalogMock.items = [
+      {
+        kind: "plugin",
+        label: "Slack",
+        plugin: "slack",
+        href: "/plugins/slack",
+        description: "Plugin",
+      },
+    ];
+    const user = userEvent.setup();
+    render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
+    );
+    const input = screen.getByPlaceholderText("Ask a question or describe a task...");
+    await user.type(input, "Summarize @sla");
+    await user.click(await screen.findByRole("option", { name: /Slack/ }));
+    expect(input).toHaveValue("Summarize [Slack](/plugins/slack) ");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(chatMock.sendMessage).toHaveBeenCalledWith({
+      text: "Summarize [Slack](/plugins/slack)",
+    });
+  });
+
   it("does not offer Skills from the @ mention menu", async () => {
     const user = userEvent.setup();
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
@@ -3868,7 +4601,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await screen.findByRole("option", { name: /coding-work/i });
     await user.clear(textarea);
@@ -3896,7 +4629,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     const pastedText = "/product-feature use /add-integration-to-main-chat to add attio";
     fireEvent.paste(textarea, {
       clipboardData: {
@@ -3942,7 +4675,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userWorkosId="user_1" />,
     );
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     await user.type(textarea, "/coding");
     await waitFor(() => expect(catalogCalls).toBe(1));
     expect(screen.queryByRole("option", { name: /coding-work/i })).not.toBeInTheDocument();
@@ -3959,7 +4692,7 @@ describe("Surface chat streaming UI", () => {
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
     await user.type(
-      screen.getByPlaceholderText("Ask opencompany anything..."),
+      screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Hello opencompany",
     );
     await user.click(screen.getByRole("button", { name: "Send message" }));
@@ -3968,17 +4701,31 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
   });
 
-  it("keeps the home screen clean when there is no activity", () => {
-    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userName="Louis" />);
+  it("opens home on the new chat prompt instead of activity lists", () => {
+    render(
+      <Surface
+        tasks={[taskView({ id: "task_1", name: "Run market report" })]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={null}
+        recentChats={[
+          {
+            id: "chat_1",
+            title: "Market research",
+            model: DEFAULT_MODEL,
+            preview: "Compare the latest pricing.",
+            updatedAt: currentTimestamp(),
+          },
+        ]}
+      />,
+    );
 
-    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Chats" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Routines" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Results" })).not.toBeInTheDocument();
-    expect(screen.queryByText("No chats yet.")).not.toBeInTheDocument();
-    expect(screen.queryByText("No recurring tasks yet.")).not.toBeInTheDocument();
-    expect(screen.queryByText("No results yet.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Routines" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Market research")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run market report")).not.toBeInTheDocument();
   });
 
   it("opens a chat started from a project on that project's prompt", () => {
@@ -3987,7 +4734,6 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
-        userName="Louis"
         newChatProjectId="project_1"
         newChatProjectName="product"
         recentChats={[
@@ -4006,222 +4752,48 @@ describe("Surface chat streaming UI", () => {
     expect(
       screen.getByRole("heading", { name: "What should we build in product?" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText("welcome back, Louis")).not.toBeInTheDocument();
     expect(screen.queryByText("Older chat")).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask a question or describe a task...")).toBeInTheDocument();
   });
 
-  it("keeps the plain home screen when a project name is missing", () => {
+  it("keeps the plain home prompt when a project name is missing", () => {
     render(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
-        userName="Louis"
         newChatProjectId="project_1"
       />,
     );
 
-    expect(screen.getByText("welcome back, Louis")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
-  it("renders recent chat history with links to each chat", () => {
+  it("greets the signed-in user by first name on the home prompt", () => {
     render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} userFirstName="Louis" />,
     );
 
-    const chatLink = screen.getByRole("link", { name: /Market research/ });
-    expect(chatLink).toHaveAttribute("href", "/chat/chat_1");
-    expect(screen.getByText("Compare the latest pricing.")).toBeInTheDocument();
-  });
-
-  it("renders home chat state indicators", () => {
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({
-            id: "working_chat",
-            title: "Working chat",
-            status: "running",
-          }),
-          {
-            id: "unseen_chat",
-            title: "Done unseen",
-            model: DEFAULT_MODEL,
-            preview: "Ready to review.",
-            updatedAt: currentTimestamp(),
-            state: "done_unseen",
-          },
-          {
-            id: "seen_chat",
-            title: "Done seen",
-            model: DEFAULT_MODEL,
-            preview: "Already opened.",
-            updatedAt: currentTimestamp(),
-            state: "done_seen",
-          },
-        ]}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: /Working chat/ })).toHaveAttribute(
-      "href",
-      "/chat/working_chat",
-    );
-    expect(screen.getByRole("link", { name: /Done unseen/ })).toHaveAttribute(
-      "href",
-      "/chat/unseen_chat",
-    );
-    expect(screen.getByRole("link", { name: /Done seen/ })).toHaveAttribute(
-      "href",
-      "/chat/seen_chat",
-    );
-    expect(screen.getByTestId("home-chat-working")).toBeInTheDocument();
-    expect(screen.getByTestId("home-chat-unseen")).toBeInTheDocument();
-    expect(screen.getByTestId("home-chat-seen")).toBeInTheDocument();
-  });
-
-  it("keeps Codex and Claude Code sessions in Chats while Tasks show real tasks", () => {
-    const { container } = render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[taskView({ id: "task_1", name: "Prepare report" })]}
-        schedules={[
-          {
-            id: "schedule_1",
-            name: "Monday update",
-            sourceDescription: "Every Monday",
-            cron: "0 9 * * 1",
-            timezone: "Europe/Berlin",
-            prompt: "Prepare the weekly update",
-            enabled: true,
-            version: 1,
-            lastRunAt: null,
-            nextRunAt: "2026-07-20T07:00:00.000Z",
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          codexChatSummary({ id: "codex_1", title: "Fix deployment" }),
-          codexChatSummary({
-            id: "claude_1",
-            title: "Update docs",
-            engine: "claude_code",
-            preview: "Claude is updating the docs.",
-          }),
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            engine: "opencompany",
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    const tasksSection = screen.getByRole("heading", { name: "Tasks" }).closest("section");
-    const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
-    expect(tasksSection).not.toBeNull();
-    expect(chatsSection).not.toBeNull();
-    expect(within(tasksSection!).getByRole("link", { name: /Prepare report/ })).toHaveAttribute(
-      "href",
-      "/tasks/TASK-1",
-    );
-    expect(within(tasksSection!).queryByText("Fix deployment")).not.toBeInTheDocument();
-    expect(within(tasksSection!).queryByText("Update docs")).not.toBeInTheDocument();
-    expect(within(chatsSection!).getByRole("link", { name: /Fix deployment/ })).toHaveAttribute(
-      "href",
-      "/chat/codex_1",
-    );
-    expect(within(chatsSection!).getByRole("link", { name: /Update docs/ })).toHaveAttribute(
-      "href",
-      "/chat/claude_1",
-    );
-    expect(within(chatsSection!).getByText("Market research")).toBeInTheDocument();
     expect(
-      within(container)
-        .getAllByRole("heading")
-        .map((heading) => heading.textContent)
-        .filter((heading) => ["Tasks", "Chats", "Routines"].includes(heading ?? "")),
-    ).toEqual(["Tasks", "Chats", "Routines"]);
+      screen.getByRole("heading", { name: "What should we build next, Louis?" }),
+    ).toBeInTheDocument();
   });
 
-  it("updates a recurring Task through the versioned schedule command", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        workspaceId="workspace_1"
-        tasks={[]}
-        schedules={[
-          {
-            id: "schedule_1",
-            name: "Monday update",
-            sourceDescription: "Every Monday",
-            cron: "0 9 * * 1",
-            timezone: "Europe/Berlin",
-            prompt: "Prepare the weekly update",
-            enabled: true,
-            version: 4,
-            lastRunAt: null,
-            nextRunAt: "2026-07-20T07:00:00.000Z",
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Pause Monday update" }));
-
-    await waitFor(() =>
-      expect(automationCommandMocks.updateSchedule).toHaveBeenCalledWith(
-        "schedule_1",
-        { expectedVersion: 4, enabled: false },
-        { scopeKey: "workspace_1" },
-      ),
-    );
-  });
-
-  it("shows Codex chats in Chats when background task spawning is disabled", () => {
+  it("prefers the project prompt over the user's first name", () => {
     render(
       <Surface
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={null}
-        recentChats={[codexChatSummary()]}
+        newChatProjectId="project_1"
+        newChatProjectName="product"
+        userFirstName="Louis"
       />,
     );
 
-    expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Chats" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Codex task/ })).toHaveAttribute(
-      "href",
-      "/chat/goat_chat_codex_1",
-    );
+    expect(
+      screen.getByRole("heading", { name: "What should we build in product?" }),
+    ).toBeInTheDocument();
   });
 
   it("renders coding workspaces only for persistent Codex and Claude Code chats", () => {
@@ -4269,293 +4841,6 @@ describe("Surface chat streaming UI", () => {
     });
     expect(screen.queryByRole("button", { name: "Open workspace" })).not.toBeInTheDocument();
     backgroundTask.unmount();
-  });
-
-  it("keeps active and pinned coding chats visible outside the recent window", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          tasks={[]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-          recentChats={[
-            codexChatSummary({
-              id: "recent_ready",
-              title: "Recent ready",
-              status: "idle",
-              updatedAt: "2026-07-04T17:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_running",
-              title: "Old but working",
-              status: "running",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_pinned",
-              title: "Pinned ready",
-              status: "idle",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-              pinnedAt: "2026-07-04T12:00:00.000Z",
-            }),
-            codexChatSummary({
-              id: "old_hidden",
-              title: "Old hidden",
-              status: "idle",
-              updatedAt: "2026-06-26T17:00:00.000Z",
-            }),
-          ]}
-        />,
-      );
-
-      const chatsSection = screen.getByRole("heading", { name: "Chats" }).closest("section");
-      expect(chatsSection).not.toBeNull();
-      expect(within(chatsSection!).getByText("Recent ready")).toBeInTheDocument();
-      expect(within(chatsSection!).getByText("Old but working")).toBeInTheDocument();
-      expect(within(chatsSection!).getByText("Pinned ready")).toBeInTheDocument();
-      expect(within(chatsSection!).queryByText("Old hidden")).not.toBeInTheDocument();
-      expect(screen.queryByRole("heading", { name: "Tasks" })).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("prefetches recent chats and task results before navigation", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[
-          {
-            id: "task_1",
-            displayId: "TASK-1",
-            name: "Run market report",
-            prompt: "Write a report",
-            model: DEFAULT_MODEL,
-            status: "succeeded",
-            stage: "completed",
-            result: "Done",
-            error: null,
-            archivedAt: null,
-            createdAt: currentTimestamp(),
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-          codexChatSummary({
-            id: "codex_chat_1",
-            title: "Fix deployment",
-            status: "idle",
-            updatedAt: currentTimestamp(),
-          }),
-        ]}
-      />,
-    );
-
-    await user.hover(screen.getByRole("link", { name: /Market research/ }));
-    await user.hover(screen.getByRole("link", { name: /Fix deployment/ }));
-    await user.hover(screen.getByRole("link", { name: /Run market report/ }));
-
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/chat_1");
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/chat/codex_chat_1");
-    expect(routerMock.prefetch).toHaveBeenCalledWith("/tasks/TASK-1");
-  });
-
-  it("archives canonical results while keeping compatibility results read-only", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[
-          taskView({
-            id: "canonical_task",
-            displayId: "TASK-1",
-            name: "Canonical result",
-            sessionId: "canonical_conversation",
-          }),
-          taskView({
-            id: "legacy_task",
-            displayId: "TASK-2",
-            name: "Legacy result",
-            sessionId: null,
-          }),
-        ]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Canonical result" }));
-
-    expect(taskCommandMocks.archive).toHaveBeenCalledWith("canonical_task", { scopeKey: "" });
-    expect(screen.queryByRole("button", { name: "Archive Legacy result" })).not.toBeInTheDocument();
-  });
-
-  it.each(["waiting", "failed", "succeeded", "canceled"] as const)(
-    "archives a %s task from the home list",
-    async (status) => {
-      const user = userEvent.setup();
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[
-            taskView({
-              id: "settled_task",
-              name: "Review deployment",
-              sessionId: "task_conversation",
-              status,
-              stage: status === "failed" ? "failed" : "completed",
-              reportedOutcome: "needs_attention",
-            }),
-          ]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-        />,
-      );
-
-      await user.click(screen.getByRole("button", { name: "Archive Review deployment" }));
-
-      expect(taskCommandMocks.archive).toHaveBeenCalledWith("settled_task", { scopeKey: "" });
-      expect(screen.queryByRole("link", { name: /Review deployment/ })).not.toBeInTheDocument();
-    },
-  );
-
-  it.each(["queued", "running"] as const)("does not offer to archive a %s task", (status) => {
-    render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[taskView({ name: "Active task", sessionId: "task_conversation", status })]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
-    );
-
-    expect(screen.getByRole("link", { name: /Active task/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Archive Active task" })).not.toBeInTheDocument();
-  });
-
-  it("hides old home chats but shows all unarchived tasks regardless of age", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-04T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[
-            taskView({
-              id: "recent_task",
-              displayId: "TASK-1",
-              name: "Recent result",
-              createdAt: "2026-07-04T10:00:00.000Z",
-              updatedAt: "2026-07-04T10:00:00.000Z",
-            }),
-            taskView({
-              id: "old_task",
-              displayId: "TASK-2",
-              name: "Old result",
-              createdAt: "2026-07-02T10:00:00.000Z",
-              updatedAt: "2026-07-02T10:00:00.000Z",
-            }),
-            taskView({
-              id: "archived_task",
-              displayId: "TASK-3",
-              name: "Archived result",
-              archivedAt: "2026-07-04T12:00:00.000Z",
-            }),
-          ]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-          recentChats={[
-            {
-              id: "recent_chat",
-              title: "Recent chat",
-              model: DEFAULT_MODEL,
-              preview: "Visible",
-              updatedAt: "2026-07-04T10:00:00.000Z",
-            },
-            {
-              id: "old_chat",
-              title: "Old chat",
-              model: DEFAULT_MODEL,
-              preview: "Hidden",
-              updatedAt: "2026-06-26T10:00:00.000Z",
-            },
-          ]}
-        />,
-      );
-
-      expect(screen.getByText("Recent chat")).toBeInTheDocument();
-      expect(screen.queryByText("Old chat")).not.toBeInTheDocument();
-      expect(screen.getByText("Recent result")).toBeInTheDocument();
-      expect(screen.getByText("Old result")).toBeInTheDocument();
-      expect(screen.queryByText("Archived result")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("archives a chat from the home list", async () => {
-    const user = userEvent.setup();
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
-
-    expect(updateHeadlessChatConversation).toHaveBeenCalledWith("chat_1", { archived: true });
-    expect(screen.queryByText("Market research")).not.toBeInTheDocument();
-  });
-
-  it("restores a home chat when the archive request rejects", async () => {
-    const user = userEvent.setup();
-    headlessChatCommandMocks.updateConversation.mockRejectedValueOnce(
-      new Error("network unavailable"),
-    );
-    render(
-      <Surface
-        tasks={[]}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-        recentChats={[
-          {
-            id: "chat_1",
-            title: "Market research",
-            model: DEFAULT_MODEL,
-            preview: "Compare the latest pricing.",
-            updatedAt: currentTimestamp(),
-          },
-        ]}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Archive Market research" }));
-
-    await waitFor(() => expect(screen.getByText("Market research")).toBeInTheDocument());
-    expect(routerMock.refresh).not.toHaveBeenCalled();
   });
 
   it("opens the same composer as main chat with Cmd+K and starts a background chat without navigating", async () => {
@@ -4617,7 +4902,7 @@ describe("Surface chat streaming UI", () => {
       screen.queryByPlaceholderText("Ask opencompany anything, or describe a task..."),
     ).not.toBeInTheDocument();
     // Never navigates away from the home screen it was opened on.
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("highlights and strips an ampersand background directive in Cmd+K compose", async () => {
@@ -4667,7 +4952,6 @@ describe("Surface chat streaming UI", () => {
     expect(
       overlay?.querySelector('[data-opencompany-chat-directive="background"]'),
     ).toHaveTextContent("&");
-    expect(quickComposerInput).toHaveClass("text-transparent");
 
     await user.keyboard("{Enter}");
 
@@ -4692,7 +4976,10 @@ describe("Surface chat streaming UI", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.keyboard("{Meta>}k{/Meta}");
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
@@ -4736,7 +5023,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.type(
       within(dialog).getByPlaceholderText("Ask opencompany anything, or describe a task..."),
       "Clone my repo",
@@ -4802,7 +5092,6 @@ describe("Surface chat streaming UI", () => {
         workspaceId="workspace_1"
         codexConnected
         userWorkosId="user_1"
-        taskSpawningEnabled
       />,
     );
 
@@ -4810,7 +5099,10 @@ describe("Surface chat streaming UI", () => {
     const dialog = screen.getByRole("dialog");
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     const quickComposerInput = within(dialog).getByPlaceholderText(
       "Ask opencompany anything, or describe a task...",
@@ -4848,7 +5140,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // Popover content (model list, goal mode fields) portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
     await user.click(within(dialog).getByRole("button", { name: "Goal mode" }));
     await user.click(screen.getByRole("checkbox", { name: "Goal mode" }));
     await user.type(screen.getByPlaceholderText("Objective"), "Fix the flaky tests");
@@ -4885,7 +5180,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(within(dialog).getByRole("option", { name: "Start new chat" }));
     await user.click(within(dialog).getByRole("button", { name: "Model" }));
     // The model picker's popover content portals outside the dialog's DOM subtree.
-    await user.click(screen.getByText("Cloud Codex sandbox"));
+    await user.click(screen.getByRole("button", { name: "Coding agents" }));
+    await user.click(
+      screen.getByRole("button", { name: "Codex: included with your ChatGPT subscription" }),
+    );
 
     expect(window.localStorage.getItem("opencompany-goat-main-chat-selection:user_1")).toBeNull();
   });
@@ -4979,13 +5277,7 @@ describe("Surface chat streaming UI", () => {
     );
 
     render(
-      <Surface
-        taskSpawningEnabled
-        tasks={[]}
-        allTasks={allTasks}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={null}
-      />,
+      <Surface tasks={[]} allTasks={allTasks} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
     await user.keyboard("{Meta>}k{/Meta}");
@@ -5064,7 +5356,6 @@ describe("Surface chat streaming UI", () => {
 
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[]}
         allTasks={[
           taskView({
@@ -5181,7 +5472,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));
@@ -5203,7 +5494,7 @@ describe("Surface chat streaming UI", () => {
       <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />,
     );
 
-    await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start");
+    await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Start");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     pathnameMock.value = "/brain";
@@ -5278,7 +5569,7 @@ describe("Surface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
     expect(routerMock.replace).toHaveBeenCalledWith("/");
     expect(updateHeadlessChatConversation).not.toHaveBeenCalledWith("chat_1", { archived: true });
   });
@@ -5310,7 +5601,7 @@ describe("Surface chat streaming UI", () => {
     await nextAnimationFrame();
 
     expect(screen.queryByText("Earlier answer")).not.toBeInTheDocument();
-    expect(screen.getByText("welcome back, there")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What should we build next?" })).toBeInTheDocument();
   });
 
   it("allows drafting but blocks Enter submission while streaming", async () => {
@@ -5319,7 +5610,7 @@ describe("Surface chat streaming UI", () => {
 
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
 
-    const textarea = screen.getByPlaceholderText("Ask opencompany anything...");
+    const textarea = screen.getByPlaceholderText("Ask a question or describe a task...");
     expect(textarea).toBeEnabled();
 
     await user.type(textarea, "My next message");
@@ -5772,7 +6063,7 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
   });
 
-  it("renders a task card from start_workflow tool output", () => {
+  it("renders a saved workflow result in the chat transcript", () => {
     render(
       <Surface
         tasks={[]}
@@ -5785,39 +6076,22 @@ describe("Surface chat streaming UI", () => {
             {
               id: "assistant_1",
               role: "assistant",
-              metadata: { sessionId: "chat_1" },
               parts: [
-                { type: "text", text: "Started that workflow as a Task." },
                 {
-                  type: START_WORKFLOW_TOOL_PART_TYPE,
-                  toolCallId: "tool_1",
+                  type: "tool-workflows",
+                  toolCallId: "workflow_1",
                   state: "output-available",
-                  input: {
-                    workflowId: "customer-interview-synthesis",
-                    prompt: "Synthesize the Acme interview.",
-                  },
+                  input: { command: "create", name: "Weekly investor update" },
                   output: {
-                    taskId: "task_1",
-                    taskDisplayId: "TASK-42",
-                    taskName: "Customer interview synthesis",
-                    status: "queued",
-                    prompt: "Synthesize the Acme interview.",
-                  },
-                },
-                {
-                  type: START_TASK_TOOL_PART_TYPE,
-                  toolCallId: "tool_2",
-                  state: "output-available",
-                  input: {
-                    name: "Fallback task",
-                    prompt: "Synthesize the Acme interview.",
-                  },
-                  output: {
-                    taskId: "task_1",
-                    taskDisplayId: "TASK-42",
-                    taskName: "Customer interview synthesis",
-                    status: "already_started",
-                    prompt: "Synthesize the Acme interview.",
+                    ok: true,
+                    workflow: {
+                      slug: "weekly-investor-update",
+                      name: "Weekly investor update",
+                      status: "draft",
+                      scope: "personal",
+                      memory: { enabled: false },
+                      activationBlockers: ["Add instructions before activating."],
+                    },
                   },
                 },
               ],
@@ -5826,17 +6100,80 @@ describe("Surface chat streaming UI", () => {
         }}
       />,
     );
-
-    expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
-    expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
-    expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
-    expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Weekly investor update" })).toHaveAttribute(
+      "href",
+      "/workflows/weekly-investor-update",
+    );
+    expect(screen.getByText("Add instructions before activating.")).toBeInTheDocument();
   });
+
+  it.each([START_WORKFLOW_TOOL_PART_TYPE, "tool-workflows"])(
+    "renders a task card from %s output",
+    (workflowPartType) => {
+      render(
+        <Surface
+          tasks={[]}
+          defaultModel={DEFAULT_MODEL}
+          initialChat={{
+            id: "chat_1",
+            title: "Chat",
+            model: DEFAULT_MODEL,
+            messages: [
+              {
+                id: "assistant_1",
+                role: "assistant",
+                metadata: { sessionId: "chat_1" },
+                parts: [
+                  { type: "text", text: "Started that workflow as a Task." },
+                  {
+                    type: workflowPartType,
+                    toolCallId: "tool_1",
+                    state: "output-available",
+                    input: {
+                      workflowId: "customer-interview-synthesis",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                    output: {
+                      taskId: "task_1",
+                      taskDisplayId: "TASK-42",
+                      taskName: "Customer interview synthesis",
+                      status: "queued",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                  },
+                  {
+                    type: START_TASK_TOOL_PART_TYPE,
+                    toolCallId: "tool_2",
+                    state: "output-available",
+                    input: {
+                      name: "Fallback task",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                    output: {
+                      taskId: "task_1",
+                      taskDisplayId: "TASK-42",
+                      taskName: "Customer interview synthesis",
+                      status: "already_started",
+                      prompt: "Synthesize the Acme interview.",
+                    },
+                  },
+                ],
+              } as unknown as ChatUiMessage,
+            ],
+          }}
+        />,
+      );
+
+      expect(screen.getByText("Started that workflow as a Task.")).toBeInTheDocument();
+      expect(screen.getAllByText("Customer interview synthesis")).toHaveLength(1);
+      expect(screen.getByText("TASK-42 · Queued")).toBeInTheDocument();
+      expect(screen.queryByText("Workflow")).not.toBeInTheDocument();
+    },
+  );
 
   it("renders current task status from task state instead of start_task output", () => {
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -5888,7 +6225,6 @@ describe("Surface chat streaming UI", () => {
   it("renders a metadata-only task card from the task state lookup", () => {
     render(
       <Surface
-        taskSpawningEnabled
         tasks={[
           taskView({
             id: "task_1",
@@ -6316,26 +6652,6 @@ describe("Surface chat streaming UI", () => {
     expect(screen.getByText("Web fetch returned no readable page content.")).toBeInTheDocument();
   });
 
-  it("labels freshly created result rows as just now", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-02T17:44:00.000Z"));
-    try {
-      render(
-        <Surface
-          taskSpawningEnabled
-          tasks={[taskView({ createdAt: "2026-07-02T17:43:45.000Z" })]}
-          defaultModel={DEFAULT_MODEL}
-          initialChat={null}
-        />,
-      );
-
-      expect(screen.getByText("just now")).toBeInTheDocument();
-      expect(screen.queryByText("0m ago")).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   describe("pane contract", () => {
     it("only lets the active pane's Cmd/Ctrl+K open the command palette when two panes are mounted", async () => {
       const user = userEvent.setup();
@@ -6390,7 +6706,9 @@ describe("Surface chat streaming UI", () => {
       await user.keyboard("{Escape}");
 
       await waitFor(() => expect(screen.getAllByPlaceholderText("Reply...")).toHaveLength(1));
-      expect(screen.getByPlaceholderText("Ask opencompany anything...")).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText("Ask a question or describe a task..."),
+      ).toBeInTheDocument();
     });
 
     it("only lets the active pane consume a window-level file drop when two panes are mounted", async () => {
@@ -6463,7 +6781,10 @@ describe("Surface chat streaming UI", () => {
         />,
       );
 
-      await user.type(screen.getByPlaceholderText("Ask opencompany anything..."), "Start now");
+      await user.type(
+        screen.getByPlaceholderText("Ask a question or describe a task..."),
+        "Start now",
+      );
       await user.click(screen.getByRole("button", { name: "Send message" }));
 
       await waitFor(() => expect(chatMock.preparedRequestBodies).toHaveLength(1));

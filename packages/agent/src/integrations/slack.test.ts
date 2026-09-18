@@ -25,11 +25,11 @@ describe("Slack OAuth flows", () => {
   it("uses Slack's dedicated user OAuth flow and advertised scopes for MCP", () => {
     const state = createSlackIntegrationState({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
     expect(verifySlackIntegrationState(state)).toMatchObject({
       userWorkosId: "user_1",
-      returnTo: "/settings/plugins/slack",
+      returnTo: "/plugins/slack",
     });
 
     const url = new URL(buildSlackAuthorizationUrl(state));
@@ -47,7 +47,7 @@ describe("Slack OAuth flows", () => {
       returnTo: "https://evil.example/steal",
     });
 
-    expect(verifySlackIntegrationState(state).returnTo).toBe("/settings/plugins/slack");
+    expect(verifySlackIntegrationState(state).returnTo).toBe("/plugins/slack");
   });
 
   it("exchanges MCP codes at oauth.v2.user.access and reads its top-level token", async () => {

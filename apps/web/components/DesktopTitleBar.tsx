@@ -9,7 +9,9 @@ import {
   MoreHorizontal,
   PanelLeft,
   Plus,
+  Puzzle,
   Settings,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -24,11 +26,9 @@ const SETTINGS_TITLES: Record<string, string> = {
   "/settings/workspace": "Workspace",
   "/settings/usage": "Usage",
   "/settings/workspace/inference": "Inference",
+  "/settings/workspace/sandboxes": "Sandboxes",
   "/settings/repositories": "Repositories",
-  "/settings/skills": "Skills",
   "/settings/mcp": "MCP",
-  "/settings/attio": "Attio",
-  "/settings/fathom": "Fathom ingestion",
 };
 
 function pathSegmentLabel(value: string | undefined, fallback: string) {
@@ -56,7 +56,7 @@ export function DesktopTitleBar({
   const segments = pathname.split("/").filter(Boolean);
 
   let title = workspace.name;
-  let section = "Home";
+  let section = "New Chat";
   let SectionIcon = CircleDashed;
 
   if (segments[0] === "chat") {
@@ -70,6 +70,14 @@ export function DesktopTitleBar({
     title = pathSegmentLabel(segments[1], "Workflows");
     section = "Workflows";
     SectionIcon = Workflow;
+  } else if (segments[0] === "plugins") {
+    title = pathSegmentLabel(segments[1], "Plugins");
+    section = "Plugins";
+    SectionIcon = Puzzle;
+  } else if (segments[0] === "skills") {
+    title = pathSegmentLabel(segments[1], "Skills");
+    section = "Skills";
+    SectionIcon = Sparkles;
   } else if (segments[0] === "wiki") {
     title = pathSegmentLabel(segments.at(-1), "Wiki");
     section = "Wiki";

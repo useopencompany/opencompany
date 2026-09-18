@@ -1,26 +1,25 @@
 "use client";
 
-import { cn } from "@opencompany/ui/lib/utils";
+import type { FeatureFlags } from "@opencompany/agent/feature-flags";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   BrainCircuit,
   CircleDollarSign,
+  Container,
   CreditCard,
   FolderGit2,
   MessageSquare,
-  PackageOpen,
   PanelLeft,
   PlugZap,
   SearchCheck,
   SlidersHorizontal,
-  Sparkles,
+  Smartphone,
   UserRound,
   Users,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 
@@ -30,7 +29,9 @@ type SettingsNavItem = {
   label: string;
   badge?: string;
   adminOnly?: boolean;
-  isActive: (pathname: string) => boolean;
+  // Shown only while the member has this beta flag on.
+  featureFlag?: keyof FeatureFlags;
+  isActive?: (pathname: string) => boolean;
 };
 
 type SettingsNavGroup = {
@@ -72,24 +73,16 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         isActive: (pathname) => pathname === "/settings/workspace/inference",
       },
       {
+        href: "/settings/workspace/sandboxes",
+        icon: Container,
+        label: "Sandboxes",
+        isActive: (pathname) => pathname === "/settings/workspace/sandboxes",
+      },
+      {
         href: "/settings/workspace/capabilities",
         icon: SearchCheck,
         label: "Capabilities",
         isActive: (pathname) => pathname === "/settings/workspace/capabilities",
-      },
-      {
-        href: "/settings/skills",
-        icon: Sparkles,
-        label: "Skills",
-        isActive: (pathname) =>
-          pathname === "/settings/skills" || pathname.startsWith("/settings/skills/"),
-      },
-      {
-        href: "/settings/plugins",
-        icon: PackageOpen,
-        label: "Plugins",
-        isActive: (pathname) =>
-          pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/"),
       },
       {
         href: "/settings/repositories",
@@ -115,13 +108,34 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         label: "Members",
         isActive: (pathname) => pathname === "/settings/workspace",
       },
+    ],
+  },
+  {
+    label: "Channels",
+    items: [
       {
         href: "/settings/workspace/slack",
         icon: MessageSquare,
-        label: "Slack bot",
+        label: "Slack",
         badge: "Beta",
         adminOnly: true,
         isActive: (pathname) => pathname === "/settings/workspace/slack",
+      },
+      {
+        href: "/settings/imessage",
+        icon: Smartphone,
+        label: "iMessage",
+        badge: "Beta",
+        featureFlag: "imessage",
+        isActive: (pathname) => pathname === "/settings/imessage",
+      },
+      {
+        href: "/settings/whatsapp",
+        icon: Smartphone,
+        label: "WhatsApp",
+        badge: "Beta",
+        featureFlag: "whatsapp",
+        isActive: (pathname) => pathname === "/settings/whatsapp",
       },
     ],
   },
@@ -164,7 +178,9 @@ export function SettingsSidebar({
   showCollapseButton?: boolean;
 }) {
   const pathname = usePathname();
-  const isAdmin = useAppDataOptional()?.workspace.role === "admin";
+  const appData = useAppDataOptional();
+  const isAdmin = appData?.workspace.role === "admin";
+  const featureFlags = appData?.featureFlags;
 
   return (
     <aside
@@ -216,72 +232,18 @@ export function SettingsSidebar({
               </div>
               {group.items
                 .filter((item) => !item.adminOnly || isAdmin)
+                .filter((item) => !item.featureFlag || featureFlags?.[item.featureFlag] === true)
                 .map((item) => (
-                  <SettingsNavRow key={item.href} item={item} active={item.isActive(pathname)} />
+                  <SettingsNavRow
+                    key={item.href}
+                    item={item}
+                    active={item.isActive?.(pathname) ?? false}
+                  />
                 ))}
             </div>
           ))}
         </nav>
       </div>
     </aside>
-  );
-}
-
-// Shared content shell for every settings sub-page: a scrollable, left-aligned column with a
-// consistent header. Nav lives in SettingsSidebar, so pages only own their body.
-export function SettingsContent({
-  title,
-  description,
-  backLink,
-  icon,
-  badge,
-  contentClassName,
-  children,
-}: {
-  title: string;
-  description?: string;
-  backLink?: { href: string; label: string };
-  /** Optional mark rendered beside the page title, for pages about a single named thing. */
-  icon?: ReactNode;
-  /** Optional status pill rendered beside the page title. */
-  badge?: ReactNode;
-  contentClassName?: string;
-  children: ReactNode;
-}) {
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 overflow-y-auto px-6 md:px-10">
-        <div
-          className={cn(
-            "mx-auto flex w-full max-w-[680px] flex-col gap-8 pb-24 pt-14 sm:pt-20",
-            contentClassName,
-          )}
-        >
-          {backLink ? (
-            <Link
-              href={backLink.href}
-              prefetch
-              className="-mb-4 inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] text-ink-subtle transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              <ArrowLeft size={14} strokeWidth={2} />
-              {backLink.label}
-            </Link>
-          ) : null}
-          <header className="flex flex-col gap-1.5">
-            <div className="flex flex-wrap items-center gap-2.5">
-              {icon}
-              <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-                {title}
-              </h1>
-              {badge}
-            </div>
-            {description ? (
-              <p className="text-[13px] leading-5 text-ink-subtle">{description}</p>
-            ) : null}
-          </header>
-          {children}
-        </div>
-      </div>
-    </main>
   );
 }

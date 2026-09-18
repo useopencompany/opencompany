@@ -1,4 +1,4 @@
-import type { TaskScheduleReadModel, WorkflowDto } from "@opencompany/protocol";
+import type { WorkflowDto, WorkflowScope, WorkflowSlackChannel } from "@opencompany/protocol";
 
 export type WorkflowStep = {
   id: string;
@@ -32,6 +32,10 @@ export type WorkflowTrigger =
       nextRunAt: string | null;
     };
 
+export type WorkflowAutomationTrigger =
+  | ({ id: string } & Extract<WorkflowTrigger, { type: "event" }>)
+  | ({ id: string } & Extract<WorkflowTrigger, { type: "schedule" }>);
+
 export type WorkflowDetail = {
   id: string;
   slug: string;
@@ -39,15 +43,32 @@ export type WorkflowDetail = {
   description: string;
   steps: WorkflowStep[];
   status: "draft" | "active";
+  scope: WorkflowScope;
+  slackChannel: WorkflowSlackChannel;
+  createdByUserId: string | null;
   trigger: WorkflowTrigger;
+  triggers?: WorkflowAutomationTrigger[];
   version: number;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
-export type WorkflowListItem = WorkflowDetail;
-export type TaskScheduleView = TaskScheduleReadModel;
+// The list hydrates from the `workflows-v1` read model, which deliberately omits channel
+// configuration. Keeping it off this type stops a list-side read of a field Electric never sends.
+export type WorkflowListItem = Omit<WorkflowDetail, "slackChannel">;
+
+// The API only returns workflows the viewer may edit, so editability needs no client rule. Changing
+// the visibility itself is narrower: the creator, or an admin claiming one that predates scopes.
+export function canManageWorkflowScope(
+  workflow: Pick<WorkflowDetail, "createdByUserId">,
+  viewer: { userId: string; role: "admin" | "member" },
+) {
+  return (
+    workflow.createdByUserId === viewer.userId ||
+    (workflow.createdByUserId === null && viewer.role === "admin")
+  );
+}
 
 export type WorkflowCatalogItem = {
   steps: WorkflowStep[];

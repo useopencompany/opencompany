@@ -85,12 +85,10 @@ import {
 } from "./codex-chat-wakeup";
 import { materializeClaudeSkillSnapshotsForSession } from "./codex-managed-skills";
 import {
-  buildGitHubCommandEnv,
   createKnownSecretRedactor,
   GITHUB_RECONNECT_NOTICE,
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
-  githubSandboxTokenMinimumValidityMs,
   loadGitHubAuthForUser,
   logCodingSandboxAcquisition,
   shouldAppendGitHubAuthNotice,
@@ -103,11 +101,22 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
-import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import { createSteeringChannel } from "./coding-chat-steering";
+import {
+  codingSandboxTemplate,
+  settledCodingSandboxIdleTimeoutMs,
+} from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
+import { reconcileDopplerSandboxAuth } from "./doppler-sandbox-auth";
 import type { RunnerEnv } from "./env";
 import type { ExternalEngineTurnSummary } from "./external-engine-contract";
+import {
+  createGitHubSandboxCapability,
+  type GitHubSandboxAuth,
+  type GitHubSandboxCapability,
+  prepareGitHubSandboxAuth,
+} from "./github-sandbox-auth";
 import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
@@ -414,12 +423,16 @@ export async function runClaudeCodeChatTurn(input: {
         userWorkosId: turn.userWorkosId,
         namespace: env.sandboxNamespace,
       },
-      template: env.codexE2bTemplate ?? "codex",
+      template: codingSandboxTemplate(env.codexE2bTemplates, session.sandboxSize),
       envs: {},
       metadata: managedSandboxMetadata({
         namespace: env.sandboxNamespace,
         ownerKind: "codex_chat_session",
         ownerId: session.id,
+        execution: {
+          backend: session.executionBackend,
+          version: session.executionBackendVersion,
+        },
         metadata: { user_id: turn.userWorkosId },
       }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,
@@ -490,6 +503,7 @@ export async function runClaudeCodeChatTurn(input: {
 
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
+  let githubSandboxAuth: GitHubSandboxAuth | null = null;
   let pluginDataRuntime: PluginDataRuntime | null = null;
   let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
   let executionStage = "fence_previous_turn";
@@ -552,14 +566,32 @@ export async function runClaudeCodeChatTurn(input: {
       workspaceId: session.workspaceId,
       userWorkosId: turn.userWorkosId,
     });
+    const dopplerAuth = await reconcileDopplerSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
     executionStage = "load_github_auth";
     let github: GitHubCommandAuth | null = null;
     let githubNotice: string | null = null;
+    let githubCapability: GitHubSandboxCapability | null = null;
     try {
-      github = await loadGitHubAuthForUser(turn.userWorkosId, {
-        minimumValidityMs: githubSandboxTokenMinimumValidityMs(env.codexTimeoutMs),
-      });
+      github = await loadGitHubAuthForUser(turn.userWorkosId);
+      if (github) {
+        if (!input.canonicalAttemptId || !env.runnerPublicUrl || !session.workspaceId) {
+          throw new Error("GitHub broker is unavailable for this engine attempt.");
+        }
+        githubCapability = createGitHubSandboxCapability({
+          sessionId: session.id,
+          turnId: turn.id,
+          attemptId: input.canonicalAttemptId,
+          leaseId,
+          secret: env.internalToken,
+          timeoutMs: env.codexTimeoutMs,
+        });
+      }
     } catch (error) {
+      github = null;
       const needsReconnect = error instanceof GitHubUserAccessAuthError;
       logger.warn("GitHub sandbox auth unavailable; continuing the chat turn", {
         event: "opencompany.goat_claude_chat_github_auth_unavailable",
@@ -619,10 +651,12 @@ export async function runClaudeCodeChatTurn(input: {
       auth.token,
       github?.githubToken ?? null,
       github?.githubAuthHeader ?? null,
+      ...(githubCapability?.redactionValues ?? []),
       env.internalToken,
       actionGatewayTicket,
       ...repositoryBootstrap.secretValues,
       ...infisicalAuth.redactionValues,
+      ...dopplerAuth.redactionValues,
     ]);
     if (input.recovery) {
       // Permission requests are bound to the dead ACP connection. Cancel them before the
@@ -630,6 +664,15 @@ export async function runClaudeCodeChatTurn(input: {
       await projector.cancelPendingInteractions();
     }
 
+    if (github && githubCapability && env.runnerPublicUrl) {
+      executionStage = "prepare_github_auth";
+      githubSandboxAuth = await prepareGitHubSandboxAuth({
+        sandbox,
+        brokerUrl: env.runnerPublicUrl,
+        capability: githubCapability,
+        identity: github,
+      });
+    }
     executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
     await checkAbort();
@@ -764,6 +807,7 @@ export async function runClaudeCodeChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
@@ -787,6 +831,7 @@ export async function runClaudeCodeChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
             skillPaths: invokedSkillPaths,
@@ -851,14 +896,7 @@ export async function runClaudeCodeChatTurn(input: {
         workdir: CLAUDE_CHAT_WORKDIR,
         envs: buildClaudeAcpCommandEnv({
           auth,
-          ...(github
-            ? {
-                githubEnv: buildGitHubCommandEnv({
-                  ...github,
-                  toolCallId: turn.id,
-                }),
-              }
-            : {}),
+          ...(githubSandboxAuth ? { githubEnv: githubSandboxAuth.env } : {}),
           model: session.model || null,
           toolTimeoutMs: env.codexTimeoutMs,
         }),
@@ -951,6 +989,13 @@ export async function runClaudeCodeChatTurn(input: {
         // arrives (for example from a permissions.ask rule) to preserve Claude's
         // bypass-permissions behavior without surfacing an approval prompt.
         onPermissionRequest: async (request) => approveAcpPermission(request),
+        ...createSteeringChannel({
+          engine: "claude_code",
+          runId: turn.id,
+          leaseId,
+          leaseOwner,
+          onRuntimeEvents: (events) => projector.push(events),
+        }),
       });
       if (actionGatewayTicket && !coreMcpInitObserved) {
         logger.warn("Claude Code did not report opencompany tool initialization", {
@@ -1232,6 +1277,7 @@ export async function runClaudeCodeChatTurn(input: {
       });
     }
   } finally {
+    if (githubSandboxAuth && outcome !== "handed_off") await githubSandboxAuth.dispose();
     if (pluginDataRuntime) {
       await pluginDataRuntime.release().catch((error) => {
         captureException(error, {
@@ -1378,7 +1424,7 @@ function buildClaudeChatTask(input: {
     "You are Claude Code running in a persistent cloud sandbox for an ongoing chat with a user.",
     "The sandbox and its files persist across messages in this chat session, so you can build on earlier work.",
     input.githubAvailable
-      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
+      ? `GitHub authentication is managed automatically for gh and HTTPS git commands. Use gh api for GitHub API requests; GH_TOKEN is a local relay credential and cannot authenticate direct requests to GitHub. Clone repositories under the working directory (${CLAUDE_CHAT_WORKDIR}) only when the user asks you to work on one. Keep development servers inside that directory so Preview can detect them.`
       : null,
     input.actionsAvailable
       ? `${input.actionDiscoveryInstructions} ${CLAUDE_CHAT_ACTIONS_SUFFIX}`
@@ -1428,7 +1474,7 @@ function buildClaudeChatRecoveryTask(input: {
     "The previous runner process died while handling this same user message. Continue from the durable sandbox, filesystem, git state, and persisted progress below instead of starting over.",
     "First inspect the current filesystem, git state, and any relevant external state. Do not repeat completed work or rerun side-effecting commands until inspection proves that it is necessary.",
     input.githubAvailable
-      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
+      ? "GitHub authentication is managed automatically for gh and HTTPS git commands. Use gh api for GitHub API requests; GH_TOKEN is a local relay credential and cannot authenticate direct requests to GitHub. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
       : null,
     input.actionsAvailable
       ? `${input.actionDiscoveryInstructions} ${CLAUDE_CHAT_ACTIONS_SUFFIX}`

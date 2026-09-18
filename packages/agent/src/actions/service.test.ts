@@ -21,6 +21,7 @@ const catalog: ActionServiceCatalog = {
 
 describe("serveActionRequest", () => {
   it("owns discovery, retry-safe identity, and the shared call budget", async () => {
+    expect(ACTION_MAX_CALLS_PER_TURN).toBe(32);
     const governance = createInMemoryActionTurnGovernance();
     const execute = vi.fn(async ({ action }: { action: string }) => ({
       ok: true as const,
@@ -64,7 +65,7 @@ describe("serveActionRequest", () => {
 
     await expect(
       serveActionRequest({
-        request: executeRequest("call_17"),
+        request: executeRequest("call_33"),
         catalog,
         governance,
         execute,
@@ -87,7 +88,7 @@ describe("serveActionRequest", () => {
     const governance = createInMemoryActionTurnGovernance({ prelistedSourceIds: ["gmail"] });
     const execute = vi.fn(async () => ({ ok: true as const, action: "gmail.search", result: [] }));
     const results = await Promise.all(
-      Array.from({ length: 23 }, (_, i) =>
+      Array.from({ length: 39 }, (_, i) =>
         serveActionRequest({
           request: executeRequest(`parallel-${i}`),
           catalog,
@@ -96,13 +97,65 @@ describe("serveActionRequest", () => {
         }),
       ),
     );
-    expect(execute).toHaveBeenCalledTimes(16);
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
     expect(
       results.filter((result) => !result.ok && result.error.code === "call_budget"),
     ).toHaveLength(7);
-    expect(results[0]?.budget).toEqual({ limit: 16, used: 1, remaining: 15 });
-    expect(results[15]?.budget).toEqual({ limit: 16, used: 16, remaining: 0 });
-    expect(results[22]?.budget).toEqual({ limit: 16, used: 16, remaining: 0 });
+    expect(results[0]?.budget).toEqual({ limit: 32, used: 1, remaining: 31 });
+    expect(results[31]?.budget).toEqual({ limit: 32, used: 32, remaining: 0 });
+    expect(results[38]?.budget).toEqual({ limit: 32, used: 32, remaining: 0 });
+  });
+
+  it("shares the 32-call budget across integrations", async () => {
+    const multiSourceCatalog: ActionServiceCatalog = {
+      sources: [
+        ...catalog.sources,
+        { id: "google_calendar", label: "Calendar", description: "Calendar" },
+      ],
+      actions: [
+        ...catalog.actions,
+        {
+          id: "google_calendar.list",
+          source: "google_calendar",
+          description: "List events.",
+          params: { type: "object" },
+        },
+      ],
+    };
+    const governance = createInMemoryActionTurnGovernance({
+      prelistedSourceIds: ["gmail", "google_calendar"],
+    });
+    const execute = vi.fn(async ({ action }: { action: string }) => ({
+      ok: true as const,
+      action,
+      result: [],
+    }));
+
+    for (let call = 1; call <= ACTION_MAX_CALLS_PER_TURN; call += 1) {
+      const action = call % 2 === 0 ? "google_calendar.list" : "gmail.search";
+      await expect(
+        serveActionRequest({
+          request: executeRequest(`shared-${call}`, action),
+          catalog: multiSourceCatalog,
+          governance,
+          execute,
+        }),
+      ).resolves.toMatchObject({ ok: true });
+    }
+
+    await expect(
+      serveActionRequest({
+        request: executeRequest("shared-33", "google_calendar.list"),
+        catalog: multiSourceCatalog,
+        governance,
+        execute,
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "call_budget" },
+      budget: { limit: 32, used: 32, remaining: 0 },
+    });
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
   });
 
   it("preserves the host budget across a fresh wrapper after approval resume", async () => {
@@ -116,18 +169,18 @@ describe("serveActionRequest", () => {
         execute: () =>
           serveActionRequest({ request: executeRequest(id), catalog, governance: host, execute }),
       });
-    for (let i = 0; i < 16; i++) await call(`resume-${i}`);
-    expect(await call("resume-16")).toMatchObject({
+    for (let i = 0; i < ACTION_MAX_CALLS_PER_TURN; i++) await call(`resume-${i}`);
+    expect(await call("resume-32")).toMatchObject({
       ok: false,
       error: { code: "call_budget" },
-      budget: { limit: 16, used: 16, remaining: 0 },
+      budget: { limit: 32, used: 32, remaining: 0 },
     });
     expect(await call("resume-0")).toMatchObject({
       ok: false,
       error: { code: "duplicate_invocation" },
-      budget: { limit: 16, used: 16, remaining: 0 },
+      budget: { limit: 32, used: 32, remaining: 0 },
     });
-    expect(execute).toHaveBeenCalledTimes(16);
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
   });
 
   it("charges admitted invalid parameters and provider failures, but not unknown actions", async () => {
@@ -153,7 +206,14 @@ describe("serveActionRequest", () => {
           governance,
           execute,
         }),
-      ).toMatchObject({ ok: false, budget: { limit: 16, used: i, remaining: 16 - i } });
+      ).toMatchObject({
+        ok: false,
+        budget: {
+          limit: ACTION_MAX_CALLS_PER_TURN,
+          used: i,
+          remaining: ACTION_MAX_CALLS_PER_TURN - i,
+        },
+      });
     }
     expect(execute).toHaveBeenCalledTimes(2);
   });
@@ -207,12 +267,12 @@ describe("serveActionRequest", () => {
   });
 });
 
-function executeRequest(invocationId: string) {
+function executeRequest(invocationId: string, action = "gmail.search") {
   return {
     operation: "execute" as const,
     sessionId: "session_1",
     turnId: "turn_1",
-    action: "gmail.search",
+    action,
     params: {},
     invocationId,
   };
@@ -306,7 +366,7 @@ describe("compact action discovery", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("uses exact IDs, records only found sources, and leaves all 16 executions available", async () => {
+  it("uses exact IDs, records only found sources, and leaves all 32 executions available", async () => {
     const governance = createInMemoryActionTurnGovernance();
     const execute = vi.fn(async ({ action }: { action: string }) => ({
       ok: true as const,
@@ -338,7 +398,7 @@ describe("compact action discovery", () => {
         execute,
       });
     }
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < ACTION_MAX_CALLS_PER_TURN; i++) {
       expect(
         await serveActionRequest({
           request: executeRequest(String(i)),
@@ -348,9 +408,9 @@ describe("compact action discovery", () => {
         }),
       ).toMatchObject({ ok: true });
     }
-    expect(execute).toHaveBeenCalledTimes(16);
+    expect(execute).toHaveBeenCalledTimes(ACTION_MAX_CALLS_PER_TURN);
     expect(
-      await serveActionRequest({ request: executeRequest("17"), catalog, governance, execute }),
+      await serveActionRequest({ request: executeRequest("33"), catalog, governance, execute }),
     ).toMatchObject({ ok: false, error: { code: "call_budget" } });
   });
 });

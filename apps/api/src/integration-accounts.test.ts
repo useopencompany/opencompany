@@ -8,6 +8,11 @@ import {
   validateGranolaApiKey,
 } from "@opencompany/agent/integrations/granola";
 import {
+  connectPostHogEventsIntegration,
+  getPostHogEventsIntegrationState,
+  validatePostHogEventsConnection,
+} from "@opencompany/agent/integrations/posthog-events";
+import {
   connectRenderMcpIntegration,
   getRenderIntegrationState,
   validateRenderApiKey,
@@ -21,6 +26,7 @@ import { captureProductServerEvent } from "@opencompany/analytics/product/server
 import type { Actor } from "@opencompany/core";
 import {
   applyIntegrationCapabilityMode,
+  applyIntegrationToolMode,
   disconnectPersonalIntegration,
 } from "@opencompany/db/integrations";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,6 +36,7 @@ import type { RunnerClient } from "./runner-client";
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   applyIntegrationCapabilityMode: vi.fn(async () => undefined),
+  applyIntegrationToolMode: vi.fn(async () => undefined),
   disconnectPersonalIntegration: vi.fn(async () => true),
   loadIntegrationCredential: vi.fn(async () => null),
 }));
@@ -45,6 +52,22 @@ vi.mock("@opencompany/agent/integrations/granola", async (importOriginal) => ({
     integrationId: "gint_granola",
     accountEmail: "sam@example.com",
     accountName: "Sam",
+    statusReason: null,
+  })),
+}));
+
+vi.mock("@opencompany/agent/integrations/posthog-events", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  validatePostHogEventsConnection: vi.fn(),
+  connectPostHogEventsIntegration: vi.fn(async () => ({ integrationId: "gint_posthog_events" })),
+  getPostHogEventsIntegrationState: vi.fn(async () => ({
+    provider: "posthog" as const,
+    connected: true,
+    status: "connected" as const,
+    integrationId: "gint_posthog_events",
+    projectId: "12345",
+    region: "eu" as const,
+    connectionLabel: "Project 12345 · EU",
     statusReason: null,
   })),
 }));
@@ -219,6 +242,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["gmail.readonly"],
         capabilityModes: { read: "on" },
+        toolModes: {},
       },
       {
         integrationId: "gint_fathom_mcp",
@@ -231,6 +255,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["mcp"],
         capabilityModes: { query: "ask" },
+        toolModes: {},
       },
       {
         integrationId: "gint_betterstack_mcp",
@@ -243,6 +268,7 @@ describe("integration account service", () => {
         statusReason: null,
         scopes: ["read", "write"],
         capabilityModes: { read: "on", query: "ask", write: "ask" },
+        toolModes: {},
       },
     ]);
   });
@@ -350,6 +376,44 @@ describe("integration account service", () => {
     );
   });
 
+  it("validates the tool mode and tool id before touching the connection", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "sometimes"),
+    ).rejects.toMatchObject({ status: 400, message: "Unknown permission mode." });
+    await expect(service.setToolMode(member, "gint_x", "  ", "on")).rejects.toMatchObject({
+      status: 400,
+      message: "A valid tool is required.",
+    });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash thread; drop", "on"),
+    ).rejects.toMatchObject({ status: 400, message: "A valid tool is required." });
+    expect(applyIntegrationToolMode).not.toHaveBeenCalled();
+  });
+
+  it("applies a per-tool override and clears it back to the group with inherit", async () => {
+    const row = {
+      id: "gint_x",
+      provider: "gmail",
+      userWorkosId: "user_1",
+      workspaceId: null,
+    };
+    const service = createIntegrationAccountService({ db: fakeDb([[row], [row]]) });
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "ask"),
+    ).resolves.toBeUndefined();
+    expect(applyIntegrationToolMode).toHaveBeenCalledWith(
+      expect.objectContaining({ integrationIds: ["gint_x"], toolId: "trash_thread", mode: "ask" }),
+    );
+    await expect(
+      service.setToolMode(member, "gint_x", "trash_thread", "inherit"),
+    ).resolves.toBeUndefined();
+    // A null mode is how the store removes the key so the tool follows its group again.
+    expect(applyIntegrationToolMode).toHaveBeenLastCalledWith(
+      expect.objectContaining({ integrationIds: ["gint_x"], toolId: "trash_thread", mode: null }),
+    );
+  });
+
   it.each(["read", "query", "write"])(
     "updates Supabase %s permission through account settings",
     async (capabilityId) => {
@@ -369,6 +433,28 @@ describe("integration account service", () => {
       ).resolves.toBeUndefined();
       expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
         expect.objectContaining({ integrationIds: ["gint_x"], capabilityId, mode: "ask" }),
+      );
+    },
+  );
+  it.each(["read", "query", "write", "draft"])(
+    "updates Todoist %s permission through account settings",
+    async (capabilityId) => {
+      const db = fakeDb([
+        [
+          {
+            id: "gint_todoist",
+            provider: "todoist",
+            userWorkosId: "user_1",
+            workspaceId: null,
+          },
+        ],
+      ]);
+      const service = createIntegrationAccountService({ db });
+      await expect(
+        service.setCapabilityMode(member, "gint_todoist", capabilityId, "ask"),
+      ).resolves.toBeUndefined();
+      expect(applyIntegrationCapabilityMode).toHaveBeenCalledWith(
+        expect.objectContaining({ integrationIds: ["gint_todoist"], capabilityId, mode: "ask" }),
       );
     },
   );
@@ -483,6 +569,49 @@ describe("integration account service", () => {
       status: 400,
       message: "Granola rejected this API key. Check it and try again.",
     });
+  });
+
+  it("validates and connects a region-bound PostHog event project", async () => {
+    vi.mocked(validatePostHogEventsConnection).mockResolvedValueOnce({ ok: true });
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.connectPostHogEvents(member, {
+        apiKey: "  phx_abcdefghijklmnop  ",
+        projectId: "12345",
+        region: "eu",
+      }),
+    ).resolves.toMatchObject({
+      connected: true,
+      integrationId: "gint_posthog_events",
+      projectId: "12345",
+      region: "eu",
+    });
+    expect(validatePostHogEventsConnection).toHaveBeenCalledWith({
+      apiKey: "phx_abcdefghijklmnop",
+      projectId: "12345",
+      region: "eu",
+    });
+    expect(connectPostHogEventsIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userWorkosId: "user_1",
+        apiKey: "phx_abcdefghijklmnop",
+        projectId: "12345",
+        region: "eu",
+      }),
+    );
+    expect(getPostHogEventsIntegrationState).toHaveBeenCalled();
+  });
+
+  it("rejects malformed PostHog keys before calling the provider", async () => {
+    const service = createIntegrationAccountService({ db: fakeDb() });
+    await expect(
+      service.connectPostHogEvents(member, {
+        apiKey: "not-a-key",
+        projectId: "12345",
+        region: "us",
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(validatePostHogEventsConnection).not.toHaveBeenCalled();
   });
 
   it("connects Render with a validated key and refreshes plugin discovery", async () => {

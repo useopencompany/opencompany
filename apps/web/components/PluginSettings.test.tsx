@@ -27,7 +27,7 @@ import {
   OFFICIAL_PLUGINS,
   OfficialSkillPluginDetail,
   PluginDetail,
-  PluginsSettings,
+  PluginsRoute,
   POSTHOG_PLUGIN_SOURCE,
   RENDER_PLUGIN_SOURCE,
   SIGNOZ_PLUGIN_SOURCE,
@@ -253,7 +253,7 @@ describe("Plugin settings", () => {
   it("shows and filters to installed plugins", async () => {
     const user = userEvent.setup();
     render(
-      <PluginsSettings
+      <PluginsRoute
         plugins={[
           {
             ...installedOfficialPlugin("linear"),
@@ -267,13 +267,10 @@ describe("Plugin settings", () => {
 
     expect(screen.getByRole("link", { name: /linear/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/linear",
+      "/plugins/linear",
     );
     expect(screen.getByText("Enabled")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute(
-      "href",
-      "/settings/plugins/linear",
-    );
+    expect(screen.getByRole("link", { name: "Manage" })).toHaveAttribute("href", "/plugins/linear");
 
     const installedFilter = screen.getByRole("button", { name: "Show 1 installed plugin" });
     expect(installedFilter).toHaveAttribute("aria-pressed", "false");
@@ -291,23 +288,37 @@ describe("Plugin settings", () => {
 
   it("warns that an enabled plugin still needs its account connection", () => {
     appData.integrations = integrationStateFromRows([]);
-    render(
-      <PluginsSettings plugins={[installedOfficialPlugin("linear")]} canEdit workspaceId="w1" />,
-    );
+    render(<PluginsRoute plugins={[installedOfficialPlugin("linear")]} canEdit workspaceId="w1" />);
 
     expect(screen.getByText("Requires connection")).toBeInTheDocument();
     expect(screen.queryByText("Enabled")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
       "href",
-      "/settings/plugins/linear",
+      "/plugins/linear",
     );
     expect(screen.queryByRole("link", { name: "Manage" })).toBeNull();
+  });
+
+  it("uses Doppler authentication to show whether the installed plugin is ready", async () => {
+    const doppler = installedOfficialPlugin("doppler");
+    const view = render(
+      <PluginsRoute plugins={[doppler]} canEdit workspaceId="w1" dopplerConnected={false} />,
+    );
+    await userEvent.setup().click(screen.getByRole("button", { name: "Show 1 installed plugin" }));
+    expect(screen.getByText("Requires connection")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Connect" })).toHaveAttribute(
+      "href",
+      "/plugins/doppler",
+    );
+    view.rerender(<PluginsRoute plugins={[doppler]} canEdit workspaceId="w1" dopplerConnected />);
+    expect(screen.queryByText("Requires connection")).not.toBeInTheDocument();
+    expect(screen.getByText("Enabled")).toBeInTheDocument();
   });
 
   it("keeps a disabled plugin disabled rather than warning about its connection", () => {
     appData.integrations = integrationStateFromRows([]);
     render(
-      <PluginsSettings
+      <PluginsRoute
         plugins={[{ ...installedOfficialPlugin("linear"), status: "disabled" as const }]}
         canEdit
         workspaceId="w1"
@@ -322,9 +333,7 @@ describe("Plugin settings", () => {
   it("stays green for a plugin that has no connection to make", async () => {
     const user = userEvent.setup();
     appData.integrations = integrationStateFromRows([]);
-    render(
-      <PluginsSettings plugins={[installedOfficialPlugin("vercel")]} canEdit workspaceId="w1" />,
-    );
+    render(<PluginsRoute plugins={[installedOfficialPlugin("vercel")]} canEdit workspaceId="w1" />);
 
     await user.click(screen.getByRole("button", { name: "Show 1 installed plugin" }));
 
@@ -335,7 +344,7 @@ describe("Plugin settings", () => {
 
   it("offers one-click installation for every uninstalled official package", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
     expect(captureProductEvent).toHaveBeenCalledWith("plugin_catalog_viewed", {
       workspace_id: "workspace_1",
@@ -343,111 +352,97 @@ describe("Plugin settings", () => {
 
     const linearLink = screen.getByRole("link", { name: /linear/i });
     const linearCard = linearLink.closest("li");
-    expect(linearLink).toHaveAttribute("href", "/settings/plugins/linear");
+    expect(linearLink).toHaveAttribute("href", "/plugins/linear");
     expect(screen.getByRole("searchbox", { name: "Search plugins" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Featured" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Communication" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Productivity" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Engineering" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Business" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /neon/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/neon",
-    );
+    expect(screen.getByRole("link", { name: /neon/i })).toHaveAttribute("href", "/plugins/neon");
     expect(screen.getByRole("link", { name: /notion/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/notion",
+      "/plugins/notion",
     );
     expect(screen.getByRole("link", { name: /better stack/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/betterstack",
+      "/plugins/betterstack",
     );
     expect(screen.getByRole("link", { name: /github/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/github",
+      "/plugins/github",
     );
-    expect(screen.getByRole("link", { name: /gmail/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/gmail",
-    );
+    expect(screen.getByRole("link", { name: /gmail/i })).toHaveAttribute("href", "/plugins/gmail");
     expect(screen.getByRole("link", { name: /fathom/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/fathom",
+      "/plugins/fathom",
     );
     expect(screen.getByRole("link", { name: /granola/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/granola",
+      "/plugins/granola",
     );
     expect(screen.getByRole("link", { name: /google admin/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-admin",
+      "/plugins/google-admin",
     );
     await user.click(screen.getByRole("button", { name: "View all featured plugins" }));
-    expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/slack",
-    );
+    expect(screen.getByRole("link", { name: /slack/i })).toHaveAttribute("href", "/plugins/slack");
     await user.click(screen.getByRole("button", { name: "All" }));
 
     expect(screen.getByRole("link", { name: /google calendar/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-calendar",
+      "/plugins/google-calendar",
     );
     expect(screen.getByRole("link", { name: /infisical/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/infisical",
+      "/plugins/infisical",
     );
     expect(screen.getByRole("link", { name: /posthog/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/posthog",
+      "/plugins/posthog",
     );
     expect(screen.getByRole("link", { name: /stripe/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/stripe",
+      "/plugins/stripe",
     );
-    expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/x",
-    );
+    expect(screen.getByRole("link", { name: /^x/i })).toHaveAttribute("href", "/plugins/x");
     expect(screen.getByRole("link", { name: /latitude/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/latitude",
+      "/plugins/latitude",
     );
     expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(18);
     await user.click(screen.getByRole("button", { name: "View all productivity plugins" }));
     expect(screen.getByRole("link", { name: /google drive/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/google-drive",
+      "/plugins/google-drive",
     );
-    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /jamie/i })).toHaveAttribute("href", "/plugins/jamie");
+    expect(screen.getByRole("link", { name: /todoist/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/jamie",
+      "/plugins/todoist",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
     expect(screen.getByRole("link", { name: /vercel/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/vercel",
+      "/plugins/vercel",
     );
     await user.click(screen.getByRole("button", { name: "All" }));
     await user.click(screen.getByRole("button", { name: "View all business plugins" }));
     expect(screen.getByRole("link", { name: /yc advise/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/yc-advise",
+      "/plugins/yc-advise",
     );
     expect(screen.getByRole("link", { name: /hubspot/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/hubspot",
+      "/plugins/hubspot",
     );
-    expect(screen.getByRole("link", { name: /attio/i })).toHaveAttribute(
-      "href",
-      "/settings/plugins/attio",
-    );
+    expect(screen.getByRole("link", { name: /attio/i })).toHaveAttribute("href", "/plugins/attio");
     expect(GITHUB_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/github$/u,
     );
     expect(GOOGLE_DRIVE_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/bae88070e498725de008e358a74bd18bc46ed27c/google-drive",
+      "https://github.com/useopencompany/plugins/tree/8b328aa34239234c215e905275c2de3bf4567c29/google-drive",
     );
     expect(LINEAR_PLUGIN_SOURCE).toMatch(
       /^https:\/\/github\.com\/useopencompany\/plugins\/tree\/[0-9a-f]{40}\/linear$/u,
@@ -471,7 +466,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/14e7f6d3e978103c5427c725229ae93bc3e47f8c/vercel",
     );
     expect(POSTHOG_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/4ba32cd5a7618d9be3714ec0efd3c8784209046c/posthog",
+      "https://github.com/useopencompany/plugins/tree/e2b5b58aaccca1783df7ec960751ab13d23dcd86/posthog",
     );
     expect(HUBSPOT_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/6b4e00b71f7d1b388fe5aa225aa86c8d35ba2578/hubspot",
@@ -498,7 +493,7 @@ describe("Plugin settings", () => {
       "https://github.com/useopencompany/plugins/tree/21060c09d1bbe70df85519cc3ad74cd5d097fbb6/x",
     );
     expect(GMAIL_PLUGIN_SOURCE).toBe(
-      "https://github.com/useopencompany/plugins/tree/ff6f34b42796129c2a125a32b3a78e8cae353df6/gmail",
+      "https://github.com/useopencompany/plugins/tree/82998a44647a31c0b1f973f0554ca25c33e822dc/gmail",
     );
     expect(GRANOLA_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/22c1fe7d9bafd4fd63d49c3f0b18d1e3e63d0dae/granola",
@@ -513,14 +508,18 @@ describe("Plugin settings", () => {
     expect(
       within(linearCard as HTMLElement).getByRole("button", { name: "Install" }),
     ).toBeEnabled();
-    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(5);
+    // Six featured packages are installable, including the paid Lead research plugin.
+    expect(screen.getAllByRole("button", { name: "Install" })).toHaveLength(6);
+    const leadResearchCard = screen.getByText("Lead research").closest("li") as HTMLElement | null;
+    expect(leadResearchCard).not.toBeNull();
+    expect(within(leadResearchCard as HTMLElement).getByText("Paid")).toBeVisible();
     expect(previewHeadlessPluginImport).not.toHaveBeenCalled();
     expect(importHeadlessPlugin).not.toHaveBeenCalled();
   });
 
   it("searches the catalog and narrows it by category", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
     const search = screen.getByRole("searchbox", { name: "Search plugins" });
     await user.type(search, "database");
@@ -541,39 +540,43 @@ describe("Plugin settings", () => {
     await user.click(screen.getByRole("button", { name: "Communication" }));
     expect(screen.getByRole("link", { name: /resend/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/resend",
+      "/plugins/resend",
     );
   });
 
   it("opens a full category from its overview section", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
     await user.click(screen.getByRole("button", { name: "View all engineering plugins" }));
 
     const engineering = screen.getByRole("region", { name: "Engineering" });
     expect(within(engineering).getByRole("link", { name: /convex/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/convex",
+      "/plugins/convex",
     );
-    expect(within(engineering).getAllByRole("link")).toHaveLength(10);
+    expect(within(engineering).getAllByRole("link")).toHaveLength(12);
     expect(within(engineering).getByRole("link", { name: /supabase/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/supabase",
+      "/plugins/supabase",
     );
 
     expect(within(engineering).getByRole("link", { name: /github/i })).toBeInTheDocument();
+    expect(within(engineering).getByRole("link", { name: /dash0/i })).toHaveAttribute(
+      "href",
+      "/plugins/dash0",
+    );
     expect(within(engineering).getByRole("link", { name: /signoz/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/signoz",
+      "/plugins/signoz",
     );
     expect(within(engineering).getByRole("link", { name: /vercel/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/vercel",
+      "/plugins/vercel",
     );
     expect(within(engineering).getByRole("link", { name: /infisical/i })).toHaveAttribute(
       "href",
-      "/settings/plugins/infisical",
+      "/plugins/infisical",
     );
     expect(screen.getByRole("button", { name: "Engineering" })).toHaveAttribute(
       "aria-pressed",
@@ -583,7 +586,7 @@ describe("Plugin settings", () => {
 
   it("recovers from an empty search", async () => {
     const user = userEvent.setup();
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
     await user.type(screen.getByRole("searchbox", { name: "Search plugins" }), "no-such-plugin");
     expect(screen.getByText("No plugins found")).toBeInTheDocument();
@@ -602,7 +605,7 @@ describe("Plugin settings", () => {
         }),
     );
 
-    render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+    render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
     const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
     expect(linearCard).not.toBeNull();
@@ -616,7 +619,7 @@ describe("Plugin settings", () => {
     finishPreview?.(officialPreview);
 
     await waitFor(() => {
-      expect(router.push).toHaveBeenCalledWith("/settings/plugins/linear");
+      expect(router.push).toHaveBeenCalledWith("/plugins/linear");
     });
     expect(previewHeadlessPluginImport).toHaveBeenCalledWith({ url: LINEAR_PLUGIN_SOURCE });
     expect(importHeadlessPlugin).toHaveBeenCalledWith({
@@ -633,7 +636,7 @@ describe("Plugin settings", () => {
     const user = userEvent.setup();
     const current = installedOfficialPlugin("linear");
     render(
-      <PluginsSettings
+      <PluginsRoute
         plugins={[
           {
             ...current,
@@ -670,7 +673,7 @@ describe("Plugin settings", () => {
         stage === "preview" ? previewHeadlessPluginImport : importHeadlessPlugin,
       ).mockRejectedValue(new Error("Package source unavailable."));
 
-      render(<PluginsSettings plugins={[]} canEdit workspaceId="workspace_1" />);
+      render(<PluginsRoute plugins={[]} canEdit workspaceId="workspace_1" />);
 
       const linearCard = screen.getByRole("link", { name: /linear/i }).closest("li");
       expect(linearCard).not.toBeNull();

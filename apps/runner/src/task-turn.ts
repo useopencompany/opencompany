@@ -11,6 +11,7 @@ import {
   productAnalyticsUsageSourceForEngine,
 } from "@opencompany/analytics/product/server";
 import { calculateModelUsageCost } from "@opencompany/billing";
+import { findReportedPullRequestRef } from "@opencompany/core";
 import { RUN_EVENT_NOTIFY_CHANNEL } from "@opencompany/db/chat-repository";
 import { recordCreditDebit } from "@opencompany/db/credits";
 import { stringifyPostgresJson } from "@opencompany/db/postgres-json";
@@ -24,7 +25,8 @@ import {
   type Task,
   type TaskReportedOutcome,
 } from "@opencompany/db/product-schema";
-import { createLogger } from "@opencompany/observability";
+import { linkSessionPullRequest } from "@opencompany/db/session-pull-requests";
+import { captureException, createLogger } from "@opencompany/observability";
 import {
   createGatewayAttribution,
   gatewayProviderOptions,
@@ -922,7 +924,17 @@ export async function settleDurableTurn(input: {
         (
           ${Boolean(next)}::boolean
           AND (NOT ${requestedRetry}::boolean OR task.attempts < 2)
-        ) AS queue_next
+        ) AS insert_next,
+        -- A message the user sent while this turn was working is a Run of its own, waiting behind
+        -- it. The Task is not finished while one is queued: it must not report an outcome or
+        -- notify, it must keep running so the queue claim can pick the message up.
+        EXISTS (
+          SELECT 1
+          FROM goat.codex_chat_turns AS queued
+          WHERE queued.chat_session_id = task.session_id
+            AND queued.status = 'queued'
+            AND queued.id <> ${target.turnId}
+        ) AS has_queued_message
       FROM goat.tasks AS task
       WHERE task.id = ${completion?.taskId ?? null}
         AND task.session_id = ${target.chatSessionId}
@@ -933,6 +945,12 @@ export async function settleDurableTurn(input: {
         )
         AND EXISTS (SELECT 1 FROM settled_turn)
       FOR UPDATE
+    ),
+    settlement_decision AS MATERIALIZED (
+      SELECT
+        settlement.*,
+        (settlement.insert_next OR settlement.has_queued_message) AS queue_next
+      FROM settlement_task AS settlement
     ),
     projected_task AS (
       UPDATE goat.tasks AS task
@@ -962,7 +980,7 @@ export async function settleDurableTurn(input: {
             ELSE ${completion?.outcomeComment ?? null}
           END,
           attempts = CASE
-            WHEN ${requestedRetry}::boolean AND settlement.queue_next THEN 2
+            WHEN ${requestedRetry}::boolean AND settlement.insert_next THEN 2
             ELSE task.attempts
           END,
           harness_spec = COALESCE(
@@ -970,9 +988,9 @@ export async function settleDurableTurn(input: {
             task.harness_spec
           ),
           updated_at = ${input.completedAt}
-      FROM settlement_task AS settlement
+      FROM settlement_decision AS settlement
       WHERE task.id = settlement.id
-      RETURNING task.*, settlement.previous_status, settlement.queue_next
+      RETURNING task.*, settlement.previous_status, settlement.queue_next, settlement.insert_next
     ),
     finished_task_activity AS MATERIALIZED (
       INSERT INTO goat.task_activities (
@@ -1012,7 +1030,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
       WHERE ${requestedRetry}::boolean
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     tagged_current_task_messages AS (
@@ -1052,7 +1070,7 @@ export async function settleDurableTurn(input: {
         ${input.completedAt}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     next_assistant_message AS (
@@ -1070,7 +1088,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 1)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
       RETURNING id
     ),
     next_turn AS (
@@ -1105,7 +1123,7 @@ export async function settleDurableTurn(input: {
         ${new Date(input.completedAt.getTime() + 2)}
       FROM projected_task AS task
       WHERE ${Boolean(next)}
-        AND task.queue_next
+        AND task.insert_next
         AND EXISTS (SELECT 1 FROM next_user_message)
         AND EXISTS (SELECT 1 FROM next_assistant_message)
       RETURNING id, chat_session_id, user_message_id
@@ -1265,7 +1283,7 @@ export async function settleDurableTurn(input: {
     WHERE EXISTS (SELECT 1 FROM updated_task_chat)
       AND canonical_guard.materialized = 1
       AND (
-        NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
+        NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.insert_next)
         OR (
           EXISTS (SELECT 1 FROM next_turn)
           AND EXISTS (SELECT 1 FROM next_queued_event)
@@ -1282,7 +1300,7 @@ export async function settleDurableTurn(input: {
           )
           AND (
             NOT ${requestedRetry}::boolean
-            OR NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.queue_next)
+            OR NOT EXISTS (SELECT 1 FROM projected_task AS task WHERE task.insert_next)
             OR EXISTS (SELECT 1 FROM retry_task_activity)
           )
         )
@@ -1290,10 +1308,53 @@ export async function settleDurableTurn(input: {
   `);
   const settled = rowsFromExecute<{ id: string; nextQueued?: boolean }>(result)[0];
   if (!settled) throw new CodexChatLeaseLostError();
+  await linkPullRequestReportedByTask({ target, completion, turnStatus: input.turnStatus });
   await captureWorkflowHandoffChatMessageSent({
     target,
     next: settled.nextQueued === false ? null : next,
   });
+}
+
+/**
+ * Links the PR a settled Task says it opened.
+ *
+ * Streaming capture in `createExternalEngineProjector` only sees a PR opened by `gh pr create` or
+ * the GitHub MCP tool, which leaves two kinds of Task with a PR nobody can see from the sidebar:
+ * one run on the `opencompany` engine, which streams through a different projector entirely, and
+ * one whose agent opened the PR some other way. A Task reports what it did in its result and
+ * outcome comment, and the board card already treats a PR URL there as that Task's PR, so the
+ * sidebar reads the same two fields rather than disagreeing with the card beside it.
+ *
+ * Only a completed Task is scanned: a failed or cancelled run's result is an error string, and a
+ * PR named in one is as likely to be the PR that could not be finished as one that was opened.
+ *
+ * The link is a convenience on top of a Task that has already settled, so a failure here must not
+ * undo that. `linkSessionPullRequest` is idempotent, so a PR streaming capture already recorded
+ * stays on the state GitHub gave it.
+ */
+async function linkPullRequestReportedByTask(input: {
+  target: { userWorkosId: string; chatSessionId: string; turnId: string };
+  completion: TaskTurnCompletion | null;
+  turnStatus: "completed" | "failed" | "interrupted";
+}) {
+  const { completion } = input;
+  if (input.turnStatus !== "completed" || !completion || completion.disposition === "retry") return;
+  const ref = findReportedPullRequestRef(completion.result, completion.outcomeComment);
+  if (!ref) return;
+  try {
+    await linkSessionPullRequest({
+      db: getDb(),
+      chatSessionId: input.target.chatSessionId,
+      userWorkosId: input.target.userWorkosId,
+      ref,
+    });
+  } catch (error) {
+    captureException(error, {
+      event: "opencompany.task_reported_pull_request_link_failed",
+      turn_id: input.target.turnId,
+      chat_session_id: input.target.chatSessionId,
+    });
+  }
 }
 
 async function captureWorkflowHandoffChatMessageSent(input: {

@@ -11,7 +11,8 @@ import {
   type HeadlessChatRunReadModel,
 } from "@/lib/headless-chat-collections";
 import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
-import { normalizeModel } from "@/lib/model-options";
+import { normalizeConversationModel } from "@/lib/model-options";
+import { selectActiveTaskRun } from "@/lib/task-conversation-activity";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
 // Pane contract, forwarded to Surface: an embedded host (the review queue) detaches this view
@@ -71,12 +72,11 @@ function LiveCanonicalTaskDetailPanel({
     (query) => query.from({ run: runsCollection }),
     [runsCollection],
   );
+  const data = useAppData();
+  const liveTask = data.tasks?.find((task) => task.id === run.task.id);
   const activeRun = useMemo(
-    () =>
-      ((runRows ?? []) as HeadlessChatRunReadModel[])
-        .filter((candidate) => ["queued", "running", "paused"].includes(candidate.status))
-        .toSorted((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null,
-    [runRows],
+    () => selectActiveTaskRun(liveTask ?? run.task, (runRows ?? []) as HeadlessChatRunReadModel[]),
+    [liveTask, run.task, runRows],
   );
 
   return (
@@ -100,13 +100,12 @@ function CanonicalTaskDetailView({
   activeRun: HeadlessChatRunReadModel | null;
 } & TaskDetailPaneProps) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const liveTask = data.tasks?.find((task) => task.id === run.task.id);
   const initialChat: ChatSessionView = useMemo(
     () => ({
       id: conversationId,
       title: liveTask?.name.trim() || taskDetailTitle(run),
-      model: normalizeModel(run.task.model),
+      model: normalizeConversationModel(run.task.engine, run.task.model),
       engine: run.task.engine,
       messages: run.chat?.messages ?? [],
     }),
@@ -118,16 +117,13 @@ function CanonicalTaskDetailView({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
       recentChats={data.recentChats}
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       {...pane}
       taskConversation={{
@@ -139,7 +135,7 @@ function CanonicalTaskDetailView({
               ? "queued"
               : "running"
           : (liveTask?.status ?? run.task.status),
-        startedAtMs: taskActivityStartedAtMs(run),
+        startedAtMs: taskTurnStartedAtMs(liveTask ?? run.task, activeRun?.createdAt),
         activeRunId: activeRun?.id ?? null,
       }}
     />
@@ -151,12 +147,11 @@ function LegacyTaskDetailPanel({
   ...pane
 }: { initialRun: HarnessRunViewModel } & TaskDetailPaneProps) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const title = taskDetailTitle(initialRun);
   const initialChat: ChatSessionView = {
     id: initialRun.task.id,
     title,
-    model: normalizeModel(initialRun.task.model),
+    model: normalizeConversationModel("opencompany", initialRun.task.model),
     engine: "opencompany",
     messages: legacyHarnessRunToChatMessages(initialRun),
   };
@@ -166,22 +161,19 @@ function LegacyTaskDetailPanel({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={initialChat.model}
       initialChat={initialChat}
       recentChats={data.recentChats}
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       {...pane}
       taskConversation={{
         taskId: initialRun.task.id,
         status: initialRun.task.status,
-        startedAtMs: taskActivityStartedAtMs(initialRun),
+        startedAtMs: taskTurnStartedAtMs(initialRun.task),
       }}
       readOnlyNotice="This pre-cutover task is available as read-only history. Start a new task to continue the work."
     />
@@ -192,7 +184,14 @@ function taskDetailTitle(run: HarnessRunViewModel) {
   return run.task.name.trim() || run.chat?.title.trim() || "Task";
 }
 
-function taskActivityStartedAtMs(run: HarnessRunViewModel) {
-  const parsed = Date.parse(run.task.updatedAt || run.task.createdAt);
-  return Number.isFinite(parsed) ? parsed : Date.now();
+function taskTurnStartedAtMs(
+  task: Pick<HarnessRunViewModel["task"], "createdAt" | "updatedAt">,
+  activeRunCreatedAt?: string,
+) {
+  for (const timestamp of [activeRunCreatedAt, task.updatedAt, task.createdAt]) {
+    if (!timestamp) continue;
+    const parsed = Date.parse(timestamp);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
 }

@@ -10,8 +10,11 @@ import {
   type PluginGatewayDiscoveredTool,
   type PluginInstallReport,
   type PluginManifest,
+  type PluginPriceUnit,
+  type PluginPricing,
   type PluginStatus,
   type PluginStdioServer,
+  type PullRequestState,
   RUN_APPROVAL_STATUSES,
   RUN_ATTEMPT_STATUSES,
   RUN_EVENT_TYPES,
@@ -19,12 +22,15 @@ import {
   type RunAttemptStatus,
   type RunEventType,
   type RunStatus,
+  SANDBOX_SIZES,
+  type SandboxSize,
   TASK_SOURCES,
   type TaskSource,
 } from "@opencompany/core";
 import type { EncryptedPayload } from "@opencompany/crypto";
 import { relations, type SQL, sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   bigserial,
   boolean,
@@ -80,6 +86,7 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
+export type WorkflowScope = "personal" | "company";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
   provider: string;
@@ -175,6 +182,7 @@ export type IntegrationProvider =
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "stripe"
   | "latitude"
   | "posthog"
@@ -182,6 +190,7 @@ export type IntegrationProvider =
   | "notion"
   | "supabase"
   | "resend"
+  | "todoist"
   | "x_account";
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
@@ -374,7 +383,9 @@ export type TaskToolName =
   | "list_actions"
   | "describe_actions"
   | "use_action"
-  | "update_task_status";
+  | "update_task_status"
+  | "read_workflow_memory"
+  | "update_workflow_memory";
 
 export type TaskSkillId = "first-principles" | "yc-office-hours";
 
@@ -411,6 +422,10 @@ export type HarnessSpec = {
     // The workspace-scoped workflow slug that spawned this task.
     id: string;
     workspaceId: string;
+    // Company workflows may only use Company standalone Skills. Personal workflows execute as
+    // their owner and may also use that actor's Personal Skills. Optional for persisted harnesses
+    // created before this authorization decision became part of the immutable contract.
+    skillAccess?: "company" | "actor";
     skillIds: string[];
     skillBundleIds: string[];
     pluginIds: string[];
@@ -617,6 +632,12 @@ export type ChatEngine = "opencompany" | "codex" | "claude_code";
 export type ChatActivityState = "working" | "idle";
 // Engines whose durable turns run through the legacy-named goat.codex_chat_* queue.
 export type CodexChatEngine = ChatEngine;
+export const EXECUTION_BACKENDS = ["runner_attached", "sandbox_supervisor"] as const;
+export type ExecutionBackend = (typeof EXECUTION_BACKENDS)[number];
+export type ExecutionBackendCompatibility = {
+  backend: ExecutionBackend;
+  version: number;
+};
 
 export type ChatAttachmentKind =
   | "image"
@@ -639,6 +660,10 @@ export type ChatMessageAttachment = {
 };
 
 export type CodexChatSessionStatus = ConversationRuntimeStatus;
+// Which turn runner executes an opencompany-engine runtime. `chat` is the main product harness;
+// `personal_agent` is the iMessage personal assistant, which owns its own prompt, tool set and
+// lifecycle while sharing the durable session, run and message tables.
+export type CodexChatHarness = "chat" | "personal_agent";
 export type CodexChatTurnStatus =
   | "queued"
   | "running"
@@ -671,6 +696,7 @@ export const CODING_HARNESS_EVENT_TYPES = [
   "turn.started",
   "turn.completed",
   "usage.updated",
+  "steering.delivered",
   "error",
   "unknown",
 ] as const;
@@ -756,13 +782,16 @@ export const users = productSchema.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     botsEnabled: boolean("bots_enabled").notNull().default(false),
-    taskSpawningEnabled: boolean("task_spawning_enabled").notNull().default(false),
+    approveForMeEnabled: boolean("approve_for_me_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     subagentsEnabled: boolean("subagents_enabled").notNull().default(false),
     pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
+    // Opt-in to the iMessage personal assistant channel (Settings → Channels → iMessage).
+    imessageEnabled: boolean("imessage_enabled").notNull().default(false),
+    whatsappEnabled: boolean("whatsapp_enabled").notNull().default(false),
     // Retained for rollback compatibility after the wiki became the default.
     // Runtime code must not read this legacy per-user preview flag.
     wikiEnabled: boolean("wiki_enabled").notNull().default(false),
@@ -812,6 +841,9 @@ export const workspaces = productSchema.table(
     // Reversible cutover switch for the retired Brain UI and agent tools.
     // Wiki is the default knowledge system for every workspace.
     legacyBrainEnabled: boolean("legacy_brain_enabled").notNull().default(false),
+    // Machine size new cloud coding sandboxes start on. Workspace admins own it;
+    // a session pins the value it was created with (codexChatSessions.sandboxSize).
+    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -820,6 +852,13 @@ export const workspaces = productSchema.table(
       table.workosOrganizationId,
     ),
     slugIdx: uniqueIndex("goat_workspaces_slug_idx").on(table.slug),
+    sandboxSizeCheck: check(
+      "goat_workspaces_sandbox_size_check",
+      sql`${table.sandboxSize} IN (${sql.join(
+        SANDBOX_SIZES.map((size) => sql`${size}`),
+        sql`, `,
+      )})`,
+    ),
   }),
 );
 
@@ -1704,7 +1743,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1754,7 +1793,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1804,7 +1843,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -3035,6 +3074,25 @@ export const granolaSyncState = productSchema.table("granola_sync_state", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// PostHog's event timestamp is supplied by the SDK and can arrive late or out of order. The poll
+// cursor therefore follows PostHog's server-side ingestion time, with the immutable event UUID as
+// a tie-breaker when several events share the same timestamp.
+export const posthogEventSyncState = productSchema.table("posthog_event_sync_state", {
+  integrationId: text("integration_id")
+    .primaryKey()
+    .references(() => integrations.id, { onDelete: "cascade" }),
+  userWorkosId: text("user_workos_id")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  // Keep PostHog's full DateTime64(6) text. JavaScript Date truncates microseconds and can make a
+  // tuple cursor reread or skip events that were ingested within the same millisecond.
+  ingestedAtCursor: text("ingested_at_cursor").notNull(),
+  eventUuidCursor: text("event_uuid_cursor").notNull().default(""),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Per-integration Fathom poll cursor. opencompany uses bounded created_after /
 // created_before windows for personal API-key connections. The initial cursor
 // is written when the connection is created, so live ingestion never backfills
@@ -3213,6 +3271,10 @@ export const googleDriveFileStates = productSchema.table(
   }),
 );
 
+// RETIRED: the Recurring Tasks ("Routines") feature was removed. Nothing reads or writes these
+// two tables or `tasks.schedule_id` any more; they are retained only because dropping them is an
+// explicitly destructive migration that needs its own plan and production verification. See
+// PRO-307.
 export const taskSchedules = productSchema.table(
   "task_schedules",
   {
@@ -3280,6 +3342,10 @@ export const workflows = productSchema.table(
     model: text("model").notNull().default(""),
     steps: jsonb("steps").$type<WorkflowStep[]>().notNull().default(sql`'[]'::jsonb`),
     trigger: text("trigger").$type<WorkflowTrigger>().notNull().default("manual"),
+    automationTriggers: jsonb("automation_triggers")
+      .$type<Record<string, unknown>[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     scheduleCron: text("schedule_cron"),
     scheduleTimezone: text("schedule_timezone").notNull().default("UTC"),
     schedulePrompt: text("schedule_prompt").notNull().default(""),
@@ -3297,6 +3363,17 @@ export const workflows = productSchema.table(
     }),
     eventHarnessSpec: jsonb("event_harness_spec").$type<HarnessSpec | null>(),
     status: text("status").$type<WorkflowStatus>().notNull().default("active"),
+    // Workflows written before scopes existed belong to the whole workspace, so "company" is both
+    // the backfill and the physical default for writers that predate this column.
+    scope: text("scope").$type<WorkflowScope>().notNull().default("company"),
+    // Every workflow could post to Slack before the Channels section existed, so the default keeps
+    // existing rows working and only an explicit toggle takes the send tool away from a run.
+    slackChannelEnabled: boolean("slack_channel_enabled").notNull().default(true),
+    // Cosmetic per-workflow Slack identity. One Slack app has one bot user, so this only overrides
+    // the display name on the post; empty means the default @opencompany identity.
+    slackBotDisplayName: text("slack_bot_display_name").notNull().default(""),
+    // Public HTTPS image Slack downloads for the cosmetic per-message avatar.
+    slackBotAvatarUrl: text("slack_bot_avatar_url").notNull().default(""),
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
@@ -3322,6 +3399,15 @@ export const workflows = productSchema.table(
         sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
       ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+    // created_by_workos_id is cleared when a user row is deleted, so the owner cannot be required
+    // here. Readers treat a personal row without an owner as visible to nobody.
+    scopeCheck: check(
+      "opencompany_workflows_scope_check",
+      sql`${table.scope} IN ('personal', 'company')`,
+    ),
+    personalOwnerIdx: index("opencompany_workflows_personal_owner_idx")
+      .on(table.workspaceId, table.createdByWorkosId)
+      .where(sql`${table.scope} = 'personal' AND ${table.archivedAt} IS NULL`),
     triggerCheck: check(
       "goat_workflows_trigger_check",
       sql`${table.trigger} IN ('manual', 'slack', 'linear', 'schedule', 'event')`,
@@ -3517,6 +3603,9 @@ export const plugins = productSchema.table(
       .notNull()
       .default(sql`'[]'::jsonb`),
     events: jsonb("events").$type<PluginEventDefinition[]>().notNull().default(sql`'[]'::jsonb`),
+    // Validated list prices from a reviewed, integrity-pinned package. This row is the billing
+    // authority for the plugin's paid actions; a package that declares none stays null and free.
+    pricing: jsonb("pricing").$type<PluginPricing | null>(),
     eventModes: jsonb("event_modes")
       .$type<Record<string, boolean>>()
       .notNull()
@@ -3931,6 +4020,7 @@ export const tasks = productSchema.table(
   }),
 );
 
+// RETIRED with `taskSchedules` above.
 export const taskScheduleRuns = productSchema.table(
   "task_schedule_runs",
   {
@@ -3967,6 +4057,32 @@ export const taskScheduleRuns = productSchema.table(
   }),
 );
 
+// A workflow's single markdown memory: one document per workflow, carried between runs.
+// Kept out of `workflows` on purpose — a run rewriting its memory must not bump the definition's
+// version or `updated_at`, which drive optimistic concurrency in the editor and list ordering.
+// `enabled` lives here too, so toggling memory takes effect on the next run without re-saving
+// (and re-planning) the workflow definition.
+export const workflowMemories = productSchema.table(
+  "workflow_memories",
+  {
+    workflowId: text("workflow_id")
+      .primaryKey()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    enabled: boolean("enabled").notNull().default(false),
+    content: text("content").notNull().default(""),
+    // Null until a run writes memory for the first time; the editor uses it to say "never written".
+    contentUpdatedAt: timestamp("content_updated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceIdx: index("opencompany_workflow_memories_workspace_idx").on(table.workspaceId),
+  }),
+);
+
 export const workflowScheduleRuns = productSchema.table(
   "workflow_schedule_runs",
   {
@@ -3974,6 +4090,7 @@ export const workflowScheduleRuns = productSchema.table(
     workflowId: text("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull().default("legacy"),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -3992,6 +4109,7 @@ export const workflowScheduleRuns = productSchema.table(
   (table) => ({
     workflowForIdx: uniqueIndex("goat_workflow_schedule_runs_workflow_for_idx").on(
       table.workflowId,
+      table.triggerId,
       table.scheduledFor,
     ),
     workspaceCreatedIdx: index("goat_workflow_schedule_runs_workspace_created_idx").on(
@@ -4020,6 +4138,7 @@ export const workflowEventRuns = productSchema.table(
     workflowId: text("workflow_id")
       .notNull()
       .references(() => workflows.id, { onDelete: "cascade" }),
+    triggerId: text("trigger_id").notNull().default("legacy"),
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
@@ -4045,6 +4164,7 @@ export const workflowEventRuns = productSchema.table(
   (table) => ({
     workflowDeliveryIdx: uniqueIndex("opencompany_workflow_event_runs_workflow_delivery_idx").on(
       table.workflowId,
+      table.triggerId,
       table.provider,
       table.deliveryId,
     ),
@@ -4515,6 +4635,13 @@ export const capabilityRuns = productSchema.table(
     provider: text("provider").notNull(),
     endpoint: text("endpoint").notNull(),
     status: text("status").$type<CapabilityRunStatus>().notNull(),
+    // Set when the run was routed through a paid plugin. The three price columns snapshot the
+    // installed package's list price so settlement and reconciliation bill what was quoted, even
+    // if the workspace updates or uninstalls the plugin while the run is still in flight.
+    pluginName: text("plugin_name"),
+    priceUnit: text("price_unit").$type<PluginPriceUnit>(),
+    priceAmountUsdMicros: bigint("price_amount_usd_micros", { mode: "number" }),
+    priceMaxUnits: integer("price_max_units"),
     quoteProviderCostUsdMicros: bigint("quote_provider_cost_usd_micros", {
       mode: "number",
     }).notNull(),
@@ -4559,6 +4686,9 @@ export const capabilityRuns = productSchema.table(
       table.status,
       table.approvalExpiresAt,
     ),
+    pluginSpendIdx: index("goat_capability_runs_plugin_spend_idx")
+      .on(table.workspaceId, table.pluginName, table.createdAt)
+      .where(sql`${table.pluginName} IS NOT NULL`),
     sourceCheck: check(
       "goat_capability_runs_source_check",
       sql`${table.source} IN ('x', 'linkedin', 'youtube', 'instagram', 'tiktok', 'lead', 'seo', 'image')`,
@@ -4593,6 +4723,46 @@ export const capabilityRuns = productSchema.table(
     statusCheck: check(
       "goat_capability_runs_status_check",
       sql`${table.status} IN ('awaiting_approval', 'approved', 'canceled', 'expired', 'executing', 'running', 'stopping', 'succeeded', 'failed', 'stopped', 'timed_out')`,
+    ),
+    // A plugin-routed run carries a complete price snapshot or none at all; a partial one cannot
+    // be settled deterministically.
+    pluginPriceCheck: check(
+      "goat_capability_runs_plugin_price_check",
+      sql`(
+          ${table.pluginName} IS NULL
+          AND ${table.priceUnit} IS NULL
+          AND ${table.priceAmountUsdMicros} IS NULL
+          AND ${table.priceMaxUnits} IS NULL
+        ) OR (
+          ${table.pluginName} IS NOT NULL
+          AND ${table.priceUnit} IN ('per_call', 'per_result')
+          AND ${table.priceAmountUsdMicros} > 0
+          AND ${table.priceMaxUnits} > 0
+        )`,
+    ),
+  }),
+);
+
+// A workspace-set ceiling on what a paid plugin may spend in a UTC day. Absent row means no limit.
+export const pluginSpendLimits = productSchema.table(
+  "plugin_spend_limits",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pluginName: text("plugin_name").notNull(),
+    dailyLimitUsdMicros: bigint("daily_limit_usd_micros", { mode: "number" }).notNull(),
+    updatedByWorkosId: text("updated_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.pluginName] }),
+    limitCheck: check(
+      "goat_plugin_spend_limits_limit_check",
+      sql`${table.dailyLimitUsdMicros} > 0`,
     ),
   }),
 );
@@ -4956,6 +5126,7 @@ export const codexChatSessions = productSchema.table(
       .notNull()
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     engine: text("engine").$type<CodexChatEngine>().notNull().default("codex"),
+    harness: text("harness").$type<CodexChatHarness>().notNull().default("chat"),
     model: text("model").notNull().default("gpt-5.5"),
     brainRef: text("brain_ref").references(() => brains.id, {
       onDelete: "set null",
@@ -4964,7 +5135,19 @@ export const codexChatSessions = productSchema.table(
       onDelete: "set null",
     }),
     hostToolContractVersion: text("host_tool_contract_version"),
+    // Private runtime ownership pinned before the first Run. Production admission remains on the
+    // established runner until the sandbox-supervisor implementation clears its rollout gates.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
+    supervisorTemplateVersion: text("supervisor_template_version"),
     sandboxId: text("sandbox_id"),
+    // Machine size resolved from the workspace default when the session was created.
+    // Pinned for the session's whole life so a later workspace change never resizes
+    // work that is already running.
+    sandboxSize: text("sandbox_size").$type<SandboxSize>().notNull().default("standard"),
     codexThreadId: text("codex_thread_id"),
     activeTurnId: text("active_turn_id"),
     status: text("status").$type<CodexChatSessionStatus>().notNull().default("queued"),
@@ -4999,6 +5182,86 @@ export const codexChatSessions = productSchema.table(
       "goat_codex_chat_sessions_engine_check",
       sql`${table.engine} IN ('opencompany', 'codex', 'claude_code')`,
     ),
+    harnessCheck: check(
+      "goat_codex_chat_sessions_harness_check",
+      sql`${table.harness} IN ('chat', 'personal_agent')`,
+    ),
+    sandboxSizeCheck: check(
+      "goat_codex_chat_sessions_sandbox_size_check",
+      sql`${table.sandboxSize} IN (${sql.join(
+        SANDBOX_SIZES.map((size) => sql`${size}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendCheck: check(
+      "goat_codex_chat_sessions_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_sessions_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
+    ),
+    supervisorTemplateVersionCheck: check(
+      "goat_codex_chat_sessions_supervisor_template_version_check",
+      sql`(
+        (${table.executionBackend} = 'runner_attached' AND ${table.supervisorTemplateVersion} IS NULL)
+        OR
+        (${table.executionBackend} = 'sandbox_supervisor' AND NULLIF(${table.supervisorTemplateVersion}, '') IS NOT NULL)
+      )`,
+    ),
+  }),
+);
+
+/**
+ * A pull request a coding-agent session opened.
+ *
+ * Keyed on `chat_sessions` rather than on the coding runtime row or on `tasks`, because a Task is
+ * a `chat_sessions` row with `kind = 'task'`: linking here is what lets an ordinary chat and a
+ * Task carry the same PR badge without the sidebar branching on which one it is looking at.
+ *
+ * One row per (session, PR). `state` is a cache of GitHub's answer, not a fact this system owns:
+ * it is refreshed on read and `checked_at` is how the reader decides whether it is stale enough
+ * to re-ask.
+ */
+export const sessionPullRequests = productSchema.table(
+  "session_pull_requests",
+  {
+    id: text("id").primaryKey(),
+    chatSessionId: text("chat_session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    repositoryFullName: text("repository_full_name").notNull(),
+    number: integer("number").notNull(),
+    url: text("url").notNull(),
+    state: text("state").$type<PullRequestState>().notNull().default("open"),
+    // Null until the first successful read from GitHub, which is also what marks a link as
+    // never-yet-confirmed: the badge stays hidden until GitHub has agreed the PR exists.
+    checkedAt: timestamp("checked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    sessionPullRequestIdx: uniqueIndex("goat_session_pull_requests_session_pr_idx").on(
+      table.chatSessionId,
+      table.repositoryFullName,
+      table.number,
+    ),
+    // The sidebar asks "which of my sessions have a PR", so the read is per-user.
+    userSessionIdx: index("goat_session_pull_requests_user_session_idx").on(
+      table.userWorkosId,
+      table.chatSessionId,
+    ),
+    numberCheck: check("goat_session_pull_requests_number_check", sql`${table.number} > 0`),
+    stateCheck: check(
+      "goat_session_pull_requests_state_check",
+      sql`${table.state} IN ('draft', 'open', 'blocked', 'merged', 'closed')`,
+    ),
   }),
 );
 
@@ -5025,9 +5288,22 @@ export const codexChatTurns = productSchema.table(
     status: text("status").$type<CodexChatTurnStatus>().notNull().default("queued"),
     prompt: text("prompt").notNull(),
     settings: jsonb("settings").$type<CodexChatTurnSettings>().notNull().default(sql`'{}'::jsonb`),
+    // Copied from the immutable Session binding when this Run is admitted.
+    executionBackend: text("execution_backend")
+      .$type<ExecutionBackend>()
+      .notNull()
+      .default("runner_attached"),
+    executionBackendVersion: integer("execution_backend_version").notNull().default(1),
     error: text("error"),
     interruptRequestedAt: timestamp("interrupt_requested_at", {
       withTimezone: true,
+    }),
+    // Set when the user promotes this queued turn into the sibling turn that was already running
+    // (ACP steering): its prompt is injected into that live turn instead of starting its own.
+    // The promotion is intent, not a transfer -- this row stays a claimable queued turn until the
+    // running worker actually injects it, so a turn that ends first simply runs it next.
+    steerIntoRunId: text("steer_into_run_id").references((): AnyPgColumn => codexChatTurns.id, {
+      onDelete: "set null",
     }),
     attempts: integer("attempts").notNull().default(0),
     recoveryAttempts: integer("recovery_attempts").notNull().default(0),
@@ -5044,6 +5320,12 @@ export const codexChatTurns = productSchema.table(
   },
   (table) => ({
     claimIdx: index("goat_codex_chat_turns_claim_idx").on(table.status, table.createdAt),
+    executionClaimIdx: index("goat_codex_chat_turns_execution_claim_idx").on(
+      table.executionBackend,
+      table.executionBackendVersion,
+      table.status,
+      table.createdAt,
+    ),
     sessionCreatedIdx: index("goat_codex_chat_turns_session_created_idx").on(
       table.codexChatSessionId,
       table.createdAt,
@@ -5063,6 +5345,17 @@ export const codexChatTurns = productSchema.table(
     eventSequenceCheck: check(
       "goat_codex_chat_turns_event_sequence_check",
       sql`${table.eventSequence} >= 0`,
+    ),
+    executionBackendCheck: check(
+      "goat_codex_chat_turns_execution_backend_check",
+      sql`${table.executionBackend} IN (${sql.join(
+        EXECUTION_BACKENDS.map((backend) => sql`${backend}`),
+        sql`, `,
+      )})`,
+    ),
+    executionBackendVersionCheck: check(
+      "goat_codex_chat_turns_execution_backend_version_check",
+      sql`${table.executionBackendVersion} > 0`,
     ),
   }),
 );
@@ -5419,6 +5712,10 @@ export const conversationReadModelV1 = productSchema.table(
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     activityState: text("activity_state").$type<ChatActivityState>().notNull().default("idle"),
     hasUnseen: boolean("has_unseen").notNull().default(false),
+    // A run of this Conversation is blocked on a pending approval or question. Orthogonal to
+    // activityState: a foreground approval holds the engine open, so the Conversation is still
+    // 'working' while it is the reader who has to act.
+    awaitingInput: boolean("awaiting_input").notNull().default(false),
     runtimeStatus: text("runtime_status").$type<ConversationRuntimeStatus>(),
     activeRunId: text("active_run_id"),
     runtimeHasError: boolean("runtime_has_error"),
@@ -5538,6 +5835,10 @@ export const taskReadModelV1 = productSchema.table(
     outcomeComment: text("outcome_comment"),
     // Mirrors the unread flag on the Task's conversation, which is where settlement sets it.
     hasUnseen: boolean("has_unseen").notNull().default(false),
+    // A run of this Task is blocked on a pending approval or question. `waiting` already covers
+    // the Task the runner parked for one; this also catches the coding engine that holds its run
+    // open while it polls for a permission decision, which leaves the Task `running`.
+    awaitingInput: boolean("awaiting_input").notNull().default(false),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
@@ -5569,7 +5870,13 @@ export const workflowReadModelV1 = productSchema.table(
     description: text("description").notNull(),
     steps: jsonb("steps").$type<WorkflowStep[]>().notNull(),
     status: text("status").$type<WorkflowStatus>().notNull(),
+    scope: text("scope").$type<WorkflowScope>().notNull(),
+    createdByWorkosId: text("created_by_workos_id"),
     trigger: jsonb("trigger").$type<Record<string, unknown>>().notNull(),
+    triggers: jsonb("triggers")
+      .$type<Record<string, unknown>[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     scheduleCron: text("schedule_cron"),
     scheduleTimezone: text("schedule_timezone").notNull(),
     schedulePrompt: text("schedule_prompt").notNull(),
@@ -5599,6 +5906,8 @@ export const workflowScheduleReadModelV1 = productSchema.table(
     id: text("id").primaryKey(),
     workflowId: text("workflow_id").notNull(),
     workspaceId: text("workspace_id").notNull(),
+    scope: text("scope").$type<WorkflowScope>().notNull(),
+    createdByWorkosId: text("created_by_workos_id"),
     workflowSlug: text("workflow_slug").notNull(),
     name: text("name").notNull(),
     cron: text("cron").notNull(),
@@ -6177,6 +6486,81 @@ export const infisicalAuthFlows = productSchema.table(
     expiresAtIdx: index("goat_infisical_auth_flows_expires_at_idx").on(table.expiresAt),
     statusCheck: check(
       "goat_infisical_auth_flows_status_check",
+      sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
+    ),
+  }),
+);
+
+export type DopplerConnectionStatus = "connected" | "needs_reauth" | "disconnected";
+export type DopplerAuthFlowStatus = "pending" | "link_ready" | "completed" | "failed" | "expired";
+
+export const dopplerConnections = productSchema.table(
+  "doppler_connections",
+  {
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").notNull(),
+    encryptedAuthBundle:
+      jsonb("encrypted_auth_bundle").$type<IntegrationCredentialEncryptedPayload>(),
+    encryptionKeyVersion: integer("encryption_key_version"),
+    credentialGeneration: uuid("credential_generation").notNull().defaultRandom(),
+    status: text("status").$type<DopplerConnectionStatus>().notNull().default("disconnected"),
+    statusReason: text("status_reason"),
+    accountName: text("account_name"),
+    cliVersion: text("cli_version"),
+    bundleFormatVersion: integer("bundle_format_version"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    connectedByWorkosId: text("connected_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    lastValidatedAt: timestamp("last_validated_at", { withTimezone: true }),
+    lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workspaceId, table.ownerUserId] }),
+    statusIdx: index("doppler_connections_status_idx").on(table.status),
+    connectedByIdx: index("doppler_connections_connected_by_idx").on(table.connectedByWorkosId),
+    statusCheck: check(
+      "doppler_connections_status_check",
+      sql`${table.status} IN ('connected', 'needs_reauth', 'disconnected')`,
+    ),
+    credentialCheck: check(
+      "doppler_connections_credential_check",
+      sql`(${table.status} = 'disconnected' AND ${table.encryptedAuthBundle} IS NULL AND ${table.encryptionKeyVersion} IS NULL) OR (${table.status} IN ('connected', 'needs_reauth') AND ${table.encryptedAuthBundle} IS NOT NULL AND ${table.encryptionKeyVersion} IS NOT NULL)`,
+    ),
+  }),
+);
+
+export const dopplerAuthFlows = productSchema.table(
+  "doppler_auth_flows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    requestedByWorkosId: text("requested_by_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
+    sandboxId: text("sandbox_id").notNull(),
+    loginUrl: text("login_url"),
+    userCode: text("user_code"),
+    status: text("status").$type<DopplerAuthFlowStatus>().notNull().default("pending"),
+    statusReason: text("status_reason"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    workspaceStatusIdx: index("doppler_auth_flows_workspace_status_idx").on(
+      table.workspaceId,
+      table.status,
+    ),
+    expiresAtIdx: index("doppler_auth_flows_expires_at_idx").on(table.expiresAt),
+    statusCheck: check(
+      "doppler_auth_flows_status_check",
       sql`${table.status} IN ('pending', 'link_ready', 'completed', 'failed', 'expired')`,
     ),
   }),
@@ -7205,6 +7589,7 @@ export type ChatSession = typeof chatSessions.$inferSelect;
 export type ChatShare = typeof chatShares.$inferSelect;
 export type ActionTurn = typeof actionTurns.$inferSelect;
 export type CapabilityRun = typeof capabilityRuns.$inferSelect;
+export type PluginSpendLimit = typeof pluginSpendLimits.$inferSelect;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type ChatModelRoutingAttempt = typeof chatModelRoutingAttempts.$inferSelect;
 export type ChatSandboxUsage = typeof chatSandboxUsage.$inferSelect;
@@ -7213,6 +7598,7 @@ export type BrowserProfileSession = typeof browserProfileSessions.$inferSelect;
 export type ChatSessionSkillBundle = typeof chatSessionSkillBundles.$inferSelect;
 export type ChatSessionPlugin = typeof chatSessionPlugins.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
+export type WorkflowMemoryRow = typeof workflowMemories.$inferSelect;
 export type SkillBundle = typeof skillBundles.$inferSelect;
 export type SkillBundleFile = typeof skillBundleFiles.$inferSelect;
 export type SkillInstallation = typeof skillInstallations.$inferSelect;
@@ -7222,3 +7608,251 @@ export type PluginFile = typeof pluginFiles.$inferSelect;
 export type PluginSkill = typeof pluginSkills.$inferSelect;
 export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;
+
+// External sources wake a stable Conversation; Runs remain the existing fenced execution unit.
+export const sessionSubscriptions = productSchema.table(
+  "session_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    source: text("source").notNull(),
+    sourceKey: jsonb("source_key").$type<Record<string, string>>().notNull(),
+    policy: jsonb("policy")
+      .notNull()
+      .default({
+        acceptedEvents: ["human_text_reply"],
+        authorization: "slack_thread_participant",
+        queue: "serial",
+      }),
+    status: text("status").notNull().default("waiting"),
+    nextSequence: bigint("next_sequence", { mode: "number" }).notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("session_subscriptions_source_idx").on(
+      table.workspaceId,
+      table.source,
+      table.sourceKey,
+    ),
+    index("session_subscriptions_session_idx").on(table.sessionId),
+    check("session_subscriptions_status_check", sql`${table.status} IN ('waiting', 'closed')`),
+  ],
+);
+
+export const subscriptionEvents = productSchema.table(
+  "subscription_events",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    subscriptionId: text("subscription_id")
+      .notNull()
+      .references(() => sessionSubscriptions.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    payload: jsonb("payload").notNull(),
+    status: text("status").notNull().default("pending"),
+    runId: text("run_id").references(() => codexChatTurns.id),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("subscription_events_event_idx").on(table.subscriptionId, table.eventId),
+    uniqueIndex("subscription_events_sequence_idx").on(table.subscriptionId, table.sequence),
+    index("subscription_events_pending_idx").on(table.status, table.id),
+    check(
+      "subscription_events_status_check",
+      sql`${table.status} IN ('pending', 'running', 'delivering', 'done', 'ignored')`,
+    ),
+  ],
+);
+
+export const channelDeliveries = productSchema.table(
+  "channel_deliveries",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => chatSessions.id, { onDelete: "cascade" }),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    teamId: text("team_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts"),
+    // A reply is queued before Slack has given its root post a timestamp, so it points at the root
+    // delivery and the worker fills thread_ts in from that row's message_ts when it sends.
+    threadParentId: text("thread_parent_id").references((): AnyPgColumn => channelDeliveries.id, {
+      onDelete: "cascade",
+    }),
+    text: text("text").notNull(),
+    // Snapshot the workflow's cosmetic Slack identity at enqueue time, so a later edit cannot
+    // retroactively change a queued post. Empty values keep the default bot identity.
+    botDisplayName: text("bot_display_name").notNull().default(""),
+    botAvatarUrl: text("bot_avatar_url").notNull().default(""),
+    status: text("status").notNull().default("pending"),
+    messageTs: text("message_ts"),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("channel_deliveries_pending_idx").on(table.status, table.createdAt),
+    index("channel_deliveries_thread_parent_idx")
+      .on(table.threadParentId)
+      .where(sql`${table.threadParentId} IS NOT NULL`),
+    check(
+      "channel_deliveries_status_check",
+      sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+  ],
+);
+
+// A member's phone paired to the iMessage personal assistant. One row per user and one per phone.
+// Linking is inbound-only: the member texts a short code to the shared opencompany line and the
+// webhook binds the sending handle. The bound Conversation is an opencompany-engine runtime with
+// the `personal_agent` harness; texts become ordinary Messages and Runs on it.
+export const imessageBindings = productSchema.table(
+  "imessage_bindings",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // pending → linked. A pending row holds the code the member must text; a linked row holds the
+    // handle that texted it and the Conversation its texts route into.
+    status: text("status").$type<ImessageBindingStatus>().notNull().default("pending"),
+    linkCode: text("link_code"),
+    linkCodeExpiresAt: timestamp("link_code_expires_at", { withTimezone: true }),
+    // The paired iMessage handle exactly as messages.dev reports it (E.164 phone or Apple ID).
+    handle: text("handle"),
+    conversationId: text("conversation_id").references(() => chatSessions.id, {
+      onDelete: "set null",
+    }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("goat_imessage_bindings_user_idx").on(table.userWorkosId),
+    uniqueIndex("goat_imessage_bindings_handle_idx")
+      .on(table.handle)
+      .where(sql`${table.handle} IS NOT NULL`),
+    index("goat_imessage_bindings_link_code_idx")
+      .on(table.linkCode)
+      .where(sql`${table.linkCode} IS NOT NULL`),
+    check("goat_imessage_bindings_status_check", sql`${table.status} IN ('pending', 'linked')`),
+  ],
+);
+export type ImessageBindingStatus = "pending" | "linked";
+export type ImessageBinding = typeof imessageBindings.$inferSelect;
+
+export const whatsappBindings = productSchema.table(
+  "whatsapp_bindings",
+  {
+    id: text("id").primaryKey(),
+    userWorkosId: text("user_workos_id")
+      .notNull()
+      .references(() => users.workosUserId, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    // pending → linked. A pending row holds the code the member must text; a linked row holds the
+    // handle that texted it and the Conversation its texts route into.
+    status: text("status").$type<WhatsappBindingStatus>().notNull().default("pending"),
+    linkCode: text("link_code"),
+    linkCodeExpiresAt: timestamp("link_code_expires_at", { withTimezone: true }),
+    // The paired WhatsApp sender normalized to an E.164 phone number.
+    handle: text("handle"),
+    conversationId: text("conversation_id").references(() => chatSessions.id, {
+      onDelete: "set null",
+    }),
+    linkedAt: timestamp("linked_at", { withTimezone: true }),
+    lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("whatsapp_bindings_user_idx").on(table.userWorkosId),
+    uniqueIndex("whatsapp_bindings_handle_idx")
+      .on(table.handle)
+      .where(sql`${table.handle} IS NOT NULL`),
+    uniqueIndex("whatsapp_bindings_link_code_idx")
+      .on(table.linkCode)
+      .where(sql`${table.linkCode} IS NOT NULL`),
+    check("whatsapp_bindings_status_check", sql`${table.status} IN ('pending', 'linked')`),
+  ],
+);
+export type WhatsappBindingStatus = "pending" | "linked";
+export type WhatsappBinding = typeof whatsappBindings.$inferSelect;
+
+// Durable inbox for direct messages sent to the workspace Slack bot. Ingress persists the message
+// before acknowledging Slack; the runner resolves the sender to an opencompany account and opens
+// the Task that answers in the message's thread.
+export const slackDirectMessages = productSchema.table(
+  "slack_direct_messages",
+  {
+    id: bigserial("id", { mode: "number" }).primaryKey(),
+    teamId: text("team_id").notNull(),
+    eventId: text("event_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    messageTs: text("message_ts").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    sessionId: text("session_id").references(() => chatSessions.id, { onDelete: "set null" }),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_direct_messages_event_idx").on(table.teamId, table.eventId),
+    index("slack_direct_messages_pending_idx")
+      .on(table.status, table.nextAttemptAt, table.id)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "slack_direct_messages_status_check",
+      sql`${table.status} IN ('pending', 'started', 'ignored')`,
+    ),
+  ],
+);
+
+// A durable claim per reply slot prevents duplicate sends after an ambiguous provider timeout.
+export const whatsappSendAttempts = productSchema.table(
+  "whatsapp_send_attempts",
+  {
+    id: text("id").primaryKey(),
+    status: text("status").$type<"pending" | "accepted" | "failed">().notNull(),
+    providerMessageId: text("provider_message_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "whatsapp_send_attempts_status_check",
+      sql`${table.status} IN ('pending', 'accepted', 'failed')`,
+    ),
+  ],
+);
+
+// Committed with pairing/unlink changes, so a redelivered control message has no second effect.
+export const whatsappIngressReceipts = productSchema.table("whatsapp_ingress_receipts", {
+  id: text("id").primaryKey(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

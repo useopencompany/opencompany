@@ -13,6 +13,16 @@ const mocks = vi.hoisted(() => ({
   getBalance: vi.fn(),
   recordDebit: vi.fn(),
   autoRefill: vi.fn(),
+  listInstalledPluginPricing: vi.fn(),
+  getPluginDailySpendLimit: vi.fn(),
+  sumPluginDailySpend: vi.fn(),
+}));
+
+vi.mock("@opencompany/db/plugin-pricing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@opencompany/db/plugin-pricing")>()),
+  listInstalledPluginPricing: mocks.listInstalledPluginPricing,
+  getPluginDailySpendLimitUsdMicros: mocks.getPluginDailySpendLimit,
+  sumPluginDailySpendUsdMicros: mocks.sumPluginDailySpend,
 }));
 
 vi.mock("@opencompany/db/capabilities", () => ({
@@ -72,6 +82,30 @@ describe("executeManagedCapability", () => {
       ledgerId: 1,
       balanceUsdMicros: 9_998_200,
     });
+    mocks.listInstalledPluginPricing.mockResolvedValue([
+      {
+        pluginName: "lead-research",
+        pricing: {
+          currency: "USD",
+          actions: [
+            {
+              action: "find_person_email",
+              label: "Email lookup",
+              unit: "per_call",
+              amountUsdMicros: 150_000,
+            },
+            {
+              action: "search_prospects",
+              label: "Prospect found",
+              unit: "per_result",
+              amountUsdMicros: 80_000,
+            },
+          ],
+        },
+      },
+    ]);
+    mocks.getPluginDailySpendLimit.mockResolvedValue(null);
+    mocks.sumPluginDailySpend.mockResolvedValue(0);
   });
 
   it("automatically runs a cheap action and settles provider cost at cost", async () => {
@@ -545,9 +579,9 @@ describe("executeManagedCapability", () => {
     expect(mocks.createRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: "awaiting_approval",
-        quoteProviderCostUsdMicros: 300_000,
+        quoteProviderCostUsdMicros: 150_000,
         quotePlatformFeeUsdMicros: 0,
-        quoteTotalCostUsdMicros: 300_000,
+        quoteTotalCostUsdMicros: 150_000,
         approvalExpiresAt: new Date("2026-07-23T10:15:00.000Z"),
       }),
     );
@@ -670,7 +704,7 @@ describe("executeManagedCapability", () => {
         workspaceId: "workspace_1",
         chatSessionId: "chat_1",
         action: "lead.find_person_email",
-        quoteTotalCostUsdMicros: 300_000,
+        quoteTotalCostUsdMicros: 150_000,
         inputHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
@@ -856,6 +890,162 @@ describe("executeManagedCapability", () => {
   });
 });
 
+describe("paid plugin actions", () => {
+  const leadSpec = () => spec("lead.find_person_email", "lead", "pdl", "/v5/person/enrich");
+
+  it("bills the plugin list price, not the provider's settled cost", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
+    });
+    await executeManagedCapability({
+      spec: leadSpec(),
+      params: { query: "ada@example.com" },
+      context: context(),
+      client,
+    });
+    // The provider charged 30¢; the plugin sells the lookup for 15¢ and the workspace pays 15¢.
+    expect(mocks.recordDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalCostUsdMicros: 150_000,
+        providerCostUsdMicros: 150_000,
+        platformFeeUsdMicros: 0,
+        costBasis: expect.objectContaining({
+          kind: "paid_plugin_action",
+          pluginName: "lead-research",
+          priceUnit: "per_call",
+          billedUnits: 1,
+          providerCostUsdMicros: 300_000,
+        }),
+      }),
+    );
+  });
+
+  it("keeps our margin when the provider costs less than the list price", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({
+        provider: "pdl",
+        endpoint: "/v5/person/enrich",
+        cost: { value: 0.04, currency: "USD" },
+      }),
+    });
+    await executeManagedCapability({
+      spec: leadSpec(),
+      params: { query: "ada@example.com" },
+      context: context(),
+      client,
+    });
+    expect(mocks.recordDebit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        totalCostUsdMicros: 150_000,
+        providerCostUsdMicros: 40_000,
+        platformFeeUsdMicros: 110_000,
+      }),
+    );
+  });
+
+  it("snapshots the price on the run so settlement survives an uninstall", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
+    });
+    await executeManagedCapability({
+      spec: leadSpec(),
+      params: { query: "ada@example.com" },
+      context: context(),
+      client,
+    });
+    expect(mocks.createRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        price: {
+          pluginName: "lead-research",
+          unit: "per_call",
+          amountUsdMicros: 150_000,
+          maxUnits: 1,
+        },
+      }),
+    );
+  });
+
+  it("charges nothing when a paid lookup fails", async () => {
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({
+        provider: "pdl",
+        endpoint: "/v5/person/enrich",
+        cost: { value: 0.3, currency: "USD" },
+        status: "FAILED",
+        providerResponse: { httpStatus: 502 },
+      }),
+    });
+    await expect(
+      executeManagedCapability({
+        spec: leadSpec(),
+        params: { query: "ada@example.com" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "provider_error" });
+    expect(mocks.recordDebit).not.toHaveBeenCalled();
+    expect(mocks.settleRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", totalCostUsdMicros: 0 }),
+    );
+  });
+
+  it("refuses a lookup that would pass the plugin's daily spending limit", async () => {
+    mocks.getPluginDailySpendLimit.mockResolvedValue(500_000);
+    mocks.sumPluginDailySpend.mockResolvedValue(400_000);
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
+    });
+    await expect(
+      executeManagedCapability({
+        spec: leadSpec(),
+        params: { query: "ada@example.com" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "disabled" });
+    expect(client.run).not.toHaveBeenCalled();
+    expect(mocks.createRun).not.toHaveBeenCalled();
+  });
+
+  it("allows a lookup that exactly reaches the daily spending limit", async () => {
+    mocks.getPluginDailySpendLimit.mockResolvedValue(500_000);
+    mocks.sumPluginDailySpend.mockResolvedValue(350_000);
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
+    });
+    await executeManagedCapability({
+      spec: leadSpec(),
+      params: { query: "ada@example.com" },
+      context: context(),
+      client,
+    });
+    expect(client.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the action when the plugin is not installed", async () => {
+    mocks.listInstalledPluginPricing.mockResolvedValue([]);
+    const client = fakeClient({
+      inspection: inspectPrice(0.3),
+      run: providerRun({ cost: { value: 0.3, currency: "USD" } }),
+    });
+    await expect(
+      executeManagedCapability({
+        spec: leadSpec(),
+        params: { query: "ada@example.com" },
+        context: context(),
+        client,
+      }),
+    ).rejects.toMatchObject({ code: "disabled" });
+    expect(client.run).not.toHaveBeenCalled();
+  });
+});
+
 function context(): ActionExecuteContext {
   return {
     userWorkosId: "user_1",
@@ -941,7 +1131,14 @@ function fakeClient(input: { inspection: MonidInspection; run: MonidRun; polled?
   };
 }
 
-function auditRow(input: Record<string, unknown>) {
+function auditRow({ price, ...input }: Record<string, unknown>) {
+  // Mirrors the stored row: createCapabilityRun flattens the price snapshot into columns.
+  const snapshot = (price ?? null) as {
+    pluginName: string;
+    unit: string;
+    amountUsdMicros: number;
+    maxUnits: number;
+  } | null;
   return {
     id: "gcr_1",
     workspaceId: "workspace_1",
@@ -953,6 +1150,10 @@ function auditRow(input: Record<string, unknown>) {
       input.approvalExpiresAt instanceof Date
         ? input.approvalExpiresAt
         : new Date("2026-07-23T10:15:00.000Z"),
+    pluginName: snapshot?.pluginName ?? null,
+    priceUnit: snapshot?.unit ?? null,
+    priceAmountUsdMicros: snapshot?.amountUsdMicros ?? null,
+    priceMaxUnits: snapshot?.maxUnits ?? null,
     ...input,
   };
 }

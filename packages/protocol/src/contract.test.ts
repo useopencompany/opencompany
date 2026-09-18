@@ -99,18 +99,28 @@ describe("v1 protocol contract", () => {
       title: "Ship the runtime contract",
       engine: "claude_code" as const,
       model: "anthropic/claude-sonnet-5",
+      composerSettings: {
+        reasoningEffort: "medium" as const,
+        planModeEnabled: false,
+        goalMode: null,
+      },
       runtime,
       activityState: "working" as const,
       hasUnseen: false,
+      awaitingInput: false,
       pinnedAt: null,
       createdAt: "2026-08-13T07:00:00.000Z",
       updatedAt: "2026-08-13T08:00:00.000Z",
     };
 
     expect(ConversationSchema.parse(conversation).runtime).toEqual(runtime);
+    expect(ConversationSchema.parse(conversation).composerSettings).toEqual(
+      conversation.composerSettings,
+    );
+    const { composerSettings: _composerSettings, ...conversationReadModel } = conversation;
     expect(
       ConversationReadModelSchema.parse({
-        ...conversation,
+        ...conversationReadModel,
         messageShapeEpoch: 3,
         archivedAt: null,
         pinnedAt: null,
@@ -119,7 +129,7 @@ describe("v1 protocol contract", () => {
     ).toEqual(runtime);
     expect(() =>
       ConversationReadModelV1Schema.parse({
-        ...conversation,
+        ...conversationReadModel,
         archivedAt: null,
         pinnedAt: null,
         lastSeenAt: null,
@@ -196,10 +206,8 @@ describe("v1 protocol contract", () => {
       "/v1/workflows/{workflowId}/archive",
       "/v1/workflows/{workflowId}/invoke",
       "/v1/workflows/{workflowId}/run-now",
-      "/v1/schedules",
-      "/v1/schedules/{scheduleId}",
-      "/v1/schedules/{scheduleId}/archive",
-      "/v1/schedules/{scheduleId}/run-now",
+      "/v1/workflows/{workflowId}/memory",
+      "/v1/workflows/{workflowId}/slack-avatar",
       "/v1/brains/{brainId}",
       "/v1/brains/{brainId}/overview",
       "/v1/brains/{brainId}/source-items",
@@ -223,13 +231,13 @@ describe("v1 protocol contract", () => {
       "/v1/identity",
       "/v1/identity/sync",
       "/v1/workspace",
+      "/v1/workspace/sandbox-size",
       "/v1/workspace/invitations",
       "/v1/workspace/invitations/{invitationId}",
       "/v1/workspace/members/{userId}",
       "/v1/workspaces",
       "/v1/workspaces/{workspaceId}/switch",
       "/v1/onboarding",
-      "/v1/onboarding/workspace-slug/check",
       "/v1/onboarding/profile",
       "/v1/onboarding/workspace",
       "/v1/onboarding/complete",
@@ -280,6 +288,7 @@ describe("v1 protocol contract", () => {
       "/v1/projects/{projectId}/conversations",
       "/v1/projects/{projectId}/conversations/{conversationId}",
       "/v1/conversations",
+      "/v1/session-pull-requests",
       "/v1/conversations/{conversationId}",
       "/v1/conversations/{conversationId}/share",
       "/v1/conversations/{conversationId}/title",
@@ -296,15 +305,21 @@ describe("v1 protocol contract", () => {
       "/public/chat-shares/{shareId}/metadata",
       "/public/chat-shares/{shareId}/attachments/{messageId}/{attachmentId}",
       "/public/chat-shares/{shareId}/artifacts/{artifactId}/versions/{versionId}",
+      "/public/workflow-avatars/{workflowId}/{assetId}",
       "/v1/conversations/{conversationId}/engine-session/runtime",
       "/v1/conversations/{conversationId}/engine-session/runtime-access",
       "/v1/runs/{runId}",
       "/v1/runs/{runId}/events",
       "/v1/runs/{runId}/cancel",
+      "/v1/runs/{runId}/steer",
       "/v1/runs/{runId}/approvals/{approvalId}",
       "/v1/read-models/{readModel}",
       "/v1/me/preferences",
       "/v1/me/mcp-setup",
+      "/v1/me/imessage",
+      "/v1/me/whatsapp",
+      "/v1/me/imessage/link",
+      "/v1/me/whatsapp/link",
       "/v1/feedback",
       "/v1/repo-configs",
       "/v1/repo-configs/{repositoryExternalId}/env",
@@ -314,9 +329,12 @@ describe("v1 protocol contract", () => {
       "/v1/integration-accounts/attio/{integrationId}",
       "/v1/integration-accounts/fathom",
       "/v1/integration-accounts/granola",
+      "/v1/integration-accounts/posthog-events",
+      "/v1/integration-accounts/posthog-events/{integrationId}/events",
       "/v1/integration-accounts/jamie-events/endpoint",
       "/v1/integration-accounts/jamie-events",
       "/v1/integration-accounts/convex",
+      "/v1/integration-accounts/convex-events",
       "/v1/integration-accounts/render",
       "/v1/integration-accounts/stripe",
       "/v1/integration-accounts",
@@ -325,6 +343,7 @@ describe("v1 protocol contract", () => {
       "/v1/brains/{brainId}/slack-bot/channels",
       "/v1/integration-accounts/{integrationId}/usage",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
+      "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",
       "/v1/actions/{actionId}/permissions/always-allow",
       "/v1/integration-accounts/{integrationId}",
       "/v1/engine-auth/claude-code",
@@ -335,6 +354,10 @@ describe("v1 protocol contract", () => {
       "/v1/engine-auth/codex/device",
       "/v1/engine-auth/codex/device/{flowId}/poll",
       "/v1/engine-auth/infisical",
+      "/v1/engine-auth/doppler",
+      "/v1/engine-auth/doppler/start",
+      "/v1/engine-auth/doppler/{flowId}/poll",
+      "/v1/engine-auth/doppler/cancel",
       "/v1/engine-auth/infisical/start",
       "/v1/engine-auth/infisical/{flowId}/complete",
       "/v1/billing",
@@ -363,6 +386,8 @@ describe("v1 protocol contract", () => {
       "/v1/plugins/{name}/mcp/refresh",
       "/v1/plugins/{name}/data/delete",
       "/v1/plugins/{name}/events/{eventId}",
+      "/v1/plugins/{name}/billing",
+      "/v1/plugins/{name}/billing/daily-limit",
     ]);
     expect(document.paths?.["/v1/skills"]).toHaveProperty("get");
     expect(document.paths?.["/v1/skills"]).toHaveProperty("post");
@@ -410,8 +435,5 @@ describe("v1 protocol contract", () => {
         param: { actionId: "gmail.send_email" },
       }).pathname,
     ).toBe("/v1/actions/gmail.send_email/permissions/always-allow");
-    expect(
-      client.v1.schedules[":scheduleId"].$url({ param: { scheduleId: "schedule_1" } }).pathname,
-    ).toBe("/v1/schedules/schedule_1");
   });
 });

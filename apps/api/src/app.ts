@@ -8,9 +8,11 @@ import type { BrainSourceApplicationService } from "@opencompany/agent/brain-sou
 import type { BrowserProfileApplicationService } from "@opencompany/agent/browser-profiles/service";
 import type {
   AttioProviderState,
+  ConvexEventsProviderState,
   FathomProviderState,
   GranolaProviderState,
   JamieEventsProviderState,
+  PostHogEventsProviderState,
   StripeProviderState,
 } from "@opencompany/agent/integration-state";
 import type { ConvexProviderState } from "@opencompany/agent/integrations/convex-mcp";
@@ -21,6 +23,7 @@ import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/g
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { McpService } from "@opencompany/agent/mcp-http";
+import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
 import {
@@ -52,15 +55,16 @@ import {
   type SkillInstallationListItem,
   type Task,
   type TaskApplicationService,
-  type TaskSchedule,
-  type TaskScheduleApplicationService,
   type WikiCommandApplicationService,
   type WikiPage,
   type WikiTimelineEntry,
+  WORKFLOW_AVATAR_MAX_BYTES,
   type Workflow,
   type WorkflowApplicationService,
+  type WorkflowMemory,
 } from "@opencompany/core";
 import { captureException, createLogger, type LogFields } from "@opencompany/observability";
+import type { SessionPullRequestDto } from "@opencompany/protocol";
 import {
   createOpenApiDocument,
   createV1Router,
@@ -94,6 +98,7 @@ import type { BrainAssetService } from "./brain-assets";
 import type { BrainControlService } from "./brain-control";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
+import type { ConvexIngressService } from "./convex-ingress";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
 import { admitEngineMessage } from "./engine-messages";
@@ -104,6 +109,8 @@ import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { HubspotIngressService } from "./hubspot-ingress";
 import type { IdentityService } from "./identity";
+import type { ImessageIngressService } from "./imessage-ingress";
+import type { ImessageSettingsService } from "./imessage-settings";
 import type { IntegrationAccountService } from "./integration-accounts";
 import type { JamieIngressService } from "./jamie-ingress";
 import type { LinearIngressService } from "./linear-ingress";
@@ -111,6 +118,7 @@ import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
+import type { PluginBillingService } from "./plugin-billing";
 import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
@@ -120,7 +128,11 @@ import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
 import type { StripeIngressService } from "./stripe-ingress";
 import type { UserSettingsService } from "./user-settings";
+import type { WhatsappIngressService } from "./whatsapp-ingress";
+import type { WhatsappSettingsService } from "./whatsapp-settings";
 import type { WikiControlService, WikiControlView } from "./wiki-control";
+import type { WorkflowAvatarService } from "./workflow-avatars";
+import { executeWorkflowCommand } from "./workflow-commands";
 import type { CapabilityApprovalView, WorkspaceCapabilityService } from "./workspace-capabilities";
 import type { WorkspaceControlService } from "./workspace-control";
 import type { XAccountIngressService } from "./x-account-ingress";
@@ -156,7 +168,6 @@ export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
-  schedules: TaskScheduleApplicationService;
   knowledge: KnowledgeApplicationService;
   // Executes the `wiki` agent tool command contract for internal callers
   // (the runner over HTTP, the API-hosted MCP tool in-process).
@@ -182,6 +193,7 @@ export type CreateApiAppInput = {
   pluginImports: PluginImportApplicationService;
   customMcp?: CustomMcpApplicationService;
   brainAssets: BrainAssetService;
+  workflowAvatars: WorkflowAvatarService;
   chatResources?: ChatResourceService;
   messagePresentations?: MessagePresentationService;
   chatTitles?: ChatTitleService;
@@ -208,8 +220,12 @@ export type CreateApiAppInput = {
   userSettings: UserSettingsService;
   feedback: FeedbackService;
   repoConfigs: RepoConfigService;
+  /** Pull requests opened by the actor's own coding sessions, with each state read from GitHub. */
+  sessionPullRequests: (actor: Actor) => Promise<SessionPullRequestDto[]>;
   integrationAccounts: IntegrationAccountService;
   slackBotSettings: SlackBotSettingsService;
+  imessageSettings?: ImessageSettingsService;
+  whatsappSettings?: WhatsappSettingsService;
   mcp?: McpService;
   gmailMcp?: GmailMcpService;
   googleAdminMcp?: GoogleAdminMcpService;
@@ -220,6 +236,7 @@ export type CreateApiAppInput = {
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
   workspaceCapabilities: WorkspaceCapabilityService;
+  pluginBilling: PluginBillingService;
   workspaceControl: WorkspaceControlService;
   identity: IdentityService;
   onboarding: OnboardingService;
@@ -235,9 +252,12 @@ export type CreateApiAppInput = {
   hubspotIngress?: HubspotIngressService;
   attioIngress?: AttioIngressService;
   jamieIngress?: JamieIngressService;
+  convexIngress?: ConvexIngressService;
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  imessageIngress?: ImessageIngressService;
+  whatsappIngress?: WhatsappIngressService;
   stripeIngress?: StripeIngressService;
   billingReconcile?: BillingReconcileService;
   notifier?: RunEventNotifier;
@@ -444,6 +464,7 @@ export function createApiApp(input: CreateApiAppInput) {
         idempotencyKey: c.req.valid("header")["idempotency-key"],
         name: body.name,
         ...(body.description !== undefined ? { description: body.description } : {}),
+        ...(body.scope !== undefined ? { scope: body.scope } : {}),
       });
       return c.json(
         {
@@ -512,90 +533,43 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: taskCreationDto(result), meta }, 202);
     },
-    listTaskSchedules: async (c) => {
+    getWorkflowMemory: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const query = c.req.valid("query");
-      const page = await input.schedules.listTaskSchedules(actor, {
-        ...(query.cursor ? { cursor: query.cursor } : {}),
-        ...(query.limit ? { limit: query.limit } : {}),
+      const memory = await input.workflows.getWorkflowMemory(
+        actor,
+        c.req.valid("param").workflowId,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    updateWorkflowMemory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const memory = await input.workflows.setWorkflowMemoryEnabled(
+        actor,
+        c.req.valid("param").workflowId,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    clearWorkflowMemory: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const memory = await input.workflows.clearWorkflowMemory(
+        actor,
+        c.req.valid("param").workflowId,
+      );
+      return c.json({ data: workflowMemoryDto(memory), meta }, 200);
+    },
+    uploadWorkflowSlackAvatar: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.workflowAvatars.upload({
+        actor,
+        workflowId: c.req.valid("param").workflowId,
+        file: c.req.valid("form").file,
       });
-      return c.json(
-        { data: page.schedules.map(taskScheduleDto), nextCursor: page.nextCursor, meta },
-        200,
-      );
-    },
-    createTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const result = await input.schedules.createTaskSchedule(actor, {
-        idempotencyKey: c.req.valid("header")["idempotency-key"],
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.sourceDescription !== undefined
-          ? { sourceDescription: body.sourceDescription }
-          : {}),
-        cron: body.cron,
-        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
-        prompt: body.prompt,
-      });
-      return c.json(
-        {
-          data: {
-            schedule: taskScheduleDto(result.schedule),
-            transactionId: result.transactionId,
-            replayed: result.idempotentReplay,
-          },
-          meta,
-        },
-        201,
-      );
-    },
-    getTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "read", 300);
-      const schedule = await input.schedules.getTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-      );
-      return c.json({ data: taskScheduleDto(schedule), meta }, 200);
-    },
-    updateTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const body = c.req.valid("json");
-      const scheduleId = c.req.valid("param").scheduleId;
-      const result =
-        "enabled" in body
-          ? await input.schedules.setTaskScheduleEnabled(actor, scheduleId, body)
-          : await input.schedules.updateTaskSchedule(actor, scheduleId, body);
-      return c.json(
-        {
-          data: { schedule: taskScheduleDto(result.schedule), transactionId: result.transactionId },
-          meta,
-        },
-        200,
-      );
-    },
-    archiveTaskSchedule: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "write", 60);
-      const result = await input.schedules.archiveTaskSchedule(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("json").expectedVersion,
-      );
-      return c.json({ data: result, meta }, 200);
-    },
-    runTaskScheduleNow: async (c) => {
-      const actor = actorFrom(c);
-      await enforceRateLimit(rateLimiter, actor, "message", 30);
-      const result = await input.schedules.runTaskScheduleNow(
-        actor,
-        c.req.valid("param").scheduleId,
-        c.req.valid("header")["idempotency-key"],
-      );
-      return c.json({ data: taskCreationDto(result), meta }, 202);
+      return c.json({ data: result, meta }, 201);
     },
     getBrainSnapshot: async (c) => {
       const actor = actorFrom(c);
@@ -846,6 +820,21 @@ export function createApiApp(input: CreateApiAppInput) {
       const workspace = await input.workspaceControl.rename(actor, c.req.valid("json").name);
       return c.json({ data: workspace, meta }, 200);
     },
+    getWorkspaceSandboxSize: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const sandboxSize = await input.workspaceControl.getSandboxSize(actor);
+      return c.json({ data: { sandboxSize }, meta }, 200);
+    },
+    setWorkspaceSandboxSize: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const sandboxSize = await input.workspaceControl.setSandboxSize(
+        actor,
+        c.req.valid("json").sandboxSize,
+      );
+      return c.json({ data: { sandboxSize }, meta }, 200);
+    },
     inviteWorkspaceMember: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "workspace-invitation", 20);
@@ -884,12 +873,6 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-read", 300);
       const state = await input.onboarding.getState(identity);
       return c.json({ data: state, meta }, 200);
-    },
-    checkOnboardingWorkspaceSlug: async (c) => {
-      const identity = identityFrom(c);
-      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-slug", 120);
-      const result = await input.onboarding.checkSlug(identity, c.req.valid("json").slug);
-      return c.json({ data: result, meta }, 200);
     },
     saveOnboardingProfile: async (c) => {
       const identity = identityFrom(c);
@@ -988,28 +971,28 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     confirmWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     cancelWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     retryWikiImport: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     createBrainDocument: async (c) => {
@@ -1257,35 +1240,35 @@ export function createApiApp(input: CreateApiAppInput) {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listWikiIngestActivity: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     upsertWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     setWikiSourceEnabled: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     deleteWikiSource: async () => {
       throw new ApiError(
         410,
         "invalid_request",
-        "Wiki ingestion has been retired. Configure plugin events in Settings → Plugins.",
+        "Wiki ingestion has been retired. Configure plugin events on the Plugins page.",
       );
     },
     listSkills: async (c) => {
@@ -1626,6 +1609,22 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: publicPluginInstallation(plugin), meta }, 200);
     },
+    getPluginBilling: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const billing = await input.pluginBilling.get(actor, c.req.valid("param").name);
+      return c.json({ data: billing, meta }, 200);
+    },
+    setPluginDailySpendLimit: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const billing = await input.pluginBilling.setDailyLimit(
+        actor,
+        c.req.valid("param").name,
+        c.req.valid("json").dailyLimitUsd,
+      );
+      return c.json({ data: billing, meta }, 200);
+    },
     listBots: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -1733,6 +1732,11 @@ export function createApiApp(input: CreateApiAppInput) {
         },
         200,
       );
+    },
+    listSessionPullRequests: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.sessionPullRequests(actor), meta }, 200);
     },
     getConversation: async (c) => {
       const actor = actorFrom(c);
@@ -2083,6 +2087,12 @@ export function createApiApp(input: CreateApiAppInput) {
       });
       return chatResourceResponse(asset) as never;
     },
+    downloadPublicWorkflowAvatar: async (c) => {
+      const params = c.req.valid("param");
+      await enforcePublicRateLimit(rateLimiter, params.workflowId, "public-avatar-bytes", 600);
+      const asset = await input.workflowAvatars.download(params);
+      return chatResourceResponse(asset) as never;
+    },
     getEngineRuntimeStatus: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -2234,6 +2244,12 @@ export function createApiApp(input: CreateApiAppInput) {
         202,
       );
     },
+    steerRun: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.chat.steerRun(actor, c.req.valid("param").runId);
+      return c.json({ data: result, meta }, 200);
+    },
     resolveApproval: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "message", 30);
@@ -2243,6 +2259,13 @@ export function createApiApp(input: CreateApiAppInput) {
         approvalId: params.approvalId,
         ...c.req.valid("json"),
       });
+      if (!result.idempotentReplay)
+        await captureProductServerEvent("run_approval_resolved", actor.userId, {
+          workspace_id: actor.workspaceId,
+          run_id: result.runId,
+          approval_id: result.approvalId,
+          resolution: result.resolution,
+        });
       return c.json(
         {
           data: {
@@ -2347,15 +2370,6 @@ export function createApiApp(input: CreateApiAppInput) {
           );
         }
         await input.workflows.listWorkflows(actor, { limit: 1 });
-      } else if (params.readModel === "task-schedules-v1") {
-        if (query.conversationId || query.brainId) {
-          throw new ApiError(
-            400,
-            "invalid_request",
-            "conversationId is not valid for this read model.",
-          );
-        }
-        await input.schedules.listTaskSchedules(actor, { limit: 1 });
       } else if (params.readModel === "integration-accounts-v1") {
         if (query.conversationId || query.brainId) {
           throw new ApiError(
@@ -2424,6 +2438,42 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceRateLimit(rateLimiter, actor, "read", 300);
       const status = await input.userSettings.getMcpSetup(actor);
       return c.json({ data: mcpSetupDto(status), meta }, 200);
+    },
+    getImessageSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.get(actor), meta }, 200);
+    },
+    startImessageLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.startLink(actor), meta }, 200);
+    },
+    unlinkImessage: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.imessageSettings) throw new ApiError(404, "not_found", "iMessage is not enabled.");
+      return c.json({ data: await input.imessageSettings.unlink(actor), meta }, 200);
+    },
+    getWhatsappSettings: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.get(actor), meta }, 200);
+    },
+    startWhatsappLink: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.startLink(actor), meta }, 200);
+    },
+    unlinkWhatsapp: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 30);
+      if (!input.whatsappSettings) throw new ApiError(404, "not_found", "WhatsApp is not enabled.");
+      return c.json({ data: await input.whatsappSettings.unlink(actor), meta }, 200);
     },
     updateMcpSetup: async (c) => {
       const actor = actorFrom(c);
@@ -2515,6 +2565,20 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: { state: granolaStateDto(state) }, meta }, 200);
     },
+    connectPostHogEventsAccount: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const state = await input.integrationAccounts.connectPostHogEvents(actor, body);
+      return c.json({ data: { state: posthogEventsStateDto(state) }, meta }, 200);
+    },
+    listPostHogEventDefinitions: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 120);
+      const { integrationId } = c.req.valid("param");
+      const data = await input.integrationAccounts.listPostHogEvents(actor, integrationId);
+      return c.json({ data, meta }, 200);
+    },
     createJamieEventsEndpoint: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2538,6 +2602,18 @@ export function createApiApp(input: CreateApiAppInput) {
         c.req.valid("json").apiKey,
       );
       return c.json({ data: { state: convexStateDto(state) }, meta }, 200);
+    },
+    enableConvexEvents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const state = await input.integrationAccounts.enableConvexEvents(actor);
+      return c.json({ data: { state: convexEventsStateDto(state) }, meta }, 200);
+    },
+    disableConvexEvents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.integrationAccounts.disableConvexEvents(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
     },
     connectRenderAccount: async (c) => {
       const actor = actorFrom(c);
@@ -2637,6 +2713,25 @@ export function createApiApp(input: CreateApiAppInput) {
         200,
       );
     },
+    setIntegrationToolMode: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const params = c.req.valid("param");
+      const mode = c.req.valid("json").mode;
+      await input.integrationAccounts.setToolMode(actor, params.integrationId, params.toolId, mode);
+      return c.json(
+        {
+          data: {
+            integrationId: params.integrationId,
+            toolId: params.toolId,
+            // The service rejects anything outside the tool mode vocabulary.
+            mode: mode as "on" | "ask" | "off" | "inherit",
+          },
+          meta,
+        },
+        200,
+      );
+    },
     alwaysAllowAction: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
@@ -2719,6 +2814,41 @@ export function createApiApp(input: CreateApiAppInput) {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "write", 60);
       await input.engineAuth.disconnectCodex(actor);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    getDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await input.engineAuth.getDopplerStatus(actor), meta }, 200);
+    },
+    startDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "engine-auth-start", 10);
+      return c.json({ data: { flow: await input.engineAuth.startDopplerAuth(actor) }, meta }, 201);
+    },
+    pollDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json(
+        {
+          data: {
+            flow: await input.engineAuth.pollDopplerAuth(actor, c.req.valid("param").flowId),
+          },
+          meta,
+        },
+        200,
+      );
+    },
+    deleteDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, true);
+      return c.json({ data: { deleted: true as const }, meta }, 200);
+    },
+    cancelDopplerAuth: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.engineAuth.cancelDopplerAuth(actor, false);
       return c.json({ data: { deleted: true as const }, meta }, 200);
     },
     getInfisicalAuth: async (c) => {
@@ -2858,20 +2988,16 @@ export function createApiApp(input: CreateApiAppInput) {
               enforceMessageProtocolVersion(c);
               await next();
               span.setAttributes({ "goat.http_status_code": c.res.status });
+              // Hono resolves handler errors through `app.onError` before `next()` returns, so
+              // the response is already an error envelope here. `c.error` carries the cause.
+              if (c.error && c.res.status >= 500) {
+                span.fail(c.error, { "goat.http_status_code": c.res.status });
+              }
               return c.res;
             } catch (error) {
               c.res = apiErrorResponse(c, error);
-              if (
-                c.res.status >= 500 ||
-                (!(error instanceof ApiError) && !(error instanceof CoreError))
-              ) {
-                captureException(error, {
-                  ...requestFailureLogFieldsFrom(c),
-                  event: "opencompany.api_request_failed",
-                  request_id: requestIdFrom(c),
-                  method: c.req.method,
-                  path: c.req.path,
-                });
+              if (shouldReportRequestFailure(error, c.res.status)) {
+                reportRequestFailure(c, error);
               }
               span.setAttributes({ "goat.http_status_code": c.res.status });
               if (c.res.status >= 500) {
@@ -2899,6 +3025,17 @@ export function createApiApp(input: CreateApiAppInput) {
             apiErrorResponse(
               c,
               new ApiError(413, "invalid_request", "The attachment upload is too large."),
+            ),
+        }),
+      );
+      router.use(
+        "/v1/workflows/:workflowId/slack-avatar",
+        bodyLimit({
+          maxSize: WORKFLOW_AVATAR_MAX_BYTES + MULTIPART_ENVELOPE_BYTES,
+          onError: (c) =>
+            apiErrorResponse(
+              c,
+              new ApiError(413, "invalid_request", "Avatars are limited to 1 MB."),
             ),
         }),
       );
@@ -2944,15 +3081,14 @@ export function createApiApp(input: CreateApiAppInput) {
     },
   });
 
+  // Every handler error lands here, including the ones thrown under the /v1 middleware: Hono
+  // routes them to `onError` at the failing handler and only then resumes the middleware chain.
   app.onError((error, c) => {
-    captureException(error, {
-      ...requestFailureLogFieldsFrom(c),
-      event: "opencompany.api_request_failed",
-      request_id: requestIdFrom(c),
-      method: c.req.method,
-      path: c.req.path,
-    });
-    return apiErrorResponse(c, error);
+    const response = apiErrorResponse(c, error);
+    if (shouldReportRequestFailure(error, response.status)) {
+      reportRequestFailure(c, error);
+    }
+    return response;
   });
   app.get("/healthz", (c) =>
     c.json({
@@ -3052,10 +3188,33 @@ export function createApiApp(input: CreateApiAppInput) {
     const skipped = await input.onboardingEmails.unsubscribe(email);
     return c.json({ data: { skipped }, meta }, 200);
   });
-  // Internal runner→API entrypoint for the `wiki` agent tool. The API owns the
+  // Internal runner→API entrypoints for workflow and wiki tools. The API owns the
   // whole boundary: bearer auth, body validation, server-side actor
   // reauthorization, command-aware rate limits, and command execution against
-  // Postgres. The runner never touches the wiki database directly.
+  // Postgres. The runner never touches these domain tables directly.
+  app.post("/internal/workflows/commands", async (c) => {
+    authorizeInternalBearer(
+      c.req.raw,
+      input.wikiCommandsInternalSecret,
+      "Workflow command execution is unavailable.",
+    );
+    const idempotencyKey = boundedString(c.req.header("idempotency-key"), 200);
+    if (!idempotencyKey)
+      throw new ApiError(400, "invalid_request", "An Idempotency-Key header is required.");
+    const body = InternalWorkflowCommandRequestSchema.safeParse(await internalJsonBody(c.req.raw));
+    if (!body.success)
+      throw new ApiError(400, "invalid_request", "A valid workflow command is required.");
+    const actor = await input.resolveWikiServiceActor(body.data);
+    const isRead = ["list", "read"].includes(String(body.data.command.command));
+    await enforceRateLimit(rateLimiter, actor, isRead ? "read" : "write", 60);
+    const output = await executeWorkflowCommand({
+      actor,
+      command: body.data.command,
+      idempotencyKey,
+      workflows: input.workflows,
+    });
+    return c.json({ data: output, meta }, 200);
+  });
   app.post("/internal/wiki/commands", async (c) => {
     authorizeInternalBearer(
       c.req.raw,
@@ -3155,6 +3314,13 @@ export function createApiApp(input: CreateApiAppInput) {
       ingress.webhook(c.req.param("endpointId"), c.req.raw),
     );
   }
+  if (input.convexIngress) {
+    const ingress = input.convexIngress;
+    app.use("/webhooks/convex/:endpointId", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/convex/:endpointId", (c) =>
+      ingress.webhook(c.req.param("endpointId"), c.req.raw),
+    );
+  }
   if (input.mcpOAuthIngress) {
     const ingress = input.mcpOAuthIngress;
     app.get("/integrations/attio-mcp/start", (c) => ingress.start("attio", c.req.raw));
@@ -3166,7 +3332,9 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/fathom-mcp/start", (c) => ingress.start("fathom", c.req.raw));
     app.get("/integrations/fathom-mcp/callback", (c) => ingress.callback("fathom", c.req.raw));
     app.get("/integrations/signoz/start", (c) => ingress.start("signoz", c.req.raw));
+    app.get("/integrations/dash0/start", (c) => ingress.start("dash0", c.req.raw));
     app.get("/integrations/signoz/callback", (c) => ingress.callback("signoz", c.req.raw));
+    app.get("/integrations/dash0/callback", (c) => ingress.callback("dash0", c.req.raw));
     app.get("/integrations/vercel/start", (c) => ingress.start("vercel", c.req.raw));
     app.get("/integrations/vercel/callback", (c) => ingress.callback("vercel", c.req.raw));
     app.get("/integrations/linear/start", (c) => ingress.start("linear", c.req.raw));
@@ -3183,9 +3351,11 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/stripe/callback", (c) => ingress.callback("stripe", c.req.raw));
     app.get("/integrations/notion/start", (c) => ingress.start("notion", c.req.raw));
     app.get("/integrations/supabase/start", (c) => ingress.start("supabase", c.req.raw));
+    app.get("/integrations/todoist/start", (c) => ingress.start("todoist", c.req.raw));
     app.get("/integrations/resend/start", (c) => ingress.start("resend", c.req.raw));
     app.get("/integrations/notion/callback", (c) => ingress.callback("notion", c.req.raw));
     app.get("/integrations/supabase/callback", (c) => ingress.callback("supabase", c.req.raw));
+    app.get("/integrations/todoist/callback", (c) => ingress.callback("todoist", c.req.raw));
     app.get("/integrations/resend/callback", (c) => ingress.callback("resend", c.req.raw));
     app.get("/integrations/latitude/start", (c) => ingress.start("latitude", c.req.raw));
     app.get("/integrations/latitude/callback", (c) => ingress.callback("latitude", c.req.raw));
@@ -3203,6 +3373,16 @@ export function createApiApp(input: CreateApiAppInput) {
     app.get("/integrations/slack-bot/callback", (c) => ingress.callback(c.req.raw));
     app.use("/webhooks/slack-bot/events", ingressBodyLimit(1024 * 1024));
     app.post("/webhooks/slack-bot/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.imessageIngress) {
+    const ingress = input.imessageIngress;
+    app.use("/webhooks/imessage/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/imessage/events", (c) => ingress.webhook(c.req.raw));
+  }
+  if (input.whatsappIngress) {
+    const ingress = input.whatsappIngress;
+    app.use("/webhooks/whatsapp/events", ingressBodyLimit(256 * 1024));
+    app.post("/webhooks/whatsapp/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.stripeIngress) {
     app.use("/webhooks/stripe", ingressBodyLimit(1024 * 1024));
@@ -3440,6 +3620,23 @@ function setRequestFailureLogFields(c: Context, fields: LogFields) {
   });
 }
 
+// Expected domain outcomes (not found, forbidden, rate limited, validation) are modelled as
+// ApiError/CoreError with a 4xx status and are not defects; only 5xx responses and errors of
+// unknown shape belong in the error tracker.
+function shouldReportRequestFailure(error: unknown, status: number) {
+  return status >= 500 || (!(error instanceof ApiError) && !(error instanceof CoreError));
+}
+
+function reportRequestFailure(c: Context, error: unknown) {
+  captureException(error, {
+    ...requestFailureLogFieldsFrom(c),
+    event: "opencompany.api_request_failed",
+    request_id: requestIdFrom(c),
+    method: c.req.method,
+    path: c.req.path,
+  });
+}
+
 function requestFailureLogFieldsFrom(c: Context): LogFields {
   const actor = getContextValue(c, "actor");
   const identity = getContextValue(c, "identity");
@@ -3535,6 +3732,11 @@ function conversationDto(conversation: {
   title: string;
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
+  composerSettings: {
+    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    planModeEnabled?: boolean;
+    goalMode?: { objective: string; tokenBudget?: number | null } | null;
+  } | null;
   messageShapeEpoch: number;
   runtime: {
     status: "queued" | "starting" | "idle" | "running" | "failed" | "interrupted" | "closed";
@@ -3544,6 +3746,7 @@ function conversationDto(conversation: {
   } | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  awaitingInput: boolean;
   pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -3591,6 +3794,19 @@ function taskCreationDto(result: {
 function workflowDto(workflow: Workflow) {
   return {
     ...workflow,
+    ...(workflow.triggers
+      ? {
+          triggers: workflow.triggers.map((trigger) =>
+            trigger.type === "schedule"
+              ? {
+                  ...trigger,
+                  lastRunAt: trigger.lastRunAt?.toISOString() ?? null,
+                  nextRunAt: trigger.nextRunAt?.toISOString() ?? null,
+                }
+              : trigger,
+          ),
+        }
+      : {}),
     trigger:
       workflow.trigger.type === "schedule"
         ? {
@@ -3605,14 +3821,8 @@ function workflowDto(workflow: Workflow) {
   };
 }
 
-function taskScheduleDto(schedule: TaskSchedule) {
-  return {
-    ...schedule,
-    lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
-    nextRunAt: schedule.nextRunAt.toISOString(),
-    createdAt: schedule.createdAt.toISOString(),
-    updatedAt: schedule.updatedAt.toISOString(),
-  };
+function workflowMemoryDto(memory: WorkflowMemory) {
+  return { ...memory, updatedAt: memory.updatedAt?.toISOString() ?? null };
 }
 
 function brainFolderDto(folder: BrainFolder) {
@@ -3862,6 +4072,19 @@ function granolaStateDto(state: GranolaProviderState) {
   };
 }
 
+function posthogEventsStateDto(state: PostHogEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    projectId: state.projectId,
+    region: state.region,
+    connectionLabel: state.connectionLabel,
+    statusReason: state.statusReason,
+  };
+}
+
 function jamieEventsStateDto(state: JamieEventsProviderState) {
   return {
     provider: state.provider,
@@ -3869,6 +4092,19 @@ function jamieEventsStateDto(state: JamieEventsProviderState) {
     status: integrationAccountStatusDto(state.status),
     integrationId: state.integrationId,
     statusReason: state.statusReason,
+    webhookUrl: state.webhookUrl,
+    lastDeliveryAt: state.lastDeliveryAt,
+  };
+}
+
+function convexEventsStateDto(state: ConvexEventsProviderState) {
+  return {
+    provider: state.provider,
+    connected: state.connected,
+    status: integrationAccountStatusDto(state.status),
+    integrationId: state.integrationId,
+    statusReason: state.statusReason,
+    deployment: state.deployment,
     webhookUrl: state.webhookUrl,
     lastDeliveryAt: state.lastDeliveryAt,
   };

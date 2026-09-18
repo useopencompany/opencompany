@@ -11,6 +11,11 @@ import {
   webHttpsPort,
 } from "./lib/caddy-dev.mjs";
 import {
+  DESKTOP_AUTH_SECRET_ENV,
+  isValidDesktopAuthSecret,
+  resolveLocalDesktopAuthSecret,
+} from "./lib/desktop-auth-env.mjs";
+import {
   directDatabaseUrl,
   dockerRunArgs,
   ELECTRIC_CONTAINER,
@@ -19,6 +24,12 @@ import {
   ELECTRIC_LOCAL_URL,
 } from "./lib/electric-dev.mjs";
 import { environmentFileMigrationPlan, migrateEnvironmentFile } from "./lib/env-name-migration.mjs";
+import {
+  errorReportingEnvRemovalPlan,
+  intentionalErrorReportingEnv,
+  removeGeneratedErrorReportingEnv,
+  restoreIntentionalErrorReportingEnv,
+} from "./lib/local-error-reporting-env.mjs";
 import { localSandboxNamespace } from "./lib/sandbox-namespace.mjs";
 
 const CHECK_MODE = argv.includes("--check");
@@ -26,20 +37,30 @@ const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
 const LOCAL_ENV_PATHS = [".env.local", ".env.override.local", "apps/web/.env.local"];
+const PERSONAL_ENV_PATH = ".env.override.local";
+const GENERATED_ERROR_REPORTING_ENV_PATHS = [".env.local", "apps/web/.env.local"];
+const intentionalErrorReportingValues = intentionalErrorReportingEnv({
+  inheritedEnv: process.env,
+  personalEnvPath: PERSONAL_ENV_PATH,
+});
 let initialEnvironmentMoves;
+let initialErrorReportingRemovals;
 try {
   initialEnvironmentMoves = CHECK_MODE
     ? planLocalEnvironmentMigrations()
     : migrateLocalEnvironmentFiles();
+  initialErrorReportingRemovals = CHECK_MODE
+    ? errorReportingEnvRemovalPlan(GENERATED_ERROR_REPORTING_ENV_PATHS)
+    : removeGeneratedErrorReportingEnv(GENERATED_ERROR_REPORTING_ENV_PATHS);
 } catch (error) {
   console.error(`\n\x1b[31m✗ Setup failed:\x1b[0m ${error.message}\n`);
   exit(1);
 }
 await import("./load-env.mjs");
+restoreIntentionalErrorReportingEnv(process.env, intentionalErrorReportingValues);
 
 const SHARED_DATABASE_MODE =
   argv.includes("--shared-db") || process.env.OPENCOMPANY_SHARED_DATABASE === "1";
-const PERSONAL_ENV_PATH = ".env.override.local";
 // .nvmrc pins this project to Node 22.
 const MIN_NODE = [20, 20, 0];
 const WORKOS_ENV_KEYS = [
@@ -87,6 +108,11 @@ const RUNNER_ENV_KEYS = [
   "E2B_API_KEY",
   "VERCEL_AI_GATEWAY_API_KEY",
   "EXA_API_KEY",
+  "MESSAGES_API_KEY",
+  "KAPSO_API_KEY",
+  "KAPSO_PHONE_NUMBER_ID",
+  "WHATSAPP_LINE_HANDLE",
+  "MESSAGES_LINE_HANDLE",
   "APIFY_API_TOKEN",
   "BLOB_READ_WRITE_TOKEN",
   "MONID_API_KEY",
@@ -96,7 +122,9 @@ const RUNNER_ENV_KEYS = [
   "OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET",
   "OPENAI_API_KEY",
   "OPENAI_CODEX_API_KEY",
-  "OPENCOMPANY_CODEX_E2B_TEMPLATE",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
+  "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
   "RUNNER_CODEX_MODEL",
   "RUNNER_CODEX_TIMEOUT_MS",
   "RUNNER_CODEX_API_KEY_FALLBACK_ENABLED",
@@ -140,8 +168,10 @@ const BILLING_LOCAL_ENV_KEYS = [
   "OPENCOMPANY_STRIPE_CHECKOUT_ENABLED",
   "CRON_SECRET",
 ];
+// The Better Stack error DSNs are deliberately not mirrored: local runs would report into the
+// shared error tracker as `development` noise. Set them in `.env.override.local` when testing
+// error capture on purpose.
 const RUNTIME_OBSERVABILITY_ENV_KEYS = [
-  "BETTER_STACK_ERRORS_DSN",
   "OBSERVABILITY_ENABLED",
   "OBSERVABILITY_ENV",
   "OBSERVABILITY_RELEASE",
@@ -151,7 +181,6 @@ const RUNTIME_OBSERVABILITY_ENV_KEYS = [
   "BRAINTRUST_API_KEY",
   "BRAINTRUST_PROJECT_ID",
   "BRAINTRUST_PROJECT_NAME",
-  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
@@ -211,6 +240,7 @@ const LOCAL_WEB_APP_URL = webHttpsOrigin(process.env);
 const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
 const WEB_ENV_PATH = "apps/web/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
+  DESKTOP_AUTH_SECRET_ENV,
   "DATABASE_URL",
   "NEON_BRANCH",
   "API_BROWSER_ORIGINS",
@@ -236,6 +266,7 @@ const LOCAL_DEV_DEFAULT_ENV_VALUES = {
   RUNNER_SANDBOX_NAMESPACE: localSandboxNamespace(),
 };
 const WEB_LOCAL_ENV_KEYS = [
+  DESKTOP_AUTH_SECRET_ENV,
   "OPENCOMPANY_PORT",
   "OPENCOMPANY_HTTPS_PORT",
   "DATABASE_URL",
@@ -262,7 +293,6 @@ const WEB_LOCAL_ENV_KEYS = [
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_RELEASE",
   "NEXT_PUBLIC_OBSERVABILITY_LOG_LEVEL",
-  "NEXT_PUBLIC_BETTER_STACK_ERRORS_DSN",
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST",
   ...RUNTIME_OBSERVABILITY_ENV_KEYS,
@@ -395,6 +425,13 @@ function migrateLocalEnvironmentFiles() {
   );
 }
 
+function removeGeneratedErrorReportingEnvAfterWrite() {
+  const removals = removeGeneratedErrorReportingEnv(GENERATED_ERROR_REPORTING_ENV_PATHS);
+  if (removals.length > 0) {
+    ok(`Removed generated Better Stack error DSNs from ${formatRemovalPaths(removals)}`);
+  }
+}
+
 function isPlaceholder(value) {
   if (!value) return true;
   return (
@@ -407,6 +444,7 @@ function isPlaceholder(value) {
 
 function inspectState() {
   const env = readEffectiveLocalEnv();
+  const webEnv = parseEnv(WEB_ENV_PATH);
   const workosMissing = WORKOS_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const runnerMissing = LOCAL_RUNNER_REQUIRED_ENV_KEYS.filter((k) => isPlaceholder(env[k]));
   const billingMissing = BILLING_LOCAL_ENV_KEYS.filter((key) => isPlaceholder(env[key]));
@@ -418,6 +456,11 @@ function inspectState() {
     nodeModules: existsSync("node_modules") ? "installed" : "missing",
     workos: workosMissing.length === 0 ? "ready" : "placeholder",
     workosMissingKeys: workosMissing,
+    desktopAuth:
+      isValidDesktopAuthSecret(env[DESKTOP_AUTH_SECRET_ENV]) &&
+      webEnv[DESKTOP_AUTH_SECRET_ENV] === env[DESKTOP_AUTH_SECRET_ENV]
+        ? "ready"
+        : "invalid",
     runner: runnerMissing.length === 0 ? "ready" : "placeholder",
     runnerMissingKeys: runnerMissing,
     databaseUrl: isPlaceholder(env.DATABASE_URL) ? "placeholder" : "set",
@@ -604,6 +647,7 @@ async function ensureEnvFile(state) {
 }
 
 async function ensureLocalDevDefaults() {
+  await ensureDesktopAuthSecret();
   const env = parseEnv(".env.local");
   const missingDefaults = Object.fromEntries(
     Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(
@@ -615,6 +659,24 @@ async function ensureLocalDevDefaults() {
 
   writeEnvValues(".env.local", missingDefaults);
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
+async function ensureDesktopAuthSecret() {
+  const localEnv = parseEnv(".env.local");
+  const personalEnv = parseEnv(PERSONAL_ENV_PATH);
+  const value = resolveLocalDesktopAuthSecret(
+    localEnv[DESKTOP_AUTH_SECRET_ENV],
+    personalEnv[DESKTOP_AUTH_SECRET_ENV],
+  );
+  // setup --dev spawns the server in this process's environment; do not pass
+  // along the placeholder loaded before the generated file was repaired.
+  process.env[DESKTOP_AUTH_SECRET_ENV] = value;
+  if (personalEnv[DESKTOP_AUTH_SECRET_ENV] !== undefined) return;
+  if (localEnv[DESKTOP_AUTH_SECRET_ENV] === value) return;
+
+  writeEnvValues(".env.local", { [DESKTOP_AUTH_SECRET_ENV]: value });
+  chmodSync(".env.local", 0o600);
+  ok("Configured the local desktop sign-in handoff key");
 }
 
 function shouldReplaceLocalDefault(key, current, next) {
@@ -663,6 +725,7 @@ async function ensureWebEnvFile() {
   }
 
   writeEnvValues(WEB_ENV_PATH, values);
+  chmodSync(WEB_ENV_PATH, 0o600);
   ok(`Updated ${WEB_ENV_PATH} with web-local auth/proxy/compatibility/observability env`);
 }
 
@@ -1133,12 +1196,18 @@ async function main() {
         `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
       );
     }
+    if (initialErrorReportingRemovals.length > 0) {
+      ok(
+        `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
     const state = inspectState();
     const source = pullSharedDevEnv({
       requireDatabaseUrl: SHARED_DATABASE_MODE,
       requireNeonProject: !SHARED_DATABASE_MODE && state.neonProject !== "set",
     });
+    removeGeneratedErrorReportingEnvAfterWrite();
     await ensureLocalDevDefaults();
     await ensureWebEnvFile();
     ok(`Updated .env.local with shared setup values from ${source}`);
@@ -1152,7 +1221,13 @@ async function main() {
         `Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`,
       );
     }
+    if (initialErrorReportingRemovals.length > 0) {
+      ok(
+        `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+      );
+    }
     await ensureEnvFile(inspectState());
+    removeGeneratedErrorReportingEnvAfterWrite();
     await ensureLocalDevDefaults();
     await ensureStripe(inspectState());
     await ensureWebEnvFile();
@@ -1168,8 +1243,20 @@ async function main() {
         reason: `migrate moved environment variables (${formatEnvironmentMoves(initialEnvironmentMoves)})`,
       });
     }
+    if (initialErrorReportingRemovals.length > 0) {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `remove generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+      });
+    }
     if (state.envFile === "missing") {
       nextSteps.push({ command: "bun run setup", reason: "create .env.local" });
+    }
+    if (state.desktopAuth !== "ready") {
+      nextSteps.push({
+        command: "bun run setup",
+        reason: `configure ${DESKTOP_AUTH_SECRET_ENV} for desktop Google sign-in (remove or correct an invalid personal override first)`,
+      });
     }
     if (
       state.workos === "placeholder" ||
@@ -1273,6 +1360,11 @@ async function main() {
   if (initialEnvironmentMoves.length > 0) {
     ok(`Migrated local environment variables: ${formatEnvironmentMoves(initialEnvironmentMoves)}`);
   }
+  if (initialErrorReportingRemovals.length > 0) {
+    ok(
+      `Removed generated Better Stack error DSNs from ${formatRemovalPaths(initialErrorReportingRemovals)}`,
+    );
+  }
 
   // Hard prerequisite — fail fast before touching env/db if the runtime that
   // local Electric needs isn't available.
@@ -1280,6 +1372,7 @@ async function main() {
 
   const state = inspectState();
   await ensureEnvFile(state);
+  removeGeneratedErrorReportingEnvAfterWrite();
   await ensureLocalDevDefaults();
   await ensureWorkOS(inspectState());
   await ensureLocalRunnerEnv(inspectState());
@@ -1315,4 +1408,8 @@ main().catch((err) => {
 
 function formatEnvironmentMoves(moves) {
   return [...new Set(moves.map(({ oldName, newName }) => `${oldName} → ${newName}`))].join(", ");
+}
+
+function formatRemovalPaths(removals) {
+  return [...new Set(removals.map(({ path }) => path))].join(", ");
 }

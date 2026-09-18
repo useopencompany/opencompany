@@ -73,12 +73,10 @@ import {
 } from "./codex-cli";
 import { materializeCodexSkillSnapshotsForSession } from "./codex-managed-skills";
 import {
-  buildGitHubCommandEnv,
   createKnownSecretRedactor,
   GITHUB_RECONNECT_NOTICE,
   GITHUB_UNAVAILABLE_NOTICE,
   type GitHubCommandAuth,
-  githubSandboxTokenMinimumValidityMs,
   loadGitHubAuthForUser,
   logCodingSandboxAcquisition,
   shouldAppendGitHubAuthNotice,
@@ -91,10 +89,21 @@ import {
   loadCodingChatHistory,
 } from "./coding-chat-history";
 import { codingChatSkillPromptLines } from "./coding-chat-skills";
-import { settledCodingSandboxIdleTimeoutMs } from "./coding-sandbox-lifecycle";
+import { createSteeringChannel } from "./coding-chat-steering";
+import {
+  codingSandboxTemplate,
+  settledCodingSandboxIdleTimeoutMs,
+} from "./coding-sandbox-lifecycle";
 import { CODING_WORKSPACE_SANDBOX_NETWORK } from "./coding-workspace-runtime";
 import { getDb } from "./db";
+import { reconcileDopplerSandboxAuth } from "./doppler-sandbox-auth";
 import type { RunnerEnv } from "./env";
+import {
+  createGitHubSandboxCapability,
+  type GitHubSandboxAuth,
+  type GitHubSandboxCapability,
+  prepareGitHubSandboxAuth,
+} from "./github-sandbox-auth";
 import {
   combineSandboxPromptFragments,
   reconcileInfisicalSandboxAuth,
@@ -300,12 +309,16 @@ export async function runCodexChatTurn(input: {
         userWorkosId: turn.userWorkosId,
         namespace: env.sandboxNamespace,
       },
-      template: env.codexE2bTemplate ?? "codex",
+      template: codingSandboxTemplate(env.codexE2bTemplates, session.sandboxSize),
       envs: {},
       metadata: managedSandboxMetadata({
         namespace: env.sandboxNamespace,
         ownerKind: "codex_chat_session",
         ownerId: session.id,
+        execution: {
+          backend: session.executionBackend,
+          version: session.executionBackendVersion,
+        },
         metadata: { user_id: turn.userWorkosId },
       }),
       network: CODING_WORKSPACE_SANDBOX_NETWORK,
@@ -369,6 +382,7 @@ export async function runCodexChatTurn(input: {
   let outcome: "settled" | "handed_off" = "settled";
   let leaseLost = false;
   let authCacheStaged = false;
+  let githubSandboxAuth: GitHubSandboxAuth | null = null;
   let pluginDataRuntime: PluginDataRuntime | null = null;
   let pluginMcpRuntime: PluginMcpLauncherRuntime | null = null;
   let pluginMcpQuiesced = false;
@@ -430,15 +444,33 @@ export async function runCodexChatTurn(input: {
       workspaceId: session.workspaceId,
       userWorkosId: turn.userWorkosId,
     });
+    const dopplerAuth = await reconcileDopplerSandboxAuth({
+      sandbox,
+      workspaceId: session.workspaceId,
+      userWorkosId: turn.userWorkosId,
+    });
     checkExternalAbort();
     executionStage = "load_github_auth";
     let github: GitHubCommandAuth | null = null;
     let githubNotice: string | null = null;
+    let githubCapability: GitHubSandboxCapability | null = null;
     try {
-      github = await loadGitHubAuthForUser(turn.userWorkosId, {
-        minimumValidityMs: githubSandboxTokenMinimumValidityMs(env.codexTimeoutMs),
-      });
+      github = await loadGitHubAuthForUser(turn.userWorkosId);
+      if (github) {
+        if (!input.canonicalAttemptId || !env.runnerPublicUrl || !session.workspaceId) {
+          throw new Error("GitHub broker is unavailable for this engine attempt.");
+        }
+        githubCapability = createGitHubSandboxCapability({
+          sessionId: session.id,
+          turnId: turn.id,
+          attemptId: input.canonicalAttemptId,
+          leaseId,
+          secret: env.internalToken,
+          timeoutMs: env.codexTimeoutMs,
+        });
+      }
     } catch (error) {
+      github = null;
       const needsReconnect = error instanceof GitHubUserAccessAuthError;
       logger.warn("GitHub sandbox auth unavailable; continuing the chat turn", {
         event: "opencompany.goat_codex_chat_github_auth_unavailable",
@@ -486,10 +518,12 @@ export async function runCodexChatTurn(input: {
       auth.kind === "api" ? auth.apiKeyValue : null,
       github?.githubToken ?? null,
       github?.githubAuthHeader ?? null,
+      ...(githubCapability?.redactionValues ?? []),
       env.internalToken,
       toolGatewayTicket,
       ...repositoryBootstrap.secretValues,
       ...infisicalAuth.redactionValues,
+      ...dopplerAuth.redactionValues,
     ]);
     const acpNormalizer = createAcpEventNormalizer({ engineName: "Codex" });
     const turnProjector = createExternalEngineProjector({
@@ -535,6 +569,15 @@ export async function runCodexChatTurn(input: {
       executionStage = "cancel_stale_interactions";
       await turnProjector.cancelPendingInteractions();
       checkExternalAbort();
+    }
+    if (github && githubCapability && env.runnerPublicUrl) {
+      executionStage = "prepare_github_auth";
+      githubSandboxAuth = await prepareGitHubSandboxAuth({
+        sandbox,
+        brokerUrl: env.runnerPublicUrl,
+        capability: githubCapability,
+        identity: github,
+      });
     }
     executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
@@ -682,6 +725,7 @@ export async function runCodexChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             previousProgress: summarizeCodexChatRecoveryProgress(initialParts),
             attachmentPaths: materializedAttachments.paths,
@@ -705,6 +749,7 @@ export async function runCodexChatTurn(input: {
               botPrompt,
               repositoryBootstrap.promptFragment,
               infisicalAuth.promptFragment,
+              dopplerAuth.promptFragment,
             ),
             attachmentPaths: materializedAttachments.paths,
             skillPaths: invokedSkillPaths,
@@ -780,14 +825,7 @@ export async function runCodexChatTurn(input: {
         codexHome: CODEX_CHAT_HOME,
         mcpServers,
         toolTimeoutMs: env.codexTimeoutMs,
-        ...(github
-          ? {
-              githubEnv: buildGitHubCommandEnv({
-                ...github,
-                toolCallId: turn.id,
-              }),
-            }
-          : {}),
+        ...(githubSandboxAuth ? { githubEnv: githubSandboxAuth.env } : {}),
       }),
       model: session.model || env.codexModel,
       reasoningEffort,
@@ -857,6 +895,13 @@ export async function runCodexChatTurn(input: {
           timeoutMs: env.codexTimeoutMs,
           checkAbort,
         }),
+      ...createSteeringChannel({
+        engine: "codex",
+        runId: turn.id,
+        leaseId,
+        leaseOwner,
+        onRuntimeEvents: (events) => turnProjector.push(events),
+      }),
     });
     if (taskContext) await checkAbort(true);
     const acpSummary = acpNormalizer.summary();
@@ -1086,6 +1131,7 @@ export async function runCodexChatTurn(input: {
       }
     }
   } finally {
+    if (githubSandboxAuth && outcome !== "handed_off") await githubSandboxAuth.dispose();
     if (pluginDataRuntime) {
       await pluginDataRuntime.release().catch((error) => {
         captureException(error, {
@@ -1773,12 +1819,16 @@ export async function updateCodexChatSessionIfLeaseHeld(input: {
     SET ${input.setSql}
     WHERE session.id = ${input.turn.codexChatSessionId}
       AND session.user_workos_id = ${input.turn.userWorkosId}
+      AND session.execution_backend = 'runner_attached'
+      AND session.execution_backend_version = 1
       AND EXISTS (
         SELECT 1
         FROM goat.codex_chat_turns AS turn
         WHERE turn.id = ${input.turn.id}
           AND turn.user_workos_id = ${input.turn.userWorkosId}
           AND turn.codex_chat_session_id = session.id
+          AND turn.execution_backend = session.execution_backend
+          AND turn.execution_backend_version = session.execution_backend_version
           AND turn.lease_id = ${input.leaseId}
           AND turn.lease_owner = ${input.leaseOwner}
           AND turn.status = 'running'
@@ -1800,6 +1850,8 @@ export async function markCodexChatSandboxTimeoutArmed(input: {
     SET sandbox_timeout_armed_at = ${new Date()}
     WHERE id = ${input.sessionId}
       AND user_workos_id = ${input.userWorkosId}
+      AND execution_backend = 'runner_attached'
+      AND execution_backend_version = 1
       AND sandbox_id = ${input.sandboxId}
       AND status IN ('idle', 'failed', 'interrupted', 'closed')
   `);
@@ -1824,6 +1876,8 @@ export async function claimCodexChatRecovery(input: {
         updated_at = ${new Date()}
     WHERE turn.id = ${input.turn.id}
       AND turn.user_workos_id = ${input.turn.userWorkosId}
+      AND turn.execution_backend = 'runner_attached'
+      AND turn.execution_backend_version = 1
       AND turn.lease_id = ${input.leaseId}
       AND turn.lease_owner = ${input.leaseOwner}
       AND turn.status = 'running'
@@ -1906,7 +1960,7 @@ function buildCodexChatTask(input: {
     "You are Codex running in a persistent cloud sandbox for an ongoing chat with a user.",
     "The sandbox and its files persist across messages in this chat session, so you can build on earlier work.",
     input.githubAvailable
-      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Clone repositories into the working directory only when the user asks you to work on one."
+      ? `GitHub authentication is managed automatically for gh and HTTPS git commands. Use gh api for GitHub API requests; GH_TOKEN is a local relay credential and cannot authenticate direct requests to GitHub. Clone repositories under the working directory (${CODEX_CHAT_WORKDIR}) only when the user asks you to work on one. Keep development servers inside that directory so Preview can detect them.`
       : null,
     input.repositoryBootstrapPrompt || null,
     input.brainAvailable
@@ -1963,7 +2017,7 @@ function buildCodexChatRecoveryTask(input: {
     "The previous runner process died while handling this same user message. Continue from the durable sandbox, filesystem, git state, ACP session, and persisted progress below instead of starting over.",
     "First inspect the current filesystem, git state, and any relevant external state. Do not repeat completed work or rerun side-effecting commands until inspection proves that it is necessary.",
     input.githubAvailable
-      ? "GitHub authentication is available through GH_TOKEN and git HTTPS extraheader auth. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
+      ? "GitHub authentication is managed automatically for gh and HTTPS git commands. Use gh api for GitHub API requests; GH_TOKEN is a local relay credential and cannot authenticate direct requests to GitHub. Before pushing, opening a PR, or mutating GitHub, inspect the current remote/PR state so recovery is idempotent."
       : null,
     input.repositoryBootstrapPrompt || null,
     input.brainAvailable

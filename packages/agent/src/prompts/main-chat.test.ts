@@ -75,9 +75,36 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).not.toContain("<action_sources>");
   });
 
+  it("never offers one-off task delegation, with or without workflows", () => {
+    const withoutWorkflows = createProductChatSystemPrompt();
+    const withWorkflows = createProductChatSystemPrompt({
+      workflows: [
+        {
+          id: "customer-interview-synthesis",
+          name: "Customer interview synthesis",
+          description: "Synthesize confirmed interview findings.",
+        },
+      ],
+    });
+
+    for (const prompt of [withoutWorkflows, withWorkflows]) {
+      expect(prompt).not.toContain("start_task");
+      expect(prompt).not.toContain("still call the task tool instead of refusing");
+      expect(prompt).toContain("You cannot start a one-off task");
+      expect(prompt).toContain(
+        "never claim work is running in the background and never promise to follow up later",
+      );
+    }
+    expect(withoutWorkflows).toContain(
+      "Handle the user's request directly in this chat when possible.",
+    );
+    expect(withWorkflows).toContain(
+      "except when they explicitly ask to start an available workflow",
+    );
+  });
+
   it("advertises active workflows with explicit-only launch guidance", () => {
     const prompt = createProductChatSystemPrompt({
-      taskToolsEnabled: false,
       workflows: [
         {
           id: "customer-interview-synthesis",
@@ -158,7 +185,7 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).toContain("one-off approval card");
     expect(prompt).toContain("<wiki_fill>");
     expect(prompt).toContain("Survey breadth before depth");
-    expect(prompt).toContain("exception to normal task routing");
+    expect(prompt).toContain("Do this in the open even though it is multi-step");
     expect(prompt).toContain("nextCursor or nextPageToken");
     expect(prompt).toContain("[[source:provider:id]]");
     expect(prompt).toContain("summarize what you saved");
@@ -204,10 +231,9 @@ describe("createProductChatSystemPrompt integrations", () => {
     expect(prompt).not.toContain("<wiki_fill>");
   });
 
-  it("keeps multi-step action research in chat when task tools are disabled", () => {
+  it("keeps multi-step action research in chat", () => {
     const prompt = createProductChatSystemPrompt({
       connectedIntegrations: CONNECTED_INTEGRATIONS,
-      taskToolsEnabled: false,
     });
     expect(prompt).toContain("Choose the lightest path");
     expect(prompt).toContain("Multi-step and cross-source research may stay in chat");

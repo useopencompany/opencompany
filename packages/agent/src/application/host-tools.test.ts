@@ -3,6 +3,7 @@ import {
   type ChatHostContext,
   type ChatHostToolServiceDependencies,
   executeChatHostToolService,
+  workflowCommandIdempotencyKey,
   workspaceSkillIdempotencyKey,
 } from "./host-tools";
 
@@ -13,19 +14,63 @@ const context: ChatHostContext = {
   workspaceName: "Analytical Engines",
   conversationId: "conversation_1",
   messageId: "message_1",
-  brainRef: null,
   email: "ada@example.test",
   firstName: "Ada",
   lastName: "Lovelace",
   timezone: "Europe/London",
-  taskToolsEnabled: true,
+  automationToolsEnabled: true,
   skillToolsEnabled: true,
+  slackChannelEnabled: false,
   subagentsEnabled: false,
-  legacyBrainEnabled: false,
 };
 
 describe("opencompany Chat Task host tools", () => {
-  it("does not advertise task delegation or schedules in a task conversation", async () => {
+  it("only exposes and accepts the Slack send tool for a workflow run with Slack turned on", async () => {
+    const postSlackMessage = vi.fn(async () => ({ deliveryId: "delivery_1" }));
+    const post = (slackChannelEnabled: boolean) =>
+      executeChatHostToolService({
+        command: {
+          operation: "post_slack_message",
+          sessionId: "runtime_1",
+          runId: "run_1",
+          input: { channel: "#product", text: "Done.", messageKey: "summary" },
+        },
+        dependencies: testDependencies({
+          loadContext: vi.fn(async () => ({
+            ...context,
+            taskConversation: true,
+            slackChannelEnabled,
+          })),
+          postSlackMessage,
+        }),
+      });
+
+    await expect(post(false)).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("workflows that have Slack turned on"),
+    });
+    expect(postSlackMessage).not.toHaveBeenCalled();
+
+    await expect(post(true)).resolves.toMatchObject({ ok: true });
+    expect(postSlackMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run_1",
+        actorId: "user_1",
+        post: { channel: "#product", text: "Done.", messageKey: "summary" },
+      }),
+    );
+
+    await expect(
+      executeChatHostToolService({
+        command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+        dependencies: testDependencies({
+          loadContext: vi.fn(async () => ({ ...context, slackChannelEnabled: true })),
+        }),
+      }),
+    ).resolves.toMatchObject({ ok: true, result: { slackChannelEnabled: true } });
+  });
+
+  it("does not advertise task delegation in a task conversation", async () => {
     const dependencies = testDependencies({
       loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
     });
@@ -37,10 +82,9 @@ describe("opencompany Chat Task host tools", () => {
       }),
     ).resolves.toMatchObject({
       ok: true,
-      result: { taskToolsEnabled: false, workflows: [], recurringSchedules: [] },
+      result: { automationToolsEnabled: false, workflows: [] },
     });
     expect(dependencies.listWorkflowCatalog).not.toHaveBeenCalled();
-    expect(dependencies.listSchedules).not.toHaveBeenCalled();
   });
 
   it("carries the member's subagent preference, except inside a task conversation", async () => {
@@ -72,46 +116,56 @@ describe("opencompany Chat Task host tools", () => {
     ).resolves.toMatchObject({ ok: true, result: { subagentsEnabled: false } });
   });
 
-  it.each([
-    "start_task",
-    "start_workflow",
-    "schedule_task",
-    "edit_task_schedule",
-    "delete_task_schedule",
-  ] as const)("rejects direct %s calls from tasks before any side effect", async (operation) => {
+  it("does not allow management calls to bypass the one-run-per-turn dispatcher", async () => {
+    const manageWorkflows = vi.fn();
     const dependencies = testDependencies({
-      loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+      loadContext: vi.fn(async () => context),
+      manageWorkflows,
     });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation,
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            taskConversation: false,
-            name: "Research",
-            prompt: "Research the requested topic.",
-            model: "moonshotai/kimi-k2.6",
-            engine: "opencompany",
-            workflowId: "research",
-            cron: "0 9 * * *",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: "Tasks cannot create other tasks or manage task schedules. Use a main chat instead.",
+    const result = await executeChatHostToolService({
+      command: {
+        operation: "workflows",
+        sessionId: "runtime_1",
+        runId: "run_1",
+        input: { command: "run", workflowId: "monitor", prompt: "Run" },
+      },
+      dependencies,
     });
-    expect(dependencies.createTask).not.toHaveBeenCalled();
-    expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
-    expect(dependencies.createSchedule).not.toHaveBeenCalled();
-    expect(dependencies.listSchedules).not.toHaveBeenCalled();
-    expect(dependencies.updateSchedule).not.toHaveBeenCalled();
-    expect(dependencies.deleteSchedule).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("run dispatcher") });
+    expect(manageWorkflows).not.toHaveBeenCalled();
   });
+
+  it.each(["start_workflow", "workflows"] as const)(
+    "rejects direct %s calls from tasks before any side effect",
+    async (operation) => {
+      const dependencies = testDependencies({
+        loadContext: vi.fn(async () => ({ ...context, taskConversation: true })),
+      });
+
+      await expect(
+        executeChatHostToolService({
+          command: {
+            operation,
+            sessionId: "runtime_1",
+            runId: "run_1",
+            input: {
+              taskConversation: false,
+              name: "Research",
+              prompt: "Research the requested topic.",
+              model: "moonshotai/kimi-k2.6",
+              engine: "opencompany",
+              workflowId: "research",
+            },
+          },
+          dependencies,
+        }),
+      ).resolves.toEqual({
+        ok: false,
+        error: "Tasks cannot start workflows. Use a main chat instead.",
+      });
+      expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
     const dependencies = testDependencies({
@@ -427,118 +481,6 @@ describe("opencompany Chat Task host tools", () => {
     expect(updateWorkspaceSkill).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { model: "moonshotai/kimi-k2.6", engine: "opencompany" },
-    { model: "openai/gpt-6-astra", engine: "codex" },
-  ])("delegates $model tasks through the authenticated Task creator", async ({ model, engine }) => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Market research",
-            prompt: "Research the market.",
-            model,
-            engine,
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({ ok: true, result: taskResult });
-
-    expect(createTask).toHaveBeenCalledWith({
-      actorId: "user_1",
-      workspaceId: "workspace_1",
-      brainRef: null,
-      name: "Market research",
-      prompt: "Research the market.",
-      model,
-      engine,
-    });
-  });
-
-  it("passes a Brain to created Tasks only when the workspace enables the legacy feature", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({
-      loadContext: vi.fn(async () => ({ ...context, legacyBrainEnabled: true })),
-      createTask,
-    });
-
-    await executeChatHostToolService({
-      command: {
-        operation: "start_task",
-        sessionId: "runtime_1",
-        runId: "run_1",
-        input: {
-          name: "Market research",
-          prompt: "Research the market.",
-          model: "moonshotai/kimi-k2.6",
-          engine: "opencompany",
-        },
-      },
-      dependencies,
-    });
-
-    expect(createTask).toHaveBeenCalledWith(expect.objectContaining({ brainRef: "brain_1" }));
-  });
-
-  it("rejects a task model that the selected coding engine cannot run", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Review code",
-            prompt: "Review the code.",
-            model: "anthropic/claude-sonnet-5",
-            engine: "codex",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: 'Model "anthropic/claude-sonnet-5" is not available for the Codex engine.',
-    });
-    expect(createTask).not.toHaveBeenCalled();
-  });
-
-  it("rejects rollout-gated task models at the host boundary", async () => {
-    const createTask = vi.fn(async () => taskResult);
-    const dependencies = testDependencies({ createTask });
-
-    await expect(
-      executeChatHostToolService({
-        command: {
-          operation: "start_task",
-          sessionId: "runtime_1",
-          runId: "run_1",
-          input: {
-            name: "Analyze launch",
-            prompt: "Analyze the launch.",
-            model: "openai/gpt-6-astra",
-            engine: "opencompany",
-          },
-        },
-        dependencies,
-      }),
-    ).resolves.toEqual({
-      ok: false,
-      error: 'Unsupported model "openai/gpt-6-astra".',
-    });
-    expect(createTask).not.toHaveBeenCalled();
-  });
-
   it("delegates an agent-created Workflow invocation through the Workflow Task creator", async () => {
     const createWorkflowTask = vi.fn(async () => taskResult);
     const dependencies = testDependencies({ createWorkflowTask });
@@ -560,42 +502,6 @@ describe("opencompany Chat Task host tools", () => {
       workspaceId: "workspace_1",
       mention: { id: "weekly-report" },
       description: "Prepare this week's report.",
-    });
-  });
-
-  it("binds an agent-created schedule to the active workspace", async () => {
-    const createSchedule = vi.fn(async () => ({
-      id: "schedule_1",
-      name: "Daily briefing",
-      cron: "0 9 * * *",
-      timezone: "Europe/London",
-      nextRunAt: new Date("2026-08-12T08:00:00.000Z"),
-      prompt: "Prepare the briefing.",
-    }));
-    const dependencies = testDependencies({ createSchedule });
-
-    await executeChatHostToolService({
-      command: {
-        operation: "schedule_task",
-        sessionId: "runtime_1",
-        runId: "run_1",
-        input: {
-          name: "Daily briefing",
-          cron: "0 9 * * *",
-          prompt: "Prepare the briefing.",
-        },
-      },
-      dependencies,
-    });
-
-    expect(createSchedule).toHaveBeenCalledWith({
-      actorId: "user_1",
-      workspaceId: "workspace_1",
-      name: "Daily briefing",
-      sourceDescription: "",
-      cron: "0 9 * * *",
-      timezone: "Europe/London",
-      prompt: "Prepare the briefing.",
     });
   });
 
@@ -718,8 +624,6 @@ function testDependencies(
 ): ChatHostToolServiceDependencies {
   return {
     loadContext: vi.fn(async () => context),
-    listBrains: vi.fn(async () => [{ id: "brain_1", slug: "home" }]),
-    defaultBrainSlug: "home",
     browserProfilesAvailable: () => false,
     createAgentSession: vi.fn(),
     endAgentSession: vi.fn(),
@@ -732,11 +636,6 @@ function testDependencies(
     manageWorkspaceSkills: vi.fn(),
     createWorkspaceSkill: vi.fn(),
     updateWorkspaceSkill: vi.fn(),
-    createTask: vi.fn(async () => taskResult),
-    listSchedules: vi.fn(async () => []),
-    createSchedule: vi.fn(),
-    updateSchedule: vi.fn(),
-    deleteSchedule: vi.fn(),
     createWorkflowTask: vi.fn(async () => taskResult),
     listWorkflowCatalog: vi.fn(async () => []),
     executeBrowserTool: vi.fn(),
@@ -744,3 +643,26 @@ function testDependencies(
     ...overrides,
   };
 }
+
+describe("workflow creation identity", () => {
+  it("replays a model retry with a different tool-call ID and equivalent defaults", () => {
+    const first = workflowCommandIdempotencyKey("turn_1", "call_1", {
+      command: "create",
+      name: "Monitor",
+    });
+    expect(
+      workflowCommandIdempotencyKey("turn_1", "call_2", {
+        name: "Monitor",
+        scope: "personal",
+        status: "draft",
+        command: "create",
+      }),
+    ).toBe(first);
+    expect(
+      workflowCommandIdempotencyKey("turn_2", "call_1", { command: "create", name: "Monitor" }),
+    ).not.toBe(first);
+    expect(
+      workflowCommandIdempotencyKey("turn_1", "call_2", { command: "create", name: "Other" }),
+    ).not.toBe(first);
+  });
+});

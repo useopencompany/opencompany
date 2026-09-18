@@ -38,6 +38,22 @@ If two installed Skills have the same name, a standalone Skill takes precedence 
 Skill. Between Plugins, the alphabetically earlier Plugin name takes precedence. Settings reports
 these collisions so you can identify why a Skill is hidden.
 
+## Paid Plugins
+
+Some official Plugins are paid. Their catalog entry is marked **Paid**, and their Plugin page lists
+what each action costs before you install anything. Lead research works this way: it finds
+companies and people matching your ICP and the work emails to reach them.
+
+A paid Plugin needs no account to connect. Usage is charged to your workspace credits at the price
+shown, and you only pay for results — a lookup that finds nothing, or that fails, is free. Prices
+are fixed by the installed package version, so an updated package cannot change what you are paying
+until you update it.
+
+A workspace admin can set a **daily spending limit** on the Plugin page. It caps what the Plugin
+can spend across the whole workspace each UTC day. A lookup that would pass the cap is refused and
+the agent says so; it is not offered for approval. The per-chat spending limit in
+**Settings → Capabilities** still applies on top.
+
 ## Permissions and account ownership
 
 Plugins and connected accounts are personal. Each teammate installs their own plugins and connects
@@ -84,7 +100,7 @@ connection separately when you want to revoke account access.
 
 ## Convex
 
-Install Convex from **Settings → Plugins**, then connect it using a deployment-scoped deploy key
+Install Convex from **Plugins** in the sidebar, then connect it using a deployment-scoped deploy key
 from your Convex deployment settings. Use a key beginning with `dev:` or `prod:`. Grant the key
 `deployment:functions:runInternalQueries` and `deployment:data:view`; opencompany validates both
 function and schema access before saving it. Project-wide tokens and self-hosted endpoints are not
@@ -106,3 +122,23 @@ opencompany encrypts the key and keeps it server-side. Its hosted bridge runs th
 Convex CLI MCP server. Requests have a 30-second execution limit and a bounded response size;
 use smaller pages or narrower queries for large datasets. Uninstalling the plugin disables tools;
 disconnect the account separately to revoke opencompany's saved connection.
+
+
+## Dash0
+
+Install Dash0 from **Plugins** in the sidebar, then select **Connect** and authorize your Dash0
+account. opencompany automatically follows Dash0’s organization region across **AWS Ireland**,
+**AWS Germany**, **AWS Oregon**, and **GCP Netherlands**. If discovery previously failed with
+`organization_region_mismatch`, select **Refresh** on the plugin page; an existing connection
+does not need to be reinstalled.
+
+Telemetry queries and Agent0 investigation reads start **Ask** because they can expose private
+operational data. **Run paid Agent0 investigations** starts **Off**. Enabling it permits requests
+that spend Dash0 credits and may use outbound network access; review each request and Dash0's
+Agent0 settings first. Other discovered tools require confirmation, including management tools.
+
+OAuth credentials are encrypted and remain server-side. Regional routing accepts only Dash0’s
+explicit region-mismatch response and forwards MCP traffic only to four reviewed Dash0 endpoints.
+It never follows an arbitrary URL or HTTP redirect, and OAuth refresh keeps its original issuer.
+Uninstalling removes tool availability; disconnect the account separately to remove the saved
+connection. You can also revoke access in Dash0's **User Settings → Applications**.

@@ -40,6 +40,8 @@ const mocks = vi.hoisted(() => ({
   loadNeonConnection: vi.fn(),
   getNotionState: vi.fn(),
   getSupabaseState: vi.fn(),
+  getTodoistState: vi.fn(),
+  loadTodoistConnection: vi.fn(),
   getResendState: vi.fn(),
   loadNotionConnection: vi.fn(),
   loadSupabaseConnection: vi.fn(),
@@ -55,7 +57,9 @@ const mocks = vi.hoisted(() => ({
   getSlackState: vi.fn(),
   loadSlackConnection: vi.fn(),
   getSigNozState: vi.fn(),
+  getDash0State: vi.fn(),
   loadSigNozConnection: vi.fn(),
+  loadDash0Connection: vi.fn(),
   getStripeState: vi.fn(),
   loadStripeConnection: vi.fn(),
   getXState: vi.fn(),
@@ -177,6 +181,11 @@ vi.mock("./integrations/notion-mcp", () => ({
   getNotionMcpIntegrationState: mocks.getNotionState,
   loadNotionMcpWorkerConnection: mocks.loadNotionConnection,
 }));
+vi.mock("./integrations/todoist-mcp", () => ({
+  TODOIST_MCP_ENDPOINT_URL: "https://ai.todoist.net/mcp",
+  getTodoistMcpIntegrationState: mocks.getTodoistState,
+  loadTodoistMcpWorkerConnection: mocks.loadTodoistConnection,
+}));
 vi.mock("./integrations/supabase-mcp", () => ({
   SUPABASE_MCP_ENDPOINT_URL: "https://mcp.supabase.com/mcp",
   getSupabaseMcpIntegrationState: mocks.getSupabaseState,
@@ -201,6 +210,11 @@ vi.mock("./integrations/signoz-mcp", () => ({
   SIGNOZ_MCP_ENDPOINT_URL: "https://mcp.us.signoz.cloud/mcp",
   getSigNozIntegrationState: mocks.getSigNozState,
   loadSigNozMcpWorkerConnection: mocks.loadSigNozConnection,
+}));
+vi.mock("./integrations/dash0-mcp", () => ({
+  DASH0_MCP_ENDPOINT_URL: "https://api.eu-west-1.aws.dash0.com/mcp",
+  getDash0IntegrationState: mocks.getDash0State,
+  loadDash0McpWorkerConnection: mocks.loadDash0Connection,
 }));
 vi.mock("./integrations/stripe", () => ({
   STRIPE_MCP_ENDPOINT_URL: "https://mcp.stripe.com",
@@ -873,6 +887,51 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
+  it("binds Dash0 credentials only to the reviewed AWS Ireland endpoint", async () => {
+    mocks.listRegistrations.mockResolvedValueOnce([
+      record({
+        pluginName: "dash0",
+        pluginLabel: "dash0",
+        pluginDescription: "Dash0 plugin tools.",
+        connectionProvider: "dash0",
+        server: {
+          name: "dash0",
+          type: "streamable-http",
+          url: "https://api.eu-west-1.aws.dash0.com/mcp",
+          headers: {},
+        },
+        refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+      }),
+    ]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:dash0:dash0",
+        connectionProvider: "dash0",
+        getState: mocks.getDash0State,
+        loadConnection: mocks.loadDash0Connection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://api.us-west-2.aws.dash0.com/mcp",
+      "https://api.eu-west-1.aws.dash0.com.evil.example/mcp",
+      "https://api.eu-west-1.aws.dash0.com/mcp?target=other",
+      "https://api.eu-west-1.aws.dash0.com/other",
+      "http://api.eu-west-1.aws.dash0.com/mcp",
+      "https://user:password@api.eu-west-1.aws.dash0.com/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        record({
+          pluginName: "dash0",
+          connectionProvider: "dash0",
+          server: { name: "dash0", type: "streamable-http", url, headers: {} },
+        }),
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
+  });
+
   it("binds PostHog credentials only to the reviewed tool-filtered endpoint", async () => {
     const endpoint =
       "https://mcp.posthog.com/mcp?mode=tools&tools=dashboards-get-all,dashboard-get,dashboard-insights-run,insights-list,insight-get,insight-query,read-data-schema,query-trends,query-funnel,query-retention,query-paths,query-stickiness,query-lifecycle,insight-create";
@@ -1194,6 +1253,46 @@ describe("plugin gateway registration cache", () => {
       },
     ]);
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+  });
+
+  it("binds Todoist OAuth credentials only to Todoist's exact hosted MCP endpoint", async () => {
+    const todoistRecord = record({
+      pluginName: "todoist",
+      pluginLabel: "todoist",
+      pluginDescription: "Todoist plugin tools.",
+      connectionProvider: "todoist",
+      server: {
+        name: "todoist",
+        type: "streamable-http",
+        url: "https://ai.todoist.net/mcp",
+        headers: {},
+      },
+      refreshAfter: new Date("2026-08-26T13:00:00.000Z"),
+    });
+    mocks.listRegistrations.mockResolvedValueOnce([todoistRecord]);
+
+    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+      expect.objectContaining({
+        source: "plugin:todoist:todoist",
+        connectionProvider: "todoist",
+        getState: mocks.getTodoistState,
+        loadConnection: mocks.loadTodoistConnection,
+      }),
+    ]);
+
+    for (const url of [
+      "https://ai.todoist.net.evil.example/mcp",
+      "https://evil.example/mcp",
+      "http://ai.todoist.net/mcp",
+      "https://ai.todoist.net/other",
+      "https://ai.todoist.net/mcp?token=leak",
+      "https://attacker@ai.todoist.net/mcp",
+    ]) {
+      mocks.listRegistrations.mockResolvedValueOnce([
+        { ...todoistRecord, server: { ...todoistRecord.server, url } },
+      ]);
+      await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
+    }
   });
 
   it("binds Supabase OAuth credentials only to Supabase's exact hosted MCP endpoint", async () => {

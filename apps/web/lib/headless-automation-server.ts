@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createApiClient, type TaskScheduleDto, type WorkflowDto } from "@opencompany/protocol";
+import { createApiClient, type WorkflowDto, type WorkflowMemoryDto } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
 export async function listHeadlessWorkflows(): Promise<WorkflowDto[]> {
@@ -28,20 +28,15 @@ export async function getHeadlessWorkflow(workflowId: string): Promise<WorkflowD
   return (await response.json()).data;
 }
 
-export async function listHeadlessTaskSchedules(): Promise<TaskScheduleDto[]> {
-  const client = await serverAutomationClient();
-  const schedules: TaskScheduleDto[] = [];
-  let cursor: string | undefined;
-  do {
-    const response = await client.v1.schedules.$get({
-      query: { limit: "100", ...(cursor ? { cursor } : {}) },
-    });
-    if (!response.ok) throw await serverResponseError(response, "Recurring Task loading failed");
-    const page = await response.json();
-    schedules.push(...page.data);
-    cursor = page.nextCursor ?? undefined;
-  } while (cursor);
-  return schedules;
+export async function getHeadlessWorkflowMemory(
+  workflowId: string,
+): Promise<WorkflowMemoryDto | null> {
+  const response = await (await serverAutomationClient()).v1.workflows[":workflowId"].memory.$get({
+    param: { workflowId },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw await serverResponseError(response, "Workflow memory loading failed");
+  return (await response.json()).data;
 }
 
 async function serverAutomationClient() {

@@ -26,14 +26,16 @@ describe("persistent bot storage", () => {
         workos_user_id text PRIMARY KEY,
         bots_enabled boolean NOT NULL DEFAULT false,
         timezone text NOT NULL DEFAULT 'UTC',
-        task_spawning_enabled boolean NOT NULL DEFAULT false,
         task_view_mode text NOT NULL DEFAULT 'board',
         task_time_range text NOT NULL DEFAULT '7d',
         auto_model_routing_enabled boolean NOT NULL DEFAULT false,
+        approve_for_me_enabled boolean NOT NULL DEFAULT false,
         review_inbox_enabled boolean NOT NULL DEFAULT false,
         sidebar_projects_enabled boolean NOT NULL DEFAULT false,
         subagents_enabled boolean NOT NULL DEFAULT false,
         past_session_access_enabled boolean NOT NULL DEFAULT false,
+        imessage_enabled boolean NOT NULL DEFAULT false,
+        whatsapp_enabled boolean NOT NULL DEFAULT false,
         updated_at timestamptz NOT NULL DEFAULT now()
       );
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
@@ -76,7 +78,6 @@ describe("persistent bot storage", () => {
 
     expect(await settings.updatePreferences(actor, { botsEnabled: true })).toMatchObject({
       botsEnabled: true,
-      taskSpawningEnabled: false,
     });
     await service.create(actor, bot);
     expect(await service.list(actor)).toEqual([bot]);

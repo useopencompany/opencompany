@@ -23,12 +23,14 @@ export type ActionProviderId =
   | "neon"
   | "notion"
   | "supabase"
+  | "todoist"
   | "resend"
   | "betterstack"
   | "convex"
   | "render"
   | "vercel"
   | "signoz"
+  | "dash0"
   | "fathom"
   | "infisical"
   | "x_account";
@@ -191,6 +193,12 @@ export type ResolvedAction = ActionDescriptor & {
     capabilityId: CapabilityId;
     label: string;
     integrationIds: string[];
+    /**
+     * The connection-scoped tool key this action maps to, when it has one. Chat's standing
+     * permission writes this key so approving one action cannot widen its whole capability
+     * group. Absent for actions that are not a single discovered MCP tool.
+     */
+    toolId?: string;
   };
   execute: (params: Record<string, unknown>, context: ActionExecuteContext) => Promise<unknown>;
 };

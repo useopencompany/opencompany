@@ -14,6 +14,7 @@ export type PluginConnectionProvider = PersonalAccountProvider | "posthog" | "st
 
 const PLUGIN_TOOL_ACCESS_LABEL = {
   attio: "Attio",
+  convex: "Convex",
   hubspot: "HubSpot",
   jamie: "Jamie",
   posthog: "PostHog",
@@ -72,6 +73,7 @@ export function pluginAccountsFromState(
           statusReason: connection.statusReason,
           scopes: [],
           capabilityModes: connection.capabilityModes,
+          toolModes: connection.toolModes,
         }
       : null;
     return {
@@ -93,12 +95,14 @@ export function pluginAccountsFromState(
     config.connectionProvider === "neon" ||
     config.connectionProvider === "notion" ||
     config.connectionProvider === "supabase" ||
+    config.connectionProvider === "todoist" ||
     config.connectionProvider === "resend" ||
     config.connectionProvider === "posthog" ||
     config.connectionProvider === "convex" ||
     config.connectionProvider === "render" ||
     config.connectionProvider === "vercel" ||
     config.connectionProvider === "signoz" ||
+    config.connectionProvider === "dash0" ||
     config.connectionProvider === "slack" ||
     config.connectionProvider === "stripe" ||
     config.connectionProvider === "x_account"
@@ -111,6 +115,7 @@ export function pluginAccountsFromState(
     // so the tool connection comes from the provider state instead.
     if (
       config.connectionProvider === "attio" ||
+      config.connectionProvider === "convex" ||
       config.connectionProvider === "posthog" ||
       config.connectionProvider === "hubspot" ||
       config.connectionProvider === "jamie"
@@ -131,6 +136,7 @@ export function pluginAccountsFromState(
               statusReason: connection.statusReason,
               scopes: [],
               capabilityModes: connection.capabilityModes,
+              toolModes: connection.toolModes,
             }
           : null;
       return {
@@ -184,6 +190,7 @@ export function pluginAccountsFromState(
         statusReason: state.linear.statusReason,
         scopes: [],
         capabilityModes: state.linear.capabilityModes,
+        toolModes: state.linear.toolModes,
       }
     : null;
   return {

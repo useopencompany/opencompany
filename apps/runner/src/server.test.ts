@@ -45,7 +45,7 @@ const env = {
   dictationFinalModel: undefined,
   exaApiKey: undefined,
   browserEnabled: false,
-  codexE2bTemplate: undefined,
+  codexE2bTemplates: { small: undefined, standard: undefined, large: undefined },
   sandboxNamespace: "test",
   codexTimeoutMs: 1_200_000,
   codexModel: "gpt-5.5",
@@ -125,65 +125,24 @@ describe("runner execution transport surface", () => {
   });
 });
 
-describe("Slack answer-bot event dispatch", () => {
-  it("requires internal auth and enqueues a versioned event command", async () => {
-    const enqueue = vi.fn();
-    const server = createServer(workerEnv, { slackBotEvents: { enqueue } });
+describe("retired Slack bot dispatch", () => {
+  it("requires internal auth and rejects legacy bot commands", async () => {
+    const server = createServer(workerEnv);
     servers.push(server);
-    const payload = {
-      schemaVersion: 1,
-      eventId: "Ev123",
-      claimId: "gsbec_claim",
-      kind: "mention",
-      input: {
-        teamId: "T123",
-        channelId: "C123",
-        messageTs: "1784196000.000100",
-        threadTs: null,
-        text: "<@B123> what changed?",
-        slackUserId: "U123",
-      },
+    const request = {
+      method: "POST" as const,
+      url: "/internal/goat/slack-bot/events",
+      payload: { kind: "mention" },
     };
-
-    const unauthorized = await server.inject({
-      method: "POST",
-      url: "/internal/goat/slack-bot/events",
-      payload,
-    });
-    expect(unauthorized.statusCode).toBe(401);
-
-    const response = await server.inject({
-      method: "POST",
-      url: "/internal/goat/slack-bot/events",
-      headers: { authorization: `Bearer ${workerEnv.internalToken}` },
-      payload,
-    });
-    expect(response.statusCode).toBe(202);
-    expect(enqueue).toHaveBeenCalledWith(payload);
-  });
-
-  it("rejects malformed commands and disabled workers", async () => {
-    const enqueue = vi.fn();
-    const disabled = createServer(env, { slackBotEvents: { enqueue } });
-    servers.push(disabled);
-    const disabledResponse = await disabled.inject({
-      method: "POST",
-      url: "/internal/goat/slack-bot/events",
-      headers: { authorization: `Bearer ${env.internalToken}` },
-      payload: { schemaVersion: 1 },
-    });
-    expect(disabledResponse.statusCode).toBe(503);
-
-    const enabled = createServer(workerEnv, { slackBotEvents: { enqueue } });
-    servers.push(enabled);
-    const invalid = await enabled.inject({
-      method: "POST",
-      url: "/internal/goat/slack-bot/events",
-      headers: { authorization: `Bearer ${workerEnv.internalToken}` },
-      payload: { schemaVersion: 1 },
-    });
-    expect(invalid.statusCode).toBe(400);
-    expect(enqueue).not.toHaveBeenCalled();
+    expect((await server.inject(request)).statusCode).toBe(401);
+    expect(
+      (
+        await server.inject({
+          ...request,
+          headers: { authorization: `Bearer ${workerEnv.internalToken}` },
+        })
+      ).statusCode,
+    ).toBe(410);
   });
 });
 

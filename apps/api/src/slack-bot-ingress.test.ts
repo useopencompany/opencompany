@@ -1,12 +1,16 @@
+vi.mock("@opencompany/db/session-subscriptions", () => ({
+  enqueueSlackDirectMessage: vi.fn(async () => 1),
+  enqueueSlackThreadReply: vi.fn(async () => 1),
+}));
+
 import { createHmac } from "node:crypto";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import { createSlackBotState } from "@opencompany/agent/integrations/slack-bot";
 import { connectSlackBotIntegration } from "@opencompany/db/integrations";
 import {
-  claimSlackBotEvent,
-  getSlackBotThreadParticipation,
-  releaseSlackBotEvent,
-} from "@opencompany/db/slack-bot";
+  enqueueSlackDirectMessage,
+  enqueueSlackThreadReply,
+} from "@opencompany/db/session-subscriptions";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerClient } from "./runner-client";
@@ -21,10 +25,7 @@ vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   connectSlackBotIntegration: vi.fn(),
 }));
 vi.mock("@opencompany/db/slack-bot", () => ({
-  claimSlackBotEvent: vi.fn(),
-  getSlackBotThreadParticipation: vi.fn(async () => null),
   markSlackBotIntegrationStatusForTeam: vi.fn(async () => undefined),
-  releaseSlackBotEvent: vi.fn(async () => undefined),
 }));
 vi.mock("@opencompany/agent/integrations/slack", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -76,11 +77,8 @@ describe("Slack bot ingress", () => {
     vi.stubEnv("OPENCOMPANY_SLACK_BOT_CLIENT_SECRET", "slack-bot-secret");
     vi.stubEnv("OPENCOMPANY_SLACK_BOT_SIGNING_SECRET", "slack-bot-signing");
     vi.stubEnv("OPENCOMPANY_SLACK_BOT_STATE_SECRET", "slack-bot-state-secret");
-    vi.mocked(claimSlackBotEvent).mockResolvedValue({
-      eventId: "Ev123",
-      claimId: "gsbec_claim",
-    });
-    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue(null);
+    vi.mocked(enqueueSlackThreadReply).mockResolvedValue(1);
+    vi.mocked(enqueueSlackDirectMessage).mockResolvedValue(1);
   });
 
   afterEach(() => {
@@ -222,97 +220,94 @@ describe("Slack bot ingress", () => {
     );
   });
 
-  it("verifies, claims, and dispatches answer events to the runner", async () => {
-    const response = await ingress().webhook(
-      signedEventRequest({
-        type: "app_mention",
-        channel: "C123",
-        user: "U123",
-        ts: "1784196000.000100",
-        text: "<@B123> what changed?",
-      }),
-    );
-
+  const humanReply = {
+    type: "message",
+    channel: "C123",
+    channel_type: "channel",
+    user: "U123",
+    ts: "1784196000.000200",
+    thread_ts: "1784196000.000100",
+    text: "What are the DB implications?",
+  };
+  it("persists a signed reply before acknowledging Slack", async () => {
+    const response = await ingress().webhook(signedEventRequest(humanReply));
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true });
-    expect(claimSlackBotEvent).toHaveBeenCalledWith(
-      { eventId: "Ev123", teamId: "T123" },
-      sentinelDb,
-    );
-    expect(runnerRequest).toHaveBeenCalledWith(
-      "/internal/goat/slack-bot/events",
-      {
-        schemaVersion: 1,
+    expect(enqueueSlackThreadReply).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
         eventId: "Ev123",
-        claimId: "gsbec_claim",
-        kind: "mention",
-        input: {
-          teamId: "T123",
-          channelId: "C123",
-          messageTs: "1784196000.000100",
-          threadTs: null,
-          text: "<@B123> what changed?",
-          slackUserId: "U123",
-        },
-      },
-      { errorFormat: "error-message" },
-    );
-  });
-
-  it("releases a claim when runner dispatch fails while still acknowledging Slack", async () => {
-    runnerRequest.mockRejectedValueOnce(new Error("runner unavailable"));
-
-    const response = await ingress().webhook(
-      signedEventRequest({
-        type: "app_mention",
-        channel: "C123",
-        user: "U123",
-        ts: "1784196000.000100",
-        text: "<@B123> what changed?",
+        teamId: "T123",
+        threadTs: humanReply.thread_ts,
+        text: humanReply.text,
       }),
     );
-
-    expect(response.status).toBe(200);
-    expect(releaseSlackBotEvent).toHaveBeenCalledWith(
-      { eventId: "Ev123", claimId: "gsbec_claim" },
-      sentinelDb,
-    );
-  });
-
-  it("routes only known participating thread follow-ups", async () => {
-    const unknown = await ingress().webhook(
-      signedEventRequest({
-        type: "message",
-        channel: "C123",
-        channel_type: "channel",
-        user: "U123",
-        ts: "1784196000.000200",
-        thread_ts: "1784196000.000100",
-        text: "and what about churn?",
-      }),
-    );
-    await expect(unknown.json()).resolves.toEqual({ ok: true, ignored: true });
     expect(runnerRequest).not.toHaveBeenCalled();
+  });
+  it("returns 503 when persistence fails so Slack retries", async () => {
+    vi.mocked(enqueueSlackThreadReply).mockRejectedValueOnce(new Error("database unavailable"));
+    expect((await ingress().webhook(signedEventRequest(humanReply))).status).toBe(503);
+  });
+  it.each([
+    { type: "app_mention" },
+    { thread_ts: undefined },
+    { thread_ts: humanReply.ts },
+    { bot_id: "B123" },
+    { subtype: "message_changed" },
+    { files: [{}] },
+    { text: "" },
+    { channel_type: "group" },
+    { channel: "D123" },
+    { channel_type: "im" },
+  ])("ignores unsupported events %j", async (overrides) => {
+    const response = await ingress().webhook(signedEventRequest({ ...humanReply, ...overrides }));
+    expect(response.status).toBe(200);
+    expect(enqueueSlackThreadReply).not.toHaveBeenCalled();
+    expect(enqueueSlackDirectMessage).not.toHaveBeenCalled();
+    expect(runnerRequest).not.toHaveBeenCalled();
+  });
 
-    vi.mocked(getSlackBotThreadParticipation).mockResolvedValue({
-      integrationId: "gint_1",
-    });
-    const known = await ingress().webhook(
-      signedEventRequest({
-        type: "message",
-        channel: "C123",
-        channel_type: "channel",
-        user: "U123",
-        ts: "1784196000.000200",
-        thread_ts: "1784196000.000100",
-        text: "and what about churn?",
+  const directMessage = {
+    type: "message",
+    channel: "D123",
+    channel_type: "im",
+    user: "U123",
+    ts: "1784196000.000100",
+    text: "Where did last week's signups come from?",
+  };
+  it("queues a direct message as a session request before acknowledging Slack", async () => {
+    const response = await ingress().webhook(signedEventRequest(directMessage));
+    expect(response.status).toBe(200);
+    expect(enqueueSlackDirectMessage).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        eventId: "Ev123",
+        teamId: "T123",
+        channelId: "D123",
+        messageTs: directMessage.ts,
+        slackUserId: "U123",
+        text: directMessage.text,
       }),
     );
-    await expect(known.json()).resolves.toEqual({ ok: true });
-    expect(runnerRequest).toHaveBeenCalledWith(
-      "/internal/goat/slack-bot/events",
-      expect.objectContaining({ kind: "follow_up" }),
-      { errorFormat: "error-message" },
+    expect(enqueueSlackThreadReply).not.toHaveBeenCalled();
+  });
+  it("routes a reply inside a direct message thread to the existing session", async () => {
+    await ingress().webhook(
+      signedEventRequest({
+        ...directMessage,
+        ts: "1784196000.000200",
+        thread_ts: directMessage.ts,
+      }),
+    );
+    expect(enqueueSlackDirectMessage).not.toHaveBeenCalled();
+    expect(enqueueSlackThreadReply).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({ channelId: "D123", threadTs: directMessage.ts }),
+    );
+  });
+  it("acknowledges untracked threads and duplicate events without dispatching", async () => {
+    vi.mocked(enqueueSlackThreadReply).mockResolvedValueOnce(0);
+    await expect((await ingress().webhook(signedEventRequest(humanReply))).json()).resolves.toEqual(
+      { ok: true, accepted: 0 },
     );
   });
 

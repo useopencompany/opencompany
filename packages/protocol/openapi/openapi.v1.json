@@ -998,8 +998,26 @@
               "active"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
+          },
+          "slackChannel": {
+            "$ref": "#/components/schemas/WorkflowSlackChannel"
+          },
+          "createdByUserId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTrigger"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTrigger"
+            },
+            "maxItems": 20
           },
           "version": {
             "type": "integer",
@@ -1026,6 +1044,9 @@
           "description",
           "steps",
           "status",
+          "scope",
+          "slackChannel",
+          "createdByUserId",
           "trigger",
           "version",
           "archivedAt",
@@ -1071,6 +1092,35 @@
           "title",
           "model",
           "instructions"
+        ],
+        "additionalProperties": false
+      },
+      "WorkflowScope": {
+        "type": "string",
+        "enum": [
+          "personal",
+          "company"
+        ]
+      },
+      "WorkflowSlackChannel": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "avatarUrl": {
+            "type": "string",
+            "maxLength": 2048,
+            "default": ""
+          }
+        },
+        "required": [
+          "enabled",
+          "displayName"
         ],
         "additionalProperties": false
       },
@@ -1218,6 +1268,149 @@
           }
         ]
       },
+      "WorkflowAutomationTrigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters",
+              "prompt"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              },
+              "lastRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "nextRunAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "cron",
+              "timezone",
+              "prompt",
+              "enabled",
+              "lastRunAt",
+              "nextRunAt"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "WorkflowMutationEnvelope": {
         "type": "object",
         "properties": {
@@ -1263,6 +1456,9 @@
           "description": {
             "type": "string",
             "maxLength": 1024
+          },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
           }
         },
         "required": [
@@ -1347,8 +1543,21 @@
               "active"
             ]
           },
+          "scope": {
+            "$ref": "#/components/schemas/WorkflowScope"
+          },
+          "slackChannel": {
+            "$ref": "#/components/schemas/WorkflowSlackChannel"
+          },
           "trigger": {
             "$ref": "#/components/schemas/WorkflowTriggerInput"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTriggerInput"
+            },
+            "maxItems": 20
           }
         },
         "required": [
@@ -1487,6 +1696,131 @@
           }
         ]
       },
+      "WorkflowAutomationTriggerInput": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "event": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "key": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string",
+                        "maxLength": 256
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "provider",
+              "event",
+              "integrationId",
+              "filters"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "schedule"
+                ]
+              },
+              "cron": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "timezone": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "prompt": {
+                "type": "string",
+                "maxLength": 10000
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "cron"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "WorkflowArchiveEnvelope": {
         "type": "object",
         "properties": {
@@ -1609,18 +1943,11 @@
         ],
         "additionalProperties": false
       },
-      "TaskSchedulePage": {
+      "WorkflowMemoryEnvelope": {
         "type": "object",
         "properties": {
           "data": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaskSchedule"
-            }
-          },
-          "nextCursor": {
-            "type": "string",
-            "nullable": true
+            "$ref": "#/components/schemas/WorkflowMemory"
           },
           "meta": {
             "$ref": "#/components/schemas/ProtocolMetadata"
@@ -1628,290 +1955,65 @@
         },
         "required": [
           "data",
-          "nextCursor",
           "meta"
         ],
         "additionalProperties": false
       },
-      "TaskSchedule": {
+      "WorkflowMemory": {
         "type": "object",
         "properties": {
-          "id": {
+          "workflowId": {
             "type": "string",
             "minLength": 1,
             "maxLength": 256,
             "example": "run_019fed53"
           },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "sourceDescription": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "cron": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "timezone": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "prompt": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 10000
-          },
           "enabled": {
             "type": "boolean"
           },
-          "lastRunAt": {
-            "type": "string",
-            "nullable": true,
-            "format": "date-time"
-          },
-          "nextRunAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
+          "content": {
+            "type": "string"
           },
           "updatedAt": {
             "type": "string",
+            "nullable": true,
             "format": "date-time"
           }
         },
         "required": [
-          "id",
-          "name",
-          "sourceDescription",
-          "cron",
-          "timezone",
-          "prompt",
+          "workflowId",
           "enabled",
-          "lastRunAt",
-          "nextRunAt",
-          "version",
-          "createdAt",
+          "content",
           "updatedAt"
         ],
         "additionalProperties": false
       },
-      "TaskScheduleMutationEnvelope": {
+      "UpdateWorkflowMemoryBody": {
         "type": "object",
         "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "schedule": {
-                "$ref": "#/components/schemas/TaskSchedule"
-              },
-              "transactionId": {
-                "type": "string",
-                "pattern": "^[0-9]+$/u"
-              },
-              "replayed": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "schedule",
-              "transactionId",
-              "replayed"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CreateTaskScheduleBody": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "maxLength": 80
-          },
-          "sourceDescription": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "cron": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "timezone": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "prompt": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 10000
-          }
-        },
-        "required": [
-          "cron",
-          "prompt"
-        ],
-        "additionalProperties": false
-      },
-      "TaskScheduleEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/TaskSchedule"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "TaskScheduleUpdateEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "schedule": {
-                "$ref": "#/components/schemas/TaskSchedule"
-              },
-              "transactionId": {
-                "type": "string",
-                "pattern": "^[0-9]+$/u"
-              }
-            },
-            "required": [
-              "schedule",
-              "transactionId"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateTaskScheduleCommand": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/UpdateTaskScheduleBody"
-          },
-          {
-            "$ref": "#/components/schemas/SetTaskScheduleEnabledBody"
-          }
-        ]
-      },
-      "UpdateTaskScheduleBody": {
-        "type": "object",
-        "properties": {
-          "expectedVersion": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 80
-          },
-          "sourceDescription": {
-            "type": "string",
-            "maxLength": 1024
-          },
-          "cron": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "timezone": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "prompt": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 10000
-          }
-        },
-        "required": [
-          "expectedVersion",
-          "name",
-          "cron",
-          "prompt"
-        ],
-        "additionalProperties": false
-      },
-      "SetTaskScheduleEnabledBody": {
-        "type": "object",
-        "properties": {
-          "expectedVersion": {
-            "type": "integer",
-            "minimum": 1
-          },
           "enabled": {
             "type": "boolean"
           }
         },
         "required": [
-          "expectedVersion",
           "enabled"
         ],
         "additionalProperties": false
       },
-      "TaskScheduleArchiveEnvelope": {
+      "WorkflowSlackAvatarUploadEnvelope": {
         "type": "object",
         "properties": {
           "data": {
             "type": "object",
             "properties": {
-              "scheduleId": {
+              "avatarUrl": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 256,
-                "example": "run_019fed53"
-              },
-              "version": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "transactionId": {
-                "type": "string",
-                "pattern": "^[0-9]+$/u"
+                "maxLength": 2048,
+                "format": "uri"
               }
             },
             "required": [
-              "scheduleId",
-              "version",
-              "transactionId"
+              "avatarUrl"
             ],
             "additionalProperties": false
           },
@@ -1922,6 +2024,19 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WorkflowSlackAvatarUploadBody": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          }
+        },
+        "required": [
+          "file"
         ],
         "additionalProperties": false
       },
@@ -4388,9 +4503,15 @@
             "type": "boolean"
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "approveForMeEnabled": {
             "type": "boolean"
           },
           "chatCapabilitiesBetaEnabled": {
@@ -4406,6 +4527,12 @@
             "type": "boolean"
           },
           "pastSessionAccessEnabled": {
+            "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "whatsappEnabled": {
             "type": "boolean"
           },
           "wikiEnabled": {
@@ -4470,11 +4597,14 @@
           "timezone",
           "taskSpawningEnabled",
           "autoModelRoutingEnabled",
+          "approveForMeEnabled",
           "chatCapabilitiesBetaEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
           "pastSessionAccessEnabled",
+          "imessageEnabled",
+          "whatsappEnabled",
           "wikiEnabled",
           "taskViewMode",
           "taskTimeRange",
@@ -4748,6 +4878,53 @@
         ],
         "additionalProperties": false
       },
+      "WorkspaceSandboxSizeEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "sandboxSize": {
+                "type": "string",
+                "enum": [
+                  "small",
+                  "standard",
+                  "large"
+                ]
+              }
+            },
+            "required": [
+              "sandboxSize"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetWorkspaceSandboxSizeBody": {
+        "type": "object",
+        "properties": {
+          "sandboxSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "standard",
+              "large"
+            ]
+          }
+        },
+        "required": [
+          "sandboxSize"
+        ],
+        "additionalProperties": false
+      },
       "WorkspaceCommandEnvelope": {
         "type": "object",
         "properties": {
@@ -4958,49 +5135,6 @@
         ],
         "additionalProperties": false
       },
-      "OnboardingWorkspaceSlugEnvelope": {
-        "type": "object",
-        "properties": {
-          "data": {
-            "type": "object",
-            "properties": {
-              "slug": {
-                "type": "string",
-                "maxLength": 40
-              },
-              "available": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "slug",
-              "available"
-            ],
-            "additionalProperties": false
-          },
-          "meta": {
-            "$ref": "#/components/schemas/ProtocolMetadata"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "additionalProperties": false
-      },
-      "CheckOnboardingWorkspaceSlugBody": {
-        "type": "object",
-        "properties": {
-          "slug": {
-            "type": "string",
-            "maxLength": 256
-          }
-        },
-        "required": [
-          "slug"
-        ],
-        "additionalProperties": false
-      },
       "OnboardingCommandEnvelope": {
         "type": "object",
         "properties": {
@@ -5118,18 +5252,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 80
-          },
-          "slug": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40,
-            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$/u"
           }
         },
         "required": [
           "workspaceId",
-          "name",
-          "slug"
+          "name"
         ],
         "additionalProperties": false
       },
@@ -5264,6 +5391,45 @@
               "provider",
               "folders",
               "partial"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "gmail"
+                ]
+              },
+              "labels": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "provider",
+              "labels"
             ],
             "additionalProperties": false
           },
@@ -7704,6 +7870,9 @@
           "model": {
             "type": "string"
           },
+          "composerSettings": {
+            "$ref": "#/components/schemas/ConversationComposerSettingsV1"
+          },
           "runtime": {
             "$ref": "#/components/schemas/ConversationRuntime"
           },
@@ -7715,6 +7884,9 @@
             ]
           },
           "hasUnseen": {
+            "type": "boolean"
+          },
+          "awaitingInput": {
             "type": "boolean"
           },
           "pinnedAt": {
@@ -7736,11 +7908,59 @@
           "title",
           "engine",
           "model",
+          "composerSettings",
           "runtime",
           "activityState",
           "hasUnseen",
+          "awaitingInput",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationComposerSettingsV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "reasoningEffort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh"
+            ]
+          },
+          "planModeEnabled": {
+            "type": "boolean"
+          },
+          "goalMode": {
+            "$ref": "#/components/schemas/CodexGoalModeV1"
+          }
+        },
+        "required": [
+          "reasoningEffort"
+        ],
+        "additionalProperties": false
+      },
+      "CodexGoalModeV1": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "objective": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "tokenBudget": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1,
+            "maximum": 2000000
+          }
+        },
+        "required": [
+          "objective"
         ],
         "additionalProperties": false
       },
@@ -7780,6 +8000,62 @@
           "activeRunId",
           "hasError",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "SessionPullRequestList": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SessionPullRequest"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SessionPullRequest": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "url": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "open",
+              "blocked",
+              "merged",
+              "closed"
+            ]
+          }
+        },
+        "required": [
+          "conversationId",
+          "repository",
+          "number",
+          "url",
+          "state"
         ],
         "additionalProperties": false
       },
@@ -8299,27 +8575,6 @@
           }
         ]
       },
-      "CodexGoalModeV1": {
-        "type": "object",
-        "nullable": true,
-        "properties": {
-          "objective": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4000
-          },
-          "tokenBudget": {
-            "type": "integer",
-            "nullable": true,
-            "minimum": 1,
-            "maximum": 2000000
-          }
-        },
-        "required": [
-          "objective"
-        ],
-        "additionalProperties": false
-      },
       "MessageMention": {
         "type": "object",
         "properties": {
@@ -8705,6 +8960,10 @@
           "engine"
         ],
         "additionalProperties": false
+      },
+      "WorkflowAvatarAssetId": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.(?:png|jpg|webp)$/u"
       },
       "EngineRuntimeStatusEnvelope": {
         "type": "object",
@@ -10216,6 +10475,40 @@
         ],
         "additionalProperties": false
       },
+      "SteerRunEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "targetRunId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              }
+            },
+            "required": [
+              "runId",
+              "targetRunId"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "ResolveApprovalEnvelope": {
         "type": "object",
         "properties": {
@@ -10364,7 +10657,10 @@
             "maxLength": 100
           },
           "taskSpawningEnabled": {
-            "type": "boolean"
+            "type": "boolean",
+            "enum": [
+              true
+            ]
           },
           "wikiEnabled": {
             "type": "boolean",
@@ -10393,6 +10689,9 @@
           "autoModelRoutingEnabled": {
             "type": "boolean"
           },
+          "approveForMeEnabled": {
+            "type": "boolean"
+          },
           "reviewInboxEnabled": {
             "type": "boolean"
           },
@@ -10404,6 +10703,12 @@
           },
           "pastSessionAccessEnabled": {
             "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "whatsappEnabled": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -10414,10 +10719,13 @@
           "taskViewMode",
           "taskTimeRange",
           "autoModelRoutingEnabled",
+          "approveForMeEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
-          "pastSessionAccessEnabled"
+          "pastSessionAccessEnabled",
+          "imessageEnabled",
+          "whatsappEnabled"
         ],
         "additionalProperties": false
       },
@@ -10459,6 +10767,9 @@
           "autoModelRoutingEnabled": {
             "type": "boolean"
           },
+          "approveForMeEnabled": {
+            "type": "boolean"
+          },
           "reviewInboxEnabled": {
             "type": "boolean"
           },
@@ -10469,6 +10780,12 @@
             "type": "boolean"
           },
           "pastSessionAccessEnabled": {
+            "type": "boolean"
+          },
+          "imessageEnabled": {
+            "type": "boolean"
+          },
+          "whatsappEnabled": {
             "type": "boolean"
           }
         },
@@ -10536,6 +10853,170 @@
         ],
         "additionalProperties": false
       },
+      "ImessageSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImessageSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ImessageSettings": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "lineHandle": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "binding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "linked"
+                ]
+              },
+              "linkCode": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 12
+              },
+              "linkCodeExpiresAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "handle": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 64
+              },
+              "conversationId": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 128
+              },
+              "linkedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "status",
+              "linkCode",
+              "linkCodeExpiresAt",
+              "handle",
+              "conversationId",
+              "linkedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "configured",
+          "lineHandle",
+          "binding"
+        ],
+        "additionalProperties": false
+      },
+      "WhatsappSettingsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WhatsappSettings"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "WhatsappSettings": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "lineHandle": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "binding": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "linked"
+                ]
+              },
+              "linkCode": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 12
+              },
+              "linkCodeExpiresAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              },
+              "handle": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 64
+              },
+              "conversationId": {
+                "type": "string",
+                "nullable": true,
+                "maxLength": 128
+              },
+              "linkedAt": {
+                "type": "string",
+                "nullable": true,
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "status",
+              "linkCode",
+              "linkCodeExpiresAt",
+              "handle",
+              "conversationId",
+              "linkedAt"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "configured",
+          "lineHandle",
+          "binding"
+        ],
+        "additionalProperties": false
+      },
       "FeedbackSubmissionEnvelope": {
         "type": "object",
         "properties": {
@@ -10579,11 +11060,36 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 4000
+          },
+          "context": {
+            "$ref": "#/components/schemas/FeedbackContext"
           }
         },
         "required": [
           "kind",
           "message"
+        ],
+        "additionalProperties": false
+      },
+      "FeedbackContext": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "task"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "kind",
+          "id"
         ],
         "additionalProperties": false
       },
@@ -11045,6 +11551,169 @@
         ],
         "additionalProperties": false
       },
+      "PostHogEventsAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/PostHogEventsAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PostHogEventsAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "posthog"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "projectId": {
+            "type": "string",
+            "nullable": true
+          },
+          "region": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "us",
+              "eu",
+              null
+            ]
+          },
+          "connectionLabel": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "projectId",
+          "region",
+          "connectionLabel",
+          "statusReason"
+        ],
+        "additionalProperties": false
+      },
+      "PostHogEventsConnectBody": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,19}$"
+          },
+          "region": {
+            "type": "string",
+            "enum": [
+              "us",
+              "eu"
+            ]
+          }
+        },
+        "required": [
+          "apiKey",
+          "projectId",
+          "region"
+        ],
+        "additionalProperties": false
+      },
+      "PostHogEventDefinitionListEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "events": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "maxLength": 512
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 512
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 500
+              },
+              "partial": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "events",
+              "partial"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "JamieEventsAccountStateEnvelope": {
         "type": "object",
         "properties": {
@@ -11209,6 +11878,91 @@
           "statusReason",
           "capabilityModes",
           "toolModes"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountStateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "state": {
+                "$ref": "#/components/schemas/ConvexEventsAccountState"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "ConvexEventsAccountState": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": [
+              "convex"
+            ]
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "not_connected",
+              "connected",
+              "needs_reauth",
+              "sync_failed"
+            ]
+          },
+          "integrationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "deployment": {
+            "type": "string",
+            "nullable": true
+          },
+          "webhookUrl": {
+            "type": "string",
+            "nullable": true,
+            "format": "uri"
+          },
+          "lastDeliveryAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "provider",
+          "connected",
+          "status",
+          "integrationId",
+          "statusReason",
+          "deployment",
+          "webhookUrl",
+          "lastDeliveryAt"
         ],
         "additionalProperties": false
       },
@@ -11446,6 +12200,7 @@
               "github_user",
               "slack",
               "hubspot",
+              "posthog",
               "granola",
               "fathom",
               "attio",
@@ -11454,10 +12209,12 @@
               "render",
               "vercel",
               "signoz",
+              "dash0",
               "latitude",
               "neon",
               "supabase",
               "resend",
+              "todoist",
               "x_account"
             ]
           },
@@ -11506,6 +12263,12 @@
             "additionalProperties": {
               "nullable": true
             }
+          },
+          "toolModes": {
+            "type": "object",
+            "additionalProperties": {
+              "nullable": true
+            }
           }
         },
         "required": [
@@ -11518,7 +12281,8 @@
           "connectionLabel",
           "statusReason",
           "scopes",
-          "capabilityModes"
+          "capabilityModes",
+          "toolModes"
         ],
         "additionalProperties": false
       },
@@ -11562,6 +12326,9 @@
           "needsScopeUpgrade": {
             "type": "boolean"
           },
+          "canCustomizeIdentity": {
+            "type": "boolean"
+          },
           "teamName": {
             "type": "string",
             "nullable": true,
@@ -11583,6 +12350,7 @@
           "installed",
           "status",
           "needsScopeUpgrade",
+          "canCustomizeIdentity",
           "teamName",
           "statusReason",
           "destinationCount"
@@ -11855,6 +12623,65 @@
         "additionalProperties": false
       },
       "SetIntegrationCapabilityModeBody": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "IntegrationToolModeEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "integrationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "example": "gint_0f8e7d6c5b4a",
+                "description": "Integration connection id."
+              },
+              "toolId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "on",
+                  "ask",
+                  "off",
+                  "inherit"
+                ]
+              }
+            },
+            "required": [
+              "integrationId",
+              "toolId",
+              "mode"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "SetIntegrationToolModeBody": {
         "type": "object",
         "properties": {
           "mode": {
@@ -12289,6 +13116,129 @@
           "accountEmail",
           "host",
           "lastValidatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "DopplerAuthStatusEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DopplerAuthStatus"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "DopplerAuthStatus": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "disconnected",
+              null
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "accountName": {
+            "type": "string",
+            "nullable": true
+          },
+          "lastValidatedAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "status",
+          "statusReason",
+          "accountName",
+          "lastValidatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "DopplerAuthFlowEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "flow": {
+                "$ref": "#/components/schemas/DopplerAuthFlow"
+              }
+            },
+            "required": [
+              "flow"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "DopplerAuthFlow": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gcodf_0f8e7d6c5b4a",
+            "description": "Engine auth flow id."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "link_ready",
+              "completed",
+              "failed",
+              "expired"
+            ]
+          },
+          "loginUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "userCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "loginUrl",
+          "userCode",
+          "statusReason",
+          "expiresAt"
         ],
         "additionalProperties": false
       },
@@ -12972,6 +13922,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "eventModes": {
             "type": "object",
             "additionalProperties": {
@@ -13019,6 +13972,7 @@
           "integrity",
           "installReport",
           "events",
+          "pricing",
           "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
@@ -13228,6 +14182,80 @@
             ]
           },
           "events": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "pricing": {
             "oneOf": [
               {
                 "type": "object",
@@ -13696,6 +14724,62 @@
           }
         ]
       },
+      "PluginPricing": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginActionPrice"
+            }
+          }
+        },
+        "required": [
+          "currency",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "PluginActionPrice": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "per_call",
+              "per_result"
+            ]
+          },
+          "amountUsdMicros": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "action",
+          "label",
+          "unit",
+          "amountUsdMicros"
+        ],
+        "additionalProperties": false
+      },
       "PluginDiscoveredTool": {
         "type": "object",
         "properties": {
@@ -13831,6 +14915,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "eventModes": {
             "type": "object",
             "additionalProperties": {
@@ -13891,6 +14978,7 @@
           "integrity",
           "installReport",
           "events",
+          "pricing",
           "eventModes",
           "mcpApprovedIntegrity",
           "createdAt",
@@ -14233,6 +15321,9 @@
             },
             "maxItems": 64
           },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
           "report": {
             "$ref": "#/components/schemas/PluginValidationReport"
           }
@@ -14248,6 +15339,7 @@
           "stdioServers",
           "remoteMcpServers",
           "events",
+          "pricing",
           "report"
         ],
         "additionalProperties": false
@@ -14473,6 +15565,80 @@
                 "additionalProperties": false
               }
             ]
+          },
+          "pricing": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "absent"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ignored"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "present": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "parsed"
+                    ]
+                  },
+                  "issues": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "present",
+                  "status",
+                  "issues"
+                ],
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "required": [
@@ -14624,6 +15790,64 @@
         },
         "required": [
           "enabled"
+        ],
+        "additionalProperties": false
+      },
+      "PluginBillingEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PluginBilling"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "PluginBilling": {
+        "type": "object",
+        "properties": {
+          "pluginName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "pricing": {
+            "$ref": "#/components/schemas/PluginPricing"
+          },
+          "dailyLimitUsdMicros": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "spentTodayUsdMicros": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "pluginName",
+          "pricing",
+          "dailyLimitUsdMicros",
+          "spentTodayUsdMicros"
+        ],
+        "additionalProperties": false
+      },
+      "SetPluginDailySpendLimitBody": {
+        "type": "object",
+        "properties": {
+          "dailyLimitUsd": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "dailyLimitUsd"
         ],
         "additionalProperties": false
       }
@@ -15474,124 +16698,10 @@
         }
       }
     },
-    "/v1/schedules": {
+    "/v1/workflows/{workflowId}/memory": {
       "get": {
         "tags": [
-          "Schedules"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "cursor",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            },
-            "required": false,
-            "name": "limit",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Actor-owned Recurring Task schedules.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskSchedulePage"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Schedules"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateTaskScheduleBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Recurring Task schedule created.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskScheduleMutationEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/schedules/{scheduleId}": {
-      "get": {
-        "tags": [
-          "Schedules"
+          "Workflows"
         ],
         "security": [
           {
@@ -15610,17 +16720,17 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "scheduleId",
+            "name": "workflowId",
             "in": "path"
           }
         ],
         "responses": {
           "200": {
-            "description": "An actor-owned Recurring Task schedule.",
+            "description": "The Workflow's single markdown memory and whether memory is enabled.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskScheduleEnvelope"
+                  "$ref": "#/components/schemas/WorkflowMemoryEnvelope"
                 }
               }
             }
@@ -15639,7 +16749,7 @@
       },
       "patch": {
         "tags": [
-          "Schedules"
+          "Workflows"
         ],
         "security": [
           {
@@ -15658,7 +16768,7 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "scheduleId",
+            "name": "workflowId",
             "in": "path"
           }
         ],
@@ -15667,18 +16777,66 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UpdateTaskScheduleCommand"
+                "$ref": "#/components/schemas/UpdateWorkflowMemoryBody"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Recurring Task schedule updated or paused after an optimistic version check.",
+            "description": "Workflow memory enabled or disabled. Stored content is left untouched.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskScheduleUpdateEnvelope"
+                  "$ref": "#/components/schemas/WorkflowMemoryEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Workflows"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow memory content cleared. The enabled toggle is left untouched.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowMemoryEnvelope"
                 }
               }
             }
@@ -15696,10 +16854,10 @@
         }
       }
     },
-    "/v1/schedules/{scheduleId}/archive": {
+    "/v1/workflows/{workflowId}/slack-avatar": {
       "post": {
         "tags": [
-          "Schedules"
+          "Workflows"
         ],
         "security": [
           {
@@ -15718,87 +16876,27 @@
               "example": "run_019fed53"
             },
             "required": true,
-            "name": "scheduleId",
+            "name": "workflowId",
             "in": "path"
           }
         ],
         "requestBody": {
           "required": true,
           "content": {
-            "application/json": {
+            "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/ArchiveVersionBody"
+                "$ref": "#/components/schemas/WorkflowSlackAvatarUploadBody"
               }
             }
           }
         },
         "responses": {
-          "200": {
-            "description": "Recurring Task schedule archived after an optimistic version check.",
+          "201": {
+            "description": "Avatar stored and addressable by an unguessable public URL.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TaskScheduleArchiveEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/schedules/{scheduleId}/run-now": {
-      "post": {
-        "tags": [
-          "Schedules"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256,
-              "example": "run_019fed53"
-            },
-            "required": true,
-            "name": "scheduleId",
-            "in": "path"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "required": true,
-            "name": "idempotency-key",
-            "in": "header"
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Recurring Task run-now accepted as a canonical Task and Run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateTaskEnvelope"
+                  "$ref": "#/components/schemas/WorkflowSlackAvatarUploadEnvelope"
                 }
               }
             }
@@ -17286,6 +18384,88 @@
         }
       }
     },
+    "/v1/workspace/sandbox-size": {
+      "get": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Machine size new cloud coding sandboxes start on in the active workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Workspaces"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetWorkspaceSandboxSizeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Workspace sandbox size updated. Admin only. Existing sessions keep the size they started with.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSandboxSizeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/workspace/invitations": {
       "post": {
         "tags": [
@@ -17567,53 +18747,6 @@
         }
       }
     },
-    "/v1/onboarding/workspace-slug/check": {
-      "post": {
-        "tags": [
-          "Onboarding"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckOnboardingWorkspaceSlugBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Normalized workspace slug availability for the authenticated identity.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingWorkspaceSlugEnvelope"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/onboarding/profile": {
       "put": {
         "tags": [
@@ -17812,6 +18945,21 @@
                         "type": "string",
                         "enum": [
                           "granola"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "provider"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "gmail"
                         ]
                       }
                     },
@@ -21417,6 +22565,43 @@
         }
       }
     },
+    "/v1/session-pull-requests": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pull requests opened by the actor's coding sessions, with each PR's state read from GitHub.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPullRequestList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conversations/{conversationId}": {
       "get": {
         "tags": [
@@ -22530,6 +23715,57 @@
         }
       }
     },
+    "/public/workflow-avatars/{workflowId}/{assetId}": {
+      "get": {
+        "tags": [
+          "Public Workflow avatars"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "workflowId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowAvatarAssetId"
+            },
+            "required": true,
+            "name": "assetId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized private bytes.",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/conversations/{conversationId}/engine-session/runtime": {
       "get": {
         "tags": [
@@ -22816,6 +24052,56 @@
         }
       }
     },
+    "/v1/runs/{runId}/steer": {
+      "post": {
+        "tags": [
+          "Runs"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "runId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The queued Run's message was injected into the Conversation's running Run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SteerRunEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runs/{runId}/approvals/{approvalId}": {
       "post": {
         "tags": [
@@ -22915,7 +24201,6 @@
                 "task-activities-v1",
                 "workflows-v1",
                 "workflow-schedules-v1",
-                "task-schedules-v1",
                 "brain-folders-v1",
                 "brain-documents-v1",
                 "brain-timeline-v1",
@@ -23180,6 +24465,224 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/McpSetupEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/imessage": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's iMessage assistant channel state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone is unlinked; the Conversation and its history remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/whatsapp": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acting user's WhatsApp assistant channel state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The phone is unlinked; the Conversation and its history remain.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/imessage/link": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A fresh link code the user texts to the opencompany line.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImessageSettingsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/me/whatsapp/link": {
+      "post": {
+        "tags": [
+          "Settings"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A fresh link code the user texts to the opencompany line.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhatsappSettingsEnvelope"
                 }
               }
             }
@@ -23647,6 +25150,105 @@
         }
       }
     },
+    "/v1/integration-accounts/posthog-events": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostHogEventsConnectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PostHog analytics events connected for the acting user.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostHogEventsAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/posthog-events/{integrationId}/events": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gint_0f8e7d6c5b4a",
+              "description": "Integration connection id."
+            },
+            "required": true,
+            "description": "Integration connection id.",
+            "name": "integrationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "PostHog event names visible to the connected project.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PostHogEventDefinitionListEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/integration-accounts/jamie-events/endpoint": {
       "post": {
         "tags": [
@@ -23773,6 +25375,90 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConvexAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/convex-events": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvexEventsAccountStateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationAccountDeleteEnvelope"
                 }
               }
             }
@@ -24293,6 +25979,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/IntegrationCapabilityModeEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gint_0f8e7d6c5b4a",
+              "description": "Integration connection id."
+            },
+            "required": true,
+            "description": "Integration connection id.",
+            "name": "integrationId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "required": true,
+            "name": "toolId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetIntegrationToolModeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-tool permission override saved for the connection, or cleared with mode \"inherit\" so the tool follows its capability group again. Owner only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationToolModeEnvelope"
                 }
               }
             }
@@ -24860,6 +26618,204 @@
         "responses": {
           "200": {
             "description": "Workspace Infisical connection disconnected. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/doppler": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current user’s Doppler connection status; never includes credentials.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DopplerAuthStatusEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace Doppler connection disconnected. Personal connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EngineAuthDisconnectEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/doppler/start": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Doppler browser-login flow started via the runner control plane. Personal connection.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DopplerAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/doppler/{flowId}/poll": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gcodf_0f8e7d6c5b4a",
+              "description": "Engine auth flow id."
+            },
+            "required": true,
+            "description": "Engine auth flow id.",
+            "name": "flowId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Poll the current user’s Doppler authorization flow; credentials are never returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DopplerAuthFlowEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/engine-auth/doppler/cancel": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancel pending personal Doppler sign-in.",
             "content": {
               "application/json": {
                 "schema": {
@@ -26849,6 +28805,116 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PluginInstallationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/billing": {
+      "get": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Action prices, daily spending limit, and spend so far today for a paid plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBillingEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/plugins/{name}/billing/daily-limit": {
+      "put": {
+        "tags": [
+          "Plugins"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "name",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPluginDailySpendLimitBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Daily spending limit for a paid plugin updated. Admin only.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PluginBillingEnvelope"
                 }
               }
             }

@@ -11,11 +11,12 @@ import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
   getAgentModelDefinition,
+  isAgentModelSelectable,
+  isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine } from "@opencompany/core";
-import { isSettledTaskStatus } from "@opencompany/core/tasks";
 import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
@@ -37,52 +38,36 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import {
-  AnthropicIcon,
-  DeepSeekIcon,
-  MoonshotIcon,
-  OpenAIIcon,
-  XaiIcon,
-} from "@opencompany/ui/icons";
+import { AnthropicIcon, OpenAIIcon } from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import { useLiveQuery } from "@tanstack/react-db";
 import {
-  AlertCircle,
   Archive,
   ArrowLeft,
   ArrowUp,
-  CalendarClock,
+  Box,
   Check,
-  CheckCircle2,
   ChevronDown,
-  CircleDotDashed,
-  Clock,
   Code2,
   CornerDownLeft,
-  FileText,
   LoaderCircle,
   MessageSquare,
   Mic,
   PanelRightClose,
   PanelRightOpen,
-  Pause,
   Play,
   Plus,
   RotateCcw,
-  Settings,
   Sparkles,
   Square,
   SquarePen,
   Target,
-  Trash2,
   Workflow as WorkflowIcon,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   type Dispatch,
-  type FormEvent,
   type RefObject,
   type SetStateAction,
   useCallback,
@@ -95,11 +80,11 @@ import {
   useTransition,
 } from "react";
 import { BotSettingsButton } from "@/components/Bots";
-import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import {
   CodingWorkspacePanel,
   type CodingWorkspacePanelHandle,
 } from "@/components/CodingWorkspacePanel";
+import { ContextReferenceOptionContent } from "@/components/ContextReference";
 import { ConversationRuntimeSync } from "@/components/ConversationRuntimeSync";
 import type { ArtifactSelection } from "@/components/chat/ArtifactViewer";
 import { pendingApprovals } from "@/components/chat/approval-presentation";
@@ -115,11 +100,25 @@ import { ChatShareButton } from "@/components/chat/ChatShareButton";
 import { ChatTranscriptSyncError } from "@/components/chat/ChatTranscriptSyncError";
 import { MessageBubble } from "@/components/chat/MessageBubble";
 import { PendingApprovalBanner } from "@/components/chat/PendingApprovalBanner";
+import { QueuedMessageCard } from "@/components/chat/QueuedMessageCard";
+import { pendingRunMessageIds, queuedChatMessages } from "@/components/chat/queued-messages";
+import {
+  type ComposerInputChange,
+  type ComposerInputHandle,
+  ReferenceComposerInput,
+} from "@/components/chat/ReferenceComposerInput";
 import { PendingActivityIndicator, ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import type { ActionApprovalRequest, CodexToolAction } from "@/components/chat/ToolCallItem";
 import { useChatAttachments } from "@/components/chat/useChatAttachments";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { useWorkflowComposer } from "@/components/chat/useWorkflowComposer";
+import {
+  CodingAgentOption,
+  ModelPickerTabs,
+  modelProviderLabel,
+} from "@/components/ModelPickerParts";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
+import { useContextReferenceCatalog } from "@/components/useContextReferenceCatalog";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
@@ -129,7 +128,6 @@ import {
   descriptionFromAdHocTaskPrompt,
   hasAdHocTaskToken,
 } from "@/lib/ad-hoc-task";
-import { isRecentChatActivity } from "@/lib/chat-activity";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {
@@ -141,8 +139,14 @@ import {
 import {
   type ChatModelSelection,
   persistLastChatSelection,
+  persistLastEngineModel,
+  persistLastReasoningEffort,
   readLastChatSelection,
+  readLastEngineModel,
+  readLastReasoningEffort,
   subscribeLastChatSelection,
+  subscribeLastEngineModel,
+  subscribeLastReasoningEffort,
 } from "@/lib/chat-composer-selection";
 import {
   CHAT_COMPOSER_FOCUS_EVENT,
@@ -150,17 +154,15 @@ import {
   HOME_NAVIGATION_EVENT,
   newOptimisticChatSessionId,
 } from "@/lib/chat-navigation";
-import {
-  clearLocalChatState,
-  setLocalChatState,
-  useLocalChatStates,
-} from "@/lib/chat-session-state";
+import { clearLocalChatState, setLocalChatState } from "@/lib/chat-session-state";
 import { composeChatTranscript } from "@/lib/chat-transcript";
 import {
   type ActiveChatTurn,
   deriveChatTurnPhase,
+  isChatConversationWorking,
   isChatTurnTerminal,
-  isChatTurnWorking,
+  reconcileRuntimeWithSettledRun,
+  reconcileRuntimeWithTaskStatus,
 } from "@/lib/chat-turn-lifecycle";
 import {
   type ChatMention,
@@ -170,17 +172,17 @@ import {
   type ChatUiAttachment,
   type ChatUiMessage,
   type ConversationRuntimeView,
-  chatSummaryState,
   isChatRuntimeActive,
   textFromChatUiMessage,
   USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { CHAT_OUT_OF_CREDITS_MESSAGE } from "@/lib/chat-validation";
+import type { CodexComposerSettingsView } from "@/lib/codex-chat-settings";
 import {
-  type CodexComposerSettingsView,
-  DEFAULT_CLAUDE_CHAT_REASONING_EFFORT,
-  DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-} from "@/lib/codex-chat-settings";
+  type ContextReferenceOption,
+  filterContextReferences,
+} from "@/lib/context-reference-catalog";
+import { referenceMarkdown } from "@/lib/context-references";
 import {
   CLAUDE_CHAT_DEFAULT_MODEL_ID,
   CLAUDE_PICKER_VALUE,
@@ -190,27 +192,33 @@ import {
   type CodexChatModelId,
   ENGINE_REGISTRY,
   type EngineChatKind,
+  engineChatModelIdForChat,
   isCloudCodingEngine,
   normalizeClaudeChatModelId,
   normalizeCodexChatModelId,
-  statusPresenter,
+  sandboxStatusPresenter,
 } from "@/lib/engine-registry";
 import {
-  archiveHeadlessTaskSchedule,
+  currentEngineSandboxStatus,
+  type EngineSandboxState,
+  PENDING_ENGINE_SANDBOX_STATE,
+} from "@/lib/engine-sandbox-state";
+import {
   invokeHeadlessWorkflow,
   listHeadlessWorkflowCatalog,
-  runHeadlessTaskScheduleNow,
-  updateHeadlessTaskSchedule,
 } from "@/lib/headless-automation-commands";
-import type { TaskScheduleView, WorkflowCatalogItem } from "@/lib/headless-automation-types";
+import type { WorkflowCatalogItem } from "@/lib/headless-automation-types";
 import { uploadHeadlessChatAttachment } from "@/lib/headless-chat-attachment-upload";
 import { retryHeadlessChatMessages } from "@/lib/headless-chat-collections";
 import {
   cancelHeadlessChatRun,
   resolveEngineQuestions,
+  steerHeadlessChatRun,
   updateHeadlessChatConversation,
+  waitForHeadlessChatRunSettlement,
 } from "@/lib/headless-chat-commands";
 import {
+  enqueueHeadlessChatMessage,
   HeadlessChatTransport,
   type HeadlessMessageAccepted,
   startHeadlessBackgroundChat,
@@ -218,7 +226,6 @@ import {
 import { listHeadlessSkillCatalog } from "@/lib/headless-knowledge-commands";
 import { getHeadlessTasks, taskReadModelToRow } from "@/lib/headless-task-collections";
 import {
-  archiveHeadlessTask,
   cancelHeadlessTaskRun,
   createHeadlessTask,
   createHeadlessTaskComment,
@@ -241,11 +248,9 @@ import {
 import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
-import { STAGE_COPY, STATUS_COPY } from "@/lib/task-display";
 import { deriveTaskWorkflowSteps, type TaskWorkflowStepView } from "@/lib/task-workflow-activity";
 import { updateTimezoneAction } from "@/lib/user-preferences";
 
-const TEXTAREA_MAX_HEIGHT_PX = 128;
 const SCROLL_BOTTOM_THRESHOLD_PX = 80;
 const CHAT_THREAD_MIN_BOTTOM_PADDING_PX = 160;
 const CHAT_THREAD_COMPOSER_GAP_PX = 20;
@@ -256,8 +261,6 @@ const COMMAND_PALETTE_RESULT_LIMIT = 50;
 const CODEX_MENTION: ChatMention = { kind: "engine", id: "codex" };
 const CLAUDE_MENTION: ChatMention = { kind: "engine", id: "claude" };
 const CLOUD_CODEX_ATTACHMENT_CAPABILITIES = { images: true, pdf: true } as const;
-const COMPOSER_MENTION_CHIP_CLASS =
-  "rounded-sm bg-ink/8 text-ink shadow-[0_0_0_3px_rgba(15,15,15,0.08)]";
 
 type ActiveMentionToken = {
   start: number;
@@ -295,6 +298,13 @@ type CommandPaletteItem =
     };
 
 type MentionOption =
+  | {
+      kind: "reference";
+      token: string;
+      label: string;
+      description: string;
+      reference: ContextReferenceOption;
+    }
   | { kind: "engine"; token: "@codex" | "@claude"; label: string; mention: ChatMention }
   | {
       kind: "task";
@@ -324,7 +334,9 @@ type EngineComposerSettings = {
   goalMode?: CodexComposerSettings["goalMode"];
 };
 type CodexComposerUiState = {
-  reasoningEffort: CodexReasoningEffort;
+  // null means "no explicit choice for this chat", so the composer falls back to the user's
+  // last-used level for the active engine. Only an effort the user actually picked is stored.
+  reasoningEffort: CodexReasoningEffort | null;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
@@ -419,19 +431,18 @@ function selectCommandPaletteItems(
 export function Surface({
   tasks,
   allTasks = tasks,
-  schedules = [],
   defaultModel,
   initialChat,
   newChatProjectId = null,
   newChatProjectName = null,
+  userFirstName = null,
   recentChats = [],
   archivedChats = [],
   codexConnected = false,
   claudeCodeConnected = false,
-  taskSpawningEnabled = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
   workspaceId = "",
-  userName = "there",
   userWorkosId = "",
   taskConversation = null,
   readOnlyNotice = null,
@@ -443,23 +454,25 @@ export function Surface({
 }: {
   tasks: readonly TaskView[];
   allTasks?: readonly TaskView[];
-  schedules?: readonly TaskScheduleView[];
   defaultModel: string;
   initialChat: ChatSessionView | null;
   // A sidebar Project the next new chat should be filed under, set when the reader started it from
   // that project's row.
   newChatProjectId?: string | null;
-  // Name of that project. Present only alongside `newChatProjectId`, and swaps the home screen's
-  // activity lists for the project's own prompt.
+  // Name of that project. Present only alongside `newChatProjectId`, and names the project in the
+  // new-chat prompt.
   newChatProjectName?: string | null;
+  // First name of the signed-in user, greeted on the Home prompt when present.
+  userFirstName?: string | null;
   recentChats?: readonly ChatSummaryView[];
   archivedChats?: readonly ChatSummaryView[];
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
-  taskSpawningEnabled?: boolean;
   autoModelRoutingEnabled?: boolean;
+  // Shared GPT models run on the workspace's ChatGPT subscription, so the picker marks them as
+  // included rather than metered.
+  sharedModelAccessEnabled?: boolean;
   workspaceId?: string;
-  userName?: string;
   // Scopes chat attachment uploads; attachments are disabled when absent.
   userWorkosId?: string;
   // Task details reuse the canonical Conversation surface with additional Task metadata.
@@ -493,8 +506,7 @@ export function Surface({
   const router = useRouter();
   const pathname = usePathname();
   const formRef = useRef<HTMLFormElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<ComposerInputHandle>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const workspacePanelRef = useRef<CodingWorkspacePanelHandle>(null);
   const workspaceToggleButtonRef = useRef<HTMLButtonElement>(null);
@@ -565,17 +577,18 @@ export function Surface({
   const baseChatModel = chatModelOverride ?? rememberedChatModel;
   const initialCodexComposerUiState = initialChat
     ? codexComposerUiStateForChat(initialChat)
-    : defaultCodexComposerUiState(
-        baseChatModel === CLAUDE_PICKER_VALUE
-          ? DEFAULT_CLAUDE_CHAT_REASONING_EFFORT
-          : DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-      );
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(initialChat?.model),
+    : defaultCodexComposerUiState();
+  // The model the open chat pins for each engine. Null means the chat pins none, so the picker
+  // shows the model last used with that engine.
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(() =>
+    engineChatModelIdForChat("codex", initialChat?.model),
   );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(initialChat?.model),
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(() =>
+    engineChatModelIdForChat("claude_code", initialChat?.model),
   );
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   // The selected model for each engine, keyed so a send reads the active engine's model
   // without a per-engine branch (a third engine reads its own model, not Claude's).
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
@@ -602,9 +615,10 @@ export function Surface({
   const [chatThreadBottomPaddingPx, setChatThreadBottomPaddingPx] = useState(
     CHAT_THREAD_MIN_BOTTOM_PADDING_PX,
   );
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
-    initialCodexComposerUiState.reasoningEffort,
-  );
+  // The effort the user explicitly picked for the open chat. Null means "follow my last-used
+  // level for this engine", resolved below once the composer's engine is known.
+  const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
+    useState<CodexReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
     initialCodexComposerUiState.planModeEnabled,
   );
@@ -617,26 +631,30 @@ export function Surface({
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState(
     initialCodexComposerUiState.goalTokenBudget,
   );
-  const [codingSandboxStatus, setCodingSandboxStatus] = useState<EngineRuntimeStatus | null>(null);
-  const [conversationRuntime, setConversationRuntime] = useState<ConversationRuntimeView | null>(
-    initialChat?.runtime ?? null,
+  const [codingSandboxState, setCodingSandboxState] = useState<EngineSandboxState>(
+    PENDING_ENGINE_SANDBOX_STATE,
   );
-  const conversationRunning = isChatRuntimeActive(conversationRuntime);
+  const codingSandboxStatus = currentEngineSandboxStatus(codingSandboxState);
+  const [syncedConversationRuntime, setConversationRuntime] =
+    useState<ConversationRuntimeView | null>(initialChat?.runtime ?? null);
   const [engineSubmitting, setEngineSubmitting] = useState(false);
+  const [queuedMessageSubmitting, setQueuedMessageSubmitting] = useState(false);
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  const [stoppingChatRun, setStoppingChatRun] = useState<{
+    conversationId: string;
+    runId: string | null;
+  } | null>(null);
+  const [locallySettledRunStatuses, setLocallySettledRunStatuses] = useState<
+    ReadonlyMap<string, "completed" | "failed" | "canceled">
+  >(() => new Map());
+  const chatStopConfirmationControllerRef = useRef<AbortController | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
   const [restoringChatId, setRestoringChatId] = useState<string | null>(null);
   const [locallyStoppedAssistantMessageIds, setLocallyStoppedAssistantMessageIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
-  const [optimisticallyArchivedIds, setOptimisticallyArchivedIds] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
-  const [optimisticallyArchivedChatIds, setOptimisticallyArchivedChatIds] = useState<
     ReadonlySet<string>
   >(() => new Set());
   const [liveChatTasks, setLiveChatTasks] = useState<readonly TaskView[] | null>(null);
@@ -646,33 +664,27 @@ export function Surface({
     ReadonlyMap<string, number>
   >(() => new Map());
   const [, startArchiveTransition] = useTransition();
-  const localChatStates = useLocalChatStates();
-  const homeChats = useMemo(
-    () => visibleHomeChats(recentChats, optimisticallyArchivedChatIds, localChatStates),
-    [localChatStates, optimisticallyArchivedChatIds, recentChats],
-  );
-  const homeSchedules = useMemo(
-    () => (taskSpawningEnabled ? visibleHomeSchedules(schedules) : []),
-    [schedules, taskSpawningEnabled],
-  );
-  const homeTasks = useMemo(
-    () =>
-      visibleHomeTasks({
-        tasks: taskSpawningEnabled ? tasks : [],
-        optimisticallyArchivedTaskIds: optimisticallyArchivedIds,
-      }),
-    [optimisticallyArchivedIds, taskSpawningEnabled, tasks],
-  );
-  const hasHomeActivity = homeTasks.length > 0 || homeChats.length > 0 || homeSchedules.length > 0;
-  const homeGreetingName = userName.trim() || "there";
-  // A chat started from a project row opens on that project's prompt instead of the home activity
-  // lists, so the reader starts on an empty page scoped to the project they clicked.
+  // A chat started from a project row names that project in the prompt, so the reader can see the
+  // first message will be filed there.
   const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
+  const conversationRuntime = useMemo(() => {
+    const taskReconciled = reconcileRuntimeWithTaskStatus(
+      syncedConversationRuntime,
+      activeTaskConversation?.status ?? null,
+    );
+    const activeRunId = taskReconciled?.activeRunId ?? null;
+    return reconcileRuntimeWithSettledRun(
+      taskReconciled,
+      activeRunId,
+      activeRunId ? (locallySettledRunStatuses.get(activeRunId) ?? null) : null,
+    );
+  }, [activeTaskConversation?.status, locallySettledRunStatuses, syncedConversationRuntime]);
+  const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
-  const workflowMentionsEnabled = taskSpawningEnabled && !activeTaskConversation;
+  const workflowMentionsEnabled = !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
   const skillMentionsEnabled = !readOnly && !activeTaskConversation;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
@@ -943,21 +955,37 @@ export function Surface({
   const backgroundChatDirective = backgroundInputDirective;
   const backgroundDirectiveTargetEngine = backgroundLaunchSelection?.engine ?? null;
   const composerEngine = backgroundChatDirective ? backgroundDirectiveTargetEngine : activeEngine;
+  // Resolved every render rather than frozen at mount, so switching engines (or the remembered
+  // model arriving after hydration) lands on that engine's own last-used level.
+  const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
+  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  // A running turn gates nothing: the message becomes a queued turn the user can steer into the
+  // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
+  // leave a note on. Background sends keep their own dispatch rules.
+  const queuesRuns = Boolean(activeTaskConversation) || (isEngineChat && !activeTaskConversation);
+  const canQueueWhileWorking = Boolean(
+    (activeTaskConversation || persistedChatSessionId) &&
+      queuesRuns &&
+      !backgroundChatDirective &&
+      !queuedMessageSubmitting &&
+      !taskCommentSubmitting &&
+      !readOnly,
+  );
   const lowCreditBalance = Boolean(
     creditBalance &&
       creditBalance.balanceUsdMicros > 0 &&
       creditBalance.balanceUsdMicros < creditBalance.lowBalanceWarnUsdMicros,
   );
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !activeEngine && !activeTaskConversation;
+  const adHocTaskMentionEnabled = !activeEngine && !activeTaskConversation;
   const backgroundAdHocTaskSelected = Boolean(
-    backgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(backgroundChatDirective.prompt),
+    backgroundChatDirective && hasAdHocTaskToken(backgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
     (!backgroundChatDirective && adHocTaskMentionEnabled && hasAdHocTaskToken(input));
+  const referenceCatalog = useContextReferenceCatalog(mentionToken?.sigil === "@");
   const mentionOptions = buildMentionOptions({
+    references: referenceCatalog.items,
     token: mentionToken,
     skills: skillCatalog,
     workflows: workflowCatalog,
@@ -1013,7 +1041,7 @@ export function Surface({
         current.filter((mention) => chatMentionIsVisible(nextInput, mention)),
       );
     },
-    [setSelectedMentions],
+    [setSelectedMentions, setInput],
   );
   const voiceDictation = useComposerVoiceDictation({
     input,
@@ -1102,6 +1130,32 @@ export function Surface({
       break;
     }
   }, [adoptResolvedAutoModel, isAutoChatModel, messages]);
+  // A message sent while a turn is running becomes its own queued Run. It renders above the
+  // composer with steer/remove actions until it starts, so the transcript keeps showing only work
+  // that actually happened. The card offers mutations and so follows the composer's read-only
+  // rule; the transcript filter does not, because a Run that never executed has nothing to show a
+  // read-only viewer either.
+  const queuedMessages = useMemo(
+    () =>
+      queuesRuns && !readOnly
+        ? queuedChatMessages({ runs: liveChat.runsById, messages: chatMessages })
+        : [],
+    [chatMessages, liveChat.runsById, queuesRuns, readOnly],
+  );
+  const pendingRunMessages = useMemo(
+    () =>
+      queuesRuns
+        ? pendingRunMessageIds({ runs: liveChat.runsById, messages: chatMessages })
+        : new Set<string>(),
+    [chatMessages, liveChat.runsById, queuesRuns],
+  );
+  const transcriptMessages = useMemo(
+    () =>
+      pendingRunMessages.size === 0
+        ? chatMessages
+        : chatMessages.filter((message) => !pendingRunMessages.has(message.id)),
+    [chatMessages, pendingRunMessages],
+  );
   const latestAssistantMessageId = useMemo(() => {
     for (let index = chatMessages.length - 1; index >= 0; index -= 1) {
       if (chatMessages[index]?.role === "assistant") return chatMessages[index]?.id ?? null;
@@ -1151,21 +1205,26 @@ export function Surface({
     latestActiveTurnStartedAtMs,
   ]);
   const runtimeTurn = useMemo<ActiveChatTurn | null>(() => {
-    const activeRunId = conversationRuntime?.activeRunId;
+    const runtime = conversationRuntime;
+    const activeRunId = runtime?.activeRunId ?? null;
+    // Electric can deliver the active status before its Run id during a refresh. Preserve the
+    // runtime-owned turn in that gap; the transport checkpoint remains available for Stop.
     if (
       activeTurn ||
       transportTurn ||
       !chatSessionId ||
-      !activeRunId ||
-      !isChatRuntimeActive(conversationRuntime)
+      !runtime ||
+      !isChatRuntimeActive(runtime)
     ) {
       return null;
     }
-    const run = liveChat.runsById.get(activeRunId);
-    const assistantMessage = chatMessages.findLast(
-      (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
-    );
-    const runtimeUpdatedAtMs = Date.parse(conversationRuntime.updatedAt);
+    const run = activeRunId ? liveChat.runsById.get(activeRunId) : null;
+    const assistantMessage = activeRunId
+      ? chatMessages.findLast(
+          (message) => message.role === "assistant" && message.metadata?.runId === activeRunId,
+        )
+      : null;
+    const runtimeUpdatedAtMs = Date.parse(runtime.updatedAt);
     const startedAtMs =
       (assistantMessage ? chatMessageStartedAtMs(assistantMessage) : null) ??
       latestActiveTurnStartedAtMs ??
@@ -1190,27 +1249,50 @@ export function Surface({
   const foregroundRun = foregroundTurn?.runId
     ? (liveChat.runsById.get(foregroundTurn.runId) ?? null)
     : null;
+  const locallySettledForegroundStatus = foregroundTurn?.runId
+    ? (locallySettledRunStatuses.get(foregroundTurn.runId) ?? null)
+    : null;
   const foregroundAssistantMessageId =
     foregroundTurn?.assistantMessageId ?? foregroundRun?.assistantMessageId ?? null;
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
   const chatTurnPhase = deriveChatTurnPhase({
-    runStatus: foregroundRun?.status ?? null,
+    runStatus: locallySettledForegroundStatus ?? foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
     runtimeMatchesTurn: Boolean(
-      foregroundTurn?.runId && conversationRuntime?.activeRunId === foregroundTurn.runId,
+      foregroundTurn &&
+        isChatRuntimeActive(conversationRuntime) &&
+        (!conversationRuntime?.activeRunId ||
+          !foregroundTurn.runId ||
+          conversationRuntime.activeRunId === foregroundTurn.runId),
     ),
     transportStatus: status,
     submitting: engineSubmitting,
   });
-  const isForegroundTurnWorking = isChatTurnWorking(chatTurnPhase);
+  // The runtime is the authoritative session-level signal and also drives the header badge.
+  // Keep the composer in the same state when its run-specific projection is briefly missing or
+  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
+  const isForegroundTurnWorking = isChatConversationWorking(
+    chatTurnPhase,
+    Boolean(activeEngineChat && conversationRunning),
+  );
+  const isChatConversationStopping = Boolean(
+    stoppingChatRun &&
+      stoppingChatRun.conversationId === chatSessionId &&
+      (!stoppingChatRun.runId ||
+        stoppingChatRun.runId === foregroundTurn?.runId ||
+        stoppingChatRun.runId === syncedConversationRuntime?.activeRunId),
+  );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
       activeTaskConversation &&
       !isTaskConversationStopping &&
       (activeTaskConversation.status === "queued" || activeTaskConversation.status === "running"),
+  );
+  const composerQueuesMessage = Boolean(
+    !activeTaskConversation && isForegroundTurnWorking && canQueueWhileWorking,
   );
   const isAgentWorking = isForegroundTurnWorking || isTaskConversationWorking;
   const isInteractionPending = isAgentWorking || isTaskConversationStopping;
@@ -1236,22 +1318,16 @@ export function Surface({
     latestActiveTurnStartedAtMs ??
     activeTaskConversation?.startedAtMs ??
     (isForegroundTurnWorking ? surfaceMountedAtMs : null);
-  const paletteRecentChats = useMemo(
-    () => recentChats.filter((chat) => !optimisticallyArchivedChatIds.has(chat.id)),
-    [optimisticallyArchivedChatIds, recentChats],
-  );
   const commandPaletteItems = useMemo<CommandPaletteItem[]>(
     () =>
       [
-        ...(taskSpawningEnabled
-          ? allTasks.map((task) => ({
-              kind: "task" as const,
-              task,
-              archived: Boolean(task.archivedAt),
-              searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
-            }))
-          : []),
-        ...paletteRecentChats.map((chat) => ({
+        ...allTasks.map((task) => ({
+          kind: "task" as const,
+          task,
+          archived: Boolean(task.archivedAt),
+          searchValue: `task ${task.archivedAt ? "archived " : ""}${task.name} ${task.prompt} ${task.displayId} ${task.id}`,
+        })),
+        ...recentChats.map((chat) => ({
           kind: "chat" as const,
           chat,
           archived: false,
@@ -1268,18 +1344,22 @@ export function Surface({
           new Date(b.kind === "task" ? b.task.updatedAt : b.chat.updatedAt).getTime() -
           new Date(a.kind === "task" ? a.task.updatedAt : a.chat.updatedAt).getTime(),
       ),
-    [allTasks, archivedChats, paletteRecentChats, taskSpawningEnabled],
+    [allTasks, archivedChats, recentChats],
   );
   const commandPaletteResults = useMemo(
     () => selectCommandPaletteItems(commandPaletteItems, chatSearchQuery),
     [chatSearchQuery, commandPaletteItems],
   );
   const showEngineComposerControls = composerEngine !== null;
+  const composerUsesSandbox = selectedWorkflow
+    ? workflowComposer.usesSandbox
+    : showEngineComposerControls;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      chatStopConfirmationControllerRef.current?.abort();
       releaseAllOptimisticAttachmentPreviews();
     };
   }, [releaseAllOptimisticAttachmentPreviews]);
@@ -1308,15 +1388,8 @@ export function Surface({
   ]);
 
   const chatTaskLookup = useMemo(
-    () =>
-      taskSpawningEnabled
-        ? buildChatTaskLookup({
-            messages: chatMessages,
-            tasks,
-            liveTasks: liveChatTasks,
-          })
-        : new Map(),
-    [chatMessages, liveChatTasks, taskSpawningEnabled, tasks],
+    () => buildChatTaskLookup({ messages: chatMessages, tasks, liveTasks: liveChatTasks }),
+    [chatMessages, liveChatTasks, tasks],
   );
   useEffect(() => {
     const pending = pendingChatFirstOutputRef.current;
@@ -1424,7 +1497,7 @@ export function Surface({
 
   const applyCodexComposerUiState = useCallback(
     (state: CodexComposerUiState) => {
-      setCodexReasoningEffort(state.reasoningEffort);
+      setCodexReasoningEffortOverride(state.reasoningEffort);
       setCodexPlanModeEnabled(state.planModeEnabled);
       setCodexGoalModeEnabled(state.goalModeEnabled);
       setCodexGoalObjective(state.goalObjective);
@@ -1435,7 +1508,7 @@ export function Surface({
       setCodexGoalObjective,
       setCodexGoalTokenBudget,
       setCodexPlanModeEnabled,
-      setCodexReasoningEffort,
+      setCodexReasoningEffortOverride,
     ],
   );
 
@@ -1504,7 +1577,9 @@ export function Surface({
       cancelChatFirstOutputMeasurement();
       if (chatSessionId && isEngineChat) {
         const currentComposerState = currentCodexComposerUiState({
-          reasoningEffort: codexReasoningEffort,
+          // The override, not the resolved level: a chat the user never dialled keeps
+          // following the last-used preference when they come back to it.
+          reasoningEffort: codexReasoningEffortOverride,
           planModeEnabled: codexPlanModeEnabled,
           goalModeEnabled: codexGoalModeEnabled,
           goalObjective: codexGoalObjective,
@@ -1536,13 +1611,13 @@ export function Surface({
               ? normalizeModel(chat.model)
               : null,
       );
-      setCodexModel(normalizeCodexChatModelId(chat?.model));
-      setClaudeModel(normalizeClaudeChatModelId(chat?.model));
+      setCodexModelOverride(engineChatModelIdForChat("codex", chat?.model));
+      setClaudeModelOverride(engineChatModelIdForChat("claude_code", chat?.model));
       setEngineChatSession(
         chat && engineTarget ? { engine: engineTarget, chatSessionId: chat.id } : null,
       );
       applyCodexComposerUiState(nextCodexComposerState);
-      setCodingSandboxStatus(null);
+      setCodingSandboxState(PENDING_ENGINE_SANDBOX_STATE);
       setConversationRuntime(chat?.runtime ?? null);
       clearActiveTurn();
       setOptimisticTurnDurations(new Map());
@@ -1571,16 +1646,17 @@ export function Surface({
       codexGoalObjective,
       codexGoalTokenBudget,
       codexPlanModeEnabled,
-      codexReasoningEffort,
+      codexReasoningEffortOverride,
       input,
       isEngineChat,
       onOpenChat,
       releaseAllOptimisticAttachmentPreviews,
       saveComposerDraft,
       setChatModelOverride,
-      setClaudeModel,
-      setCodexModel,
+      setClaudeModelOverride,
+      setCodexModelOverride,
       setMessages,
+      setInput,
       setSelectedMentions,
       selectedMentions,
     ],
@@ -1637,19 +1713,6 @@ export function Surface({
     if (!consumePendingChatComposerFocus(chatSessionId)) return;
     inputRef.current?.focus({ preventScroll: true });
   }, [chatSessionId, mode]);
-
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
-  }, [input]);
 
   useLayoutEffect(() => {
     const form = formRef.current;
@@ -1744,48 +1807,6 @@ export function Surface({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isActivePane]);
 
-  const archiveTask = (task: TaskView) => {
-    setOptimisticallyArchivedIds((current) => new Set(current).add(task.id));
-    startArchiveTransition(async () => {
-      try {
-        await archiveHeadlessTask(task.id, { scopeKey: workspaceId });
-        return;
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not archive task.");
-      }
-
-      setOptimisticallyArchivedIds((current) => {
-        const next = new Set(current);
-        next.delete(task.id);
-        return next;
-      });
-    });
-  };
-
-  const archiveChat = (chat: ChatSummaryView) => {
-    setOptimisticallyArchivedChatIds((current) => new Set(current).add(chat.id));
-    startArchiveTransition(async () => {
-      try {
-        const result = await updateHeadlessChatConversation(chat.id, { archived: true }).then(
-          () => ({ ok: true, error: null }),
-        );
-        if (result.ok) {
-          router.refresh();
-          return;
-        }
-        toast.error(result.error ?? "Could not archive chat.");
-      } catch {
-        toast.error("Could not archive chat.");
-      }
-
-      setOptimisticallyArchivedChatIds((current) => {
-        const next = new Set(current);
-        next.delete(chat.id);
-        return next;
-      });
-    });
-  };
-
   const closeCommandPalette = useCallback(() => {
     setNewChatCommandOpen(false);
     setChatSearchQuery("");
@@ -1804,7 +1825,8 @@ export function Surface({
     const activeElement = document.activeElement;
     backgroundTaskFocusOriginRef.current =
       activeElement &&
-      (activeElement === inputRef.current || Boolean(formRef.current?.contains(activeElement)))
+      (activeElement === inputRef.current?.element ||
+        Boolean(formRef.current?.contains(activeElement)))
         ? activeElement
         : null;
   };
@@ -1820,7 +1842,7 @@ export function Surface({
         activeElement &&
         activeElement !== document.body &&
         activeElement !== focusOrigin &&
-        activeElement !== inputRef.current
+        activeElement !== inputRef.current?.element
       ) {
         return;
       }
@@ -1887,8 +1909,11 @@ export function Surface({
       return;
     }
     if (activeTaskConversation) {
-      if (isTaskConversationWorking || taskCommentSubmitting) return;
+      if (taskCommentSubmitting) return;
       if (!prompt && readyAttachments.length === 0) return;
+      // Sending into a working Task queues the message behind the live turn, and the queued card
+      // is the feedback. Only a Task that had stopped needs to be told it started again.
+      const resumesTask = !isTaskConversationWorking;
       const attachmentIds = readyAttachments.map((attachment) => attachment.id);
       const pendingCommand = pendingTaskCommentRef.current;
       const command =
@@ -1915,7 +1940,7 @@ export function Surface({
           if (!mountedRef.current) return;
           pendingTaskCommentRef.current = null;
           router.refresh();
-          toast.success("Message sent. The task is running again.");
+          if (resumesTask) toast.success("Message sent. The task is running again.");
         })
         .catch((error) => {
           if (!mountedRef.current) return;
@@ -1938,7 +1963,11 @@ export function Surface({
       : null;
     const backgroundEngine = backgroundLaunch?.engine ?? null;
     const backgroundModel = backgroundLaunch?.model ?? chatModel;
-    if ((isInteractionPending && !isBackgroundSubmit) || backgroundTaskSubmitting) return;
+    if (
+      (isInteractionPending && !isBackgroundSubmit && !canQueueWhileWorking) ||
+      backgroundTaskSubmitting
+    )
+      return;
     if (chatSendBlocked) {
       toast.error(CHAT_OUT_OF_CREDITS_MESSAGE, {
         action: {
@@ -1992,7 +2021,7 @@ export function Surface({
         restoreDraft();
       };
 
-      if (taskSpawningEnabled && hasAdHocTaskToken(messagePrompt)) {
+      if (hasAdHocTaskToken(messagePrompt)) {
         const description = descriptionFromAdHocTaskPrompt(messagePrompt);
         if (!description) {
           toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
@@ -2127,7 +2156,7 @@ export function Surface({
         void runBackgroundChatTurn({
           prompt: messagePrompt,
           newSessionId,
-          model: chatSessionId ? ENGINE_REGISTRY[engine].defaultModelId : engineChatModel[engine],
+          model: chatSessionId ? rememberedEngineModel[engine] : engineChatModel[engine],
           engine: canonicalMessageEngine(engine, settings.settings),
           ...(Object.keys(metadata).length > 0 ? { metadata } : {}),
         })
@@ -2344,6 +2373,9 @@ export function Surface({
         : null
       : newOptimisticChatSessionId();
     const requestSessionId = newSessionId ? null : chatSessionId;
+    const queueingBehindActiveTurn = Boolean(
+      activeEngine && requestSessionId && isForegroundTurnWorking && canQueueWhileWorking,
+    );
     if (newSessionId && pendingNewSessionIdRef.current !== newSessionId) {
       pendingNewSessionIdRef.current = newSessionId;
       routedChatSessionIdRef.current = newSessionId;
@@ -2370,6 +2402,9 @@ export function Surface({
       if (activeSessionId) {
         setEngineChatSession({ engine: activeEngine, chatSessionId: activeSessionId });
         if (engineSettings) {
+          // A sent chat stops following the preference: its composer keeps the level the turn
+          // actually ran at, so a preference change in another tab cannot move it.
+          setCodexReasoningEffortOverride(engineSettings.reasoningEffort);
           setCodexComposerStateByChatId((current) => {
             const next = new Map(current);
             next.set(activeSessionId, codexComposerUiStateFromSettings(engineSettings));
@@ -2377,13 +2412,55 @@ export function Surface({
           });
         }
       }
-      setEngineSubmitting(true);
+      if (!queueingBehindActiveTurn) setEngineSubmitting(true);
       setCodexPlanModeEnabled(false);
       setCodexGoalModeEnabled(false);
       setCodexGoalObjective("");
       setCodexGoalTokenBudget("");
     }
     clearComposerDraft(persistedChatSessionId);
+    // Clear without revoking previews: the optimistic bubble still shows them.
+    composerAttachments.setAttachments([]);
+    // The API files the new Conversation under the project as it creates it; the local note keeps
+    // the sidebar row under that folder for the moment before the project list catches up.
+    const projectId = newSessionId ? newChatProjectId : null;
+    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
+    if (queueingBehindActiveTurn && activeEngine && requestSessionId) {
+      // useChat and HeadlessChatTransport own the one foreground stream. Queue through the command
+      // boundary so the current turn remains the foreground/Interrupt target until it finishes.
+      setQueuedMessageSubmitting(true);
+      void enqueueHeadlessChatMessage({
+        content: prompt,
+        conversationId: requestSessionId,
+        clientMessageId: newQueuedChatMessageId(),
+        model: String(model),
+        engine: messageEngine,
+        ...(readyAttachments.length > 0
+          ? { attachmentIds: readyAttachments.map((attachment) => attachment.id) }
+          : {}),
+        ...(mentions.length > 0
+          ? {
+              mentions: mentions.flatMap((mention) =>
+                mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
+              ),
+            }
+          : {}),
+      })
+        .then(() => revokeAttachmentPreviews(pendingAttachments))
+        .catch((error) => {
+          if (!mountedRef.current) return;
+          if (!inputRef.current?.value) {
+            setInput(rawPrompt);
+            setSelectedMentions(mentions);
+            composerAttachments.setAttachments(pendingAttachments);
+          }
+          toast.error(error instanceof Error ? error.message : "Could not queue that message.");
+        })
+        .finally(() => {
+          if (mountedRef.current) setQueuedMessageSubmitting(false);
+        });
+      return;
+    }
     beginActiveTurn({
       engine: messageEngine.type,
       selectedModel: String(model),
@@ -2396,12 +2473,6 @@ export function Surface({
             : (codingSandboxStatus ?? "unknown"),
       sendSource: "composer",
     });
-    // Clear without revoking previews: the optimistic bubble still shows them.
-    composerAttachments.setAttachments([]);
-    // The API files the new Conversation under the project as it creates it; the local note keeps
-    // the sidebar row under that folder for the moment before the project list catches up.
-    const projectId = newSessionId ? newChatProjectId : null;
-    if (projectId && newSessionId) noteLocalProjectAssignment(projectId, newSessionId);
     void sendMessage(message, {
       body: {
         sessionId: requestSessionId,
@@ -2549,6 +2620,7 @@ export function Surface({
     setEngineSubmitting(true);
     try {
       setCodexPlanModeEnabled(false);
+      setCodexReasoningEffortOverride(settings.reasoningEffort);
       setCodexComposerStateByChatId((current) => {
         const next = new Map(current);
         next.set(sessionId, codexComposerUiStateFromSettings(settings));
@@ -2605,6 +2677,28 @@ export function Surface({
     stop,
   ]);
 
+  const steerQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await steerHeadlessChatRun(runId);
+    } catch (error) {
+      // The common failure is losing the race: the turn ended and the queued message is already
+      // running on its own. Say so rather than implying the message was lost.
+      toast.error(
+        error instanceof Error ? error.message : "Could not steer that message into the turn.",
+      );
+      throw error;
+    }
+  }, []);
+
+  const removeQueuedMessage = useCallback(async (runId: string) => {
+    try {
+      await cancelHeadlessChatRun(runId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not remove that queued message.");
+      throw error;
+    }
+  }, []);
+
   const stopGeneration = useCallback(() => {
     cancelChatFirstOutputMeasurement();
     if (activeTaskConversation) {
@@ -2628,18 +2722,69 @@ export function Surface({
     }
 
     if (chatSessionId) {
+      if (isChatConversationStopping) return;
       const activeRunId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId ?? null;
+      const assistantMessageId = foregroundAssistantMessageId;
+      setStoppingChatRun({ conversationId: chatSessionId, runId: activeRunId });
       clearLocalActiveTurnState(chatSessionId);
-      const cancel = activeRunId
-        ? cancelHeadlessChatRun(activeRunId)
-        : headlessTransport.cancel(chatInstanceKey);
-      void cancel.catch(() => {
-        const label = activeEngineChat
-          ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
-          : "stop that response";
-        toast.error(`Could not ${label}.`);
-      });
+      chatStopConfirmationControllerRef.current?.abort();
+      const confirmationController = new AbortController();
+      chatStopConfirmationControllerRef.current = confirmationController;
       void stop();
+      void (async () => {
+        let accepted = false;
+        try {
+          const result = activeRunId
+            ? await cancelHeadlessChatRun(activeRunId)
+            : await headlessTransport.cancel(chatInstanceKey);
+          if (!result) throw new Error("The active Run is no longer available.");
+          accepted = true;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId
+              ? { ...current, runId: result.runId }
+              : current,
+          );
+          const settled =
+            result.status === "completed" ||
+            result.status === "failed" ||
+            result.status === "canceled"
+              ? result
+              : await waitForHeadlessChatRunSettlement(result.runId, {
+                  signal: confirmationController.signal,
+                });
+          if (!mountedRef.current || confirmationController.signal.aborted) return;
+          setLocallySettledRunStatuses((current) => {
+            const next = new Map(current);
+            next.set(result.runId, settled.status);
+            return next;
+          });
+          if (settled.status === "canceled" && assistantMessageId) {
+            setLocallyStoppedAssistantMessageIds((current) =>
+              new Set(current).add(assistantMessageId),
+            );
+          }
+          if (activeTurnRef.current?.runId === result.runId) clearActiveTurn();
+          setStoppingChatRun((current) => (current?.runId === result.runId ? null : current));
+        } catch (error) {
+          if (confirmationController.signal.aborted || !mountedRef.current || accepted) return;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId ? null : current,
+          );
+          void resumeStream();
+          const label = activeEngineChat
+            ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
+            : "stop that response";
+          toast.error(
+            error instanceof Error && error.message
+              ? `${error.message} The response is still running.`
+              : `Could not ${label}.`,
+          );
+        } finally {
+          if (chatStopConfirmationControllerRef.current === confirmationController) {
+            chatStopConfirmationControllerRef.current = null;
+          }
+        }
+      })();
       return;
     }
 
@@ -2661,10 +2806,14 @@ export function Surface({
     cancelChatFirstOutputMeasurement,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
+    clearActiveTurn,
     foregroundTurn?.runId,
+    foregroundAssistantMessageId,
+    isChatConversationStopping,
     isTaskConversationStopping,
     headlessTransport,
     messages,
+    resumeStream,
     stop,
   ]);
 
@@ -2681,7 +2830,7 @@ export function Surface({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [closeChat, isActivePane, mode]);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (mentionToken) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -2709,7 +2858,10 @@ export function Surface({
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if ((!isInteractionPending || isBackgroundSubmit) && !backgroundTaskSubmitting) {
+      if (
+        (!isInteractionPending || isBackgroundSubmit || canQueueWhileWorking) &&
+        !backgroundTaskSubmitting
+      ) {
         formRef.current?.requestSubmit();
       }
     }
@@ -2724,7 +2876,7 @@ export function Surface({
     setMentionToken(findActiveMentionToken(value, selectionStart));
   };
 
-  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const onInputChange = (event: ComposerInputChange) => {
     const nextInput = event.target.value;
     pendingProgrammaticPromptRef.current = null;
     if (pendingTaskCommentRef.current?.body !== nextInput) pendingTaskCommentRef.current = null;
@@ -2735,7 +2887,7 @@ export function Surface({
     updateMentionToken(nextInput, event.target.selectionStart);
   };
 
-  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const onInputPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     if (composerAttachments.handlePasteFiles(event)) return;
     if (!userWorkosId) return;
 
@@ -2750,12 +2902,14 @@ export function Surface({
     // ourselves, then resolve only exact skill tokens from the pasted fragment against the active
     // Brain catalog. Manually typed lookalikes continue to stay plain text.
     event.preventDefault();
-    const textareaValue = event.currentTarget.value;
-    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
-    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const composer = inputRef.current;
+    if (!composer) return;
+    const textareaValue = composer.value;
+    const selectionStart = composer.selectionStart ?? textareaValue.length;
+    const selectionEnd = composer.selectionEnd ?? selectionStart;
     const availableLength = Math.max(
       0,
-      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+      composer.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
     );
     const insertedText = pastedText.slice(0, availableLength);
     const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
@@ -2795,9 +2949,11 @@ export function Surface({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      workflowMentionsEnabled ? fetchBrainWorkflowCatalog().catch(() => workflowCatalog) : [],
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
@@ -2832,7 +2988,12 @@ export function Surface({
     const nextInput = `${before}${option.token} ${after}`;
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
+    if (nextInput.length > 10_000) return;
     setInput(nextInput);
+    if (option.kind === "reference") {
+      setMentionToken(null);
+      return;
+    }
     if (option.kind === "task") {
       setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
       setMentionToken(null);
@@ -2842,9 +3003,9 @@ export function Surface({
       if (option.mention.kind === "engine") {
         const modelSelection = chatModelSelectionFromEngineMention(option.mention);
         if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
         } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -2930,8 +3091,8 @@ export function Surface({
                 defaultModel={defaultModel}
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
-                taskSpawningEnabled={taskSpawningEnabled}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
                 creditBalance={creditBalance}
                 workspaceId={workspaceId}
                 onSubmitted={closeCommandPalette}
@@ -3058,55 +3219,15 @@ export function Surface({
 
       <div className="relative flex min-h-0 w-full flex-1">
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden">
-          {mode === "home" && newChatProjectPrompt ? (
+          {mode === "home" ? (
             <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-6 pb-40">
               <h1 className="max-w-[720px] text-balance text-center text-[26px] font-semibold leading-tight tracking-tight text-ink">
-                What should we build in {newChatProjectPrompt}?
+                {newChatProjectPrompt
+                  ? `What should we build in ${newChatProjectPrompt}?`
+                  : userFirstName
+                    ? `What should we build next, ${userFirstName}?`
+                    : "What should we build next?"}
               </h1>
-            </div>
-          ) : mode === "home" ? (
-            <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-              <div className="flex w-full max-w-[720px] flex-col gap-8 pb-40 pt-16 sm:pt-24">
-                {hasHomeActivity ? (
-                  <>
-                    {homeTasks.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Tasks
-                        </h2>
-                        <HomeTaskRows items={homeTasks} onArchiveTask={archiveTask} />
-                      </section>
-                    ) : null}
-
-                    {homeChats.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Chats
-                        </h2>
-                        <ChatHistoryList
-                          chats={homeChats}
-                          localChatStates={localChatStates}
-                          onSelect={openChat}
-                          onArchive={archiveChat}
-                        />
-                      </section>
-                    ) : null}
-
-                    {homeSchedules.length > 0 ? (
-                      <section className="flex flex-col gap-1">
-                        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
-                          Routines
-                        </h2>
-                        <ScheduleRows schedules={homeSchedules} workspaceId={workspaceId} />
-                      </section>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="px-2 text-[15px] leading-6 text-ink-muted">
-                    welcome back, {homeGreetingName}
-                  </p>
-                )}
-              </div>
             </div>
           ) : (
             <div className="flex min-h-0 w-full flex-1 flex-col items-center">
@@ -3140,6 +3261,7 @@ export function Surface({
                         <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
                           runtime={conversationRuntime}
+                          stopping={isChatConversationStopping}
                           optimisticStatus={
                             engineSubmitting
                               ? "starting"
@@ -3147,7 +3269,7 @@ export function Surface({
                                 ? "running"
                                 : null
                           }
-                          sandboxStatus={codingSandboxStatus}
+                          sandboxState={codingSandboxState}
                         />
                         <Tooltip>
                           <TooltipTrigger
@@ -3196,7 +3318,7 @@ export function Surface({
                   className="mx-auto flex w-full max-w-[720px] flex-col gap-3 pt-2"
                   style={{ paddingBottom: chatThreadBottomPaddingPx }}
                 >
-                  {chatMessages.map((message) => (
+                  {transcriptMessages.map((message) => (
                     <MessageBubble
                       key={message.id}
                       message={message}
@@ -3218,6 +3340,8 @@ export function Surface({
                   ))}
                   {isTaskConversationStopping ? (
                     <PendingActivityIndicator label="Stopping task…" />
+                  ) : isChatConversationStopping ? (
+                    <PendingActivityIndicator label="Stopping response…" />
                   ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
@@ -3246,12 +3370,12 @@ export function Surface({
           {mode === "chat" && chatSessionId ? (
             <ConversationRuntimeSync
               conversationId={chatSessionId}
-              setSandboxStatus={setCodingSandboxStatus}
+              setSandboxState={setCodingSandboxState}
               setRuntime={setConversationRuntime}
               pollSandbox={Boolean(activeEngineChat)}
             />
           ) : null}
-          {mode === "chat" && taskSpawningEnabled ? (
+          {mode === "chat" ? (
             <LiveChatTasks workspaceId={workspaceId} setTasks={setLiveChatTasks} />
           ) : null}
 
@@ -3307,12 +3431,22 @@ export function Surface({
                   {chatError.message || "opencompany could not answer that right now."}
                 </p>
               ) : null}
-              {mentionToken && mentionOptions.length > 0 ? (
+              {mentionToken && (mentionOptions.length > 0 || mentionToken.sigil === "@") ? (
                 <div
                   role="listbox"
                   aria-label="Mention menu"
-                  className="absolute bottom-full left-3 z-20 mb-2 max-h-72 w-80 overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
+                  className="context-mention-menu absolute bottom-full left-0 right-0 z-20 mb-2"
                 >
+                  <div className="context-mention-heading">Context</div>
+                  {mentionToken.sigil === "@" &&
+                  (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
+                    <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
+                      {referenceCatalog.loading
+                        ? "Loading mentions…"
+                        : (referenceCatalog.error ??
+                          "No matching mentions. Manage connections in Plugins.")}
+                    </p>
+                  ) : null}
                   {mentionOptions.map((option, index) => (
                     <button
                       key={option.token}
@@ -3330,7 +3464,9 @@ export function Surface({
                         index === mentionOptionIndex && "bg-surface-hover",
                       )}
                     >
-                      {option.kind === "engine" ? (
+                      {option.kind === "reference" ? (
+                        <ContextReferenceOptionContent reference={option.reference} />
+                      ) : option.kind === "engine" ? (
                         <Code2
                           size={14}
                           strokeWidth={2}
@@ -3355,19 +3491,21 @@ export function Surface({
                           className="mt-0.5 shrink-0 text-ink-subtle"
                         />
                       )}
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                          {option.token}
-                        </span>
-                        {option.kind === "skill" ||
-                        option.kind === "workflow" ||
-                        option.kind === "task" ? (
-                          <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                            {option.label}
-                            {option.description ? ` · ${option.description}` : ""}
+                      {option.kind !== "reference" ? (
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                            {option.token}
                           </span>
-                        ) : null}
-                      </span>
+                          {option.kind === "skill" ||
+                          option.kind === "workflow" ||
+                          option.kind === "task" ? (
+                            <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                              {option.label}
+                              {option.description ? ` · ${option.description}` : ""}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                       {option.kind === "engine" ? (
                         <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
                       ) : null}
@@ -3378,21 +3516,7 @@ export function Surface({
                   ))}
                 </div>
               ) : null}
-              {activeTaskConversation ? (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] leading-4 text-ink-subtle shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
-                >
-                  <MessageSquare size={13} strokeWidth={2} className="shrink-0" />
-                  <span>
-                    {isTaskConversationWorking
-                      ? "Draft your reply now — you can send it when the current run finishes."
-                      : taskCommentSubmitting
-                        ? "Sending your message…"
-                        : "Sending a message resumes this task."}
-                  </span>
-                </div>
-              ) : selectedAdHocTask ? (
+              {selectedAdHocTask ? (
                 <div
                   role="status"
                   data-testid="ad-hoc-task-hint"
@@ -3417,6 +3541,18 @@ export function Surface({
               ) : backgroundChatDirective ? (
                 <BackgroundChatDirectiveHint engine={backgroundDirectiveTargetEngine} />
               ) : null}
+              {queuedMessages.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  {queuedMessages.map((queued) => (
+                    <QueuedMessageCard
+                      key={queued.runId}
+                      message={queued}
+                      onSteer={() => steerQueuedMessage(queued.runId)}
+                      onRemove={() => removeQueuedMessage(queued.runId)}
+                    />
+                  ))}
+                </div>
+              ) : null}
               <div
                 {...composerAttachments.dragHandlers}
                 className="relative flex flex-col rounded-2xl border border-border bg-surface shadow-[0_8px_24px_rgba(15,15,15,0.08)] transition-colors duration-150 focus-within:border-border-strong"
@@ -3434,64 +3570,42 @@ export function Surface({
                 ) : null}
                 <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
                   <div className="relative min-w-0 flex-1 self-center">
-                    {renderComposerInputOverlay({
-                      value: input,
-                      mentions: activeSelectedMentions,
-                      overlayRef: inputOverlayRef,
-                    })}
-                    <textarea
+                    <ReferenceComposerInput
                       ref={inputRef}
-                      rows={1}
+                      key={persistedChatSessionId ?? "home"}
                       id="prompt"
-                      name="prompt"
                       value={input}
                       placeholder={
-                        activeTaskConversation || mode === "chat"
-                          ? "Reply..."
-                          : taskSpawningEnabled
-                            ? "Ask a question or describe a task..."
-                            : "Ask opencompany anything..."
+                        composerQueuesMessage
+                          ? "Queue a follow-up..."
+                          : activeTaskConversation || mode === "chat"
+                            ? "Reply..."
+                            : "Ask a question or describe a task..."
                       }
                       onChange={onInputChange}
                       onBlur={() => setMentionToken(null)}
-                      onClick={(event) =>
-                        updateMentionToken(
-                          event.currentTarget.value,
-                          event.currentTarget.selectionStart,
-                        )
-                      }
+                      onSelectionChange={updateMentionToken}
                       onKeyDown={onKeyDown}
                       onPaste={onInputPaste}
-                      onScroll={(event) => {
-                        if (inputOverlayRef.current) {
-                          inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                        }
-                      }}
-                      onSelect={(event) =>
-                        updateMentionToken(
-                          event.currentTarget.value,
-                          event.currentTarget.selectionStart,
-                        )
-                      }
-                      // A run in flight gates sending, not composing: the reply stays editable so a
-                      // draft can be written while the task works. onSubmit/onKeyDown hold the send.
+                      highlights={composerInputHighlightRanges(input, activeSelectedMentions)}
                       disabled={backgroundTaskSubmitting || taskCommentSubmitting || readOnly}
                       readOnly={voiceDictation.isActive}
-                      className={cn(
-                        "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                        composerInputHasHighlights(input, activeSelectedMentions) &&
-                          "text-transparent caret-ink",
-                      )}
-                      style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                      maxLength={10_000}
                     />
                   </div>
-                  {activeEngine &&
-                  isForegroundTurnWorking &&
-                  !activeTaskConversation &&
-                  !backgroundChatDirective ? (
+                  {activeTaskConversation ? (
+                    isTaskConversationWorking || isTaskConversationStopping ? (
+                      <EngineStopButton
+                        label="this task"
+                        stopping={isTaskConversationStopping}
+                        onStop={stopGeneration}
+                      />
+                    ) : null
+                  ) : activeEngine &&
+                    (isForegroundTurnWorking || isChatConversationStopping) &&
+                    !backgroundChatDirective ? (
                     <EngineStopButton
                       label={ENGINE_REGISTRY[activeEngine].label}
+                      stopping={isChatConversationStopping}
                       onStop={stopGeneration}
                     />
                   ) : null}
@@ -3510,8 +3624,7 @@ export function Surface({
                           (attachment) => attachment.status === "ready",
                         )) ||
                       composerAttachments.isUploading ||
-                      (!isBackgroundSubmit && isForegroundTurnWorking) ||
-                      isTaskConversationWorking ||
+                      (!isBackgroundSubmit && isInteractionPending && !canQueueWhileWorking) ||
                       taskCommentSubmitting ||
                       backgroundTaskSubmitting ||
                       voiceDictation.isActive ||
@@ -3519,16 +3632,41 @@ export function Surface({
                       (!activeTaskConversation && chatSendBlocked)
                     }
                     isGenerating={
-                      isBackgroundSubmit
+                      isBackgroundSubmit || activeTaskConversation
                         ? false
-                        : (!isEngineChat && isForegroundTurnWorking) || isTaskConversationWorking
+                        : !isEngineChat && isForegroundTurnWorking
                     }
-                    isStopping={!isBackgroundSubmit && isTaskConversationStopping}
+                    stopping={isChatConversationStopping}
+                    queuesMessage={composerQueuesMessage}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
                   />
                 </div>
-                <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+                <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
+                  <button
+                    type="button"
+                    disabled={
+                      backgroundTaskSubmitting ||
+                      taskCommentSubmitting ||
+                      readOnly ||
+                      voiceDictation.isActive
+                    }
+                    aria-label="Mention a plugin or repository"
+                    title="Mention a plugin or repository"
+                    className="rounded-md px-2 py-1 text-sm text-ink-subtle hover:bg-surface-hover"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const caret = inputRef.current?.selectionStart ?? input.length;
+                      const before = input.slice(0, caret);
+                      const inserted = `${before && !/\s$/.test(before) ? " " : ""}@`;
+                      const next = `${before}${inserted}${input.slice(caret)}`;
+                      pendingInputCaretRef.current = caret + inserted.length;
+                      setInput(next);
+                      updateMentionToken(next, caret + inserted.length);
+                    }}
+                  >
+                    @
+                  </button>
                   {attachmentsEnabled ? (
                     <>
                       <input
@@ -3548,6 +3686,7 @@ export function Surface({
                         aria-label="Attach files"
                         disabled={
                           isForegroundTurnWorking ||
+                          isTaskConversationWorking ||
                           taskCommentSubmitting ||
                           readOnly ||
                           voiceDictation.isActive
@@ -3593,12 +3732,12 @@ export function Surface({
                             setChatModelOverride(model);
                             persistLastChatSelection(userWorkosId, model);
                             if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                              setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                              setCodexReasoningEffortOverride(null);
                             } else if (
                               model === CLAUDE_PICKER_VALUE &&
                               model !== composerChatModel
                             ) {
-                              setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                              setCodexReasoningEffortOverride(null);
                               setCodexPlanModeEnabled(false);
                               setCodexGoalModeEnabled(false);
                               setCodexGoalObjective("");
@@ -3622,18 +3761,29 @@ export function Surface({
                           codexConnected={codexConnected}
                           claudeCodeConnected={claudeCodeConnected}
                           autoModelRoutingEnabled={autoModelRoutingEnabled}
+                          sharedModelAccessEnabled={sharedModelAccessEnabled}
                         />
                       )}
                       {showEngineComposerControls && !selectedWorkflow ? (
                         <EngineComposerControls
                           model={
                             composerEngine === "codex"
-                              ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                              ? {
+                                  engine: "codex",
+                                  value: codexModel,
+                                  onChange: (model) => {
+                                    setCodexModelOverride(model);
+                                    persistLastEngineModel(userWorkosId, "codex", model);
+                                  },
+                                }
                               : composerEngine === "claude_code"
                                 ? {
                                     engine: "claude_code",
                                     value: claudeModel,
-                                    onChange: setClaudeModel,
+                                    onChange: (model) => {
+                                      setClaudeModelOverride(model);
+                                      persistLastEngineModel(userWorkosId, "claude_code", model);
+                                    },
                                   }
                                 : null
                           }
@@ -3656,13 +3806,21 @@ export function Surface({
                             readOnly ||
                             voiceDictation.isActive
                           }
-                          onReasoningEffortChange={setCodexReasoningEffort}
+                          onReasoningEffortChange={(effort) => {
+                            setCodexReasoningEffortOverride(effort);
+                            // Last level picked for this engine is the level the next chat
+                            // with it opens on, matching how the model picker is remembered.
+                            if (composerEngine) {
+                              persistLastReasoningEffort(userWorkosId, composerEngine, effort);
+                            }
+                          }}
                           onPlanModeEnabledChange={setCodexPlanModeEnabled}
                           onGoalModeEnabledChange={setCodexGoalModeEnabled}
                           onGoalObjectiveChange={setCodexGoalObjective}
                           onGoalTokenBudgetChange={setCodexGoalTokenBudget}
                         />
                       ) : null}
+                      {composerUsesSandbox ? <SandboxIndicator /> : null}
                     </>
                   )}
                 </div>
@@ -3707,8 +3865,8 @@ export function QuickChatComposer({
   defaultModel,
   codexConnected,
   claudeCodeConnected,
-  taskSpawningEnabled,
   autoModelRoutingEnabled,
+  sharedModelAccessEnabled,
   creditBalance,
   workspaceId,
   onSubmitted,
@@ -3721,16 +3879,15 @@ export function QuickChatComposer({
   defaultModel: string;
   codexConnected: boolean;
   claudeCodeConnected: boolean;
-  taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
+  sharedModelAccessEnabled: boolean;
   creditBalance: ReturnType<typeof useCreditBalance>["balance"];
   workspaceId: string;
   onSubmitted?: () => void;
 }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const inputOverlayRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<ComposerInputHandle>(null);
   const attachmentFileInputRef = useRef<HTMLInputElement>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const mountedRef = useRef(true);
@@ -3761,31 +3918,27 @@ export function QuickChatComposer({
   );
   const [chatModelOverride, setChatModelOverride] = useState<ChatModelSelection | null>(null);
   const baseChatModel = chatModelOverride ?? rememberedChatModel;
-  const [codexModel, setCodexModel] = useState<CodexChatModelId>(() =>
-    normalizeCodexChatModelId(undefined),
-  );
-  const [claudeModel, setClaudeModel] = useState<ClaudeChatModelId>(() =>
-    normalizeClaudeChatModelId(undefined),
-  );
+  const [codexModelOverride, setCodexModelOverride] = useState<CodexChatModelId | null>(null);
+  const [claudeModelOverride, setClaudeModelOverride] = useState<ClaudeChatModelId | null>(null);
+  const rememberedEngineModel = useRememberedEngineModels(userWorkosId);
+  const codexModel = codexModelOverride ?? rememberedEngineModel.codex;
+  const claudeModel = claudeModelOverride ?? rememberedEngineModel.claude_code;
   const engineChatModel: Record<EngineChatKind, CodexChatModelId | ClaudeChatModelId> = {
     codex: codexModel,
     claude_code: claudeModel,
   };
-  const [codexReasoningEffort, setCodexReasoningEffort] = useState<CodexReasoningEffort>(
-    DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-  );
+  const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
+    useState<CodexReasoningEffort | null>(null);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
   const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
   const [codexGoalTokenBudget, setCodexGoalTokenBudget] = useState("");
 
-  const workflowMentionsEnabled = taskSpawningEnabled;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
     }
-    if (mention.kind === "workflow") return workflowMentionsEnabled;
     return true;
   });
   const chatModel =
@@ -3812,12 +3965,12 @@ export function QuickChatComposer({
   const composerEngine = parsedBackgroundChatDirective
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
+  const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
+  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
   const isEngineChat = composerEngine !== null;
-  const adHocTaskMentionEnabled = taskSpawningEnabled && !selectedEngine;
+  const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
-    parsedBackgroundChatDirective &&
-      taskSpawningEnabled &&
-      hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
+    parsedBackgroundChatDirective && hasAdHocTaskToken(parsedBackgroundChatDirective.prompt),
   );
   const selectedAdHocTask =
     backgroundAdHocTaskSelected ||
@@ -3826,7 +3979,9 @@ export function QuickChatComposer({
     creditBalance && creditBalance.enforcementEnabled && creditBalance.balanceUsdMicros <= 0,
   );
 
+  const referenceCatalog = useContextReferenceCatalog(mentionToken?.sigil === "@");
   const mentionOptions = buildMentionOptions({
+    references: referenceCatalog.items,
     token: mentionToken,
     skills: skillCatalog,
     workflows: workflowCatalog,
@@ -3834,7 +3989,7 @@ export function QuickChatComposer({
     codexConnected,
     claudeCodeConnected,
     skillsEnabled: true,
-    workflowsEnabled: workflowMentionsEnabled,
+    workflowsEnabled: true,
     adHocTaskEnabled: adHocTaskMentionEnabled || Boolean(parsedBackgroundChatDirective),
   });
   const selectedWorkflowMention = selectedAdHocTask
@@ -3901,9 +4056,7 @@ export function QuickChatComposer({
   // Mirrors the main composer: refetch each catalog whenever its menu opens so
   // recently created Skills and workflows show up.
   const skillCommandMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "/");
-  const workflowMentionMenuOpen = Boolean(
-    userWorkosId && mentionToken?.sigil === "#" && workflowMentionsEnabled,
-  );
+  const workflowMentionMenuOpen = Boolean(userWorkosId && mentionToken?.sigil === "#");
   useEffect(() => {
     if (
       !skillCommandMenuOpen &&
@@ -3930,19 +4083,6 @@ export function QuickChatComposer({
     };
   }, [skillCommandMenuOpen, workflowMentionMenuOpen, selectedWorkflowMentionId, selectedWorkflow]);
 
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    if (input.length === 0) {
-      el.style.height = "";
-      if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = 0;
-      return;
-    }
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-    if (inputOverlayRef.current) inputOverlayRef.current.scrollTop = el.scrollTop;
-  }, [input]);
-
   useLayoutEffect(() => {
     const caret = pendingInputCaretRef.current;
     if (caret === null) return;
@@ -3960,7 +4100,7 @@ export function QuickChatComposer({
     setMentionToken(findActiveMentionToken(value, selectionStart));
   };
 
-  const onInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const onInputChange = (event: ComposerInputChange) => {
     const nextInput = event.target.value;
     setInput(nextInput);
     setSelectedMentions((current) =>
@@ -3976,7 +4116,12 @@ export function QuickChatComposer({
     const nextInput = `${before}${option.token} ${after}`;
     const nextCaret = before.length + option.token.length + 1;
     pendingInputCaretRef.current = nextCaret;
+    if (nextInput.length > 10_000) return;
     setInput(nextInput);
+    if (option.kind === "reference") {
+      setMentionToken(null);
+      return;
+    }
     if (option.kind === "task") {
       setSelectedMentions((current) => current.filter((mention) => mention.kind !== "workflow"));
       setMentionToken(null);
@@ -3986,9 +4131,9 @@ export function QuickChatComposer({
       if (option.mention.kind === "engine") {
         const modelSelection = chatModelSelectionFromEngineMention(option.mention);
         if (modelSelection === CODEX_PICKER_VALUE && chatModel !== CODEX_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
         } else if (modelSelection === CLAUDE_PICKER_VALUE && chatModel !== CLAUDE_PICKER_VALUE) {
-          setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+          setCodexReasoningEffortOverride(null);
           setCodexPlanModeEnabled(false);
           setCodexGoalModeEnabled(false);
           setCodexGoalObjective("");
@@ -4006,7 +4151,7 @@ export function QuickChatComposer({
     setMentionToken(null);
   };
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (mentionToken) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -4040,24 +4185,24 @@ export function QuickChatComposer({
     }
   };
 
-  const onInputPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const onInputPaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
     if (composerAttachments.handlePasteFiles(event)) return;
     if (!userWorkosId) return;
 
     const pastedText = event.clipboardData.getData("text/plain");
     const pastedSkillIds = skillMentionIdsFromText(pastedText);
-    const pastedWorkflowIds = workflowMentionsEnabled
-      ? workflowMentionIdsFromText(pastedText)
-      : new Set<string>();
+    const pastedWorkflowIds = workflowMentionIdsFromText(pastedText);
     if (pastedSkillIds.size === 0 && pastedWorkflowIds.size === 0) return;
 
     event.preventDefault();
-    const textareaValue = event.currentTarget.value;
-    const selectionStart = event.currentTarget.selectionStart ?? textareaValue.length;
-    const selectionEnd = event.currentTarget.selectionEnd ?? selectionStart;
+    const composer = inputRef.current;
+    if (!composer) return;
+    const textareaValue = composer.value;
+    const selectionStart = composer.selectionStart ?? textareaValue.length;
+    const selectionEnd = composer.selectionEnd ?? selectionStart;
     const availableLength = Math.max(
       0,
-      event.currentTarget.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
+      composer.maxLength - (textareaValue.length - (selectionEnd - selectionStart)),
     );
     const insertedText = pastedText.slice(0, availableLength);
     const nextInput = `${textareaValue.slice(0, selectionStart)}${insertedText}${textareaValue.slice(selectionEnd)}`;
@@ -4097,14 +4242,16 @@ export function QuickChatComposer({
       return;
     }
 
+    // Each catalog falls back to what is already loaded, so one failing request still lets the
+    // other resolve its half of the pasted mentions.
     void Promise.all([
-      fetchBrainSkillCatalog(),
-      workflowMentionsEnabled ? fetchBrainWorkflowCatalog() : Promise.resolve([]),
+      fetchBrainSkillCatalog().catch(() => skillCatalog),
+      fetchBrainWorkflowCatalog().catch(() => workflowCatalog),
     ])
       .then(([skills, workflows]) => {
         if (!mountedRef.current) return;
         setSkillCatalog(skills);
-        if (workflowMentionsEnabled) setWorkflowCatalog(workflows);
+        setWorkflowCatalog(workflows);
         const currentInput = inputRef.current?.value ?? nextInput;
         const resolvedMentions = [
           ...skillMentionsFromPastedText({
@@ -4186,11 +4333,7 @@ export function QuickChatComposer({
       ...(attachment.blobPathname ? { blobPathname: attachment.blobPathname } : {}),
       ...(attachment.previewUrl ? { previewUrl: attachment.previewUrl } : {}),
     }));
-    if (
-      taskSpawningEnabled &&
-      (isBackgroundChatDirective || adHocTaskMentionEnabled) &&
-      hasAdHocTaskToken(prompt)
-    ) {
+    if ((isBackgroundChatDirective || adHocTaskMentionEnabled) && hasAdHocTaskToken(prompt)) {
       const description = descriptionFromAdHocTaskPrompt(prompt);
       if (!description) {
         toast.error(`Describe the task after ${AD_HOC_TASK_TOKEN}.`);
@@ -4396,15 +4539,24 @@ export function QuickChatComposer({
   };
 
   const showEngineComposerControls = isEngineChat;
+  const composerUsesSandbox = selectedWorkflow
+    ? workflowComposer.usesSandbox
+    : showEngineComposerControls;
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {mentionToken && mentionOptions.length > 0 ? (
-        <div
-          role="listbox"
-          aria-label="Mention menu"
-          className="max-h-72 w-full overflow-y-auto shadow-ring-md rounded-lg bg-surface p-1"
-        >
+      {mentionToken && (mentionOptions.length > 0 || mentionToken.sigil === "@") ? (
+        <div role="listbox" aria-label="Mention menu" className="context-mention-menu w-full">
+          <div className="context-mention-heading">Context</div>
+          {mentionToken.sigil === "@" &&
+          (referenceCatalog.loading || referenceCatalog.error || !mentionOptions.length) ? (
+            <p role="status" className="px-2.5 py-2 text-xs text-ink-subtle">
+              {referenceCatalog.loading
+                ? "Loading mentions…"
+                : (referenceCatalog.error ??
+                  "No matching mentions. Manage connections in Plugins.")}
+            </p>
+          ) : null}
           {mentionOptions.map((option, index) => (
             <button
               key={option.token}
@@ -4422,7 +4574,9 @@ export function QuickChatComposer({
                 index === mentionOptionIndex && "bg-surface-hover",
               )}
             >
-              {option.kind === "engine" ? (
+              {option.kind === "reference" ? (
+                <ContextReferenceOptionContent reference={option.reference} />
+              ) : option.kind === "engine" ? (
                 <Code2 size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               ) : option.kind === "workflow" ? (
                 <WorkflowIcon
@@ -4435,17 +4589,21 @@ export function QuickChatComposer({
               ) : (
                 <Sparkles size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-ink-subtle" />
               )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] font-medium leading-4 text-ink">
-                  {option.token}
-                </span>
-                {option.kind === "skill" || option.kind === "workflow" || option.kind === "task" ? (
-                  <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
-                    {option.label}
-                    {option.description ? ` · ${option.description}` : ""}
+              {option.kind !== "reference" ? (
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium leading-4 text-ink">
+                    {option.token}
                   </span>
-                ) : null}
-              </span>
+                  {option.kind === "skill" ||
+                  option.kind === "workflow" ||
+                  option.kind === "task" ? (
+                    <span className="mt-0.5 block truncate text-[12px] leading-4 text-ink-subtle">
+                      {option.label}
+                      {option.description ? ` · ${option.description}` : ""}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
               {option.kind === "engine" ? (
                 <span className="text-[12px] leading-4 text-ink-subtle">Codex</span>
               ) : null}
@@ -4497,41 +4655,18 @@ export function QuickChatComposer({
           ) : null}
           <div className="flex items-end gap-2.5 px-3.5 pt-3 pb-1.5">
             <div className="relative min-w-0 flex-1 self-center">
-              {renderComposerInputOverlay({
-                value: input,
-                mentions: activeSelectedMentions,
-                overlayRef: inputOverlayRef,
-              })}
-              <textarea
+              <ReferenceComposerInput
                 ref={inputRef}
-                rows={1}
                 id="quick-chat-prompt"
-                name="prompt"
                 value={input}
-                placeholder="Ask opencompany anything, or describe a task..."
+                placeholder={"Ask opencompany anything, or describe a task..."}
                 onChange={onInputChange}
                 onBlur={() => setMentionToken(null)}
-                onClick={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+                onSelectionChange={updateMentionToken}
                 onKeyDown={onKeyDown}
                 onPaste={onInputPaste}
-                onScroll={(event) => {
-                  if (inputOverlayRef.current) {
-                    inputOverlayRef.current.scrollTop = event.currentTarget.scrollTop;
-                  }
-                }}
-                onSelect={(event) =>
-                  updateMentionToken(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
+                highlights={composerInputHighlightRanges(input, activeSelectedMentions)}
                 disabled={isSubmitting}
-                className={cn(
-                  "relative z-10 block max-h-32 w-full resize-none bg-transparent py-[3px] text-[13.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle",
-                  composerInputHasHighlights(input, activeSelectedMentions) &&
-                    "text-transparent caret-ink",
-                )}
-                style={{ maxHeight: TEXTAREA_MAX_HEIGHT_PX }}
-                maxLength={10_000}
               />
             </div>
             <SubmitButton
@@ -4549,7 +4684,26 @@ export function QuickChatComposer({
               onStop={() => {}}
             />
           </div>
-          <div className="flex items-center gap-1 border-t border-border px-2.5 py-1.5">
+          <div className="flex flex-wrap items-center gap-1 border-t border-border px-2.5 py-1.5">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              aria-label="Mention a plugin or repository"
+              title="Mention a plugin or repository"
+              className="rounded-md px-2 py-1 text-sm text-ink-subtle hover:bg-surface-hover"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const caret = inputRef.current?.selectionStart ?? input.length;
+                const before = input.slice(0, caret);
+                const inserted = `${before && !/\s$/.test(before) ? " " : ""}@`;
+                const next = `${before}${inserted}${input.slice(caret)}`;
+                pendingInputCaretRef.current = caret + inserted.length;
+                setInput(next);
+                updateMentionToken(next, caret + inserted.length);
+              }}
+            >
+              @
+            </button>
             {attachmentsEnabled ? (
               <>
                 <input
@@ -4589,9 +4743,9 @@ export function QuickChatComposer({
                   );
                   setChatModelOverride(model);
                   if (model === CODEX_PICKER_VALUE && model !== composerChatModel) {
-                    setCodexReasoningEffort(DEFAULT_CODEX_CHAT_REASONING_EFFORT);
+                    setCodexReasoningEffortOverride(null);
                   } else if (model === CLAUDE_PICKER_VALUE && model !== composerChatModel) {
-                    setCodexReasoningEffort(DEFAULT_CLAUDE_CHAT_REASONING_EFFORT);
+                    setCodexReasoningEffortOverride(null);
                     setCodexPlanModeEnabled(false);
                     setCodexGoalModeEnabled(false);
                     setCodexGoalObjective("");
@@ -4607,15 +4761,20 @@ export function QuickChatComposer({
                 codexConnected={codexConnected}
                 claudeCodeConnected={claudeCodeConnected}
                 autoModelRoutingEnabled={autoModelRoutingEnabled}
+                sharedModelAccessEnabled={sharedModelAccessEnabled}
               />
             )}
             {showEngineComposerControls && !selectedWorkflow ? (
               <EngineComposerControls
                 model={
                   composerEngine === "codex"
-                    ? { engine: "codex", value: codexModel, onChange: setCodexModel }
+                    ? { engine: "codex", value: codexModel, onChange: setCodexModelOverride }
                     : composerEngine === "claude_code"
-                      ? { engine: "claude_code", value: claudeModel, onChange: setClaudeModel }
+                      ? {
+                          engine: "claude_code",
+                          value: claudeModel,
+                          onChange: setClaudeModelOverride,
+                        }
                       : null
                 }
                 engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
@@ -4632,13 +4791,16 @@ export function QuickChatComposer({
                 goalTokenBudget={codexGoalTokenBudget}
                 disabled={isSubmitting}
                 modelDisabled={isSubmitting}
-                onReasoningEffortChange={setCodexReasoningEffort}
+                // Not persisted, for the same reason this composer's model picker is not:
+                // a quick-compose chat sets its own level without moving the app-wide default.
+                onReasoningEffortChange={setCodexReasoningEffortOverride}
                 onPlanModeEnabledChange={setCodexPlanModeEnabled}
                 onGoalModeEnabledChange={setCodexGoalModeEnabled}
                 onGoalObjectiveChange={setCodexGoalObjective}
                 onGoalTokenBudgetChange={setCodexGoalTokenBudget}
               />
             ) : null}
+            {composerUsesSandbox ? <SandboxIndicator /> : null}
           </div>
         </div>
       </form>
@@ -4673,7 +4835,7 @@ function useComposerVoiceDictation({
   onInputChange,
 }: {
   input: string;
-  inputRef: RefObject<HTMLTextAreaElement | null>;
+  inputRef: RefObject<ComposerInputHandle | null>;
   onInputChange: (nextInput: string) => void;
 }) {
   const [status, setStatus] = useState<VoiceDictationStatus>("idle");
@@ -5037,59 +5199,6 @@ function chatHref(sessionId: string) {
   return `/chat/${encodeURIComponent(sessionId)}`;
 }
 
-function visibleHomeChats(
-  chats: readonly ChatSummaryView[],
-  optimisticallyArchivedChatIds: ReadonlySet<string>,
-  localChatStates: ReadonlyMap<string, ReturnType<typeof chatSummaryState>>,
-) {
-  return chats
-    .filter((chat) => !optimisticallyArchivedChatIds.has(chat.id))
-    .filter(
-      (chat) =>
-        Boolean(chat.pinnedAt) ||
-        isHomeChatStateVisible(chat, localChatStates.get(chat.id) ?? null) ||
-        isRecentChatActivity(chat.updatedAt),
-    )
-    .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-}
-
-function isHomeChatStateVisible(
-  chat: ChatSummaryView,
-  localState: ReturnType<typeof chatSummaryState> | null,
-) {
-  const state = localState ?? chatSummaryState(chat);
-  return state === "working" || state === "done_unseen";
-}
-
-function visibleHomeSchedules(schedules: readonly TaskScheduleView[]) {
-  return schedules
-    .filter((schedule) => schedule.id)
-    .toSorted((a, b) => new Date(a.nextRunAt).getTime() - new Date(b.nextRunAt).getTime());
-}
-
-function visibleHomeTasks(input: {
-  tasks: readonly TaskView[];
-  optimisticallyArchivedTaskIds: ReadonlySet<string>;
-}): TaskView[] {
-  return input.tasks
-    .filter((task) => !input.optimisticallyArchivedTaskIds.has(task.id) && !task.archivedAt)
-    .toSorted((left, right) => {
-      const activeDifference =
-        Number(isBackgroundTaskActive(right)) - Number(isBackgroundTaskActive(left));
-      if (activeDifference !== 0) return activeDifference;
-      return taskUpdatedAtMs(right) - taskUpdatedAtMs(left);
-    });
-}
-
-function isBackgroundTaskActive(task: TaskView) {
-  return task.status === "queued" || task.status === "running";
-}
-
-function taskUpdatedAtMs(task: TaskView) {
-  const timestamp = new Date(task.updatedAt).getTime();
-  return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
 function titleFromChatMessages(messages: readonly ChatUiMessage[]) {
   const firstUserMessage = messages.find((message) => message.role === "user");
   const text = firstUserMessage ? textFromChatUiMessage(firstUserMessage) : "";
@@ -5140,11 +5249,45 @@ function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
   return null;
 }
 
-function defaultCodexComposerUiState(
-  reasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
-): CodexComposerUiState {
+// The level a composer shows when the open chat carries no explicit choice: the user's
+// last-used level for that engine, falling back to the engine default. Subscribed rather than
+// read once so it survives hydration and stays in step across tabs. A null engine renders no
+// reasoning control, so the Codex entry is only a placeholder for the unused read.
+function useRememberedReasoningEffort(
+  userWorkosId: string,
+  engine: EngineChatKind | null,
+): CodexReasoningEffort {
+  const effortEngine = engine ?? CODEX_PICKER_VALUE;
+  return useSyncExternalStore(
+    subscribeLastReasoningEffort,
+    () => readLastReasoningEffort(userWorkosId, effortEngine),
+    () => ENGINE_REGISTRY[effortEngine].defaultReasoningEffort,
+  );
+}
+
+// The model each engine's picker shows when the open chat pins none: the model last used with
+// that engine, falling back to the engine default. Both engines are read on every render so a
+// picker never lags the engine the composer just switched to.
+function useRememberedEngineModels(userWorkosId: string): {
+  codex: CodexChatModelId;
+  claude_code: ClaudeChatModelId;
+} {
+  const codex = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "codex"),
+    () => CODEX_CHAT_DEFAULT_MODEL_ID,
+  );
+  const claudeCode = useSyncExternalStore(
+    subscribeLastEngineModel,
+    () => readLastEngineModel(userWorkosId, "claude_code"),
+    () => CLAUDE_CHAT_DEFAULT_MODEL_ID,
+  );
+  return { codex, claude_code: claudeCode };
+}
+
+function defaultCodexComposerUiState(): CodexComposerUiState {
   return {
-    reasoningEffort,
+    reasoningEffort: null,
     planModeEnabled: false,
     goalModeEnabled: false,
     goalObjective: "",
@@ -5167,20 +5310,14 @@ function codexComposerUiStateForChat(
     const saved = savedByChatId?.get(chat.id);
     if (saved) return saved;
   }
-  return codexComposerUiStateFromSettings(
-    chat?.codexComposerSettings ?? null,
-    isCloudCodingEngine(chat?.engine)
-      ? ENGINE_REGISTRY[chat.engine].defaultReasoningEffort
-      : undefined,
-  );
+  return codexComposerUiStateFromSettings(chat?.codexComposerSettings ?? null);
 }
 
 function codexComposerUiStateFromSettings(
   settings: EngineComposerSettings | null | undefined,
-  defaultReasoningEffort = DEFAULT_CODEX_CHAT_REASONING_EFFORT,
 ): CodexComposerUiState {
   if (!settings) {
-    return defaultCodexComposerUiState(defaultReasoningEffort);
+    return defaultCodexComposerUiState();
   }
   const goalMode = settings.goalMode ?? null;
   return {
@@ -5359,54 +5496,6 @@ type ComposerInputHighlightRange =
       mention: ComposerMentionHighlight;
     };
 
-function composerInputHasHighlights(value: string, mentions: readonly ChatMention[]) {
-  return composerInputHighlightRanges(value, mentions).length > 0;
-}
-
-function renderComposerInputOverlay({
-  value,
-  mentions,
-  overlayRef,
-}: {
-  value: string;
-  mentions: readonly ChatMention[];
-  overlayRef: RefObject<HTMLDivElement | null>;
-}) {
-  const ranges = composerInputHighlightRanges(value, mentions);
-  if (ranges.length === 0) return null;
-
-  let offset = 0;
-  const parts = ranges.flatMap((range, index) => {
-    const plain = value.slice(offset, range.start);
-    const chip = (
-      <span
-        key={`mention-${range.start}-${range.end}-${index}`}
-        {...(range.kind === "mention"
-          ? { "data-opencompany-chat-mention": range.mention.kind }
-          : { "data-opencompany-chat-directive": "background" })}
-        className={COMPOSER_MENTION_CHIP_CLASS}
-      >
-        {value.slice(range.start, range.end)}
-      </span>
-    );
-    offset = range.end;
-    return plain ? [plain, chip] : [chip];
-  });
-  const tail = value.slice(offset);
-  if (tail) parts.push(tail);
-
-  return (
-    <div
-      ref={overlayRef}
-      aria-hidden="true"
-      data-testid="composer-mention-overlay"
-      className="pointer-events-none absolute inset-0 z-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words py-[3px] text-[13.5px] leading-5 text-ink"
-    >
-      {parts}
-    </div>
-  );
-}
-
 function composerInputHighlightRanges(
   value: string,
   mentions: readonly ChatMention[],
@@ -5538,6 +5627,7 @@ function buildMentionOptions(input: {
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
   adHocTaskEnabled: boolean;
+  references?: ContextReferenceOption[];
 }): MentionOption[] {
   if (!input.token) return [];
   const query = input.token.query;
@@ -5604,7 +5694,15 @@ function buildMentionOptions(input: {
     return options;
   }
 
-  const options: MentionOption[] = [];
+  const options: MentionOption[] = filterContextReferences(input.references ?? [], query).map(
+    (reference) => ({
+      kind: "reference",
+      token: referenceMarkdown(reference),
+      label: reference.label,
+      description: reference.description,
+      reference,
+    }),
+  );
   if (input.codexConnected && (!query || "codex".startsWith(query))) {
     options.push({ kind: "engine", token: "@codex", label: "Codex", mention: CODEX_MENTION });
   }
@@ -5694,10 +5792,6 @@ async function startWorkflowTask(input: {
   };
 }
 
-function automationCommandError(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
-}
-
 async function uploadCanonicalAttachment({ file, pendingId }: { file: File; pendingId: string }) {
   return { ...(await uploadHeadlessChatAttachment({ file, pendingId })), canonical: true };
 }
@@ -5771,7 +5865,7 @@ function CodingEngineModelPicker({
   const selectedModel =
     models.find((model) => model.id === value) ?? models.find((model) => model.id === defaultValue);
   const selectedLabel = selectedModel?.label ?? `${engineLabel} model`;
-  const visibleModels = models.filter((model) => model.id !== "anthropic/claude-opus-4.8");
+  const visibleModels = models.filter((model) => isAgentModelSelectable(model.id));
   const ModelIcon = provider === "anthropic" ? AnthropicIcon : OpenAIIcon;
 
   return (
@@ -5866,6 +5960,28 @@ function renderEngineModelPicker(model: EngineModelPickerModel | null, disabled:
         <ClaudeModelPicker value={model.value} disabled={disabled} onChange={model.onChange} />
       );
   }
+}
+
+// The composer already says which coding agent will answer; it does not say where that agent
+// runs. Cloud coding engines execute on an isolated sandbox VM — never the user's machine — and
+// that is worth knowing before sending, not after. Sits at the end of the composer footer so it
+// reads as a property of the run rather than another control to press.
+function SandboxIndicator() {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        aria-label="Runs in an isolated cloud sandbox"
+        className="ml-auto flex shrink-0 cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium leading-none text-ink-subtle outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      >
+        <Box size={12} strokeWidth={1.9} className="shrink-0" aria-hidden="true" />
+        <span className="hidden sm:inline">Sandbox</span>
+      </TooltipTrigger>
+      <TooltipContent>
+        Runs in an isolated cloud sandbox. Your machine and local files are never touched.
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 function EngineComposerControls({
@@ -6140,15 +6256,17 @@ function formatCompactTokens(value: number): string {
 function CodingSessionStatusIndicator({
   engine,
   runtime,
+  stopping,
   optimisticStatus,
-  sandboxStatus,
+  sandboxState,
 }: {
   engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
+  stopping: boolean;
   optimisticStatus: "starting" | "running" | null;
-  sandboxStatus: EngineRuntimeStatus | null;
+  sandboxState: EngineSandboxState;
 }) {
-  let meta = statusPresenter(
+  let meta = sandboxStatusPresenter(
     engine,
     optimisticStatus
       ? {
@@ -6158,32 +6276,28 @@ function CodingSessionStatusIndicator({
           updatedAt: runtime?.updatedAt ?? "",
         }
       : runtime,
+    sandboxState,
   );
-  // A ready session whose sandbox has paused shows as asleep so the green dot never reads as
-  // "still running" hours after the last turn. A deleted sandbox stays "Ready": nothing exists
-  // anymore and a fresh one starts on the next message.
-  if (meta.kind === "ready" && sandboxStatus === "sleeping") {
+  // An interrupt in flight is the one agent-side transition the pill still owns: E2B keeps
+  // reporting the sandbox as running throughout, so only the logical state shows the stop landing.
+  if (stopping) {
     meta = {
       ...meta,
-      kind: "asleep",
-      label: "Asleep",
-      dotClass: "bg-ink/30",
-      textClass: "text-ink-subtle",
+      kind: "working",
+      label: "Stopping",
+      dotClass: "bg-warning animate-pulse",
+      textClass: "text-ink-muted",
     };
   }
-  const sandboxDetail =
-    sandboxStatus === "sleeping"
-      ? " The sandbox is sleeping and will wake automatically on the next message."
-      : sandboxStatus === "deleted"
-        ? " The previous sandbox expired; a new one will start on the next message."
-        : "";
-  const title = `${meta.engineLabel} is ${meta.label.toLowerCase()}.${sandboxDetail}`;
+  const title = stopping
+    ? `${meta.engineLabel} is stopping the current turn.`
+    : `${meta.engineLabel} sandbox is ${meta.label.toLowerCase()}.${meta.detail}`;
 
   return (
     <div
       className="flex shrink-0 items-center gap-1.5 rounded-full border border-surface-subtle bg-surface px-2.5 py-1 text-[12px] font-medium leading-4 text-ink-muted shadow-[0_1px_3px_rgba(15,15,15,0.04)]"
       title={title}
-      aria-label={`${meta.engineLabel} status: ${meta.label}`}
+      aria-label={`${meta.engineLabel} sandbox status: ${meta.label}`}
     >
       <span className={cn("size-2 rounded-full", meta.dotClass)} aria-hidden="true" />
       <span>{meta.label}</span>
@@ -6221,327 +6335,6 @@ function LiveChatTaskSubscriber({
   return null;
 }
 
-function ChatHistoryList({
-  chats,
-  localChatStates,
-  onSelect,
-  onArchive,
-}: {
-  chats: readonly ChatSummaryView[];
-  localChatStates: ReadonlyMap<string, ReturnType<typeof chatSummaryState>>;
-  onSelect: (chat: ChatSummaryView) => void;
-  onArchive: (chat: ChatSummaryView) => void;
-}) {
-  const router = useRouter();
-
-  return (
-    <div className="flex flex-col">
-      {chats.map((chat) => {
-        const href = chatHref(chat.id);
-        const prefetchChat = () => router.prefetch(href);
-        return (
-          <div
-            key={chat.id}
-            className="group/chat relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover"
-          >
-            <Link
-              href={href}
-              prefetch
-              onMouseEnter={prefetchChat}
-              onFocus={prefetchChat}
-              onTouchStart={prefetchChat}
-              onClick={() => onSelect(chat)}
-              className="flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-            >
-              <HomeChatStateIndicator
-                chat={chat}
-                localState={localChatStates.get(chat.id) ?? null}
-              />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="truncate text-[14px] font-medium leading-tight text-ink">
-                    {chat.title}
-                  </span>
-                  <span className="shrink-0 text-[12px] leading-tight text-ink-faint transition-opacity duration-150 group-hover/chat:opacity-0 group-focus-within/chat:opacity-0">
-                    {formatRelativeTime(chat.updatedAt)}
-                  </span>
-                </div>
-                <p className="truncate text-[12.5px] leading-4 text-ink-subtle">{chat.preview}</p>
-              </div>
-            </Link>
-            <button
-              type="button"
-              aria-label={`Archive ${chat.title}`}
-              title="Archive"
-              onClick={() => onArchive(chat)}
-              className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/chat:opacity-100 group-focus-within/chat:opacity-100"
-            >
-              <Archive size={14} strokeWidth={2} />
-            </button>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function HomeChatStateIndicator({
-  chat,
-  localState,
-}: {
-  chat: ChatSummaryView;
-  localState: ReturnType<typeof chatSummaryState> | null;
-}) {
-  const state = localState ?? chatSummaryState(chat);
-  return <ChatStateIndicator state={state} surface="home" showSeen />;
-}
-
-function ScheduleRows({
-  schedules,
-  workspaceId,
-}: {
-  schedules: readonly TaskScheduleView[];
-  workspaceId: string;
-}) {
-  return schedules.map((schedule) => (
-    <ScheduleRow key={schedule.id} schedule={schedule} workspaceId={workspaceId} />
-  ));
-}
-
-function ScheduleRow({
-  schedule,
-  workspaceId,
-}: {
-  schedule: TaskScheduleView;
-  workspaceId: string;
-}) {
-  const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [isEditing, setIsEditing] = useState(false);
-  const [editName, setEditName] = useState(schedule.name);
-  const [editCron, setEditCron] = useState(schedule.cron);
-  const [editTimezone, setEditTimezone] = useState(schedule.timezone);
-  const [editPrompt, setEditPrompt] = useState(schedule.prompt);
-
-  const openEdit = () => {
-    setEditName(schedule.name);
-    setEditCron(schedule.cron);
-    setEditTimezone(schedule.timezone);
-    setEditPrompt(schedule.prompt);
-    setIsEditing(true);
-  };
-
-  const saveEdit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    startTransition(async () => {
-      try {
-        await updateHeadlessTaskSchedule(
-          schedule.id,
-          {
-            expectedVersion: schedule.version,
-            name: editName,
-            sourceDescription: `${editCron.trim()} - ${editTimezone.trim()}`,
-            cron: editCron,
-            timezone: editTimezone,
-            prompt: editPrompt,
-          },
-          { scopeKey: workspaceId },
-        );
-        setIsEditing(false);
-      } catch (error) {
-        toast.error(automationCommandError(error, "Recurring Task update failed."));
-      }
-    });
-  };
-
-  return (
-    <div className="group/routine rounded-lg transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <div className="flex min-h-12 items-center gap-3 px-2 py-1.5">
-        <CalendarClock
-          size={16}
-          strokeWidth={2}
-          className={schedule.enabled ? "shrink-0 text-emerald-600" : "shrink-0 text-ink-subtle"}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-baseline gap-2">
-            <span className="truncate text-[14px] font-medium leading-tight text-ink">
-              {schedule.name}
-            </span>
-            <span className="shrink-0 text-[12px] leading-tight text-ink-subtle">
-              {schedule.enabled ? formatScheduleNextRun(schedule.nextRunAt) : "Paused"}
-            </span>
-          </div>
-          <p className="truncate text-[12.5px] leading-4 text-ink-subtle">
-            {schedule.sourceDescription || `${schedule.cron} - ${schedule.timezone}`}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/routine:opacity-100 group-focus-within/routine:opacity-100">
-          <button
-            type="button"
-            aria-label={`Run ${schedule.name} now`}
-            title="Run now"
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  const result = await runHeadlessTaskScheduleNow(schedule.id, {
-                    scopeKey: workspaceId,
-                  });
-                  router.push(`/tasks/${encodeURIComponent(result.task.displayId)}`);
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task run failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            <Play size={13} strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            aria-label={`Edit ${schedule.name}`}
-            title="Edit"
-            disabled={isPending}
-            onClick={() => {
-              if (isEditing) {
-                setIsEditing(false);
-              } else {
-                openEdit();
-              }
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            <Settings size={13} strokeWidth={2} />
-          </button>
-          <button
-            type="button"
-            aria-label={schedule.enabled ? `Pause ${schedule.name}` : `Resume ${schedule.name}`}
-            title={schedule.enabled ? "Pause" : "Resume"}
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  await updateHeadlessTaskSchedule(
-                    schedule.id,
-                    { expectedVersion: schedule.version, enabled: !schedule.enabled },
-                    { scopeKey: workspaceId },
-                  );
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task update failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-          >
-            {schedule.enabled ? (
-              <Pause size={13} strokeWidth={2} />
-            ) : (
-              <Play size={13} strokeWidth={2} />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label={`Delete ${schedule.name}`}
-            title="Delete"
-            disabled={isPending}
-            onClick={() => {
-              startTransition(async () => {
-                try {
-                  await archiveHeadlessTaskSchedule(
-                    schedule.id,
-                    { expectedVersion: schedule.version },
-                    { scopeKey: workspaceId },
-                  );
-                } catch (error) {
-                  toast.error(automationCommandError(error, "Recurring Task archive failed."));
-                }
-              });
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-danger transition-colors hover:bg-danger-bg disabled:opacity-60"
-          >
-            <Trash2 size={13} strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-      {isEditing ? (
-        <form className="flex flex-col gap-2 px-2 pb-2" onSubmit={saveEdit}>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              value={editName}
-              onChange={(event) => setEditName(event.target.value)}
-              placeholder="Name"
-              disabled={isPending}
-              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-              required
-            />
-            <input
-              value={editCron}
-              onChange={(event) => setEditCron(event.target.value)}
-              placeholder="0 9 * * 1"
-              disabled={isPending}
-              className="min-w-0 rounded-md border border-border bg-surface px-2 py-1.5 font-mono text-[12px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-              required
-            />
-          </div>
-          <input
-            value={editTimezone}
-            onChange={(event) => setEditTimezone(event.target.value)}
-            placeholder="Europe/Berlin"
-            disabled={isPending}
-            className="rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-            required
-          />
-          <textarea
-            value={editPrompt}
-            onChange={(event) => setEditPrompt(event.target.value)}
-            disabled={isPending}
-            className="min-h-20 resize-y rounded-md border border-border bg-surface px-2 py-1.5 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-subtle focus:border-border-strong"
-            required
-          />
-          <div className="flex items-center justify-end gap-2">
-            <button
-              type="button"
-              disabled={isPending}
-              onClick={() => setIsEditing(false)}
-              className="rounded-md px-2 py-1 text-[12px] text-ink-subtle transition-colors hover:bg-surface-muted hover:text-ink disabled:opacity-60"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="rounded-md bg-ink px-2 py-1 text-[12px] font-medium text-canvas transition-opacity disabled:opacity-60"
-            >
-              Save
-            </button>
-          </div>
-        </form>
-      ) : null}
-    </div>
-  );
-}
-
-function formatScheduleNextRun(value: string) {
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Next run unknown";
-  const minutes = Math.max(1, Math.ceil((timestamp - Date.now()) / 60_000));
-  if (minutes < 60) return `Next in ${minutes}m`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 36) return `Next in ${hours}h`;
-  const days = Math.round(minutes / 1440);
-  return `Next in ${days}d`;
-}
-
-function HomeTaskRows({
-  items,
-  onArchiveTask,
-}: {
-  items: readonly TaskView[];
-  onArchiveTask: (task: TaskView) => void;
-}) {
-  return items.map((task) => <ResultRow key={task.id} task={task} onArchive={onArchiveTask} />);
-}
-
 function taskRowToView(row: TaskRow): TaskView {
   return {
     id: row.id,
@@ -6570,60 +6363,6 @@ function taskRowToView(row: TaskRow): TaskView {
   };
 }
 
-function ResultRow({ task, onArchive }: { task: TaskView; onArchive: (task: TaskView) => void }) {
-  const router = useRouter();
-  const meta = getTaskMeta(task);
-  const Icon = meta.icon;
-  const title = task.name;
-  const href = `/tasks/${encodeURIComponent(task.displayId)}`;
-  const prefetchTask = () => router.prefetch(href);
-  const canArchive = Boolean(task.sessionId) && isSettledTaskStatus(task.status);
-  return (
-    <div className="group/result relative flex items-center rounded-lg px-2 py-1 transition-colors duration-150 hover:bg-surface-hover focus-within:bg-surface-hover">
-      <Link
-        href={href}
-        prefetch
-        onMouseEnter={prefetchTask}
-        onFocus={prefetchTask}
-        onTouchStart={prefetchTask}
-        className="flex min-w-0 flex-1 items-center gap-3 rounded-md py-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-      >
-        <Icon
-          size={16}
-          strokeWidth={2}
-          className={`${meta.className} shrink-0 ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
-        />
-
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">{title}</span>
-          <span className="hidden truncate text-[12.5px] leading-tight text-ink-subtle sm:inline">
-            {task.displayId} · {meta.detail}
-          </span>
-        </div>
-
-        <span
-          className={`shrink-0 text-[12px] text-ink-subtle transition-opacity duration-150 ${
-            canArchive ? "group-hover/result:opacity-0 group-focus-within/result:opacity-0" : ""
-          }`}
-        >
-          {formatRelativeTime(task.createdAt)}
-        </span>
-      </Link>
-      {canArchive ? (
-        <button
-          type="button"
-          aria-label={`Archive ${title}`}
-          title="Archive"
-          onClick={() => onArchive(task)}
-          className="absolute right-1 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md bg-surface-hover text-ink-subtle opacity-0 transition-[background-color,color,opacity] duration-150 hover:bg-surface-muted hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover/result:opacity-100 group-focus-within/result:opacity-100"
-        >
-          <Archive size={14} strokeWidth={2} />
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 function ModelPicker({
   value,
   onChange,
@@ -6631,6 +6370,7 @@ function ModelPicker({
   codexConnected = false,
   claudeCodeConnected = false,
   autoModelRoutingEnabled = false,
+  sharedModelAccessEnabled = false,
 }: {
   value: ChatModelSelection;
   onChange: (modelId: ChatModelSelection) => void;
@@ -6638,7 +6378,9 @@ function ModelPicker({
   codexConnected?: boolean;
   claudeCodeConnected?: boolean;
   autoModelRoutingEnabled?: boolean;
+  sharedModelAccessEnabled?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const isAutoSelected = value === AUTO_MODEL_SELECTION;
   const isCodexSelected = value === CODEX_PICKER_VALUE;
@@ -6646,6 +6388,20 @@ function ModelPicker({
   const isEngineSelected = isCodexSelected || isClaudeSelected;
   const selectedModel =
     !isAutoSelected && !isEngineSelected ? (findModel(value) ?? findModel(DEFAULT_MODEL)) : null;
+  const [tab, setTab] = useState<"chat" | "coding">(isEngineSelected ? "coding" : "chat");
+  // Reopening should land on the tab matching what's currently selected, but the user
+  // stays free to switch tabs while the popover is open without being reset mid-browse.
+  // Adjusting state during render (rather than in an effect) avoids an extra commit.
+  const [tabSyncedOpen, setTabSyncedOpen] = useState(open);
+  if (open !== tabSyncedOpen) {
+    setTabSyncedOpen(open);
+    if (open) setTab(isEngineSelected ? "coding" : "chat");
+  }
+
+  const goToCodingSubscriptions = () => {
+    setOpen(false);
+    router.push("/settings/workspace/inference");
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -6685,51 +6441,24 @@ function ModelPicker({
         sideOffset={10}
         className="w-[360px] max-w-[calc(100vw-1.5rem)] bg-surface p-0 text-ink"
       >
-        <Command className="bg-surface text-ink">
-          <CommandInput placeholder="Search models..." />
-          <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
-            <CommandEmpty>No models found.</CommandEmpty>
-            {autoModelRoutingEnabled ? (
-              <CommandGroup heading="Routing">
-                <CommandItem
-                  value={AUTO_MODEL_SELECTION}
-                  keywords={["Auto", "automatic", "routing", "recommended"]}
-                  onSelect={() => {
-                    onChange(AUTO_MODEL_SELECTION);
-                    setOpen(false);
-                  }}
-                  title="Choose a model from the first message and keep it for the chat."
-                  className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                >
-                  <Check
-                    size={13}
-                    strokeWidth={2}
-                    className={cn(
-                      "shrink-0 text-ink",
-                      isAutoSelected ? "opacity-100" : "opacity-0",
-                    )}
-                  />
-                  <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium leading-4">Auto</div>
-                    <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                      Picks once from your first message
-                    </div>
-                  </div>
-                </CommandItem>
-              </CommandGroup>
-            ) : null}
-            {codexConnected || claudeCodeConnected ? (
-              <CommandGroup heading="Engines">
-                {codexConnected ? (
+        <ModelPickerTabs value={tab} onChange={setTab} />
+        {tab === "chat" ? (
+          <Command className="bg-surface text-ink">
+            <CommandInput placeholder="Search models..." />
+            <CommandList className="max-h-[min(320px,calc(100vh-9rem))]">
+              <CommandEmpty>No models found.</CommandEmpty>
+              {/* Auto leads the one list rather than sitting in its own section: it is the
+                  model choice for people who do not want to make one, not a separate mode. */}
+              <CommandGroup>
+                {autoModelRoutingEnabled ? (
                   <CommandItem
-                    value={CODEX_PICKER_VALUE}
-                    keywords={["Codex", "cloud", "sandbox", "engine"]}
+                    value={AUTO_MODEL_SELECTION}
+                    keywords={["Auto", "automatic", "routing", "recommended"]}
                     onSelect={() => {
-                      onChange(CODEX_PICKER_VALUE);
+                      onChange(AUTO_MODEL_SELECTION);
                       setOpen(false);
                     }}
-                    title="Chat with Codex in a persistent cloud sandbox."
+                    title="Choose a model from the first message and keep it for the chat."
                     className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
                   >
                     <Check
@@ -6737,92 +6466,94 @@ function ModelPicker({
                       strokeWidth={2}
                       className={cn(
                         "shrink-0 text-ink",
-                        isCodexSelected ? "opacity-100" : "opacity-0",
+                        isAutoSelected ? "opacity-100" : "opacity-0",
                       )}
                     />
-                    <OpenAIIcon size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
+                    <Sparkles size={14} strokeWidth={1.85} className="shrink-0 text-ink-muted" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Codex</div>
+                      <div className="truncate font-medium leading-4">Auto</div>
                       <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Codex sandbox
+                        Picks once from your first message
                       </div>
                     </div>
                   </CommandItem>
                 ) : null}
-                {claudeCodeConnected ? (
-                  <CommandItem
-                    value={CLAUDE_PICKER_VALUE}
-                    keywords={["Claude", "Claude Code", "cloud", "sandbox", "engine"]}
-                    onSelect={() => {
-                      onChange(CLAUDE_PICKER_VALUE);
-                      setOpen(false);
-                    }}
-                    title="Chat with Claude Code in a persistent cloud sandbox."
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn(
-                        "shrink-0 text-ink",
-                        isClaudeSelected ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <AnthropicIcon
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">Claude Code</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        Cloud Claude Code sandbox
+                {MODELS.map((model) => {
+                  if (!isAgentModelSelectable(model.id)) return null;
+                  const isSelected =
+                    !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
+                  const isSubscriptionCovered =
+                    sharedModelAccessEnabled && isCodexSubscriptionModel(model.id);
+                  return (
+                    <CommandItem
+                      key={model.id}
+                      value={model.id}
+                      keywords={[model.label, modelProviderLabel(model.id)]}
+                      onSelect={() => {
+                        onChange(model.id);
+                        setOpen(false);
+                      }}
+                      title={model.description}
+                      className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
+                    >
+                      <Check
+                        size={13}
+                        strokeWidth={2}
+                        className={cn(
+                          "shrink-0 text-ink",
+                          isSelected ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <ModelProviderIcon
+                        modelId={model.id}
+                        size={14}
+                        strokeWidth={1.85}
+                        className="shrink-0 text-ink-muted"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium leading-4">{model.label}</div>
+                        <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
+                          {modelProviderLabel(model.id)}
+                        </div>
                       </div>
-                    </div>
-                  </CommandItem>
-                ) : null}
+                      {isSubscriptionCovered ? (
+                        <span
+                          title="Covered by your workspace's ChatGPT subscription, so it uses no credits."
+                          className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle"
+                        >
+                          Included
+                        </span>
+                      ) : null}
+                    </CommandItem>
+                  );
+                })}
               </CommandGroup>
-            ) : null}
-            <CommandGroup heading="Models">
-              {MODELS.map((model) => {
-                if (model.id === "anthropic/claude-opus-4.8") return null;
-                const isSelected =
-                  !isAutoSelected && !isEngineSelected && model.id === selectedModel?.id;
-                return (
-                  <CommandItem
-                    key={model.id}
-                    value={model.id}
-                    keywords={[model.label, modelProviderLabel(model.id)]}
-                    onSelect={() => {
-                      onChange(model.id);
-                      setOpen(false);
-                    }}
-                    title={model.description}
-                    className="gap-2 rounded-md px-2 py-1.5 text-[13px] text-ink data-[selected=true]:bg-surface-hover data-[selected=true]:text-ink"
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2}
-                      className={cn("shrink-0 text-ink", isSelected ? "opacity-100" : "opacity-0")}
-                    />
-                    <ModelProviderIcon
-                      modelId={model.id}
-                      size={14}
-                      strokeWidth={1.85}
-                      className="shrink-0 text-ink-muted"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium leading-4">{model.label}</div>
-                      <div className="truncate text-[11.5px] leading-4 text-ink-subtle">
-                        {modelProviderLabel(model.id)}
-                      </div>
-                    </div>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
+            </CommandList>
+          </Command>
+        ) : (
+          <div className="flex flex-col gap-1 p-2 pt-1.5">
+            <CodingAgentOption
+              engine="codex"
+              connected={codexConnected}
+              selected={isCodexSelected}
+              onSelect={() => {
+                onChange(CODEX_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+            <CodingAgentOption
+              engine="claude_code"
+              connected={claudeCodeConnected}
+              selected={isClaudeSelected}
+              onSelect={() => {
+                onChange(CLAUDE_PICKER_VALUE);
+                setOpen(false);
+              }}
+              onConnect={goToCodingSubscriptions}
+            />
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -6832,93 +6563,46 @@ function findModel(id: string) {
   return MODELS.find((model) => model.id === id);
 }
 
-function ModelProviderIcon({
-  modelId,
-  size,
-  strokeWidth,
-  className,
-}: {
-  modelId: string;
-  size: number;
-  strokeWidth: number;
-  className?: string;
-}) {
-  const provider = modelId.split("/")[0] ?? "";
-  if (provider === "anthropic") {
-    return <AnthropicIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "deepseek") {
-    return <DeepSeekIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "moonshotai") {
-    return <MoonshotIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "openai") {
-    return <OpenAIIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  if (provider === "xai") {
-    return <XaiIcon size={size} strokeWidth={strokeWidth} className={className} />;
-  }
-  return <Sparkles size={size} strokeWidth={strokeWidth} className={className} />;
-}
-
-function modelProviderLabel(id: string) {
-  const provider = id.split("/")[0] ?? "";
-  if (provider === "alibaba") return "Alibaba";
-  if (provider === "anthropic") return "Anthropic";
-  if (provider === "deepseek") return "DeepSeek";
-  if (provider === "moonshotai") return "Moonshot";
-  if (provider === "openai") return "OpenAI";
-  if (provider === "xai") return "SpaceXAI";
-  return provider;
-}
-
 function SubmitButton({
   disabled,
   isGenerating,
-  isStopping = false,
+  stopping = false,
+  queuesMessage = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
-  isStopping?: boolean;
+  stopping?: boolean;
+  queuesMessage?: boolean;
   startsTask?: boolean;
   onStop: () => void;
 }) {
-  if (isStopping) {
-    return (
-      <button
-        type="button"
-        aria-label="Stopping task"
-        title="Stopping task"
-        disabled
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas opacity-60"
-      >
-        <LoaderCircle size={13} strokeWidth={2.2} className="animate-spin" />
-      </button>
-    );
-  }
-
   if (isGenerating) {
     return (
       <button
         type="button"
         aria-label="Stop response"
         title="Stop response"
+        disabled={stopping}
         onClick={onStop}
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none"
+        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-60"
       >
-        <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        {stopping ? (
+          <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+        ) : (
+          <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        )}
       </button>
     );
   }
 
+  const action = startsTask ? "Start task" : queuesMessage ? "Queue message" : "Send message";
   return (
     <button
       type="submit"
-      aria-label={startsTask ? "Start task" : "Send message"}
-      title={startsTask ? "Start task" : undefined}
+      aria-label={action}
+      title={startsTask || queuesMessage ? action : undefined}
       disabled={disabled}
       className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-30"
     >
@@ -6931,16 +6615,32 @@ function SubmitButton({
   );
 }
 
-function EngineStopButton({ label, onStop }: { label: string; onStop: () => void }) {
+// Sits beside the composer so its message action stays available while the turn is working.
+// `stopping` covers the gap between asking to interrupt and the runner settling it.
+function EngineStopButton({
+  label,
+  stopping = false,
+  onStop,
+}: {
+  label: string;
+  stopping?: boolean;
+  onStop: () => void;
+}) {
+  const action = stopping ? `Stopping ${label}` : `Interrupt ${label}`;
   return (
     <button
       type="button"
-      aria-label={`Interrupt ${label}`}
-      title={`Interrupt ${label}`}
+      aria-label={action}
+      title={action}
+      disabled={stopping}
       onClick={onStop}
-      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+      className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-ink-muted transition-colors duration-150 hover:border-danger-border hover:bg-danger-bg hover:text-danger focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:opacity-50"
     >
-      <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      {stopping ? (
+        <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+      ) : (
+        <Square size={11} strokeWidth={2.2} fill="currentColor" />
+      )}
     </button>
   );
 }
@@ -6986,83 +6686,10 @@ function newBackgroundChatMessageId() {
   return `ui_background_${randomId}`;
 }
 
-function getTaskMeta(task: TaskView): {
-  icon: typeof FileText;
-  className: string;
-  detail: string;
-  spin: boolean;
-} {
-  const recurringPrefix = task.scheduleId ? "Recurring - " : "";
-  if (task.status === "failed") {
-    return {
-      icon: AlertCircle,
-      className: "text-danger",
-      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.failed}`,
-      spin: false,
-    };
-  }
-  if (task.status === "canceled") {
-    return {
-      icon: X,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${task.error ?? STATUS_COPY.canceled}`,
-      spin: false,
-    };
-  }
-  if (task.status === "waiting") {
-    return {
-      icon: AlertCircle,
-      className: "text-warning",
-      detail: `${recurringPrefix}${task.outcomeComment ?? STATUS_COPY.waiting}`,
-      spin: false,
-    };
-  }
-  if (task.status === "succeeded") {
-    return {
-      icon: CheckCircle2,
-      className: "text-emerald-600",
-      detail: `${recurringPrefix}${firstLine(task.result) ?? STATUS_COPY.succeeded}`,
-      spin: false,
-    };
-  }
-  if (task.status === "queued") {
-    return {
-      icon: Clock,
-      className: "text-ink-subtle",
-      detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
-      spin: false,
-    };
-  }
-  return {
-    icon: CircleDotDashed,
-    className: "text-amber-500",
-    detail: `${recurringPrefix}${STAGE_COPY[task.stage]}`,
-    spin: true,
-  };
-}
-
-function firstLine(value: string | null) {
-  const line = value?.trim().split(/\r?\n/, 1)[0]?.trim();
-  if (!line) return null;
-  return line.length > 72 ? `${line.slice(0, 72).trimEnd()}...` : line;
-}
-
-function formatRelativeTime(value: string) {
-  const timestamp = new Date(value).getTime();
-  const elapsedMs = Date.now() - timestamp;
-  if (!Number.isFinite(timestamp) || elapsedMs < 30_000) return "just now";
-
-  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
-  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
-
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `${elapsedHours}h ago`;
-
-  const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 7) return `${elapsedDays}d ago`;
-
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-  }).format(timestamp);
+function newQueuedChatMessageId() {
+  const randomId =
+    typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  return `ui_queued_${randomId}`;
 }

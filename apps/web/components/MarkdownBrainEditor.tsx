@@ -11,6 +11,8 @@ import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, GripVertical, Heading1, Heading2, Italic } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
+import { ContextReferenceNode } from "@/components/ContextReferenceNode";
+import { createContextReferenceSuggestion } from "@/components/ContextReferenceSuggestion";
 import { SkillMention } from "@/components/SkillMentionNode";
 import { createSkillMentionPlugin } from "@/components/SkillMentionSuggestion";
 import { WIKI_LINK_STATE_KEY, WikiLink, type WikiLinkState } from "@/components/WikiLinkNode";
@@ -49,6 +51,7 @@ export function MarkdownBrainEditor({
   compact = false,
   placeholder = "Start writing...",
   skillMentions,
+  contextMentions = false,
   wikiSlashCommands,
   blockHandles = false,
 }: {
@@ -72,6 +75,7 @@ export function MarkdownBrainEditor({
   // resolves at fire time. Captured once at mount, like `content`; callers
   // that need this pass a stable, server-fetched catalog.
   skillMentions?: SkillCatalogItem[];
+  contextMentions?: boolean;
   // Wiki surfaces only: typing "/" opens a Notion-style command menu (e.g.
   // "page" creates a sibling page). Captured once at mount like skillMentions.
   wikiSlashCommands?: WikiSlashCommandHandlers;
@@ -150,13 +154,20 @@ export function MarkdownBrainEditor({
               }),
             ]
           : []),
+        ...(contextMentions ? [ContextReferenceNode] : []),
         ...(skillMentions
           ? [
               SkillMention.configure({ skills: skillMentions }),
               Extension.create({
                 name: "skillMentionSuggestion",
                 addProseMirrorPlugins() {
-                  return readOnly ? [] : [createSkillMentionPlugin(this.editor, skillMentions)];
+                  return readOnly
+                    ? []
+                    : [
+                        contextMentions
+                          ? createContextReferenceSuggestion(this.editor, skillMentions)
+                          : createSkillMentionPlugin(this.editor, skillMentions),
+                      ];
                 },
               }),
             ]

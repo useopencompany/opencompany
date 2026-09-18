@@ -39,7 +39,6 @@ export default async function OnboardingPage({
 
   const legacyBrainEnabled = context?.workspace.legacyBrainEnabled === true;
 
-  const savedSlug = context?.workspace.slug ?? "";
   const stepCookie = Number.parseInt(cookieStore.get(ONBOARDING_STEP_COOKIE)?.value ?? "", 10);
   const requestedStep = Number.isNaN(stepCookie) ? 0 : stepCookie;
   // A stale onboarding cookie must never skip past workspace creation.
@@ -58,8 +57,9 @@ export default async function OnboardingPage({
       variant={variant}
       initialStep={initialStep}
       initialWorkspaceId={context?.workspace.id ?? null}
-      initialWorkspaceName={savedSlug ? (context?.workspace.name ?? "") : ""}
-      initialSlug={savedSlug}
+      // A saved slug is the marker that the workspace step already ran: it is
+      // assigned server-side on save and never set any other way.
+      initialWorkspaceName={state.workspace?.slug ? (context?.workspace.name ?? "") : ""}
       initialRole={onboarding?.role ?? null}
       initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}
       initialReferral={onboarding?.referralSource ?? null}

@@ -4,9 +4,10 @@ import type { EngineRuntimeStatus } from "@opencompany/protocol";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   AppWindow,
+  ChevronDown,
   ExternalLink,
+  Files,
   FileText,
-  LoaderCircle,
   Maximize2,
   Minimize2,
   PanelRightClose,
@@ -17,7 +18,6 @@ import dynamic from "next/dynamic";
 import {
   forwardRef,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
   type Ref,
   useCallback,
   useEffect,
@@ -27,11 +27,16 @@ import {
   useSyncExternalStore,
 } from "react";
 import { createEngineRuntimeAccess } from "@/lib/headless-chat-commands";
+import { PanelButton, WorkspaceNotice } from "./CodingWorkspaceControls";
 import { type ArtifactSelection, ArtifactViewer } from "./chat/ArtifactViewer";
 
 const CodingWorkspaceTerminal = dynamic(() => import("./CodingWorkspaceTerminal"), {
   ssr: false,
   loading: () => <WorkspaceNotice title="Loading terminal…" busy />,
+});
+const CodingWorkspaceFiles = dynamic(() => import("./CodingWorkspaceFiles"), {
+  ssr: false,
+  loading: () => <WorkspaceNotice title="Loading files…" busy />,
 });
 
 const MIN_PANEL_WIDTH = 340;
@@ -40,8 +45,9 @@ const DEFAULT_PANEL_WIDTH = 440;
 const PANEL_WIDTH_KEY = "goat-coding-workspace-panel-width-v1";
 const PANEL_WIDTH_EVENT = "goat-coding-workspace-panel-width";
 const WORKSPACE_CONNECTION_TIMEOUT_MS = 150_000;
+const PORT_DISCOVERY_POLL_MS = 5_000;
 
-type WorkspaceTab = "preview" | "terminal";
+type WorkspaceTab = "preview" | "terminal" | "files";
 type PanelTab = WorkspaceTab | "artifact";
 type ConnectionState = "dormant" | "waking" | "ready" | "disconnected" | "error";
 type PreviewPort = { port: number; isHttp: boolean; score: number };
@@ -91,18 +97,26 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     artifactSelection ? "artifact" : null,
   );
   const [connectionState, setConnectionState] = useState<ConnectionState>("dormant");
+  // Files stays mounted after its first visit so an unsaved edit survives a trip to
+  // Terminal or Preview and back.
+  const [filesMounted, setFilesMounted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [ports, setPorts] = useState<PreviewPort[]>([]);
   const [portsLoaded, setPortsLoaded] = useState(false);
+  const [outsideWorkspaceHttpPortCount, setOutsideWorkspaceHttpPortCount] = useState(0);
   const [selectedPort, setSelectedPort] = useState<number | null>(null);
-  const [manualPort, setManualPort] = useState("");
+  const [previewPath, setPreviewPath] = useState("/");
+  // In-progress address edit; null means the bar mirrors the committed address.
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState(0);
   const socketRef = useRef<WebSocket | null>(null);
+  const previewUrlRef = useRef<string | null>(null);
   const connectAttemptRef = useRef(0);
   const connectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const selectedPortRef = useRef<number | null>(null);
+  const pendingPathRef = useRef("/");
   const panelRef = useRef<HTMLElement>(null);
   const restoreFocusOnCollapseRef = useRef(false);
 
@@ -130,13 +144,19 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     [clearConnectionTimeout],
   );
 
-  const requestPreview = useCallback((port: number, targetSocket = socketRef.current) => {
-    if (targetSocket?.readyState !== WebSocket.OPEN) return;
-    selectedPortRef.current = port;
-    setSelectedPort(port);
-    setPreviewUrl(null);
-    targetSocket.send(JSON.stringify({ type: "preview.open", port }));
-  }, []);
+  const requestPreview = useCallback(
+    (port: number, path = "/", targetSocket = socketRef.current) => {
+      if (targetSocket?.readyState !== WebSocket.OPEN) return;
+      selectedPortRef.current = port;
+      pendingPathRef.current = path;
+      setSelectedPort(port);
+      setPreviewPath(path);
+      previewUrlRef.current = null;
+      setPreviewUrl(null);
+      targetSocket.send(JSON.stringify({ type: "preview.open", port }));
+    },
+    [],
+  );
 
   const connect = useCallback(
     async (tab: WorkspaceTab) => {
@@ -146,6 +166,8 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       socketRef.current?.close();
       socketRef.current = null;
       setSocket(null);
+      previewUrlRef.current = null;
+      setPreviewUrl(null);
       setConnectionState("waking");
       setError(null);
       setPortsLoaded(false);
@@ -194,16 +216,25 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           if (!message) return;
           if (message.type === "ports") {
             setPorts(message.ports);
+            setOutsideWorkspaceHttpPortCount(
+              message.outsideWorkspacePorts.filter((port) => port.isHttp).length,
+            );
             setPortsLoaded(true);
             setError(null);
             const strongest = message.ports.find((port) => port.isHttp);
-            if (strongest && selectedPortRef.current === null) {
-              requestPreview(strongest.port, nextSocket);
+            const requested = message.ports.find(
+              (port) => port.port === selectedPortRef.current && port.isHttp,
+            );
+            const target = requested ?? strongest;
+            if (target && previewUrlRef.current === null) {
+              requestPreview(target.port, pendingPathRef.current, nextSocket);
             }
           } else if (message.type === "preview") {
             selectedPortRef.current = message.port;
             setSelectedPort(message.port);
+            previewUrlRef.current = message.url;
             setPreviewUrl(message.url);
+            setPreviewPath(pendingPathRef.current);
             setPreviewRevision(0);
             setError(null);
           } else if (message.type === "error") {
@@ -248,6 +279,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     setMobilePanelOpened(true);
     setActiveTab(tab);
     setError(null);
+    if (tab === "files") setFilesMounted(true);
     if (connectionState === "ready" && socketRef.current?.readyState === WebSocket.OPEN) {
       if (tab === "preview") {
         setPortsLoaded(false);
@@ -266,6 +298,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
     setFullscreen(false);
     setConnectionState("dormant");
     setActiveTab(null);
+    setFilesMounted(false);
   }, [disconnect]);
 
   useEffect(() => {
@@ -319,6 +352,59 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [collapse, fullscreen, isNarrow, panelExpanded]);
+
+  const canonicalAddress =
+    selectedPort === null ? "" : formatPreviewAddress(selectedPort, previewPath);
+  // A port opened by typing an address may not be in the discovered list; keep it switchable.
+  const portOptions =
+    selectedPort !== null && !ports.some((port) => port.port === selectedPort)
+      ? [{ port: selectedPort, isHttp: false, score: 0 }, ...ports]
+      : ports;
+  const previewSrc = previewUrl === null ? null : composePreviewSrc(previewUrl, previewPath);
+  // Files renders as a sibling of the tab chain because it stays mounted while hidden.
+  const filesTabShowing = activeTab === "files" && connectionState === "ready" && socket !== null;
+
+  const addressValue = addressDraft ?? canonicalAddress;
+
+  // Until a server is found, keep scanning so the preview opens on its own the moment
+  // the dev server starts listening.
+  useEffect(() => {
+    if (activeTab !== "preview" || connectionState !== "ready" || !socket) return;
+    if (previewUrl !== null) return;
+    const interval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "ports.refresh" }));
+      }
+    }, PORT_DISCOVERY_POLL_MS);
+    return () => clearInterval(interval);
+  }, [activeTab, connectionState, previewUrl, socket]);
+
+  const navigateToAddress = () => {
+    const parsed = parsePreviewAddress(addressValue, selectedPortRef.current);
+    if (!parsed) {
+      setError("Only localhost can be previewed here — try localhost:3000/pricing or /pricing.");
+      return;
+    }
+    if (parsed.port === null) {
+      setError("Add a port to preview a path, like localhost:3000/pricing.");
+      return;
+    }
+    if (!isPreviewablePort(parsed.port)) {
+      setError("Use a port between 1024 and 65535.");
+      return;
+    }
+    setError(null);
+    setAddressDraft(null);
+    if (parsed.port !== selectedPortRef.current || !previewUrl) {
+      requestPreview(parsed.port, parsed.path);
+    } else if (parsed.path !== previewPath) {
+      pendingPathRef.current = parsed.path;
+      setPreviewPath(parsed.path);
+    } else {
+      // Re-entering the current address reloads it, like a browser.
+      setPreviewRevision((current) => current + 1);
+    }
+  };
 
   if (!panelExpanded) {
     return null;
@@ -403,6 +489,14 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             >
               <TerminalSquare size={14} /> Terminal
             </button>
+            <button
+              type="button"
+              onClick={() => selectTab("files")}
+              aria-pressed={activeTab === "files"}
+              className={tabClass(activeTab === "files")}
+            >
+              <Files size={14} /> Files
+            </button>
           </>
         ) : null}
         {artifactSelection ? (
@@ -438,7 +532,15 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
       ) : null}
 
       <div className="flex min-h-0 flex-1 flex-col">
-        {activeTab === "artifact" && artifactSelection ? (
+        {filesMounted && connectionState === "ready" && socket ? (
+          <CodingWorkspaceFiles
+            socket={socket}
+            sessionKey={chatSessionId}
+            rootLabel={engineLabel}
+            active={activeTab === "files"}
+          />
+        ) : null}
+        {filesTabShowing ? null : activeTab === "artifact" && artifactSelection ? (
           <ArtifactViewer
             key={`${artifactSelection.artifact.artifactId}:${artifactSelection.artifact.artifactVersionId}`}
             selection={artifactSelection}
@@ -448,7 +550,7 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
             title={workspaceEnabled ? workspaceStateTitle(sandboxStatus) : "Choose an artifact"}
             detail={
               workspaceEnabled
-                ? "Choose Preview or Terminal to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
+                ? "Choose Preview, Terminal, or Files to wake and connect to this workspace. Opening the panel alone keeps a sleeping sandbox dormant."
                 : "Open an artifact card in the conversation to read it here."
             }
           />
@@ -475,69 +577,73 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex shrink-0 items-center gap-2 border-b border-border px-2 py-2">
-                <select
-                  aria-label="Preview port"
-                  value={selectedPort ?? ""}
-                  onChange={(event) => requestPreview(Number(event.target.value))}
-                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-canvas px-2 text-[12px] text-ink outline-none"
-                >
-                  {ports.length === 0 ? (
-                    <option value="">No ports found</option>
-                  ) : selectedPort === null ? (
-                    <option value="">Select a port</option>
-                  ) : null}
-                  {ports.map((port) => (
-                    <option key={port.port} value={port.port}>
-                      localhost:{port.port}
-                      {port.isHttp ? " · HTTP" : ""}
-                    </option>
-                  ))}
-                </select>
+                {portOptions.length > 1 ? (
+                  <span className="relative shrink-0">
+                    <select
+                      aria-label="Preview port"
+                      title="Switch server"
+                      value={selectedPort ?? ""}
+                      onChange={(event) => requestPreview(Number(event.target.value))}
+                      className="h-8 w-9 appearance-none rounded-md border border-border bg-canvas text-[12px] text-transparent outline-none hover:bg-surface-hover [&>option]:text-ink"
+                    >
+                      {selectedPort === null ? <option value="">Servers</option> : null}
+                      {portOptions.map((port) => (
+                        <option key={port.port} value={port.port}>
+                          localhost:{port.port}
+                          {port.isHttp ? " · HTTP" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-ink-subtle"
+                    />
+                  </span>
+                ) : null}
                 <input
-                  aria-label="Manual preview port"
-                  inputMode="numeric"
-                  placeholder="Port"
-                  value={manualPort}
-                  onChange={(event) => setManualPort(event.target.value.replace(/\D/g, ""))}
-                  className="h-8 w-16 rounded-md border border-border bg-canvas px-2 text-[12px] text-ink outline-none"
+                  aria-label="Preview address"
+                  placeholder="localhost:3000/pricing"
+                  value={addressValue}
+                  spellCheck={false}
+                  autoComplete="off"
+                  onChange={(event) => setAddressDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      navigateToAddress();
+                    } else if (event.key === "Escape") {
+                      // Revert the edit without collapsing a fullscreen panel.
+                      event.stopPropagation();
+                      setAddressDraft(null);
+                    }
+                  }}
+                  onBlur={() => setAddressDraft(null)}
+                  className="h-8 min-w-0 flex-1 rounded-md border border-border bg-canvas px-2 text-[12px] text-ink outline-none focus:border-ink/30"
                 />
                 <PanelButton
-                  label="Open manual port"
-                  disabled={!isValidManualPort(manualPort)}
-                  onClick={() => requestPreview(Number(manualPort))}
-                >
-                  Go
-                </PanelButton>
-                <PanelButton
-                  label="Refresh ports"
+                  label="Refresh preview"
                   onClick={() => {
-                    setPortsLoaded(false);
+                    if (!previewUrl) setPortsLoaded(false);
                     socket.send(JSON.stringify({ type: "ports.refresh" }));
+                    if (previewUrl) setPreviewRevision((current) => current + 1);
                   }}
                 >
                   <RefreshCw size={14} />
                 </PanelButton>
                 <PanelButton
-                  label="Refresh preview"
-                  disabled={!previewUrl}
-                  onClick={() => setPreviewRevision((current) => current + 1)}
-                >
-                  <RefreshCw size={14} />
-                </PanelButton>
-                <PanelButton
                   label="Open preview in new tab"
-                  disabled={!previewUrl}
+                  disabled={!previewSrc}
                   onClick={() =>
-                    previewUrl && window.open(previewUrl, "_blank", "noopener,noreferrer")
+                    previewSrc && window.open(previewSrc, "_blank", "noopener,noreferrer")
                   }
                 >
                   <ExternalLink size={14} />
                 </PanelButton>
               </div>
-              {previewUrl ? (
+              {previewSrc ? (
                 <iframe
-                  key={`${previewUrl}:${previewRevision}`}
-                  src={previewUrl}
+                  key={`${previewSrc}:${previewRevision}`}
+                  src={previewSrc}
                   title={`${engineLabel} preview on port ${selectedPort ?? "unknown"}`}
                   sandbox="allow-downloads allow-forms allow-modals allow-popups allow-same-origin allow-scripts"
                   referrerPolicy="no-referrer"
@@ -550,13 +656,17 @@ export const CodingWorkspacePanel = forwardRef(function CodingWorkspacePanel(
                       ? "Looking for development servers…"
                       : ports.some((port) => port.isHttp)
                         ? "Opening preview…"
-                        : "No development server detected"
+                        : outsideWorkspaceHttpPortCount > 0
+                          ? "Development server is outside this workspace"
+                          : "No development server detected"
                   }
                   detail={
                     !portsLoaded
                       ? `Checking listening ports in the ${engineLabel} workspace.`
                       : !ports.some((port) => port.isHttp)
-                        ? `Start a server from ${engineLabel} or Terminal, then refresh ports. opencompany never runs package scripts automatically.`
+                        ? outsideWorkspaceHttpPortCount > 0
+                          ? `Restart the server from ${engineLabel} or Terminal in this workspace so Preview can open it securely.`
+                          : `Start a server from ${engineLabel} or Terminal — the preview opens automatically once it is listening. opencompany never runs package scripts automatically.`
                         : "Connecting through the secure preview gateway."
                   }
                   busy={!portsLoaded}
@@ -617,70 +727,14 @@ function serverNarrowLayout() {
   return true;
 }
 
-function WorkspaceNotice({
-  title,
-  detail,
-  busy = false,
-  actionLabel,
-  onAction,
-}: {
-  title: string;
-  detail?: string;
-  busy?: boolean;
-  actionLabel?: string;
-  onAction?: () => void;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center">
-      <div className="flex max-w-xs flex-col items-center gap-2">
-        {busy ? <LoaderCircle size={18} className="animate-spin text-ink-subtle" /> : null}
-        <p className="text-[13px] font-medium text-ink">{title}</p>
-        {detail ? <p className="text-[12px] leading-5 text-ink-subtle">{detail}</p> : null}
-        {actionLabel && onAction ? (
-          <button
-            type="button"
-            onClick={onAction}
-            className="mt-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-surface-hover"
-          >
-            {actionLabel}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function PanelButton({
-  label,
-  children,
-  disabled = false,
-  onClick,
-}: {
-  label: string;
-  children: ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      disabled={disabled}
-      onClick={onClick}
-      className="flex h-8 min-w-8 items-center justify-center rounded-md px-1.5 text-[11px] font-medium text-ink-subtle hover:bg-surface-hover hover:text-ink disabled:pointer-events-none disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
-}
-
 function focusableElements(container: HTMLElement) {
   return Array.from(
     container.querySelectorAll<HTMLElement>(
       'a[href], button:not([disabled]), select:not([disabled]), textarea:not([disabled]), input:not([disabled]), iframe, [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => !element.hasAttribute("hidden"));
+    // `closest` rather than `hasAttribute`: the Files tab stays mounted behind a hidden
+    // wrapper, so its controls must drop out of the trap along with their container.
+  ).filter((element) => !element.closest("[hidden]"));
 }
 
 function trapFocus(container: HTMLElement | null, event: ReactKeyboardEvent<HTMLElement>) {
@@ -713,13 +767,57 @@ function workspaceStateTitle(status: EngineRuntimeStatus | null) {
   return "Workspace not started";
 }
 
-function isValidManualPort(value: string) {
-  const port = Number(value);
+function isPreviewablePort(port: number) {
   return Number.isInteger(port) && port >= 1_024 && port <= 65_535;
 }
 
+function formatPreviewAddress(port: number, path: string) {
+  return `localhost:${port}${path === "/" ? "" : path}`;
+}
+
+const LOCAL_PREVIEW_HOST = /^(?:localhost|127\.0\.0\.1|0\.0\.0\.0)$/i;
+
+// Accepts what people paste from a terminal or browser: "localhost:3000/pricing",
+// "http://127.0.0.1:3000/x?y=1", ":8080", "8080", or a bare path on the current server.
+function parsePreviewAddress(
+  raw: string,
+  currentPort: number | null,
+): { port: number | null; path: string } | null {
+  const value = raw.trim().replace(/^https?:\/\//i, "");
+  if (value === "") return null;
+  if (/^\d+$/.test(value)) return { port: Number(value), path: "/" };
+  const match = value.match(/^([^/:?#]*)(?::(\d+))?([/?#].*)?$/);
+  if (!match) return null;
+  const [, host, portText, rest] = match;
+  if (host && !LOCAL_PREVIEW_HOST.test(host)) return null;
+  const path = normalizePreviewPath(rest);
+  if (path === null) return null;
+  return { port: portText ? Number(portText) : currentPort, path };
+}
+
+// A typed path must stay on the preview capability origin. Round-tripping through the
+// URL parser rejects anything it would resolve onto another host (protocol-relative
+// "//host", backslash variants, …) and returns a normalized, fully-encoded path.
+function normalizePreviewPath(rest: string | undefined): string | null {
+  const candidate = !rest ? "/" : rest.startsWith("/") ? rest : `/${rest}`;
+  try {
+    const resolved = new URL(candidate, "https://sandbox.invalid");
+    if (resolved.origin !== "https://sandbox.invalid") return null;
+    return `${resolved.pathname}${resolved.search}${resolved.hash}`;
+  } catch {
+    return null;
+  }
+}
+
+// Defense in depth at the iframe/window.open sink: the composed URL must keep the
+// capability origin, or we fall back to its root.
+function composePreviewSrc(origin: string, path: string): string {
+  const composed = new URL(path, origin);
+  return composed.origin === new URL(origin).origin ? composed.toString() : origin;
+}
+
 type RuntimeMessage =
-  | { type: "ports"; ports: PreviewPort[] }
+  | { type: "ports"; ports: PreviewPort[]; outsideWorkspacePorts: PreviewPort[] }
   | { type: "preview"; port: number; url: string }
   | { type: "error"; message: string }
   | { type: "status"; status: string };
@@ -729,7 +827,10 @@ function parseControlMessage(raw: string): RuntimeMessage | null {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (value.type === "ports" && Array.isArray(value.ports)) {
       const ports = value.ports.filter(isPreviewPort);
-      return { type: "ports", ports };
+      const outsideWorkspacePorts = Array.isArray(value.outsideWorkspacePorts)
+        ? value.outsideWorkspacePorts.filter(isPreviewPort)
+        : [];
+      return { type: "ports", ports, outsideWorkspacePorts };
     }
     if (
       value.type === "preview" &&

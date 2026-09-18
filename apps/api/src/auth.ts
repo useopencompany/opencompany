@@ -4,8 +4,6 @@ import {
   BRAIN_WRITE_PERMISSION,
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
-  SCHEDULE_READ_PERMISSION,
-  SCHEDULE_WRITE_PERMISSION,
   SKILL_READ_PERMISSION,
   SKILL_WRITE_PERMISSION,
   TASK_READ_PERMISSION,
@@ -24,6 +22,7 @@ import { ApiError } from "./errors";
 const ACTIVE_WORKSPACE_COOKIE = "goat-active-workspace";
 const ACTIVE_BRAIN_COOKIE = "goat-active-brain";
 const DEFAULT_SESSION_COOKIE = "wos-session";
+const CODEX_DEVICE_POLL_PATH = /^\/v1\/engine-auth\/codex\/device\/[^/]+\/poll$/u;
 const SESSION_MAX_AGE_SECONDS = 400 * 24 * 60 * 60;
 
 export type ApiAuthentication = {
@@ -155,7 +154,12 @@ export function createWorkOsApiAuthenticator(
     if (identity.credentialKind !== "browser_cookie" && !identity.organizationId) {
       throw unauthorized("Invalid bearer token claims.");
     }
-    const actor = await resolveLocalActor(execute, identity, identity.activeWorkspaceId);
+    const actor = await resolveLocalActor(
+      execute,
+      identity,
+      identity.activeWorkspaceId,
+      allowsSetupDuringOnboarding(request, identity),
+    );
     return {
       actor,
       ...(identity.refreshedSessionCookie
@@ -163,6 +167,30 @@ export function createWorkOsApiAuthenticator(
         : {}),
     };
   };
+}
+
+// The onboarding wizard creates the workspace two steps before it marks the
+// user onboarded, and the steps in between connect an AI subscription and
+// install plugins. Those requests carry a real browser session with a real
+// membership, so they resolve an Actor without the onboarding gate. Everything
+// else — and every non-cookie credential — keeps it. The actor query still
+// requires workspace membership, so this widens onboarding, not authorization.
+function allowsSetupDuringOnboarding(request: Request, identity: VerifiedIdentity): boolean {
+  if (identity.credentialKind !== "browser_cookie") return false;
+  const path = new URL(request.url).pathname;
+  return (
+    // Plugins step: list existing installs, preview a package, then import it.
+    (request.method === "GET" && path === "/v1/plugins") ||
+    (request.method === "POST" &&
+      (path === "/v1/plugins/imports/preview" || path === "/v1/plugins/imports")) ||
+    // Subscriptions step: read both providers' status, save a Claude Code
+    // token, and run the Codex device flow to completion.
+    (request.method === "GET" &&
+      (path === "/v1/engine-auth/claude-code" || path === "/v1/engine-auth/codex")) ||
+    (request.method === "PUT" && path === "/v1/engine-auth/claude-code") ||
+    (request.method === "POST" &&
+      (path === "/v1/engine-auth/codex/device" || CODEX_DEVICE_POLL_PATH.test(path)))
+  );
 }
 
 async function identityFromSession(input: {
@@ -245,6 +273,7 @@ async function resolveLocalActor(
   execute: ChatSqlExecute,
   identity: VerifiedIdentity,
   requestedWorkspaceId: string | null,
+  allowIncompleteOnboarding = false,
 ): Promise<Actor> {
   // OAuth bearer tokens carry the organization as an authorization scope, so
   // it must match the resolved workspace exactly. Browser sessions carry it as
@@ -258,7 +287,6 @@ async function resolveLocalActor(
     SELECT
       member.workspace_id AS "workspaceId",
       member.role,
-      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
       workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
@@ -266,7 +294,7 @@ async function resolveLocalActor(
     JOIN goat.workspaces AS workspace
       ON workspace.id = member.workspace_id
     WHERE actor_user.workos_user_id = ${identity.userId}
-      AND actor_user.onboarded_at IS NOT NULL
+      AND ${allowIncompleteOnboarding ? sql`true` : sql`actor_user.onboarded_at IS NOT NULL`}
       AND (
         ${strictOrganizationScope} = false
         OR (${identity.organizationId}::text IS NOT NULL
@@ -286,14 +314,17 @@ async function resolveLocalActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    taskSpawningEnabled: boolean;
     legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {
     throw new ApiError(
       403,
       "forbidden",
-      "Finish onboarding and select an accessible workspace before using Chat.",
+      allowIncompleteOnboarding
+        ? // Onboarding setup routes only miss a row when the workspace step has
+          // not run yet, so the onboarding-gate wording would be misleading.
+          "Create your workspace before connecting accounts or installing plugins."
+        : "Finish onboarding and select an accessible workspace before using Chat.",
     );
   }
   return {
@@ -306,13 +337,9 @@ async function resolveLocalActor(
   };
 }
 
-// Role- and flag-derived permission set, the single source of truth shared by
-// the request authenticator and the internal service-actor resolver.
-function actorPermissions(row: {
-  role: string;
-  legacyBrainEnabled: boolean;
-  taskSpawningEnabled: boolean;
-}): string[] {
+// Role-derived permission set, the single source of truth shared by the request
+// authenticator and the internal service-actor resolver.
+function actorPermissions(row: { role: string; legacyBrainEnabled: boolean }): string[] {
   return [
     CHAT_READ_PERMISSION,
     CHAT_WRITE_PERMISSION,
@@ -324,14 +351,8 @@ function actorPermissions(row: {
     ...(row.legacyBrainEnabled ? [BRAIN_READ_PERMISSION] : []),
     SKILL_WRITE_PERMISSION,
     ...(row.role === "admin" && row.legacyBrainEnabled ? [BRAIN_WRITE_PERMISSION] : []),
-    ...(row.taskSpawningEnabled
-      ? [
-          WORKFLOW_READ_PERMISSION,
-          WORKFLOW_WRITE_PERMISSION,
-          SCHEDULE_READ_PERMISSION,
-          SCHEDULE_WRITE_PERMISSION,
-        ]
-      : []),
+    WORKFLOW_READ_PERMISSION,
+    WORKFLOW_WRITE_PERMISSION,
   ];
 }
 
@@ -349,7 +370,6 @@ export async function resolveWikiServiceActor(
     SELECT
       member.workspace_id AS "workspaceId",
       member.role,
-      actor_user.task_spawning_enabled AS "taskSpawningEnabled",
       workspace.legacy_brain_enabled AS "legacyBrainEnabled"
     FROM goat.users AS actor_user
     JOIN goat.workspace_members AS member
@@ -363,7 +383,6 @@ export async function resolveWikiServiceActor(
   const row = rowsFromExecute<{
     workspaceId: string;
     role: string;
-    taskSpawningEnabled: boolean;
     legacyBrainEnabled: boolean;
   }>(result)[0];
   if (!row) {

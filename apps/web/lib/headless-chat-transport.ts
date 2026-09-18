@@ -186,7 +186,7 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
 
   async cancel(chatId: string) {
     const state = readRunState(chatId);
-    if (!state || isTerminal(state.status)) return false;
+    if (!state || isTerminal(state.status)) return null;
     const client = createApiClient(this.baseUrl(), {
       fetch: this.apiFetchImpl,
     });
@@ -194,9 +194,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
       param: { runId: state.runId },
     });
     if (!response.ok) throw await responseError(response);
-    state.status = (await response.json()).data.status;
+    const result = (await response.json()).data;
+    state.status = result.status;
     writeRunStateAliases(chatId, state);
-    return true;
+    return result;
   }
 
   async resolveApproval(input: ResolveHeadlessApprovalInput) {
@@ -376,6 +377,57 @@ export async function startHeadlessBackgroundChat(
     fetch: apiFetchImpl,
   });
   return { ...data, completion };
+}
+
+// Queueing behind an active foreground turn must not enter useChat again: that hook and this
+// transport deliberately own one foreground response stream per Conversation. Creating the
+// durable Run directly keeps the current stream, reconnect checkpoint, and Interrupt target
+// attached to the turn that is actually running. Postgres/Electric projects the queued Run and
+// its Messages into the mounted Conversation independently.
+export async function enqueueHeadlessChatMessage(
+  input: {
+    content: string;
+    conversationId: string;
+    clientMessageId: string;
+    model: string;
+    engine: MessageEngine;
+    attachmentIds?: string[];
+    mentions?: Array<{ kind: "skill"; id: string }>;
+  },
+  options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
+) {
+  const baseUrl = options.baseUrl ?? headlessChatApiBaseUrl();
+  const fetchImpl = bindFetchToRuntime(options.fetch);
+  const client = createApiClient(baseUrl, {
+    fetch: createHeadlessChatApiFetch({ baseUrl, fetch: fetchImpl }),
+  });
+  const response = await client.v1.messages.$post({
+    header: {
+      "idempotency-key": idempotencyKey(input.clientMessageId),
+      [PROTOCOL_VERSION_HEADER]: PROTOCOL_VERSION,
+    },
+    json: {
+      conversationId: input.conversationId,
+      clientMessageId: input.clientMessageId,
+      content: input.content,
+      engine: input.engine,
+      model: input.model,
+      ...(input.attachmentIds?.length ? { attachmentIds: input.attachmentIds } : {}),
+      ...(input.mentions?.length ? { mentions: input.mentions } : {}),
+    },
+  });
+  if (!response.ok) throw await responseError(response);
+  const data = (await response.json()).data;
+  const accepted = {
+    conversationId: data.conversationId,
+    runId: data.runId,
+    assistantMessageId: data.assistantMessageId,
+    transactionId: data.transactionId,
+  };
+  void reconcileAcceptedMessage(accepted).catch((error) =>
+    reportReconciliationFailure(error, accepted),
+  );
+  return data;
 }
 
 async function consumeBackgroundRunEvents(input: {

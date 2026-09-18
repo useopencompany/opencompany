@@ -1,7 +1,7 @@
 # Plugin events and workflows
 
 A workflow keeps its manual, schedule, or event trigger and its existing step editor. To use an
-event, install the official plugin, connect its event account in Settings → Plugins, and switch
+event, install the official plugin, connect its event account in Plugins, and switch
 on the event. In Workflows, choose **On an event → Plugin → Event**, select an account and any
 filters, write the step instructions, and activate the workflow.
 
@@ -12,6 +12,7 @@ The initial supported events are:
 | Linear | Issue created (`issue.created`) | Optional team and status category, including Triage | Signed webhook |
 | Granola | Meeting notes ready (`meeting.notes_ready`) | Optional folder, including its subfolders | REST polling, normally within five minutes |
 | Jamie | Meeting completed (`meeting.completed`) | Optional guests: outside your company, or internal only | Webhook you create in Jamie |
+| Gmail | Email received (`email.received`) | Optional label | REST polling, normally within five minutes |
 
 Linear's tool connection and event connection are separate. The event OAuth app must have Issue
 webhooks enabled and point at the API-owned Linear webhook ingress. Its existing client, secret,
@@ -35,6 +36,30 @@ exposes nothing that can validate a key on save, so the Events section reports w
 reached opencompany instead of claiming the key is good; Jamie's own Test button on the webhook
 produces one immediately. Rotating the key in Jamie and saving the new one keeps the same
 connection and the same URL, so workflows already bound to it keep firing.
+
+Gmail has no plain webhook — push needs a GCP Pub/Sub topic and a per-mailbox `watch` renewal — so
+`email.received` is delivered by the Gmail history poller that already runs for Brain ingestion. An
+account is polled while it has an enabled ingestion source, an active event trigger, or both, and
+the shared history cursor means neither consumer can be starved by the other. The event binds to
+the same personal Gmail connection the plugin page connects; there is no separate Events section.
+
+The `label` filter offers the account's own labels, minus the ones that cannot describe an arriving
+message: `DRAFT`, `SENT`, `SPAM`, `TRASH`, `CHAT`, and the two a person applies by hand afterwards
+(`STARRED`, `UNREAD`). `INBOX` stays, because a Gmail filter that skips the inbox makes it a real
+narrowing. This is the only filter Gmail declares on purpose: Gmail's own filter rules already
+express "from anyone at acme.com" or "subject contains invoice" far better than an event filter
+could, and a label turns any of those rules into a trigger condition without opencompany
+re-implementing Gmail's matching.
+
+`email.received` never fires on mail the mailbox sent, which is also what stops a workflow that
+replies by email from re-triggering itself. Three bounds keep a mailbox's volume from becoming
+agent tasks: the poller's existing noise floor, a 24-hour ceiling on message age so a trigger added
+long after the account was connected cannot replay a backlog, and a cap of 25 messages per pass
+that may start runs. Past that cap the remaining matches are dropped and logged rather than
+deferred, because the history cursor has to advance for ingestion. The routed message is re-read in
+full so the run's context carries the body; a body that cannot be read falls back to the snippet
+rather than dropping the event. Email is the one event source anyone can write into, so its context
+block states explicitly that the body is data and never instructions.
 
 The `guests` filter is evaluated from the delivery itself: a meeting is `external` when anyone on
 its calendar event or in its transcript has an email outside the recording user's domain. When the
@@ -67,8 +92,8 @@ provider retries idempotent. Provider context is bounded and separated from auth
 
 The workflow stores its activation time in `workflows.event_activated_at`. Re-activation, switching
 accounts, or changing routing filters starts a new activation interval; editing step instructions
-or run context keeps the interval. Events older than activation do not start runs. Granola initializes
-its cursor on connection, retains pagination progress, and limits stale-note replay to 24 hours.
+keeps the interval. Events older than activation do not start runs. Granola initializes its cursor
+on connection, retains pagination progress, and limits stale-note replay to 24 hours.
 
 A Granola folder filter covers the chosen folder and its subfolders, the scope Granola's own note
 query uses. A poll pass reads the account's folder list once, and only when a route filters on a
@@ -110,7 +135,14 @@ delivery id that survives a retry with a new delivery attempt, and the retryable
 integration tests cover activation cutoffs, duplicate deliveries, revoked subscriptions, transactional
 rollback/backoff, and the retirement migration's retained pages and rejection of old producers.
 
+Gmail label options and the poller's routing decisions are unit tested: the label picker's
+exclusions and system-label names, the mailbox-scoped delivery key, the untrusted-content context
+block, the widened poll-candidate query, sent-mail exclusion, label matching, the age ceiling, the
+per-pass cap, and that an event-only account buffers nothing for ingestion.
+
 Provider references: [Linear webhooks](https://linear.app/developers/webhooks),
 [Granola list notes](https://docs.granola.ai/api-reference/list-notes),
 [Jamie webhooks](https://docs.meetjamie.ai/developers/webhooks/getting-started),
-[Granola list folders](https://docs.granola.ai/api-reference/list-folders).
+[Granola list folders](https://docs.granola.ai/api-reference/list-folders),
+[Gmail history list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.history/list),
+[Gmail labels list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.labels/list).

@@ -6,6 +6,7 @@ import {
   ACTION_HOST_TOOL_CONTRACT_VERSION_V2,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V4,
+  ACTION_MAX_CALLS_PER_TURN,
   ACTION_TOOL_CONTRACT,
   type ActionGatewayRequest,
   LEGACY_ACTION_TOOL_CONTRACT,
@@ -75,6 +76,9 @@ describe("registerExternalEngineServiceTools", () => {
     expect(getTool(tools, "use_action").config.annotations).toEqual(
       ACTION_TOOL_CONTRACT.execute.annotations,
     );
+    expect(getTool(tools, "use_action").config.description).toContain(
+      "Limited to 32 action calls per agent turn",
+    );
     expect(ACTION_TOOL_CONTRACT.execute.annotations.idempotentHint).toBe(false);
   });
 
@@ -137,7 +141,7 @@ describe("registerExternalEngineServiceTools", () => {
     expect(publishArtifact).toHaveBeenCalledWith({
       sessionId: "codex_session_1",
       runId: "codex_turn_1",
-      toolCallId: "mcp:codex_turn_1:transport_1:request_1",
+      toolCallId: "mcp:codex_turn_1:transport_1:string:request_1",
       arguments: {
         path: "/home/user/opencompany-goat/claude-chat/plan.md",
         title: "Plan",
@@ -171,6 +175,20 @@ describe("registerExternalEngineServiceTools", () => {
       ok: true,
       sources: [{ id: "gmail", label: "Gmail", description: "Email" }],
     });
+  });
+
+  it("gives stateless file publications distinct identities when the request counter resets", async () => {
+    const publishArtifact = vi.fn<ExternalEngineToolDependencies["publishArtifact"]>(async () => ({
+      ok: false,
+      error: "test publication",
+    }));
+    const tools = registerTools(vi.fn(), publishArtifact);
+    const publish = getTool(tools, "publish_artifact").callback;
+    await publish({ path: "/sandbox/first.md" }, { requestId: 2 });
+    await publish({ path: "/sandbox/second.md" }, { requestId: 2 });
+    expect(publishArtifact.mock.calls[0]?.[0].toolCallId).not.toBe(
+      publishArtifact.mock.calls[1]?.[0].toolCallId,
+    );
   });
 
   it("derives stable, distinct invocation ids from separate MCP requests", async () => {
@@ -209,18 +227,18 @@ describe("registerExternalEngineServiceTools", () => {
       turnId: "codex_turn_1",
       action: "gmail.list",
       params: { limit: 5 },
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_41",
     });
     expect(secondRequest).toMatchObject({
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_42",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_42",
     });
     expect(retryCall[0].request).toMatchObject({
-      invocationId: "mcp:codex_turn_1:transport_1:jsonrpc_41",
+      invocationId: "mcp:codex_turn_1:transport_1:string:jsonrpc_41",
     });
     expect(firstRequest).not.toEqual(secondRequest);
   });
 
-  it("surfaces call_budget on call 17 from the shared service", async () => {
+  it("surfaces call_budget on call 33 from the shared service", async () => {
     const governance = createInMemoryActionTurnGovernance();
     const executeAction = vi.fn<ExternalEngineToolDependencies["executeAction"]>(
       async ({ request }) =>
@@ -244,7 +262,7 @@ describe("registerExternalEngineServiceTools", () => {
     const tools = registerTools(executeAction);
 
     await getTool(tools, "list_actions").callback({ source: "gmail" });
-    for (let callNumber = 1; callNumber <= 16; callNumber += 1) {
+    for (let callNumber = 1; callNumber <= ACTION_MAX_CALLS_PER_TURN; callNumber += 1) {
       const result = await getTool(tools, "use_action").callback(
         { action: "gmail.search", params: {} },
         { requestId: callNumber, sessionId: "transport_1" },
@@ -253,13 +271,14 @@ describe("registerExternalEngineServiceTools", () => {
     }
     const rejected = await getTool(tools, "use_action").callback(
       { action: "gmail.search", params: {} },
-      { requestId: 17, sessionId: "transport_1" },
+      { requestId: 33, sessionId: "transport_1" },
     );
 
     expect(rejected.isError).toBe(true);
     expect(rejected.structuredContent).toMatchObject({
       ok: false,
       error: { code: "call_budget" },
+      budget: { limit: 32, used: 32, remaining: 0 },
     });
   });
 

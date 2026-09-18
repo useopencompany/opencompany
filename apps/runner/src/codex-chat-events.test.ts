@@ -11,6 +11,7 @@ import { CodexChatLeaseLostError, UNREADABLE_ENGINE_FAILURE_MESSAGE } from "./co
 import {
   createExternalEngineProjector,
   type ExternalEngineProjectorTarget,
+  semanticEventsFromCodexParts,
 } from "./codex-chat-events";
 
 const mocks = vi.hoisted(() => ({
@@ -464,6 +465,22 @@ describe("createExternalEngineProjector", () => {
     );
   });
 
+  it("cancels the backing approval when a pending ACP question is abandoned", async () => {
+    mocks.execute.mockResolvedValue({ rows: [] });
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
+      redact: (value) => value,
+    });
+
+    await projector.cancelPendingInteractions();
+
+    expect(mocks.execute.mock.calls.map(([query]) => sqlText(query))).toContainEqual(
+      expect.stringMatching(
+        /UPDATE goat\.run_approvals AS approval[\s\S]*approval\.kind IN \('acp_permission', 'engine_questions'\)/,
+      ),
+    );
+  });
+
   it("persists and resolves an ACP permission through run_approvals", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const normalizer = createAcpEventNormalizer();
@@ -826,12 +843,76 @@ describe("createExternalEngineProjector", () => {
     expect(messageUpdates()).toHaveLength(1);
   });
 
-  it("emits redacted tool metadata and parent linkage for the live transcript", async () => {
+  it("does not re-emit checkpointed tools when a replacement attempt resumes", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ id: "updated_row" }] });
     const appendEvents = vi.fn(
       async (input: Parameters<RunExecutionRepository["appendEvents"]>[0]) =>
         input.events.map((event, index) => ({ ...event, sequence: index + 1 })),
     );
+    const normalizer = createAcpEventNormalizer();
+    const projector = createExternalEngineProjector({
+      target: projectorTarget({ canonicalAttemptId: "attempt_2" }),
+      redact: (value) => value,
+      initialParts: [
+        {
+          type: CODEX_SUBAGENT_TOOL_PART_TYPE,
+          toolCallId: "subagent_old",
+          state: "output-available",
+          input: { label: "Subagent" },
+          output: { status: "completed" },
+          children: [
+            {
+              type: CODEX_COMMAND_TOOL_PART_TYPE,
+              toolCallId: "command_old",
+              state: "output-available",
+              input: { command: "echo done" },
+              output: { status: "completed", exitCode: 0 },
+            },
+          ],
+        },
+        {
+          type: CODEX_COMMAND_TOOL_PART_TYPE,
+          toolCallId: "command_pending",
+          state: "input-available",
+          input: { command: "echo pending" },
+        },
+      ],
+      normalizeEvent: normalizer.normalize,
+      execution: { appendEvents } as unknown as RunExecutionRepository,
+    });
+    await projector.push([agentMessageChunk("Resuming.")]);
+    expect(
+      appendEvents.mock.calls
+        .flatMap(([input]) => input.events)
+        .filter((event) => event.type.startsWith("tool.")),
+    ).toEqual([]);
+    await projector.push([
+      {
+        method: "session/update",
+        params: {
+          sessionId: "session_1",
+          update: {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "command_pending",
+            status: "completed",
+            kind: "execute",
+            title: "echo pending",
+          },
+        },
+      },
+    ]);
+    const toolEvents = appendEvents.mock.calls
+      .flatMap(([input]) => input.events)
+      .filter((event) => event.type.startsWith("tool."));
+    expect(toolEvents).toEqual([
+      expect.objectContaining({
+        type: "tool.completed",
+        payload: expect.objectContaining({ toolCallId: "command_pending" }),
+      }),
+    ]);
+  });
+
+  it("emits redacted tool metadata and parent linkage for the live transcript", () => {
     const command = `secret-token ${"x".repeat(4_100)}`;
     const initialParts: CodexUiMessagePart[] = [
       {
@@ -862,23 +943,9 @@ describe("createExternalEngineProjector", () => {
         ],
       },
     ];
-    const projector = createExternalEngineProjector({
-      target: projectorTarget({ canonicalAttemptId: "attempt_1" }),
-      redact: (value) => value.replaceAll("secret-token", "[redacted]"),
-      initialParts,
-      normalizeEvent: () => [
-        {
-          type: "assistant.delta",
-          payload: { itemId: "assistant_1", delta: "Working" },
-          rawEvent: {},
-        },
-      ],
-      execution: { appendEvents } as unknown as RunExecutionRepository,
-    });
-
-    await projector.push([{}]);
-
-    const emitted = appendEvents.mock.calls.flatMap(([input]) => input.events);
+    const emitted = semanticEventsFromCodexParts(initialParts, new Map(), new Set(), (value) =>
+      value.replaceAll("secret-token", "[redacted]"),
+    );
     const started = emitted.filter((event) => event.type === "tool.started");
     expect(started).toEqual(
       expect.arrayContaining([

@@ -972,3 +972,130 @@ describe("reviewed Supabase package permissions", () => {
     });
   });
 });
+
+describe("Dash0 permission defaults", () => {
+  it("keeps paid investigations off despite read-only annotations and new tools behind Ask", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.dash0;
+    const fetcher = await createOfficialPluginFetcher({ url });
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: fetcher!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    const tools = ["getLogRecords", "runTask", "newReadTool", "newManagementTool"].map((name) => ({
+      name,
+      inputSchema: { type: "object" },
+      annotations: { readOnlyHint: true },
+    }));
+    expect(
+      classifyRemoteTool(
+        { name: "runTask", annotations: { readOnlyHint: true } },
+        plugin.capabilities,
+      ),
+    ).toMatchObject({ capability: { defaultMode: "off" }, curated: true });
+    const base = registration({
+      pluginName: "dash0",
+      source: "plugin:dash0:dash0",
+      connectionProvider: "dash0",
+      capabilities: plugin.capabilities,
+    });
+    const deps = {
+      createClient: vi.fn(async () => client({ pages: [{ tools }] })),
+      recordDispatch: vi.fn(async () => {}),
+    };
+    const snapshot = await discoverRemoteMcpSnapshot(identity, base, deps);
+    const catalog = await resolveRemoteMcpActions(
+      identity,
+      { ...base, discoverySnapshot: snapshot ?? [] },
+      deps,
+    );
+    expect(catalog?.actions.map(({ id, permissionMode }) => ({ id, permissionMode }))).toEqual([
+      { id: "plugin:dash0:dash0.getLogRecords", permissionMode: "ask" },
+      { id: "plugin:dash0:dash0.newReadTool", permissionMode: "ask" },
+      { id: "plugin:dash0:dash0.newManagementTool", permissionMode: "ask" },
+    ]);
+  });
+});
+
+describe("reviewed Todoist package permissions", () => {
+  it("imports the pinned package and gates sensitive reads, mutations, and deletes", async () => {
+    const url = OFFICIAL_PLUGIN_SOURCES.todoist;
+    const plugin = await resolvePlugin({
+      url,
+      fetcher: (await createOfficialPluginFetcher({ url }))!,
+      trustedCapabilitySources: ["useopencompany/plugins"],
+    });
+    expect(plugin.remoteServers).toEqual([
+      {
+        name: "todoist",
+        type: "streamable-http",
+        url: "https://ai.todoist.net/mcp",
+        headers: {},
+      },
+    ]);
+    expect(plugin.report.capabilities).toMatchObject({ status: "parsed", issues: [] });
+
+    // Doist registers 47 tools (src/utils/tool-names.ts in Doist/todoist-mcp); every one is
+    // classified exactly once so nothing falls through to the uncurated default by accident.
+    const tools = plugin.capabilities.flatMap((group) => group.tools);
+    expect(tools).toHaveLength(47);
+    expect(new Set(tools).size).toBe(tools.length);
+
+    for (const name of ["find-tasks", "find-projects", "get-overview", "user-info", "search"]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "read", defaultMode: "on" },
+      });
+    }
+    // Read-only, but these expose activity history, other people, attachment bytes, or a
+    // shareable export URL, so they stay on Ask even when the provider says readOnlyHint.
+    for (const name of [
+      "find-activity",
+      "get-productivity-stats",
+      "get-workspace-insights",
+      "find-project-collaborators",
+      "view-attachment",
+      "export-project-template",
+    ]) {
+      expect(
+        classifyRemoteTool({ name, annotations: { readOnlyHint: true } }, plugin.capabilities),
+      ).toMatchObject({
+        curated: true,
+        bucket: "read",
+        capability: { id: "query", defaultMode: "ask" },
+      });
+    }
+    for (const name of [
+      "add-tasks",
+      "update-tasks",
+      "complete-tasks",
+      "reschedule-tasks",
+      "manage-assignments",
+      "import-project-template",
+      // Doist marks this readOnlyHint: false — it triggers a server-side analysis job.
+      "analyze-project-health",
+    ]) {
+      expect(classifyRemoteTool({ name }, plugin.capabilities)).toMatchObject({
+        curated: true,
+        bucket: "write",
+        capability: { id: "write", defaultMode: "ask" },
+      });
+    }
+    // The one irreversible delete is opt-in only.
+    expect(classifyRemoteTool({ name: "delete-object" }, plugin.capabilities)).toMatchObject({
+      curated: true,
+      bucket: "write",
+      capability: { id: "draft", defaultMode: "off" },
+    });
+    expect(
+      classifyRemoteTool(
+        { name: "drop-everything", annotations: { readOnlyHint: true } },
+        plugin.capabilities,
+      ),
+    ).toMatchObject({
+      curated: false,
+      capability: { defaultMode: "ask" },
+    });
+  });
+});

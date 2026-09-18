@@ -40,10 +40,12 @@ export function integrationConnectionError(provider: string | null, reason: stri
     case "posthog_denied":
     case "neon_denied":
     case "supabase_denied":
+    case "todoist_denied":
     case "resend_denied":
     case "betterstack_denied":
     case "fathom_denied":
     case "stripe_denied":
+    case "dash0_denied":
     case "signoz_denied":
     case "vercel_denied":
     case "x_account_denied":
@@ -101,6 +103,8 @@ function providerName(provider: string | null) {
       return "PostHog";
     case "supabase":
       return "Supabase";
+    case "todoist":
+      return "Todoist";
     case "resend":
       return "Resend";
     case "neon":
@@ -112,6 +116,8 @@ function providerName(provider: string | null) {
       return "Render";
     case "vercel":
       return "Vercel";
+    case "dash0":
+      return "Dash0";
     case "signoz":
       return "SigNoz";
     case "x_account":

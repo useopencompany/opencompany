@@ -14,6 +14,7 @@ if (paths.length === 0) {
 }
 
 const preserveLocalKeys = new Set([
+  "OPENCOMPANY_DESKTOP_AUTH_SECRET",
   "DATABASE_URL",
   "NEON_BRANCH",
   "OPENCOMPANY_LOCAL_ONBOARDING_BYPASS_EMAILS",

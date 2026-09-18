@@ -7,18 +7,130 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- start a workflow the moment jamie finishes a meeting, with the summary, attendees, and action items as context. create an endpoint in the jamie plugin's events section, point a jamie webhook at it, save the key jamie gives you, turn on meeting completed, then choose it as your workflow's event. filter to meetings with guests from outside your company, or to internal ones only — @louis.
-- choose claude fable 5.1 for a cloud claude code sandbox, in the composer or in a workflow step. sonnet 5 stays the default, and whether fable is included or needs usage credits depends on your claude plan (#1767, #1780) — @louis.
-- ask for something visual and opencompany can now build it as a page instead of describing it: a pricing calculator, a dashboard, a timeline, a mockup. it opens in the artifact panel beside the chat, and can be revised, shared, or downloaded like any other artifact. pages run fully sandboxed, so they cannot reach the network or your account, and everything a page needs has to sit inside the file (#1775) — @louis.
-- turn on the subagents beta in preferences to let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. expand a subagent row in the chat to watch what it is doing. uses more credits per message (#1749, #1756) — @louis.
-- turn on the projects beta in preferences to group chats and tasks into named folders above recents. drag a row onto a folder to file it, drag it back onto the recents header to take it out, collapse each folder on its own, and start a new chat straight into a project from the folder's new-chat button (#1755) — @louis.
+<!-- Hold #1924 here until the live WhatsApp pairing, reply, and STOP test is confirmed. -->
 
-### Fixed
-- choosing claude fable 5.1 for a cloud claude code sandbox now works instead of failing the turn with a bare "internal error". a chat that cannot start on the model you picked now says so by name, and a reasoning effort the model does not support steps down instead of ending the turn (#1780) — @louis.
+### Added
+- try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
+
+## [1.30.0] - 2026-09-17
+
+### Added
+- workspace admins can now create and manage workflows from chat. describe the work and when it should run, then ask to edit, pause, run, or archive it. create one-step workflows with a schedule or manual start; use the editor for more steps, event triggers, model choices, and channels (#1926) — @louis.
 
 ### Changed
-- the sidebar list of chats and tasks is now called recents, and you can collapse it. the chevron beside the label points down when the list is open and right when it is closed, and your choice is remembered (#1751) — @louis.
+- new coding chats remember your last model and reasoning effort in this browser, separately for codex and claude code. existing chats keep their own choices (#1920, #1923) — @louis.
+- connecting a codex subscription as a workspace admin now turns on sharing with your team automatically (#1911) — @louis.
+- plugin and repository mentions are easier to read, with service icons and colors, clearer contrast in sent messages, and labels that line up with the surrounding text (#1910, #1915, #1918) — @louis.
+- the composer now says queue a follow-up while a coding agent works, so it is clear your next message will wait for the current turn (#1922) — @louis.
+- the optional connect mcp prompt no longer appears in the sidebar. find the setup guide in settings → mcp when you need it (#1931) — @louis.
+
+### Fixed
+- finished tasks now stop showing a working indicator and running timer, even when part of the page is slow to update (#1933) — @louis.
+- codex can now ask questions with suggested answers during normal coding chats and tasks. pending questions open automatically so you can answer and let work continue (#1930, #1935) — @louis.
+- replying in a slack thread now resumes a paused task instead of leaving your reply waiting indefinitely (#1925) — @louis.
+- personal workflows can use your personal skills again, including scheduled runs that previously failed before returning a result (#1917) — @louis.
+- connecting a plugin during signup now installs it and opens its account connection in one click (#1916) — @louis.
+- github access in active coding sessions no longer breaks when another session refreshes the shared connection (#1913) — @louis.
+- use your mac's two-finger swipe to go back and forward in the app again (#1929) — @louis.
+
+## [1.29.0] - 2026-09-16
+
+### Added
+- message the opencompany bot in slack to start a task with your own connected tools and context. keep replying in its thread to continue. your slack email must match your account in the connected workspace; admins may need to reconnect slack in settings → channels (#1900) — @louis.
+- try the imessage assistant beta to text opencompany from your phone. turn it on in preferences → beta features, then link your number in settings → channels → imessage. it can search the web, use your wiki, skills, and connected tools; actions that need approval cannot run over text (#1903) — @louis.
+- let workflows remember what happened last time. for workflows using chat models, turn on memory under advanced to carry a note between runs. you can read or clear it there; memory starts off (#1887) — @louis.
+- start a workflow when an email arrives. enable email received in the gmail plugin, then add it as a workflow trigger and optionally filter by label. mail is checked every five minutes; up to 25 messages can trigger workflows per check, and extra matches are skipped (#1893) — @louis.
+- start a workflow from a posthog event, such as a signup. connect your project with a read-only personal api key in the plugin's events setup, then choose the event in your workflow trigger (#1906) — @louis.
+- connect todoist to find, create, and update tasks and projects from chat. changes ask for approval by default; permanent deletion starts off (#1878) — @louis.
+- see a workflow's past runs on its detail page, with status, outcome, duration, and a link to the task. open all runs to see its full history (#1884) — @louis.
+- type @ to add a link to an installed plugin or accessible github repository in chat or workflow instructions. these references help name what you mean; they do not grant access or change tool permissions (#1907) — @louis.
+
+### Changed
+- choose whether each workflow can post to slack in its channels section. give its posts a display name and upload an avatar; an admin may need to reconnect slack to enable the custom identity (#1886, #1892, #1901) — @louis.
+- workflows can put a short slack update in the channel and details in its thread. replies now get a progress reaction while work runs, then an answered or needs-attention mark. reconnect older slack installs to enable reactions (#1895, #1897, #1898) — @louis.
+- search the same model choices in workflows as in chat, including qwen 3.8 max, deepseek v4, and grok 4.6. coding agents have their own tab, and the composer shows when a workflow uses a cloud sandbox (#1905, #1904) — @louis.
+- see a coding chat or task's pull request status in the sidebar. running, waiting, and unread indicators take priority until you have seen the result (#1891, #1896, #1899, #1908) — @louis.
+- tool activity and approval cards now name the service and action, so you can see which connected app the agent is using (#1885) — @louis.
+
+### Fixed
+- connected tools no longer reject unrelated actions as duplicates after a connection restarts (#1879) — @louis.
+- sending a follow-up to a task no longer adds an unnecessary five-second wait before confirming it was sent (#1882) — @louis.
+- workflows with slack enabled can now use the workspace bot consistently across chat models and coding agents (#1890) — @louis.
+
+### Removed
+- routines, the old scheduled tasks, no longer run. recreate recurring work as a workflow with a schedule trigger. tasks from past routine runs remain available (#1902) — @louis.
+
+### Security
+- personal workflow schedules are now visible only to their creator. switching a company workflow to personal also removes teammates' access to its schedule (#1894) — @louis.
+
+## [1.28.0] - 2026-09-15
+
+### Added
+- send a follow-up while a coding chat or task is working. it queues for the next turn; choose steer to redirect the current turn, or remove it if you change your mind. if the agent cannot take the instruction mid-turn, it stays queued (#1866, #1873) — @louis.
+- find prospects, research people at a company, and look up work emails with the lead research plugin. prices are shown before you spend, and workspace admins can set a daily limit. install the plugin to keep using prospecting tools previously available through capabilities (#1864) — @louis.
+- start a workflow when a convex function fails, with the function and error as context. enable error events in the convex plugin, then choose function failed as the trigger. repeated matching errors are grouped into 15-minute windows. requires convex pro; convex charges for log streams (#1862) — @louis.
+- choose gpt 5.6 sol or terra for workflow steps. models covered by your workspace's shared subscription now show included in the picker (#1877) — @louis.
+
+### Changed
+- connect a coding subscription and install plugins during workspace setup, so your first chat has the tools you need (#1876) — @louis.
+- open plugins and skills from the main sidebar while keeping your chats, tasks, and wiki in view. both have moved out of settings; old links still work (#1855, #1881) — @louis.
+- choose the size of new cloud coding sessions in settings → sandboxes. workspace admins can compare machine sizes and hourly costs there (#1859) — @louis.
+- chat and tasks can now make up to 32 connected-tool calls per turn, up from 16, so longer research and updates can finish before hitting the limit (#1861) — @louis.
+- keep workflow instructions in the steps. event triggers no longer show an additional run context field; existing saved context is preserved (#1865) — @louis.
+- running subagents start collapsed to keep the conversation readable. expand a row to follow its work (#1836) — @louis.
+
+### Fixed
+- coding sessions now finish or stop correctly after a bug left them showing as running even when the agent was done. resumed sessions also avoid repeating earlier tool activity (#1875, #1867) — @louis.
+- plugin tool permissions now keep showing your saved on, ask, or off choice instead of appearing to revert. connected accounts also update reliably when you have a custom mcp connection (#1872, #1858) — @louis.
+- slack follow-ups now include the thread history and readable sender details. workflows send replies back to the original thread explicitly, so an internal task result is no longer automatically copied to slack (#1851) — @louis.
+- workflow tasks now show their actual instructions or event context as the opening request instead of a generic run this workflow message (#1853) — @louis.
+- returning to a coding chat keeps your chosen reasoning effort. starting a new chat no longer briefly replaces the conversation with a loading screen (#1860) — @louis.
+- linear workflow connections now refresh automatically. older connections may need one reconnect before teams and events work again (#1841) — @louis.
+- render tools can connect and run again after a connection error prevented them from loading (#1869) — @louis.
+- sandbox preview keeps looking for your server after an unavailable port. if the server is outside the workspace, preview explains where to start it (#1831) — @louis.
+- attachment cards stay visible and in order while files upload, and a resumed task's timer now measures the current run (#1846, #1848) — @louis.
+
+## [1.27.0] - 2026-09-14
+
+### Added
+- start with a workflow template for a weekly shipping digest, daily inbox triage, or weekly revenue pulse. open workflow templates on the workflows page, review the saved draft, connect the tools it needs, and activate it when ready (#1845, #1850) — @louis.
+- continue a workflow from slack. connect the workspace bot in settings → channels → slack and ask your workflow to post in a public channel. anyone in that thread can reply to continue the same task, with its files and context, for up to 30 days. follow-ups use the workflow owner's connected tools and permissions (#1840, #1849) — @louis.
+- keep separate wikis for your company, a project, or a small group. give each its own instructions and share it with everyone or selected teammates. your existing pages stay in the company wiki, and old links still work (#1745, #1805) — @louis.
+- read, update, and add rows to google sheets through the google drive plugin. use enable sheets tools in the plugin's account settings to grant access, then refresh its tools (#1807) — @louis.
+- send email from chat through the gmail plugin. sending asks for approval by default; you can set its permission separately from labeling and other mail actions (#1826, #1839) — @louis.
+- connect doppler to use your project's secrets in cloud coding sessions. connect dash0 to investigate your application's logs, metrics, and traces from chat (#1834, #1843, #1830, #1832) — @louis.
+- start a workflow when jamie finishes a meeting, with its summary, attendees, and action items as context. set up the webhook in the jamie plugin's events section, then choose meeting completed as a workflow trigger. filter to internal meetings or meetings with outside guests (#1806) — @louis.
+- ask for a calculator, dashboard, timeline, or mockup as an interactive page beside your chat. revise, share, or download it like any other artifact. pages are self-contained and cannot access the network or your account (#1775) — @louis.
+- browse and edit your cloud sandbox files in the new files tab beside preview and terminal. save changes directly; if the agent changed the same file, review the conflict before overwriting it (#1821) — @louis.
+- choose a smaller or larger cloud sandbox for new coding sessions in settings → inference. workspace admins can compare sizes and running costs; existing sessions keep their current size (#1818) — @louis.
+- turn on the projects beta in preferences to group chats and tasks into folders in the sidebar. drag work into a project, collapse its folder, or start a new chat inside it (#1755, #1761, #1765, #1766, #1825) — @louis.
+- turn on the subagents beta in preferences to let opencompany split research among helpers and bring their findings back into one answer. expand a helper's row to follow its work. this uses more credits per message (#1749, #1756, #1764) — @louis.
+- turn on past session access in preferences to ask about your earlier private chats in this workspace, including archived ones. use it to review recent work or find an earlier decision (#1771) — @louis.
+- choose claude fable 5.1 for cloud claude code chats and workflow steps. availability through your subscription depends on your claude plan. see your remaining claude subscription allowance and reset times in settings → inference (#1767, #1780, #1750) — @louis.
+
+### Changed
+- tasks and workflows are now available to everyone, with no beta switch. ask chat to run a saved workflow by name when you want background work; chat no longer creates one-off tasks on its own. existing recurring routines still run (#1847, #1812) — @louis.
+- keep workflows personal or share them with your company. add several schedules or plugin events to the same workflow, and filter the list to find your own or shared work (#1817, #1822) — @louis.
+- choose which meetings or issues start a workflow. granola events can follow one folder and its subfolders; linear events can filter by team and status. event connections now live in each plugin's events section (#1793, #1772, #1803) — @louis.
+- set on, ask, or off for an individual plugin tool. allow routine labeling while keeping email sending or deletion behind approval. always allow in chat now applies only to the tool you approved (#1839) — @louis.
+- approval cards now show the action, affected files or command, and any quoted cost in one place. chats and tasks waiting for you keep a distinct sidebar indicator until you answer (#1774, #1827) — @louis.
+- find chat models and coding agents in separate tabs in the model picker. auto comes first, models covered by your shared subscription show included, and a sandbox indicator appears when you select a coding agent (#1828, #1835, #1837, #1842) — @louis.
+- open new chat from the sidebar to start work. manage recurring routines on the tasks page, open skills from the sidebar footer, and collapse recents when you want more space (#1819, #1813, #1751) — @louis.
+- type a url or path into the sandbox preview's address bar to open another page. the preview opens when your dev server starts, and the port picker appears when several servers are running (#1809) — @louis.
+- feedback sent from a chat or task now includes a link to that work, so you do not have to find and paste it yourself (#1808) — @louis.
+
+### Fixed
+- scheduled workflows run again after a bug stopped due schedules from being picked up (#1852) — @louis.
+- draft your next reply while a task is working. refreshing an active chat now keeps its timer and stop control visible, and a resumed turn counts its own running time (#1802, #1815, #1795) — @louis.
+- file uploads no longer leave tasks hanging, and publishing a revised artifact no longer fails because an earlier revision is empty (#1748, #1798) — @louis.
+- gemini image generation works again instead of failing before producing an image (#1754) — @louis.
+- coding sessions recover more reliably from an unresponsive sandbox and retain recovered output. claude code tasks can resume after reaching a turn limit, and choosing fable 5.1 now starts the selected model correctly (#1777, #1779, #1782, #1742, #1780) — @louis.
+- recent chats and tasks no longer disappear from the sidebar because of a list limit, and beta preference changes appear immediately (#1763, #1762) — @louis.
+- wiki source references now have readable labels, and granola references link to the original note (#1844) — @louis.
+- long granola meetings can now start their workflows even when the full transcript is too large to fetch (#1803) — @louis.
+
+### Removed
+- automatic imports from connected providers into wiki have been retired. existing pages remain; use workflows with plugin events for new updates. the workspace slack bot now continues workflow threads instead of answering standalone mentions or direct messages (#1772, #1840) — @louis.
 
 ## [1.26.0] - 2026-09-11
 

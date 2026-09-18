@@ -8,15 +8,31 @@ import {
   mcpInputSchema,
   registerExternalEngineServiceTools,
 } from "@opencompany/agent/application/external-engine-tools";
-import { workspaceSkillIdempotencyKey } from "@opencompany/agent/application/host-tools";
+import {
+  workflowCommandIdempotencyKey,
+  workspaceSkillIdempotencyKey,
+} from "@opencompany/agent/application/host-tools";
 import {
   executeActionGateway,
   executeActionHostGateway,
 } from "@opencompany/agent/application/persisted-action-gateway";
 import { executePersistedBrainCapture } from "@opencompany/agent/application/persisted-brain-capture";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
+import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
+import {
+  postWorkflowSlackMessage,
+  SLACK_CHANNEL_INPUT_SCHEMA,
+  SLACK_CHANNEL_TOOL_DESCRIPTION,
+  type SlackChannelPost,
+} from "@opencompany/agent/integrations/slack-channel";
+import { mcpInvocationId } from "@opencompany/agent/mcp-invocation";
 import { registerWikiTool } from "@opencompany/agent/mcp-server";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
+import {
+  parseWorkflowToolInput,
+  WORKFLOWS_INPUT_SCHEMA,
+  WORKFLOWS_TOOL_DESCRIPTION,
+} from "@opencompany/agent/workflow-tool";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
@@ -41,6 +57,7 @@ import { createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { executeApiWikiCommand } from "./api-wiki-client";
+import { executeApiWorkflowCommand } from "./api-workflow-client";
 import { wakeBrainIngestWorker } from "./brain-ingest-worker";
 import { publishExternalEngineChatArtifact } from "./chat-artifacts";
 import { createCodexBrainCaptureDynamicTool } from "./codex-brain-capture-tool";
@@ -76,6 +93,7 @@ type AcpToolsMcpDependencies = {
   executeSkillTool: (
     input: Omit<Parameters<typeof executeWorkspaceSkillToolForActor>[0], "db">,
   ) => ReturnType<typeof executeWorkspaceSkillToolForActor>;
+  executeWorkflowCommand: typeof executeApiWorkflowCommand;
   executeWikiCommand: typeof executeApiWikiCommand;
   rateLimitMax: number;
 };
@@ -95,6 +113,7 @@ const defaultDependencies: AcpToolsMcpDependencies = {
   resolveApproval: (input) => resolveActionApproval({ ...input, db: getDb() }),
   publishArtifact: publishExternalEngineChatArtifact,
   executeSkillTool: (input) => executeWorkspaceSkillToolForActor({ ...input, db: getDb() }),
+  executeWorkflowCommand: executeApiWorkflowCommand,
   executeWikiCommand: executeApiWikiCommand,
   rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
 };
@@ -179,6 +198,65 @@ export function registerAcpToolsMcpRoute(
                 env,
               });
             },
+          },
+        );
+      }
+      if (authorizedContext.slackChannelEnabled) {
+        server.registerTool(
+          SLACK_BOT_TOOL_NAME,
+          {
+            description: SLACK_CHANNEL_TOOL_DESCRIPTION,
+            inputSchema: mcpInputSchema(SLACK_CHANNEL_INPUT_SCHEMA),
+          },
+          async (args) => {
+            const current = await authorizeOperation();
+            if (!current?.slackChannelEnabled)
+              throw new Error("Slack is no longer enabled for this workflow.");
+            const result = await postWorkflowSlackMessage(
+              {
+                runId: capability.codexChatTurnId,
+                actorId: current.actorId,
+                post: args as SlackChannelPost,
+              },
+              (query) => getDb().execute(query),
+            );
+            return { content: [{ type: "text", text: JSON.stringify(result) }] };
+          },
+        );
+      }
+      if (
+        authorizedContext.taskConversation === false &&
+        authorizedContext.automationToolsEnabled
+      ) {
+        server.registerTool(
+          "workflows",
+          {
+            description: WORKFLOWS_TOOL_DESCRIPTION,
+            inputSchema: mcpInputSchema(WORKFLOWS_INPUT_SCHEMA),
+          },
+          async (raw, extra) => {
+            const current = await authorizeOperation();
+            if (!current || current.taskConversation !== false || !current.automationToolsEnabled)
+              throw new Error(
+                "Workflow management is only available to workspace admins in main chat.",
+              );
+            const args = parseWorkflowToolInput(raw);
+            const invocation = mcpInvocationId("workflows", extra.sessionId, extra.requestId);
+            const result = await resolved.executeWorkflowCommand({
+              origin: env.apiOrigin,
+              token: env.apiInternalToken,
+              actorId: current.actorId,
+              workspaceId: current.workspaceId,
+              toolInput: args,
+              // One durable run reservation per turn, even across MCP reconnects. The
+              // canonical task service rejects a second workflow with the same key.
+              idempotencyKey:
+                args.command === "run"
+                  ? `workflow-run:${capability.codexChatTurnId}`
+                  : workflowCommandIdempotencyKey(capability.codexChatTurnId, invocation, args),
+              signal: request.signal,
+            });
+            return { content: [{ type: "text", text: JSON.stringify(result) }] };
           },
         );
       }
@@ -368,7 +446,7 @@ export async function executeExternalActionWithApproval(input: {
   if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
   if (!approval.needsApproval) {
-    input.request = originalRequest;
+    if (!approval.automaticApproval) input.request = originalRequest;
     return dispatch();
   }
 
@@ -842,7 +920,11 @@ function registerBrainTools(input: {
         const response = await tool.execute({
           threadId: input.capability.codexChatSessionId,
           turnId: input.capability.codexChatTurnId,
-          callId: `mcp:${input.capability.codexChatTurnId}:${String(extra.requestId)}`,
+          callId: mcpInvocationId(
+            input.capability.codexChatTurnId,
+            extra.sessionId,
+            extra.requestId,
+          ),
           namespace: null,
           tool: tool.spec.name,
           arguments: args,

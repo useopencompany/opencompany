@@ -1,14 +1,7 @@
 import {
   ACTION_TOOL_CONTRACT,
-  AVAILABLE_AGENT_MODEL_CATALOG,
-  CLAUDE_CODE_AGENT_MODEL_IDS,
-  CLAUDE_CODE_DEFAULT_MODEL_ID,
-  CODEX_AGENT_MODEL_IDS,
-  CODEX_DEFAULT_MODEL_ID,
   DESCRIBE_ACTIONS_INPUT_ERROR,
   GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS,
-  isClaudeCodeModelId,
-  isCodexModelId,
   isDescribeActionsInput,
   LEGACY_ACTION_TOOL_CONTRACT,
   WRITE_ARTIFACT_INPUT_JSON_SCHEMA,
@@ -23,7 +16,6 @@ import {
   BROWSER_TOOL_NAMES,
   type BrowserToolName,
 } from "@opencompany/browser-tools";
-import type { HarnessEngine } from "@opencompany/db/product-schema";
 import {
   createGatewayAttribution,
   type GatewayFeature,
@@ -65,6 +57,7 @@ import {
   MAX_BROWSER_CALLS_PER_TURN,
   MAX_WEB_FETCH_CALLS_PER_TURN,
   MAX_WEB_SEARCH_CALLS_PER_TURN,
+  MAX_WORKFLOW_STARTS_PER_TURN,
 } from "./chat-limits";
 import {
   BRAIN_TOOL_NAME,
@@ -82,16 +75,10 @@ import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   type CreateWorkspaceSkillToolInput,
   type CreateWorkspaceSkillToolOutput,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
   DESCRIBE_ACTIONS_TOOL_NAME,
-  type DeleteTaskScheduleToolInput,
-  type DeleteTaskScheduleToolOutput,
   type DescribeActionsToolInput,
   type DescribeActionsToolOutput,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
-  type EditTaskScheduleToolInput,
-  type EditTaskScheduleToolOutput,
   type EditWorkspaceSkillToolInput,
   type EditWorkspaceSkillToolOutput,
   LIST_ACTIONS_TOOL_NAME,
@@ -106,12 +93,8 @@ import {
   SAVE_TO_BRAIN_TOOL_NAME,
   type SaveToBrainToolInput,
   type SaveToBrainToolOutput,
-  SCHEDULE_TASK_TOOL_NAME,
-  type ScheduleTaskToolInput,
-  type ScheduleTaskToolOutput,
-  START_TASK_TOOL_NAME,
+  SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
-  type StartTaskToolInput,
   type StartTaskToolOutput,
   type StartWorkflowToolInput,
   type StartWorkflowToolOutput,
@@ -129,6 +112,11 @@ import {
   type WebSearchToolOutput,
 } from "./chat-ui";
 import { normalizePublicWebUrl } from "./chat-web-fetch";
+import {
+  SLACK_CHANNEL_INPUT_SCHEMA,
+  SLACK_CHANNEL_TOOL_DESCRIPTION,
+  type SlackChannelPost,
+} from "./integrations/slack-channel";
 import { guardKimiOutput } from "./kimi-output-guard";
 import { type ProductLanguageModelResolution, resolveProductLanguageModel } from "./language-model";
 import {
@@ -140,8 +128,6 @@ import {
   BROWSER_USE_PROFILE_TOOL_DESCRIPTION,
   CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   createProductChatSystemPrompt,
-  DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
-  EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
   EDIT_WORKSPACE_SKILL_TOOL_DESCRIPTION,
   LIST_ACTIONS_TOOL_DESCRIPTION,
   LIST_SKILLS_QUERY_DESCRIPTION,
@@ -156,23 +142,9 @@ import {
   SAVE_TO_BRAIN_SOURCE_REF_DESCRIPTION,
   SAVE_TO_BRAIN_TITLE_DESCRIPTION,
   SAVE_TO_BRAIN_TOOL_DESCRIPTION,
-  SCHEDULE_TASK_CRON_DESCRIPTION,
-  SCHEDULE_TASK_NAME_DESCRIPTION,
-  SCHEDULE_TASK_PROMPT_DESCRIPTION,
-  SCHEDULE_TASK_SOURCE_DESCRIPTION,
-  SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-  SCHEDULE_TASK_TOOL_DESCRIPTION,
-  START_TASK_ENGINE_DESCRIPTION,
-  START_TASK_MODEL_DESCRIPTION,
-  START_TASK_NAME_DESCRIPTION,
-  START_TASK_PROMPT_DESCRIPTION,
-  START_TASK_REASON_DESCRIPTION,
-  START_TASK_TOOL_DESCRIPTION,
   START_WORKFLOW_ID_DESCRIPTION,
   START_WORKFLOW_PROMPT_DESCRIPTION,
   START_WORKFLOW_TOOL_DESCRIPTION,
-  TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-  TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
   USE_ACTION_TOOL_DESCRIPTION,
   USE_SKILL_ID_DESCRIPTION,
   USE_SKILL_TOOL_DESCRIPTION,
@@ -195,6 +167,23 @@ import {
   subagentToolSet,
 } from "./subagent";
 import {
+  READ_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+  READ_WORKFLOW_MEMORY_TOOL_NAME,
+  type ReadWorkflowMemoryToolInput,
+  type ReadWorkflowMemoryToolOutput,
+  UPDATE_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+  UPDATE_WORKFLOW_MEMORY_TOOL_NAME,
+  type UpdateWorkflowMemoryToolInput,
+  type UpdateWorkflowMemoryToolOutput,
+} from "./workflow-memory";
+import {
+  parseWorkflowToolInput,
+  WORKFLOWS_INPUT_SCHEMA,
+  WORKFLOWS_TOOL_DESCRIPTION,
+  type WorkflowCommand,
+  type WorkflowToolInput,
+} from "./workflow-tool";
+import {
   WORKSPACE_SKILL_AUTHORING_INPUT_SCHEMA,
   WORKSPACE_SKILL_EDIT_INPUT_SCHEMA,
   WORKSPACE_SKILLS_INPUT_SCHEMA,
@@ -213,7 +202,6 @@ export const CHAT_DEBUG_SCHEMA_VERSION = "opencompany.chat.debug.v1";
 export const CHAT_MAX_STEPS = 8;
 export const CHAT_MAX_STEPS_WITH_SANDBOX = 16;
 export const MAX_LIST_SKILL_RESULTS = 20;
-export const MAX_START_TASK_CALLS_PER_TURN = 10;
 
 // Task-only tool. It exists only when a caller explicitly injects an
 // `updateTaskStatus` runner. Normal background task execution does not expose
@@ -230,6 +218,10 @@ export type UpdateTaskStatusToolOutput = {
   comment: string;
 };
 export type UpdateTaskStatusRunner = (input: UpdateTaskStatusToolInput) => Promise<void>;
+export type ReadWorkflowMemoryRunner = () => Promise<ReadWorkflowMemoryToolOutput>;
+export type UpdateWorkflowMemoryRunner = (
+  input: UpdateWorkflowMemoryToolInput,
+) => Promise<UpdateWorkflowMemoryToolOutput>;
 export const UPDATE_TASK_STATUS_TOOL_DESCRIPTION =
   'Report this background task\'s final user-facing status. Call exactly once, near the end, before your final message. Use "done" when the request is fully handled; use "needs_attention" when there are partial results, blockers, errors, questions, or anything the user should review. The comment is one short plain-text sentence shown on the task card.';
 const UPDATE_TASK_STATUS_STATUS_DESCRIPTION =
@@ -302,13 +294,6 @@ export type BrowserToolRunner = (input: {
   name: BrowserToolName;
   args: unknown;
 }) => Promise<BrowserToolOutput>;
-type ScheduleTaskRunner = (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
-type EditTaskScheduleRunner = (
-  input: EditTaskScheduleToolInput,
-) => Promise<EditTaskScheduleToolOutput>;
-type DeleteTaskScheduleRunner = (
-  input: DeleteTaskScheduleToolInput,
-) => Promise<DeleteTaskScheduleToolOutput>;
 export type WorkspaceSkillsRunner = (input: WorkspaceSkillsInput) => Promise<unknown>;
 export type CreateWorkspaceSkillRunner = (
   input: CreateWorkspaceSkillToolInput,
@@ -345,6 +330,7 @@ export type SkillDispatcher = {
 };
 
 export type WorkflowDispatcher = {
+  manage?: (input: WorkflowCommand, context: { toolCallId: string }) => Promise<unknown>;
   catalog: readonly ChatWorkflowCatalogItem[];
   execute: (input: StartWorkflowToolInput) => Promise<StartedTask>;
 };
@@ -376,7 +362,7 @@ export type ProductChatAgentDebugTrace = {
 
 export type ProductChatAgentResult = {
   content: string;
-  task: StartedTask | null;
+  tasks: readonly StartedTask[];
   debugTrace: ProductChatAgentDebugTrace;
   // Full-turn usage across all steps (unlike debugTrace.usage, which is the
   // last step only as a context-fullness proxy). Headless surfaces need this
@@ -390,34 +376,19 @@ type ProductChatSystemPromptInput = NonNullable<
   Parameters<typeof createProductChatSystemPrompt>[0]
 >;
 
-type StartTaskRequest = {
-  prompt: string;
-  name?: string;
-  model: AgentModelId;
-  engine?: HarnessEngine;
-};
-
-type StartTaskExecutionContext = {
-  toolCallId: string;
-};
-
 export async function runProductChatAgent(input: {
   messages: readonly ProductChatAgentMessage[];
   model: AgentModelId;
   gatewayApiKey: string;
   workspaceId?: string;
   modelResolution?: ProductLanguageModelResolution;
-  startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
-  requestedEngine?: HarnessEngine;
-  scheduleTask?: ScheduleTaskRunner;
-  editTaskSchedule?: EditTaskScheduleRunner;
-  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  postSlackMessage?: (input: SlackChannelPost) => Promise<unknown>;
   writeArtifact?: WriteArtifactRunner;
   webFetch?: WebFetchRunner;
   webSearch?: WebSearchRunner;
@@ -440,8 +411,7 @@ export async function runProductChatAgent(input: {
   brainMultiBrain?: { targets: readonly BrainMultiBrainTarget[] };
   currentDate?: Date | string;
   userContext?: ProductChatSystemPromptInput["userContext"];
-  recurringSchedules?: ProductChatSystemPromptInput["recurringSchedules"];
-  taskToolsEnabled?: boolean;
+  automationToolsEnabled?: boolean;
   wikiToolReadOnly?: boolean;
   activeBrain?: ProductChatSystemPromptInput["activeBrain"];
   connectedIntegrations?: ProductChatSystemPromptInput["connectedIntegrations"];
@@ -467,15 +437,8 @@ export async function runProductChatAgent(input: {
     ...(input.chatSessionId ? { chatSessionId: input.chatSessionId } : {}),
     ...(input.brainRef ? { brainRef: input.brainRef } : {}),
   });
-  const latestUserMessage = latestUserMessageContent(input.messages);
   const toolContext = createProductChatToolContext({
     model: input.model,
-    ...(input.startTask ? { startTask: input.startTask } : {}),
-    ...(latestUserMessage ? { latestUserMessage } : {}),
-    ...(input.requestedEngine ? { requestedEngine: input.requestedEngine } : {}),
-    ...(input.scheduleTask ? { scheduleTask: input.scheduleTask } : {}),
-    ...(input.editTaskSchedule ? { editTaskSchedule: input.editTaskSchedule } : {}),
-    ...(input.deleteTaskSchedule ? { deleteTaskSchedule: input.deleteTaskSchedule } : {}),
     ...(input.workspaceSkills ? { workspaceSkills: input.workspaceSkills } : {}),
     ...(input.createWorkspaceSkill ? { createWorkspaceSkill: input.createWorkspaceSkill } : {}),
     ...(input.editWorkspaceSkill ? { editWorkspaceSkill: input.editWorkspaceSkill } : {}),
@@ -484,6 +447,7 @@ export async function runProductChatAgent(input: {
     ...(input.runWiki
       ? { runWiki: input.runWiki, wikiToolReadOnly: Boolean(input.wikiToolReadOnly) }
       : {}),
+    ...(input.postSlackMessage ? { postSlackMessage: input.postSlackMessage } : {}),
     ...(input.writeArtifact ? { writeArtifact: input.writeArtifact } : {}),
     ...(input.webFetch ? { webFetch: input.webFetch } : {}),
     ...(input.webSearch ? { webSearch: input.webSearch } : {}),
@@ -504,8 +468,9 @@ export async function runProductChatAgent(input: {
     browserToolsEnabled: Boolean(input.browserTools),
     ...(input.currentDate ? { currentDate: input.currentDate } : {}),
     ...(input.userContext ? { userContext: input.userContext } : {}),
-    ...(input.recurringSchedules ? { recurringSchedules: input.recurringSchedules } : {}),
-    ...(input.taskToolsEnabled !== undefined ? { taskToolsEnabled: input.taskToolsEnabled } : {}),
+    ...(input.automationToolsEnabled !== undefined
+      ? { automationToolsEnabled: input.automationToolsEnabled }
+      : {}),
     wikiToolEnabled: Boolean(input.runWiki),
     wikiToolReadOnly: Boolean(input.wikiToolReadOnly),
     artifactToolEnabled: Boolean(input.writeArtifact),
@@ -602,13 +567,13 @@ export async function runProductChatAgent(input: {
     await flushLatitude();
   }
 
-  const startedTask = toolContext.getStartedTask();
-  const content = normalizeAgentText(result.text, startedTask);
+  const startedTasks = toolContext.getStartedTasks();
+  const content = normalizeAgentText(result.text, startedTasks);
   const finishReason = stringifyFinishReason(result.finishReason);
 
   return {
     content,
-    task: startedTask,
+    tasks: startedTasks,
     debugTrace: createProductChatDebugTrace({
       model: input.model,
       steps: result.steps,
@@ -622,18 +587,13 @@ export async function runProductChatAgent(input: {
 
 export function createProductChatToolContext(input: {
   model: AgentModelId;
-  startTask?: (task: StartTaskRequest, context: StartTaskExecutionContext) => Promise<StartedTask>;
-  requestedEngine?: HarnessEngine;
-  latestUserMessage?: string;
-  scheduleTask?: ScheduleTaskRunner;
-  editTaskSchedule?: EditTaskScheduleRunner;
-  deleteTaskSchedule?: DeleteTaskScheduleRunner;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runBrainCli?: BrainCliRunner;
   saveToBrain?: SaveToBrainRunner;
   runWiki?: WikiToolRunner;
+  postSlackMessage?: (input: SlackChannelPost) => Promise<unknown>;
   writeArtifact?: WriteArtifactRunner;
   wikiToolReadOnly?: boolean;
   webFetch?: WebFetchRunner;
@@ -650,6 +610,10 @@ export function createProductChatToolContext(input: {
   // report its own outcome. Absent in interactive chat and the Slack bot, so
   // the update_task_status tool never appears there.
   updateTaskStatus?: UpdateTaskStatusRunner;
+  // Workflow-run-only: injected by the runner when the running workflow has memory enabled, so a
+  // repeating workflow can carry a single markdown document between its runs.
+  readWorkflowMemory?: ReadWorkflowMemoryRunner;
+  updateWorkflowMemory?: UpdateWorkflowMemoryRunner;
   // Injected by the runner, the only composition root that can build a nested tool context.
   // `budget` is shared with every nested context so one turn's whole subagent tree draws from
   // the same run allowance; `depth` is 0 in the main conversation.
@@ -671,12 +635,8 @@ export function createProductChatToolContext(input: {
   const webFetchCap = input.limits?.webFetchCallsPerTurn ?? MAX_WEB_FETCH_CALLS_PER_TURN;
   const actionCap = MAX_ACTION_CALLS_PER_TURN;
   let actionCallsExhausted = false;
-  let startedTask: StartedTask | null = null;
-  let startedTaskInFlight: Promise<StartedTask> | null = null;
-  let startTaskCallCount = 0;
-  let internalTaskInvocationSequence = 0;
-  let scheduledTask: ScheduleTaskToolOutput | null = null;
-  let scheduleTaskInFlight: Promise<ScheduleTaskToolOutput> | null = null;
+  const startedWorkflowTasks = new Map<string, StartedTask>();
+  const startedWorkflowTasksInFlight = new Map<string, Promise<StartedTask>>();
   let visibleToolActivity = false;
   let webFetchCallCount = 0;
   let webSearchCallCount = 0;
@@ -719,119 +679,73 @@ export function createProductChatToolContext(input: {
     });
   }
 
-  const startTrackedTask = async (
+  // A turn may start up to MAX_WORKFLOW_STARTS_PER_TURN distinct workflows, and the assistant
+  // message renders one Task card per run. Each workflow's Task is keyed on the turn id plus the
+  // workflow id, so a repeat request for one already started this turn replays that Task instead of
+  // spawning a second one. Going past the cap has to fail loudly, or the model would report a
+  // workflow as started when an earlier one's Task came back instead. The cap counts in-flight
+  // starts too: the model can emit several start_workflow calls in a single step, and the slot is
+  // taken before the first await so those parallel calls cannot all pass the same check.
+  const startWorkflowTask = async (
+    workflowId: string,
     create: () => Promise<StartedTask>,
-  ): Promise<StartTaskToolOutput> => {
-    if (startedTask) return toStartTaskToolOutput(startedTask, "already_started");
-    if (startedTaskInFlight) {
-      startedTask = await startedTaskInFlight;
-      return toStartTaskToolOutput(startedTask, "already_started");
+  ): Promise<StartWorkflowToolOutput> => {
+    const started = startedWorkflowTasks.get(workflowId);
+    if (started) return toStartTaskToolOutput(started, "already_started");
+
+    const inFlight = startedWorkflowTasksInFlight.get(workflowId);
+    if (inFlight) return toStartTaskToolOutput(await inFlight, "already_started");
+
+    const claimed = [...startedWorkflowTasks.keys(), ...startedWorkflowTasksInFlight.keys()];
+    if (claimed.length >= MAX_WORKFLOW_STARTS_PER_TURN) {
+      throw new Error(
+        `Only ${MAX_WORKFLOW_STARTS_PER_TURN} workflows can start per chat turn, and ${claimed.join(", ")} already took those slots. Tell the user that "${workflowId}" has not started and ask whether to run it next.`,
+      );
     }
 
+    const pending = create();
+    startedWorkflowTasksInFlight.set(workflowId, pending);
+    let task: StartedTask;
     try {
-      startedTaskInFlight = create();
-      startedTask = await startedTaskInFlight;
+      task = await pending;
     } finally {
-      startedTaskInFlight = null;
+      // A failed start frees its slot, so the model can retry it or run a different workflow.
+      startedWorkflowTasksInFlight.delete(workflowId);
     }
-    return toStartTaskToolOutput(startedTask, "queued");
+    startedWorkflowTasks.set(workflowId, task);
+    return toStartTaskToolOutput(task, "queued");
   };
 
-  const startTask = input.startTask;
-  if (startTask) {
-    const taskEngineHint = input.requestedEngine ?? inferStartTaskEngine(input.latestUserMessage);
-    const availableTaskModels =
-      taskEngineHint === "codex"
-        ? CODEX_AGENT_MODEL_IDS
-        : taskEngineHint === "claude_code"
-          ? CLAUDE_CODE_AGENT_MODEL_IDS
-          : AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id);
-    tools[START_TASK_TOOL_NAME] = tool<
-      StartTaskToolInput,
-      StartTaskToolOutput,
-      Record<string, unknown>
-    >({
-      description: START_TASK_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<StartTaskToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          prompt: {
-            type: "string",
-            description: START_TASK_PROMPT_DESCRIPTION,
-          },
-          name: {
-            type: "string",
-            description: START_TASK_NAME_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: START_TASK_REASON_DESCRIPTION,
-          },
-          engine: {
-            type: "string",
-            enum: ["opencompany", "codex", "claude_code"],
-            description: START_TASK_ENGINE_DESCRIPTION,
-          },
-          model: {
-            type: "string",
-            enum: [...availableTaskModels],
-            description: START_TASK_MODEL_DESCRIPTION,
-          },
-        },
-        required: ["prompt", "name"],
-      }),
-      execute: async (args, executionContext) => {
+  const workflows = input.workflows;
+  if (workflows?.manage) {
+    tools.workflows = tool<WorkflowToolInput, unknown, Record<string, unknown>>({
+      description: WORKFLOWS_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<WorkflowToolInput>(WORKFLOWS_INPUT_SCHEMA),
+      // This command schema intentionally has optional, operation-specific fields. The
+      // Codex backend otherwise treats every property as required and invents placeholders.
+      strict: false,
+      execute: async (raw, context) => {
         visibleToolActivity = true;
-        startTaskCallCount += 1;
-        if (startTaskCallCount > MAX_START_TASK_CALLS_PER_TURN) {
-          throw new Error(
-            `start_task limit reached for this turn (${MAX_START_TASK_CALLS_PER_TURN}).`,
+        const args = parseWorkflowToolInput(raw);
+        if (args.command === "run") {
+          if (!args.workflowId || !args.prompt)
+            throw new Error("Run requires workflowId and prompt.");
+          // Resolve through the live service, so a workflow created this turn is runnable.
+          const read = await workflows.manage!(
+            { command: "read", workflowId: args.workflowId },
+            { toolCallId: context.toolCallId },
+          );
+          const current = (read as { workflow?: { slug: string; status: string } }).workflow;
+          if (!current || current.status !== "active")
+            throw new Error("Only an active workflow can be run.");
+          return startWorkflowTask(current.slug, () =>
+            workflows.execute({ workflowId: current.slug, prompt: args.prompt! }),
           );
         }
-        const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
-        if (!prompt) {
-          throw new Error("start_task prompt is required.");
-        }
-        const name = typeof args.name === "string" ? args.name.trim() : "";
-        const reason = typeof args.reason === "string" ? args.reason : "";
-        const engine =
-          input.requestedEngine ??
-          normalizeStartTaskEngine(args.engine) ??
-          inferStartTaskEngine(input.latestUserMessage) ??
-          inferStartTaskEngine([name, prompt, reason].join("\n"));
-        const requestedModel = normalizeStartTaskModel(args.model, engine);
-        const model = modelForStartTaskEngine(engine, input.model, requestedModel);
-        const toolCallId =
-          executionContext &&
-          typeof executionContext === "object" &&
-          "toolCallId" in executionContext &&
-          typeof executionContext.toolCallId === "string"
-            ? executionContext.toolCallId
-            : `ai-sdk:start-task:${++internalTaskInvocationSequence}`;
-        const taskPromise = startTask(
-          {
-            prompt,
-            ...(name ? { name } : {}),
-            model,
-            ...(engine ? { engine } : {}),
-          },
-          { toolCallId },
-        );
-        if (!startedTask && !startedTaskInFlight) startedTaskInFlight = taskPromise;
-        try {
-          const task = await taskPromise;
-          startedTask ??= task;
-          return toStartTaskToolOutput(task, "queued");
-        } finally {
-          if (startedTaskInFlight === taskPromise) startedTaskInFlight = null;
-        }
+        return workflows.manage!(args, { toolCallId: context.toolCallId });
       },
     });
-  }
-
-  const workflows = input.workflows;
-  if (workflows && workflows.catalog.length > 0) {
+  } else if (workflows && workflows.catalog.length > 0) {
     const workflowIds = workflows.catalog.map((workflow) => workflow.id);
     tools[START_WORKFLOW_TOOL_NAME] = tool<
       StartWorkflowToolInput,
@@ -867,7 +781,7 @@ export function createProductChatToolContext(input: {
         if (!prompt) {
           throw new Error("start_workflow prompt is required.");
         }
-        return startTrackedTask(() => workflows.execute({ workflowId, prompt }));
+        return startWorkflowTask(workflowId, () => workflows.execute({ workflowId, prompt }));
       },
     });
   }
@@ -900,6 +814,13 @@ export function createProductChatToolContext(input: {
     });
   }
 
+  if (input.postSlackMessage) {
+    tools[SLACK_BOT_TOOL_NAME] = tool({
+      description: SLACK_CHANNEL_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<SlackChannelPost>(SLACK_CHANNEL_INPUT_SCHEMA),
+      execute: input.postSlackMessage,
+    });
+  }
   const writeArtifact = input.writeArtifact;
   if (writeArtifact) {
     tools[WRITE_ARTIFACT_TOOL_NAME] = tool<
@@ -1092,149 +1013,6 @@ export function createProductChatToolContext(input: {
     });
   }
 
-  if (input.scheduleTask) {
-    tools[SCHEDULE_TASK_TOOL_NAME] = tool<
-      ScheduleTaskToolInput,
-      ScheduleTaskToolOutput,
-      Record<string, unknown>
-    >({
-      description: SCHEDULE_TASK_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<ScheduleTaskToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          prompt: {
-            type: "string",
-            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
-          },
-          name: {
-            type: "string",
-            description: SCHEDULE_TASK_NAME_DESCRIPTION,
-          },
-          cron: {
-            type: "string",
-            description: SCHEDULE_TASK_CRON_DESCRIPTION,
-          },
-          timezone: {
-            type: "string",
-            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-          },
-          sourceDescription: {
-            type: "string",
-            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: START_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: ["prompt", "name", "cron"],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        if (scheduledTask) return scheduledTask;
-        if (scheduleTaskInFlight) {
-          scheduledTask = await scheduleTaskInFlight;
-          return scheduledTask;
-        }
-
-        scheduleTaskInFlight = input.scheduleTask!(args);
-        try {
-          scheduledTask = await scheduleTaskInFlight;
-          return scheduledTask;
-        } finally {
-          scheduleTaskInFlight = null;
-        }
-      },
-    });
-  }
-
-  if (input.editTaskSchedule) {
-    tools[EDIT_TASK_SCHEDULE_TOOL_NAME] = tool<
-      EditTaskScheduleToolInput,
-      EditTaskScheduleToolOutput,
-      Record<string, unknown>
-    >({
-      description: EDIT_TASK_SCHEDULE_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<EditTaskScheduleToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          scheduleId: {
-            type: "string",
-            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-          },
-          scheduleName: {
-            type: "string",
-            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-          },
-          name: {
-            type: "string",
-            description: SCHEDULE_TASK_NAME_DESCRIPTION,
-          },
-          prompt: {
-            type: "string",
-            description: SCHEDULE_TASK_PROMPT_DESCRIPTION,
-          },
-          cron: {
-            type: "string",
-            description: SCHEDULE_TASK_CRON_DESCRIPTION,
-          },
-          timezone: {
-            type: "string",
-            description: SCHEDULE_TASK_TIMEZONE_DESCRIPTION,
-          },
-          sourceDescription: {
-            type: "string",
-            description: SCHEDULE_TASK_SOURCE_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: START_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: [],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        return input.editTaskSchedule!(args);
-      },
-    });
-  }
-
-  if (input.deleteTaskSchedule) {
-    tools[DELETE_TASK_SCHEDULE_TOOL_NAME] = tool<
-      DeleteTaskScheduleToolInput,
-      DeleteTaskScheduleToolOutput,
-      Record<string, unknown>
-    >({
-      description: DELETE_TASK_SCHEDULE_TOOL_DESCRIPTION,
-      inputSchema: jsonSchema<DeleteTaskScheduleToolInput>({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          scheduleId: {
-            type: "string",
-            description: TASK_SCHEDULE_IDENTIFIER_DESCRIPTION,
-          },
-          scheduleName: {
-            type: "string",
-            description: TASK_SCHEDULE_NAME_LOOKUP_DESCRIPTION,
-          },
-          reason: {
-            type: "string",
-            description: START_TASK_REASON_DESCRIPTION,
-          },
-        },
-        required: [],
-      }),
-      execute: async (args) => {
-        visibleToolActivity = true;
-        return input.deleteTaskSchedule!(args);
-      },
-    });
-  }
-
   const webFetch = input.webFetch;
   if (webFetch) {
     tools[WEB_FETCH_TOOL_NAME] = tool<
@@ -1268,7 +1046,7 @@ export function createProductChatToolContext(input: {
         if (webFetchCallCount >= webFetchCap) {
           return {
             ok: false,
-            error: `web_fetch is limited to ${webFetchCap} URLs per chat turn. Start a task for deeper research.`,
+            error: `web_fetch is limited to ${webFetchCap} URLs per chat turn. Answer from what you already read and say which URLs you could not open.`,
           };
         }
         webFetchCallCount += 1;
@@ -1306,7 +1084,7 @@ export function createProductChatToolContext(input: {
         if (webSearchCallCount >= webSearchCap) {
           return {
             ok: false,
-            error: `web_search is limited to ${webSearchCap} searches per chat turn. Start a task for deeper research.`,
+            error: `web_search is limited to ${webSearchCap} searches per chat turn. Answer from what you already found and say what is still unverified.`,
           };
         }
         webSearchCallCount += 1;
@@ -1741,6 +1519,56 @@ export function createProductChatToolContext(input: {
     });
   }
 
+  const readWorkflowMemory = input.readWorkflowMemory;
+  if (readWorkflowMemory) {
+    tools[READ_WORKFLOW_MEMORY_TOOL_NAME] = tool<
+      ReadWorkflowMemoryToolInput,
+      ReadWorkflowMemoryToolOutput,
+      Record<string, unknown>
+    >({
+      description: READ_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<ReadWorkflowMemoryToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {},
+      }),
+      execute: async () => {
+        visibleToolActivity = true;
+        return readWorkflowMemory();
+      },
+    });
+  }
+
+  const updateWorkflowMemory = input.updateWorkflowMemory;
+  if (updateWorkflowMemory) {
+    tools[UPDATE_WORKFLOW_MEMORY_TOOL_NAME] = tool<
+      UpdateWorkflowMemoryToolInput,
+      UpdateWorkflowMemoryToolOutput,
+      Record<string, unknown>
+    >({
+      description: UPDATE_WORKFLOW_MEMORY_TOOL_DESCRIPTION,
+      inputSchema: jsonSchema<UpdateWorkflowMemoryToolInput>({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          content: {
+            type: "string",
+            description:
+              "The complete replacement memory, in markdown. Anything omitted is forgotten.",
+          },
+        },
+        required: ["content"],
+      }),
+      execute: async (args) => {
+        visibleToolActivity = true;
+        if (typeof args.content !== "string") {
+          throw new Error("update_workflow_memory content must be a string.");
+        }
+        return updateWorkflowMemory({ content: args.content });
+      },
+    });
+  }
+
   const runSubagent = input.runSubagent;
   const subagentBudget = input.subagentBudget ?? createSubagentBudget();
   const subagentDepth = input.subagentDepth ?? 0;
@@ -1799,7 +1627,7 @@ export function createProductChatToolContext(input: {
   return {
     areActionCallsExhausted: () => actionCallsExhausted,
     getSelectedWikiContext: () => selectedWikiContext,
-    getStartedTask: () => startedTask,
+    getStartedTasks: (): readonly StartedTask[] => [...startedWorkflowTasks.values()],
     hasVisibleToolActivity: () => visibleToolActivity,
     subagentBudget,
     repairToolCall,
@@ -1879,27 +1707,21 @@ export function createProductChatDebugTrace(input: {
   };
 }
 
-export function normalizeAgentText(text: string, startedTask: StartedTask | null) {
+export function normalizeAgentText(text: string, startedTasks: readonly StartedTask[]) {
   const trimmed = text.trim();
   if (trimmed) return trimmed;
-  if (startedTask) {
-    return "I've started a task and added it to Tasks.";
+  // A started task can now only come from start_workflow, so name the workflow runs.
+  if (startedTasks.length === 1) {
+    return "I've started that workflow. It's running in Tasks.";
+  }
+  if (startedTasks.length > 1) {
+    return `I've started those ${startedTasks.length} workflows. They're running in Tasks.`;
   }
   return "I could not produce a response. Try sending that again.";
 }
 
 export function stringifyFinishReason(value: unknown) {
   return typeof value === "string" ? value : undefined;
-}
-
-function latestUserMessageContent(messages: readonly ProductChatAgentMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message?.role !== "user") continue;
-    const trimmed = message.content.trim();
-    if (trimmed) return trimmed;
-  }
-  return undefined;
 }
 
 function parseToolCallParams(input: string): Record<string, unknown> | null {
@@ -1912,59 +1734,6 @@ function parseToolCallParams(input: string): Record<string, unknown> | null {
   } catch {
     return null;
   }
-}
-
-function normalizeStartTaskEngine(value: unknown): HarnessEngine | undefined {
-  return value === "opencompany" || value === "codex" || value === "claude_code"
-    ? value
-    : undefined;
-}
-
-function normalizeStartTaskModel(
-  value: unknown,
-  engine: HarnessEngine | undefined,
-): AgentModelId | undefined {
-  if (value === undefined) return undefined;
-  if (engine === "codex" && typeof value === "string" && isCodexModelId(value)) return value;
-  if (
-    typeof value !== "string" ||
-    !AVAILABLE_AGENT_MODEL_CATALOG.some((model) => model.id === value)
-  ) {
-    throw new Error(`Unsupported task model "${String(value)}".`);
-  }
-  return value as AgentModelId;
-}
-
-function modelForStartTaskEngine(
-  engine: HarnessEngine | undefined,
-  chatModel: AgentModelId,
-  requestedModel?: AgentModelId,
-): AgentModelId {
-  const model = requestedModel ?? chatModel;
-  if (engine === "codex") {
-    if (requestedModel && !isCodexModelId(requestedModel)) {
-      throw new Error(`Model "${requestedModel}" is not available for the Codex engine.`);
-    }
-    return isCodexModelId(model) ? model : CODEX_DEFAULT_MODEL_ID;
-  }
-  if (engine === "claude_code") {
-    if (requestedModel && !isClaudeCodeModelId(requestedModel)) {
-      throw new Error(`Model "${requestedModel}" is not available for the Claude Code engine.`);
-    }
-    return isClaudeCodeModelId(model) ? model : CLAUDE_CODE_DEFAULT_MODEL_ID;
-  }
-  return model;
-}
-
-function inferStartTaskEngine(value: string | undefined): HarnessEngine | undefined {
-  if (!value) return undefined;
-  const normalized = value.toLowerCase();
-  const steeringText = normalized.replace(/@codex\b/g, "");
-  if (!/\bcodex\b/.test(steeringText)) return undefined;
-  if (/\b(?:do not|don't|dont|without|avoid|no|not)\b.{0,24}\bcodex\b/.test(steeringText)) {
-    return undefined;
-  }
-  return "codex";
 }
 
 export function normalizeBrainToolInput(input: unknown): BrainToolInput {

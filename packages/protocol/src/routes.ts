@@ -50,7 +50,6 @@ import {
   ChatArtifactDeleteEnvelopeSchema,
   ChatArtifactVersionListEnvelopeSchema,
   ChatShareIdSchema,
-  CheckOnboardingWorkspaceSlugBodySchema,
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
@@ -60,6 +59,7 @@ import {
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
   ConvexAccountStateEnvelopeSchema,
+  ConvexEventsAccountStateEnvelopeSchema,
   CreateBillingTopUpBodySchema,
   CreateBrainBodySchema,
   CreateBrainDocumentBodySchema,
@@ -72,7 +72,6 @@ import {
   CreateTaskCommentBodySchema,
   CreateTaskCommentEnvelopeSchema,
   CreateTaskEnvelopeSchema,
-  CreateTaskScheduleBodySchema,
   CreateWikiBodySchema,
   CreateWikiPageBodySchema,
   CreateWorkflowBodySchema,
@@ -87,6 +86,8 @@ import {
   CustomMcpStatusEnvelopeSchema,
   DeleteBrainFolderBodySchema,
   DeleteWikiPageBodySchema,
+  DopplerAuthFlowEnvelopeSchema,
+  DopplerAuthStatusEnvelopeSchema,
   EngineAuthDisconnectEnvelopeSchema,
   EngineAuthFlowIdSchema,
   EngineRuntimeAccessEnvelopeSchema,
@@ -99,6 +100,7 @@ import {
   GenerateConversationTitleEnvelopeSchema,
   GranolaAccountStateEnvelopeSchema,
   IdentityEnvelopeSchema,
+  ImessageSettingsEnvelopeSchema,
   ImportSkillBodySchema,
   InfisicalAuthFlowEnvelopeSchema,
   InfisicalAuthStatusEnvelopeSchema,
@@ -109,6 +111,7 @@ import {
   IntegrationAccountUsageEnvelopeSchema,
   IntegrationApiKeyBodySchema,
   IntegrationCapabilityModeEnvelopeSchema,
+  IntegrationToolModeEnvelopeSchema,
   InviteWorkspaceMemberBodySchema,
   InvokeWorkflowBodySchema,
   JamieEventsAccountStateEnvelopeSchema,
@@ -121,14 +124,17 @@ import {
   OnboardingCommandEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
-  OnboardingWorkspaceSlugEnvelopeSchema,
   PluginArchiveEnvelopeSchema,
+  PluginBillingEnvelopeSchema,
   PluginDataDeleteEnvelopeSchema,
   PluginImportEnvelopeSchema,
   PluginImportPreviewBodySchema,
   PluginImportPreviewEnvelopeSchema,
   PluginInstallationEnvelopeSchema,
   PluginListEnvelopeSchema,
+  PostHogEventDefinitionListEnvelopeSchema,
+  PostHogEventsAccountStateEnvelopeSchema,
+  PostHogEventsConnectBodySchema,
   PresentationCursorSchema,
   ProjectBodySchema,
   ProjectConversationBodySchema,
@@ -151,12 +157,15 @@ import {
   SaveClaudeCodeTokenBodySchema,
   SaveOnboardingProfileBodySchema,
   SaveOnboardingWorkspaceBodySchema,
+  SessionPullRequestListSchema,
   SetBrainAccessBodySchema,
   SetBrainEnrichmentBodySchema,
   SetBrainIntelligenceBodySchema,
   SetBrainSourceBodySchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
+  SetIntegrationToolModeBodySchema,
+  SetPluginDailySpendLimitBodySchema,
   SetPluginEventEnabledBodySchema,
   SetRepoConfigEnvBodySchema,
   SetRepoConfigSetupBodySchema,
@@ -165,6 +174,7 @@ import {
   SetWikiAccessBodySchema,
   SetWikiSourceEnabledBodySchema,
   SetWorkspaceCapabilityBodySchema,
+  SetWorkspaceSandboxSizeBodySchema,
   SkillArchiveEnvelopeSchema,
   SkillCatalogEnvelopeSchema,
   SkillFileChunkEnvelopeSchema,
@@ -179,17 +189,13 @@ import {
   SlackBotWorkspaceSettingsEnvelopeSchema,
   StartBrainImportBodySchema,
   StartInfisicalAuthBodySchema,
+  SteerRunEnvelopeSchema,
   StripeAccountDeleteEnvelopeSchema,
   StripeAccountStateEnvelopeSchema,
   SubmitFeedbackBodySchema,
   SubscriptionUsageEnvelopeSchema,
   TaskEnvelopeSchema,
   TaskPageSchema,
-  TaskScheduleArchiveEnvelopeSchema,
-  TaskScheduleEnvelopeSchema,
-  TaskScheduleMutationEnvelopeSchema,
-  TaskSchedulePageSchema,
-  TaskScheduleUpdateEnvelopeSchema,
   TaskSummaryEnvelopeSchema,
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
@@ -199,14 +205,15 @@ import {
   UpdateMcpSetupBodySchema,
   UpdateTaskBodySchema,
   UpdateTaskEnvelopeSchema,
-  UpdateTaskScheduleCommandSchema,
   UpdateUserPreferencesBodySchema,
   UpdateWikiBodySchema,
   UpdateWikiPageBodySchema,
   UpdateWorkflowBodySchema,
+  UpdateWorkflowMemoryBodySchema,
   UpdateWorkspaceSkillBodySchema,
   UpsertWikiSourceBodySchema,
   UserPreferencesEnvelopeSchema,
+  WhatsappSettingsEnvelopeSchema,
   WikiAccessEnvelopeSchema,
   WikiIngestActivityListEnvelopeSchema,
   WikiListEnvelopeSchema,
@@ -220,14 +227,18 @@ import {
   WikiTimelineMutationEnvelopeSchema,
   WorkflowArchiveEnvelopeSchema,
   WorkflowEnvelopeSchema,
+  WorkflowMemoryEnvelopeSchema,
   WorkflowMutationEnvelopeSchema,
   WorkflowPageSchema,
+  WorkflowSlackAvatarUploadBodySchema,
+  WorkflowSlackAvatarUploadEnvelopeSchema,
   WorkflowUpdateEnvelopeSchema,
   WorkspaceActivationEnvelopeSchema,
   WorkspaceCapabilityMutationEnvelopeSchema,
   WorkspaceCapabilitySettingsEnvelopeSchema,
   WorkspaceCommandEnvelopeSchema,
   WorkspaceRenameEnvelopeSchema,
+  WorkspaceSandboxSizeEnvelopeSchema,
   WorkspaceSettingsEnvelopeSchema,
   WorkspaceSkillNameSchema,
 } from "./schemas";
@@ -502,114 +513,80 @@ export const runWorkflowNowRoute = createRoute({
   },
 });
 
-export const listTaskSchedulesRoute = createRoute({
+export const getWorkflowMemoryRoute = createRoute({
   method: "get",
-  path: "/v1/schedules",
-  tags: ["Schedules"],
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
   security: actorSecurity,
-  request: {
-    query: z.object({
-      cursor: z.string().optional(),
-      limit: z.coerce.number().int().min(1).max(100).optional(),
-    }),
-  },
+  request: { params: z.object({ workflowId: ResourceIdSchema }) },
   responses: {
     200: {
-      description: "Actor-owned Recurring Task schedules.",
-      content: { "application/json": { schema: TaskSchedulePageSchema } },
+      description: "The Workflow's single markdown memory and whether memory is enabled.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
     },
     default: errorResponse,
   },
 });
 
-export const createTaskScheduleRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules",
-  tags: ["Schedules"],
+export const updateWorkflowMemoryRoute = createRoute({
+  method: "patch",
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
   security: actorSecurity,
   request: {
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    params: z.object({ workflowId: ResourceIdSchema }),
     body: {
       required: true,
-      content: { "application/json": { schema: CreateTaskScheduleBodySchema } },
+      content: { "application/json": { schema: UpdateWorkflowMemoryBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workflow memory enabled or disabled. Stored content is left untouched.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const clearWorkflowMemoryRoute = createRoute({
+  method: "delete",
+  path: "/v1/workflows/{workflowId}/memory",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: { params: z.object({ workflowId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Workflow memory content cleared. The enabled toggle is left untouched.",
+      content: { "application/json": { schema: WorkflowMemoryEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+// The asset id is the stored blob's filename: a v4 UUID plus the validated extension. Pinning the
+// shape here keeps the public route from ever resolving a pathname outside the avatar namespace.
+export const WorkflowAvatarAssetIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(?:png|jpg|webp)$/u)
+  .openapi("WorkflowAvatarAssetId");
+
+export const uploadWorkflowSlackAvatarRoute = createRoute({
+  method: "post",
+  path: "/v1/workflows/{workflowId}/slack-avatar",
+  tags: ["Workflows"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: WorkflowSlackAvatarUploadBodySchema } },
     },
   },
   responses: {
     201: {
-      description: "Recurring Task schedule created.",
-      content: { "application/json": { schema: TaskScheduleMutationEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const getTaskScheduleRoute = createRoute({
-  method: "get",
-  path: "/v1/schedules/{scheduleId}",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: { params: z.object({ scheduleId: ResourceIdSchema }) },
-  responses: {
-    200: {
-      description: "An actor-owned Recurring Task schedule.",
-      content: { "application/json": { schema: TaskScheduleEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const updateTaskScheduleRoute = createRoute({
-  method: "patch",
-  path: "/v1/schedules/{scheduleId}",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    body: {
-      required: true,
-      content: { "application/json": { schema: UpdateTaskScheduleCommandSchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Recurring Task schedule updated or paused after an optimistic version check.",
-      content: { "application/json": { schema: TaskScheduleUpdateEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const archiveTaskScheduleRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules/{scheduleId}/archive",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    body: { required: true, content: { "application/json": { schema: ArchiveVersionBodySchema } } },
-  },
-  responses: {
-    200: {
-      description: "Recurring Task schedule archived after an optimistic version check.",
-      content: { "application/json": { schema: TaskScheduleArchiveEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
-export const runTaskScheduleNowRoute = createRoute({
-  method: "post",
-  path: "/v1/schedules/{scheduleId}/run-now",
-  tags: ["Schedules"],
-  security: actorSecurity,
-  request: {
-    params: z.object({ scheduleId: ResourceIdSchema }),
-    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
-  },
-  responses: {
-    202: {
-      description: "Recurring Task run-now accepted as a canonical Task and Run.",
-      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+      description: "Avatar stored and addressable by an unguessable public URL.",
+      content: { "application/json": { schema: WorkflowSlackAvatarUploadEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -1905,6 +1882,42 @@ export const deletePluginDataRoute = createRoute({
   },
 });
 
+export const getPluginBillingRoute = createRoute({
+  method: "get",
+  path: "/v1/plugins/{name}/billing",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: { params: z.object({ name: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "Action prices, daily spending limit, and spend so far today for a paid plugin.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setPluginDailySpendLimitRoute = createRoute({
+  method: "put",
+  path: "/v1/plugins/{name}/billing/daily-limit",
+  tags: ["Plugins"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ name: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetPluginDailySpendLimitBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Daily spending limit for a paid plugin updated. Admin only.",
+      content: { "application/json": { schema: PluginBillingEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const setPluginEventEnabledRoute = createRoute({
   method: "post",
   path: "/v1/plugins/{name}/events/{eventId}",
@@ -2104,6 +2117,21 @@ export const listConversationsRoute = createRoute({
     200: {
       description: "Actor-visible conversations.",
       content: { "application/json": { schema: ConversationPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSessionPullRequestsRoute = createRoute({
+  method: "get",
+  path: "/v1/session-pull-requests",
+  tags: ["Chat"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Pull requests opened by the actor's coding sessions, with each PR's state read from GitHub.",
+      content: { "application/json": { schema: SessionPullRequestListSchema } },
     },
     default: errorResponse,
   },
@@ -2437,6 +2465,16 @@ export const downloadPublicChatArtifactRoute = createRoute({
   responses: { 200: binaryResponse, default: errorResponse },
 });
 
+export const downloadPublicWorkflowAvatarRoute = createRoute({
+  method: "get",
+  path: "/public/workflow-avatars/{workflowId}/{assetId}",
+  tags: ["Public Workflow avatars"],
+  request: {
+    params: z.object({ workflowId: ResourceIdSchema, assetId: WorkflowAvatarAssetIdSchema }),
+  },
+  responses: { 200: binaryResponse, default: errorResponse },
+});
+
 export const getEngineRuntimeStatusRoute = createRoute({
   method: "get",
   path: "/v1/conversations/{conversationId}/engine-session/runtime",
@@ -2519,6 +2557,21 @@ export const cancelRunRoute = createRoute({
     202: {
       description: "Cancellation requested or completed.",
       content: { "application/json": { schema: CancelRunEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const steerRunRoute = createRoute({
+  method: "post",
+  path: "/v1/runs/{runId}/steer",
+  tags: ["Runs"],
+  security: actorSecurity,
+  request: { params: z.object({ runId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "The queued Run's message was injected into the Conversation's running Run.",
+      content: { "application/json": { schema: SteerRunEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -2965,6 +3018,41 @@ export const renameWorkspaceRoute = createRoute({
   },
 });
 
+export const getWorkspaceSandboxSizeRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace/sandbox-size",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Machine size new cloud coding sandboxes start on in the active workspace.",
+      content: { "application/json": { schema: WorkspaceSandboxSizeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setWorkspaceSandboxSizeRoute = createRoute({
+  method: "put",
+  path: "/v1/workspace/sandbox-size",
+  tags: ["Workspaces"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetWorkspaceSandboxSizeBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Workspace sandbox size updated. Admin only. Existing sessions keep the size they started with.",
+      content: { "application/json": { schema: WorkspaceSandboxSizeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const inviteWorkspaceMemberRoute = createRoute({
   method: "post",
   path: "/v1/workspace/invitations",
@@ -3065,26 +3153,6 @@ export const getOnboardingStateRoute = createRoute({
   },
 });
 
-export const checkOnboardingWorkspaceSlugRoute = createRoute({
-  method: "post",
-  path: "/v1/onboarding/workspace-slug/check",
-  tags: ["Onboarding"],
-  security: actorSecurity,
-  request: {
-    body: {
-      required: true,
-      content: { "application/json": { schema: CheckOnboardingWorkspaceSlugBodySchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: "Normalized workspace slug availability for the authenticated identity.",
-      content: { "application/json": { schema: OnboardingWorkspaceSlugEnvelopeSchema } },
-    },
-    default: errorResponse,
-  },
-});
-
 export const saveOnboardingProfileRoute = createRoute({
   method: "put",
   path: "/v1/onboarding/profile",
@@ -3160,6 +3228,90 @@ export const updateUserPreferencesRoute = createRoute({
     200: {
       description: "The acting user's preference set after applying the partial update.",
       content: { "application/json": { schema: UserPreferencesEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getImessageSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/me/imessage",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's iMessage assistant channel state.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startImessageLinkRoute = createRoute({
+  method: "post",
+  path: "/v1/me/imessage/link",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "A fresh link code the user texts to the opencompany line.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const unlinkImessageRoute = createRoute({
+  method: "delete",
+  path: "/v1/me/imessage",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The phone is unlinked; the Conversation and its history remain.",
+      content: { "application/json": { schema: ImessageSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getWhatsappSettingsRoute = createRoute({
+  method: "get",
+  path: "/v1/me/whatsapp",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The acting user's WhatsApp assistant channel state.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startWhatsappLinkRoute = createRoute({
+  method: "post",
+  path: "/v1/me/whatsapp/link",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "A fresh link code the user texts to the opencompany line.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const unlinkWhatsappRoute = createRoute({
+  method: "delete",
+  path: "/v1/me/whatsapp",
+  tags: ["Settings"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "The phone is unlinked; the Conversation and its history remain.",
+      content: { "application/json": { schema: WhatsappSettingsEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3371,6 +3523,41 @@ export const connectGranolaAccountRoute = createRoute({
   },
 });
 
+export const connectPostHogEventsAccountRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/posthog-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: PostHogEventsConnectBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "PostHog analytics events connected for the acting user.",
+      content: { "application/json": { schema: PostHogEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listPostHogEventDefinitionsRoute = createRoute({
+  method: "get",
+  path: "/v1/integration-accounts/posthog-events/{integrationId}/events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description: "PostHog event names visible to the connected project.",
+      content: { "application/json": { schema: PostHogEventDefinitionListEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const connectJamieEventsAccountRoute = createRoute({
   method: "put",
   path: "/v1/integration-accounts/jamie-events",
@@ -3401,6 +3588,37 @@ export const createJamieEventsEndpointRoute = createRoute({
     200: {
       description: "Jamie meeting-event endpoint ready for the acting user to paste into Jamie.",
       content: { "application/json": { schema: JamieEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const enableConvexEventsRoute = createRoute({
+  method: "post",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { headers: z.object({ "idempotency-key": z.string().min(1).max(200) }) },
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream provisioned for the connected deployment with the deploy key already stored for the Convex plugin.",
+      content: { "application/json": { schema: ConvexEventsAccountStateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disableConvexEventsRoute = createRoute({
+  method: "delete",
+  path: "/v1/integration-accounts/convex-events",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description:
+        "Convex webhook log stream deleted in Convex and the event connection removed. The stream is deleted first so Convex stops billing its owner for deliveries opencompany can no longer accept.",
+      content: { "application/json": { schema: IntegrationAccountDeleteEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3611,6 +3829,31 @@ export const setIntegrationCapabilityModeRoute = createRoute({
     200: {
       description: "Capability mode override saved for the connection. Owner only.",
       content: { "application/json": { schema: IntegrationCapabilityModeEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const setIntegrationToolModeRoute = createRoute({
+  method: "put",
+  path: "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({
+      integrationId: IntegrationAccountIdSchema,
+      toolId: z.string().min(1).max(128),
+    }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: SetIntegrationToolModeBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'Per-tool permission override saved for the connection, or cleared with mode "inherit" so the tool follows its capability group again. Owner only.',
+      content: { "application/json": { schema: IntegrationToolModeEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -3879,6 +4122,81 @@ export const deleteInfisicalAuthRoute = createRoute({
   },
 });
 
+export const getDopplerAuthRoute = createRoute({
+  method: "get",
+  path: "/v1/engine-auth/doppler",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Current user’s Doppler connection status; never includes credentials.",
+      content: { "application/json": { schema: DopplerAuthStatusEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const startDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/start",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    201: {
+      description:
+        "Doppler browser-login flow started via the runner control plane. Personal connection.",
+      content: { "application/json": { schema: DopplerAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const pollDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/{flowId}/poll",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ flowId: EngineAuthFlowIdSchema }),
+  },
+  responses: {
+    200: {
+      description:
+        "Poll the current user’s Doppler authorization flow; credentials are never returned.",
+      content: { "application/json": { schema: DopplerAuthFlowEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const deleteDopplerAuthRoute = createRoute({
+  method: "delete",
+  path: "/v1/engine-auth/doppler",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Doppler connection disconnected. Personal connection.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const cancelDopplerAuthRoute = createRoute({
+  method: "post",
+  path: "/v1/engine-auth/doppler/cancel",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Cancel pending personal Doppler sign-in.",
+      content: { "application/json": { schema: EngineAuthDisconnectEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getBillingOverviewRoute = createRoute({
   method: "get",
   path: "/v1/billing",
@@ -4011,12 +4329,10 @@ export type V1RouteHandlers = {
   archiveWorkflow: RouteHandler<typeof archiveWorkflowRoute>;
   invokeWorkflow: RouteHandler<typeof invokeWorkflowRoute>;
   runWorkflowNow: RouteHandler<typeof runWorkflowNowRoute>;
-  listTaskSchedules: RouteHandler<typeof listTaskSchedulesRoute>;
-  createTaskSchedule: RouteHandler<typeof createTaskScheduleRoute>;
-  getTaskSchedule: RouteHandler<typeof getTaskScheduleRoute>;
-  updateTaskSchedule: RouteHandler<typeof updateTaskScheduleRoute>;
-  archiveTaskSchedule: RouteHandler<typeof archiveTaskScheduleRoute>;
-  runTaskScheduleNow: RouteHandler<typeof runTaskScheduleNowRoute>;
+  getWorkflowMemory: RouteHandler<typeof getWorkflowMemoryRoute>;
+  updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
+  clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
+  uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
@@ -4046,13 +4362,14 @@ export type V1RouteHandlers = {
   syncIdentity: RouteHandler<typeof syncIdentityRoute>;
   getWorkspaceSettings: RouteHandler<typeof getWorkspaceSettingsRoute>;
   renameWorkspace: RouteHandler<typeof renameWorkspaceRoute>;
+  getWorkspaceSandboxSize: RouteHandler<typeof getWorkspaceSandboxSizeRoute>;
+  setWorkspaceSandboxSize: RouteHandler<typeof setWorkspaceSandboxSizeRoute>;
   inviteWorkspaceMember: RouteHandler<typeof inviteWorkspaceMemberRoute>;
   revokeWorkspaceInvitation: RouteHandler<typeof revokeWorkspaceInvitationRoute>;
   removeWorkspaceMember: RouteHandler<typeof removeWorkspaceMemberRoute>;
   createWorkspace: RouteHandler<typeof createWorkspaceRoute>;
   switchWorkspace: RouteHandler<typeof switchWorkspaceRoute>;
   getOnboardingState: RouteHandler<typeof getOnboardingStateRoute>;
-  checkOnboardingWorkspaceSlug: RouteHandler<typeof checkOnboardingWorkspaceSlugRoute>;
   saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
   saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
   finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
@@ -4122,6 +4439,8 @@ export type V1RouteHandlers = {
   refreshPluginMcp: RouteHandler<typeof refreshPluginMcpRoute>;
   deletePluginData: RouteHandler<typeof deletePluginDataRoute>;
   setPluginEventEnabled: RouteHandler<typeof setPluginEventEnabledRoute>;
+  getPluginBilling: RouteHandler<typeof getPluginBillingRoute>;
+  setPluginDailySpendLimit: RouteHandler<typeof setPluginDailySpendLimitRoute>;
   listBots: RouteHandler<typeof listBotsRoute>;
   createBot: RouteHandler<typeof createBotRoute>;
   getBot: RouteHandler<typeof getBotRoute>;
@@ -4133,6 +4452,7 @@ export type V1RouteHandlers = {
   fileConversationInProject: RouteHandler<typeof fileConversationInProjectRoute>;
   removeConversationFromProject: RouteHandler<typeof removeConversationFromProjectRoute>;
   listConversations: RouteHandler<typeof listConversationsRoute>;
+  listSessionPullRequests: RouteHandler<typeof listSessionPullRequestsRoute>;
   getConversation: RouteHandler<typeof getConversationRoute>;
   updateConversation: RouteHandler<typeof updateConversationRoute>;
   getConversationShare: RouteHandler<typeof getConversationShareRoute>;
@@ -4152,16 +4472,24 @@ export type V1RouteHandlers = {
   getPublicChatShareMetadata: RouteHandler<typeof getPublicChatShareMetadataRoute>;
   downloadPublicChatAttachment: RouteHandler<typeof downloadPublicChatAttachmentRoute>;
   downloadPublicChatArtifact: RouteHandler<typeof downloadPublicChatArtifactRoute>;
+  downloadPublicWorkflowAvatar: RouteHandler<typeof downloadPublicWorkflowAvatarRoute>;
   getEngineRuntimeStatus: RouteHandler<typeof getEngineRuntimeStatusRoute>;
   createEngineRuntimeAccess: RouteHandler<typeof createEngineRuntimeAccessRoute>;
   getRun: RouteHandler<typeof getRunRoute>;
   streamRunEvents: RouteHandler<typeof streamRunEventsRoute>;
   cancelRun: RouteHandler<typeof cancelRunRoute>;
+  steerRun: RouteHandler<typeof steerRunRoute>;
   resolveApproval: RouteHandler<typeof resolveApprovalRoute>;
   streamReadModel: RouteHandler<typeof streamReadModelRoute>;
   updateUserPreferences: RouteHandler<typeof updateUserPreferencesRoute>;
   getMcpSetup: RouteHandler<typeof getMcpSetupRoute>;
   updateMcpSetup: RouteHandler<typeof updateMcpSetupRoute>;
+  getImessageSettings: RouteHandler<typeof getImessageSettingsRoute>;
+  getWhatsappSettings: RouteHandler<typeof getWhatsappSettingsRoute>;
+  startImessageLink: RouteHandler<typeof startImessageLinkRoute>;
+  startWhatsappLink: RouteHandler<typeof startWhatsappLinkRoute>;
+  unlinkImessage: RouteHandler<typeof unlinkImessageRoute>;
+  unlinkWhatsapp: RouteHandler<typeof unlinkWhatsappRoute>;
   submitFeedback: RouteHandler<typeof submitFeedbackRoute>;
   listRepoConfigs: RouteHandler<typeof listRepoConfigsRoute>;
   setRepoConfigEnv: RouteHandler<typeof setRepoConfigEnvRoute>;
@@ -4171,9 +4499,13 @@ export type V1RouteHandlers = {
   disconnectAttioAccount: RouteHandler<typeof disconnectAttioAccountRoute>;
   connectFathomAccount: RouteHandler<typeof connectFathomAccountRoute>;
   connectGranolaAccount: RouteHandler<typeof connectGranolaAccountRoute>;
+  connectPostHogEventsAccount: RouteHandler<typeof connectPostHogEventsAccountRoute>;
+  listPostHogEventDefinitions: RouteHandler<typeof listPostHogEventDefinitionsRoute>;
   createJamieEventsEndpoint: RouteHandler<typeof createJamieEventsEndpointRoute>;
   connectJamieEventsAccount: RouteHandler<typeof connectJamieEventsAccountRoute>;
   connectConvexAccount: RouteHandler<typeof connectConvexAccountRoute>;
+  enableConvexEvents: RouteHandler<typeof enableConvexEventsRoute>;
+  disableConvexEvents: RouteHandler<typeof disableConvexEventsRoute>;
   connectRenderAccount: RouteHandler<typeof connectRenderAccountRoute>;
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
@@ -4185,6 +4517,7 @@ export type V1RouteHandlers = {
   listSlackBotChannels: RouteHandler<typeof listSlackBotChannelsRoute>;
   getIntegrationAccountUsage: RouteHandler<typeof getIntegrationAccountUsageRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
+  setIntegrationToolMode: RouteHandler<typeof setIntegrationToolModeRoute>;
   alwaysAllowAction: RouteHandler<typeof alwaysAllowActionRoute>;
   deleteIntegrationAccount: RouteHandler<typeof deleteIntegrationAccountRoute>;
   getClaudeCodeAuth: RouteHandler<typeof getClaudeCodeAuthRoute>;
@@ -4198,6 +4531,11 @@ export type V1RouteHandlers = {
   pollCodexDeviceAuth: RouteHandler<typeof pollCodexDeviceAuthRoute>;
   deleteCodexAuth: RouteHandler<typeof deleteCodexAuthRoute>;
   getInfisicalAuth: RouteHandler<typeof getInfisicalAuthRoute>;
+  getDopplerAuth: RouteHandler<typeof getDopplerAuthRoute>;
+  startDopplerAuth: RouteHandler<typeof startDopplerAuthRoute>;
+  pollDopplerAuth: RouteHandler<typeof pollDopplerAuthRoute>;
+  deleteDopplerAuth: RouteHandler<typeof deleteDopplerAuthRoute>;
+  cancelDopplerAuth: RouteHandler<typeof cancelDopplerAuthRoute>;
   startInfisicalAuth: RouteHandler<typeof startInfisicalAuthRoute>;
   completeInfisicalAuth: RouteHandler<typeof completeInfisicalAuthRoute>;
   deleteInfisicalAuth: RouteHandler<typeof deleteInfisicalAuthRoute>;
@@ -4236,12 +4574,10 @@ export function createV1Router(
       .openapi(archiveWorkflowRoute, handlers.archiveWorkflow)
       .openapi(invokeWorkflowRoute, handlers.invokeWorkflow)
       .openapi(runWorkflowNowRoute, handlers.runWorkflowNow)
-      .openapi(listTaskSchedulesRoute, handlers.listTaskSchedules)
-      .openapi(createTaskScheduleRoute, handlers.createTaskSchedule)
-      .openapi(getTaskScheduleRoute, handlers.getTaskSchedule)
-      .openapi(updateTaskScheduleRoute, handlers.updateTaskSchedule)
-      .openapi(archiveTaskScheduleRoute, handlers.archiveTaskSchedule)
-      .openapi(runTaskScheduleNowRoute, handlers.runTaskScheduleNow)
+      .openapi(getWorkflowMemoryRoute, handlers.getWorkflowMemory)
+      .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
+      .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
+      .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
       .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
       .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
       .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
@@ -4273,13 +4609,14 @@ export function createV1Router(
       .openapi(syncIdentityRoute, handlers.syncIdentity)
       .openapi(getWorkspaceSettingsRoute, handlers.getWorkspaceSettings)
       .openapi(renameWorkspaceRoute, handlers.renameWorkspace)
+      .openapi(getWorkspaceSandboxSizeRoute, handlers.getWorkspaceSandboxSize)
+      .openapi(setWorkspaceSandboxSizeRoute, handlers.setWorkspaceSandboxSize)
       .openapi(inviteWorkspaceMemberRoute, handlers.inviteWorkspaceMember)
       .openapi(revokeWorkspaceInvitationRoute, handlers.revokeWorkspaceInvitation)
       .openapi(removeWorkspaceMemberRoute, handlers.removeWorkspaceMember)
       .openapi(createWorkspaceRoute, handlers.createWorkspace)
       .openapi(switchWorkspaceRoute, handlers.switchWorkspace)
       .openapi(getOnboardingStateRoute, handlers.getOnboardingState)
-      .openapi(checkOnboardingWorkspaceSlugRoute, handlers.checkOnboardingWorkspaceSlug)
       .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
       .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
       .openapi(finishOnboardingRoute, handlers.finishOnboarding)
@@ -4341,6 +4678,7 @@ export function createV1Router(
       .openapi(fileConversationInProjectRoute, handlers.fileConversationInProject)
       .openapi(removeConversationFromProjectRoute, handlers.removeConversationFromProject)
       .openapi(listConversationsRoute, handlers.listConversations)
+      .openapi(listSessionPullRequestsRoute, handlers.listSessionPullRequests)
       .openapi(getConversationRoute, handlers.getConversation)
       .openapi(updateConversationRoute, handlers.updateConversation)
       .openapi(getConversationShareRoute, handlers.getConversationShare)
@@ -4360,16 +4698,24 @@ export function createV1Router(
       .openapi(getPublicChatShareMetadataRoute, handlers.getPublicChatShareMetadata)
       .openapi(downloadPublicChatAttachmentRoute, handlers.downloadPublicChatAttachment)
       .openapi(downloadPublicChatArtifactRoute, handlers.downloadPublicChatArtifact)
+      .openapi(downloadPublicWorkflowAvatarRoute, handlers.downloadPublicWorkflowAvatar)
       .openapi(getEngineRuntimeStatusRoute, handlers.getEngineRuntimeStatus)
       .openapi(createEngineRuntimeAccessRoute, handlers.createEngineRuntimeAccess)
       .openapi(getRunRoute, handlers.getRun)
       .openapi(streamRunEventsRoute, handlers.streamRunEvents)
       .openapi(cancelRunRoute, handlers.cancelRun)
+      .openapi(steerRunRoute, handlers.steerRun)
       .openapi(resolveApprovalRoute, handlers.resolveApproval)
       .openapi(streamReadModelRoute, handlers.streamReadModel)
       .openapi(updateUserPreferencesRoute, handlers.updateUserPreferences)
       .openapi(getMcpSetupRoute, handlers.getMcpSetup)
       .openapi(updateMcpSetupRoute, handlers.updateMcpSetup)
+      .openapi(getImessageSettingsRoute, handlers.getImessageSettings)
+      .openapi(getWhatsappSettingsRoute, handlers.getWhatsappSettings)
+      .openapi(startImessageLinkRoute, handlers.startImessageLink)
+      .openapi(startWhatsappLinkRoute, handlers.startWhatsappLink)
+      .openapi(unlinkImessageRoute, handlers.unlinkImessage)
+      .openapi(unlinkWhatsappRoute, handlers.unlinkWhatsapp)
       .openapi(submitFeedbackRoute, handlers.submitFeedback)
       .openapi(listRepoConfigsRoute, handlers.listRepoConfigs)
       .openapi(setRepoConfigEnvRoute, handlers.setRepoConfigEnv)
@@ -4382,9 +4728,13 @@ export function createV1Router(
       .openapi(disconnectAttioAccountRoute, handlers.disconnectAttioAccount)
       .openapi(connectFathomAccountRoute, handlers.connectFathomAccount)
       .openapi(connectGranolaAccountRoute, handlers.connectGranolaAccount)
+      .openapi(connectPostHogEventsAccountRoute, handlers.connectPostHogEventsAccount)
+      .openapi(listPostHogEventDefinitionsRoute, handlers.listPostHogEventDefinitions)
       .openapi(createJamieEventsEndpointRoute, handlers.createJamieEventsEndpoint)
       .openapi(connectJamieEventsAccountRoute, handlers.connectJamieEventsAccount)
       .openapi(connectConvexAccountRoute, handlers.connectConvexAccount)
+      .openapi(enableConvexEventsRoute, handlers.enableConvexEvents)
+      .openapi(disableConvexEventsRoute, handlers.disableConvexEvents)
       .openapi(connectRenderAccountRoute, handlers.connectRenderAccount)
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
@@ -4396,6 +4746,7 @@ export function createV1Router(
       .openapi(listSlackBotChannelsRoute, handlers.listSlackBotChannels)
       .openapi(getIntegrationAccountUsageRoute, handlers.getIntegrationAccountUsage)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
+      .openapi(setIntegrationToolModeRoute, handlers.setIntegrationToolMode)
       .openapi(alwaysAllowActionRoute, handlers.alwaysAllowAction)
       .openapi(deleteIntegrationAccountRoute, handlers.deleteIntegrationAccount)
       .openapi(getClaudeCodeAuthRoute, handlers.getClaudeCodeAuth)
@@ -4411,6 +4762,11 @@ export function createV1Router(
       .openapi(pollCodexDeviceAuthRoute, handlers.pollCodexDeviceAuth)
       .openapi(deleteCodexAuthRoute, handlers.deleteCodexAuth)
       .openapi(getInfisicalAuthRoute, handlers.getInfisicalAuth)
+      .openapi(getDopplerAuthRoute, handlers.getDopplerAuth)
+      .openapi(startDopplerAuthRoute, handlers.startDopplerAuth)
+      .openapi(pollDopplerAuthRoute, handlers.pollDopplerAuth)
+      .openapi(deleteDopplerAuthRoute, handlers.deleteDopplerAuth)
+      .openapi(cancelDopplerAuthRoute, handlers.cancelDopplerAuth)
       .openapi(startInfisicalAuthRoute, handlers.startInfisicalAuth)
       .openapi(completeInfisicalAuthRoute, handlers.completeInfisicalAuth)
       .openapi(deleteInfisicalAuthRoute, handlers.deleteInfisicalAuth)
@@ -4440,6 +4796,8 @@ export function createV1Router(
       .openapi(refreshPluginMcpRoute, handlers.refreshPluginMcp)
       .openapi(deletePluginDataRoute, handlers.deletePluginData)
       .openapi(setPluginEventEnabledRoute, handlers.setPluginEventEnabled)
+      .openapi(getPluginBillingRoute, handlers.getPluginBilling)
+      .openapi(setPluginDailySpendLimitRoute, handlers.setPluginDailySpendLimit)
   );
 }
 
@@ -4543,19 +4901,11 @@ const placeholderWorkflow = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
-const placeholderTaskSchedule = {
-  id: "schedule_contract",
-  name: "Contract schedule",
-  sourceDescription: "daily",
-  cron: "0 9 * * *",
-  timezone: "UTC",
-  prompt: "Complete the contract placeholder.",
-  enabled: true,
-  lastRunAt: null,
-  nextRunAt: placeholderTime,
-  version: 1,
-  createdAt: placeholderTime,
-  updatedAt: placeholderTime,
+const placeholderWorkflowMemory = {
+  workflowId: "workflow_contract",
+  enabled: false,
+  content: "",
+  updatedAt: null,
 };
 const placeholderBrowserProfile = {
   id: "profile_contract",
@@ -4745,6 +5095,23 @@ const placeholderPlugin = {
   archivedAt: null,
 };
 
+const placeholderPluginBilling = {
+  pluginName: "contract-plugin",
+  pricing: {
+    currency: "USD" as const,
+    actions: [
+      {
+        action: "contract_action",
+        label: "Result",
+        unit: "per_result" as const,
+        amountUsdMicros: 80_000,
+      },
+    ],
+  },
+  dailyLimitUsdMicros: 5_000_000,
+  spentTodayUsdMicros: 0,
+};
+
 function placeholderAutomationTaskEnvelope() {
   return {
     data: {
@@ -4837,27 +5204,20 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   invokeWorkflow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
   runWorkflowNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
-  listTaskSchedules: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
-  createTaskSchedule: (c) =>
+  getWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  updateWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  clearWorkflowMemory: (c) => c.json({ data: placeholderWorkflowMemory, meta }, 200),
+  uploadWorkflowSlackAvatar: (c) =>
     c.json(
       {
-        data: { schedule: placeholderTaskSchedule, transactionId: "1", replayed: false },
+        data: {
+          avatarUrl:
+            "https://my.opencompany.chat/workflow-avatars/workflow_contract/00000000-0000-4000-8000-000000000000.png",
+        },
         meta,
       },
       201,
     ),
-  getTaskSchedule: (c) => c.json({ data: placeholderTaskSchedule, meta }, 200),
-  updateTaskSchedule: (c) =>
-    c.json({ data: { schedule: placeholderTaskSchedule, transactionId: "1" }, meta }, 200),
-  archiveTaskSchedule: (c) =>
-    c.json(
-      {
-        data: { scheduleId: placeholderTaskSchedule.id, version: 2, transactionId: "1" },
-        meta,
-      },
-      200,
-    ),
-  runTaskScheduleNow: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
   getBrainSnapshot: (c) =>
     c.json(
       { data: { folders: [placeholderBrainFolder], documents: [placeholderBrainDocument] }, meta },
@@ -5114,6 +5474,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   renameWorkspace: (c) =>
     c.json({ data: { id: "workspace_contract", name: "Contract Workspace" }, meta }, 200),
+  getWorkspaceSandboxSize: (c) => c.json({ data: { sandboxSize: "standard" as const }, meta }, 200),
+  setWorkspaceSandboxSize: (c) => c.json({ data: { sandboxSize: "standard" as const }, meta }, 200),
   inviteWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 201),
   revokeWorkspaceInvitation: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   removeWorkspaceMember: (c) => c.json({ data: { completed: true as const }, meta }, 200),
@@ -5153,8 +5515,6 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
-  checkOnboardingWorkspaceSlug: (c) =>
-    c.json({ data: { slug: "contract-workspace", available: true }, meta }, 200),
   saveOnboardingProfile: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   saveOnboardingWorkspace: (c) =>
     c.json(
@@ -5490,6 +5850,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   deletePluginData: (c) =>
     c.json({ data: { name: placeholderPlugin.name, deleted: true }, meta }, 200),
   setPluginEventEnabled: (c) => c.json({ data: placeholderPlugin, meta }, 200),
+  getPluginBilling: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
+  setPluginDailySpendLimit: (c) => c.json({ data: placeholderPluginBilling, meta }, 200),
   listBots: (c) => c.json({ data: [], meta }, 200),
   createBot: (c) =>
     c.json({ data: { id: "bot_example", name: "Assistant", description: "" }, meta }, 200),
@@ -5504,6 +5866,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
   fileConversationInProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
   removeConversationFromProject: (c) => c.json({ data: [placeholderProject], meta }, 200),
   listConversations: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  listSessionPullRequests: (c) => c.json({ data: [], meta }, 200),
   getConversation: (c) => c.json({ data: placeholderConversation, meta }, 200),
   updateConversation: (c) =>
     c.json({ data: { conversationId: "conversation_contract", transactionId: "1" }, meta }, 200),
@@ -5635,6 +5998,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   downloadPublicChatArtifact: (c) =>
     c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
+  downloadPublicWorkflowAvatar: (c) =>
+    c.body("contract", 200, { "Content-Type": "application/octet-stream" }),
   getEngineRuntimeStatus: (c) =>
     c.json(
       { data: { conversationId: "conversation_contract", status: "running" as const }, meta },
@@ -5675,6 +6040,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
   streamRunEvents: (c) => c.body("", 200, { "Content-Type": "text/event-stream" }),
   cancelRun: (c) =>
     c.json({ data: { runId: "run_contract", status: "canceled", replayed: false }, meta }, 202),
+  steerRun: (c) =>
+    c.json({ data: { runId: "run_contract", targetRunId: "run_contract_active" }, meta }, 200),
   resolveApproval: (c) =>
     c.json(
       {
@@ -5694,17 +6061,30 @@ const contractDocumentHandlers: V1RouteHandlers = {
       {
         data: {
           timezone: "UTC",
-          taskSpawningEnabled: false,
+          taskSpawningEnabled: true as const,
           wikiEnabled: true as const,
           taskViewMode: "board" as const,
           taskTimeRange: "7d" as const,
           autoModelRoutingEnabled: false,
+          approveForMeEnabled: false,
           reviewInboxEnabled: false,
         },
         meta,
       },
       200,
     ),
+  getImessageSettings: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  startImessageLink: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  unlinkImessage: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  getWhatsappSettings: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  startWhatsappLink: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
+  unlinkWhatsapp: (c) =>
+    c.json({ data: { configured: false, lineHandle: null, binding: null }, meta }, 200),
   getMcpSetup: (c) =>
     c.json({ data: { preferredClient: null, complete: false, completedAt: null }, meta }, 200),
   updateMcpSetup: (c) =>
@@ -5802,6 +6182,27 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  connectPostHogEventsAccount: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "posthog" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            projectId: "12345",
+            region: "us" as const,
+            connectionLabel: "Project 12345 · US",
+            statusReason: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  listPostHogEventDefinitions: (c) =>
+    c.json({ data: { events: [{ id: "signup", name: "signup" }], partial: false }, meta }, 200),
   createJamieEventsEndpoint: (c) =>
     c.json(
       {
@@ -5857,6 +6258,26 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  enableConvexEvents: (c) =>
+    c.json(
+      {
+        data: {
+          state: {
+            provider: "convex" as const,
+            connected: true,
+            status: "connected" as const,
+            integrationId: "gint_contract",
+            statusReason: null,
+            deployment: "contract-deployment-123",
+            webhookUrl: "https://app.example.com/api/webhooks/convex/gint_contract",
+            lastDeliveryAt: null,
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  disableConvexEvents: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   connectRenderAccount: (c) =>
     c.json(
       {
@@ -5905,6 +6326,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
           installed: false,
           status: "not_connected" as const,
           needsScopeUpgrade: false,
+          canCustomizeIdentity: false,
           teamName: null,
           statusReason: null,
           destinationCount: 0,
@@ -5938,6 +6360,18 @@ const contractDocumentHandlers: V1RouteHandlers = {
           integrationId: "gint_contract",
           capabilityId: "write",
           mode: "on" as const,
+        },
+        meta,
+      },
+      200,
+    ),
+  setIntegrationToolMode: (c) =>
+    c.json(
+      {
+        data: {
+          integrationId: "gint_contract",
+          toolId: "trash_thread",
+          mode: "ask" as const,
         },
         meta,
       },
@@ -6056,6 +6490,50 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   deleteCodexAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  getDopplerAuth: (c) =>
+    c.json(
+      {
+        data: { status: null, statusReason: null, accountName: null, lastValidatedAt: null },
+        meta,
+      },
+      200,
+    ),
+  startDopplerAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gdopf_contract",
+            status: "link_ready",
+            loginUrl: "https://dashboard.doppler.com/workplace/auth/cli",
+            userCode: "test_code",
+            statusReason: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+          },
+        },
+        meta,
+      },
+      201,
+    ),
+  pollDopplerAuth: (c) =>
+    c.json(
+      {
+        data: {
+          flow: {
+            id: "gdopf_contract",
+            status: "completed",
+            loginUrl: null,
+            userCode: null,
+            statusReason: null,
+            expiresAt: "2030-01-01T00:00:00.000Z",
+          },
+        },
+        meta,
+      },
+      200,
+    ),
+  deleteDopplerAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
+  cancelDopplerAuth: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   getInfisicalAuth: (c) =>
     c.json(
       {
@@ -6188,8 +6666,9 @@ function contractIdentity() {
       lastName: "Owner",
       avatarUrl: null,
       timezone: "UTC",
-      taskSpawningEnabled: true,
+      taskSpawningEnabled: true as const,
       autoModelRoutingEnabled: false,
+      approveForMeEnabled: false,
       chatCapabilitiesBetaEnabled: false,
       reviewInboxEnabled: false,
       wikiEnabled: true as const,

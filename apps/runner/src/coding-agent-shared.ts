@@ -55,19 +55,10 @@ export function logCodingSandboxAcquisition(context: CodingSandboxAcquisitionCon
   };
 }
 
-export const GITHUB_AUTH_HEADER_ENV = "GITHUB_AUTH_HEADER";
 export const GITHUB_RECONNECT_NOTICE =
   "GitHub needs reconnecting. This turn continued without GitHub access. Reconnect GitHub in Settings.";
 export const GITHUB_UNAVAILABLE_NOTICE =
   "GitHub access is temporarily unavailable. This turn continued without GitHub access.";
-const GITHUB_SANDBOX_TOKEN_VALIDITY_BUFFER_MS = 10 * 60_000;
-
-export function githubSandboxTokenMinimumValidityMs(turnTimeoutMs: number) {
-  // Auth is loaded before sandbox preparation finishes, so keep a buffer beyond the engine's
-  // maximum run time. Refresh-token rotation invalidates the previous GitHub access token.
-  return turnTimeoutMs + GITHUB_SANDBOX_TOKEN_VALIDITY_BUFFER_MS;
-}
-
 export function shouldAppendGitHubAuthNotice(history: CodingChatHistory, notice: string) {
   if (notice !== GITHUB_RECONNECT_NOTICE) return true;
   return !history.messages.some(
@@ -81,10 +72,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function truncateText(value: string, maxLength: number) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}\n...[truncated]` : value;
-}
-
-export function safePathSegment(value: string, fallback = "coder") {
-  return value.replace(/[^A-Za-z0-9_.-]/g, "-") || fallback;
 }
 
 export function gitAuthHeader(token: string) {
@@ -106,9 +93,9 @@ type GitHubSandboxAuthOptions = {
 };
 
 // A connected personal account is the identity the user explicitly chose for the GitHub plugin.
-// Refresh immediately before the
-// token enters a sandbox; getGitHubUserAccessToken delegates to the shared expiring-OAuth helper,
-// which owns both in-process single-flight and the database refresh lease used by concurrent
+// Resolve the current credential for startup availability and author identity; provider tokens
+// stay in the runner and sandbox requests use the GitHub broker. The expiring-OAuth helper
+// owns both in-process single-flight and the database refresh lease used by concurrent
 // runner/gateway consumers.
 export async function loadGitHubUserAuthForUser(
   userWorkosId: string,
@@ -187,38 +174,6 @@ export async function loadGitHubAuthForUser(
     return loadConnectedGitHubUserAuth(userWorkosId, personalIntegration, db, options);
   }
   return null;
-}
-
-export function buildGitHubCommandEnv(input: {
-  githubAuthHeader: string;
-  githubToken: string;
-  toolCallId: string;
-  repositoryFullName?: string;
-  gitAuthorName?: string;
-  gitAuthorEmail?: string;
-}) {
-  return {
-    GH_TOKEN: input.githubToken,
-    GH_PROMPT_DISABLED: "1",
-    GH_NO_UPDATE_NOTIFIER: "1",
-    ...(input.repositoryFullName ? { GH_REPO: input.repositoryFullName } : {}),
-    GH_CONFIG_DIR: `/tmp/opencompany-gh-${safePathSegment(input.toolCallId)}`,
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
-    GIT_CONFIG_VALUE_0: input.githubAuthHeader,
-    ...(input.gitAuthorName
-      ? {
-          GIT_AUTHOR_NAME: input.gitAuthorName,
-          GIT_COMMITTER_NAME: input.gitAuthorName,
-        }
-      : {}),
-    ...(input.gitAuthorEmail
-      ? {
-          GIT_AUTHOR_EMAIL: input.gitAuthorEmail,
-          GIT_COMMITTER_EMAIL: input.gitAuthorEmail,
-        }
-      : {}),
-  };
 }
 
 function gitIdentityName(accountName: string | null, connectionLabel: string | null) {

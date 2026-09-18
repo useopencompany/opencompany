@@ -61,16 +61,25 @@ export async function createNextWorkflowEventTask(
               ON member.user_workos_id = actor_user.workos_user_id
              AND member.workspace_id = event.workspace_id
             WHERE actor_user.workos_user_id = event.user_workos_id
-              AND actor_user.task_spawning_enabled = true
               AND actor_user.onboarded_at IS NOT NULL
               AND EXISTS (
-                SELECT 1 FROM goat.workflows workflow
+                SELECT 1
+                FROM goat.workflows workflow
                 JOIN goat.plugins plugin ON plugin.workspace_id = workflow.workspace_id
                   AND plugin.owner_user_id = event.user_workos_id
                   AND plugin.name = event.provider
                   AND plugin.status = 'enabled' AND plugin.archived_at IS NULL
                   AND plugin.event_modes->event.event_type = 'true'::jsonb
-                JOIN goat.integrations integration ON integration.id = workflow.event_config->>'integrationId'
+                JOIN goat.integrations integration
+                  ON integration.id = CASE
+                    WHEN event.trigger_id = 'legacy' THEN workflow.event_config->>'integrationId'
+                    ELSE (
+                      SELECT trigger.value->>'integrationId'
+                      FROM jsonb_array_elements(workflow.automation_triggers) trigger(value)
+                      WHERE trigger.value->>'id' = event.trigger_id
+                      LIMIT 1
+                    )
+                  END
                   AND integration.user_workos_id = event.user_workos_id
                   AND integration.provider = event.provider
                   AND integration.workspace_id IS NULL AND integration.status = 'connected'
@@ -78,12 +87,32 @@ export async function createNextWorkflowEventTask(
                 WHERE workflow.id = event.workflow_id
                   AND workflow.workspace_id = event.workspace_id
                   AND workflow.status = 'active' AND workflow.archived_at IS NULL
-                  AND workflow.trigger = 'event'
-                  AND workflow.event_user_workos_id = event.user_workos_id
-                  AND workflow.event_config->>'provider' = event.provider
-                  AND workflow.event_config->>'event' = event.event_type
-                  AND (workflow.event_activated_at IS NULL
-                    OR event.event_at >= workflow.event_activated_at)
+                  AND (
+                    (
+                      event.trigger_id = 'legacy'
+                      AND workflow.trigger = 'event'
+                      AND workflow.event_user_workos_id = event.user_workos_id
+                      AND workflow.event_config->>'provider' = event.provider
+                      AND workflow.event_config->>'event' = event.event_type
+                      AND (
+                        workflow.event_activated_at IS NULL
+                        OR event.event_at >= workflow.event_activated_at
+                      )
+                    )
+                    OR EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(workflow.automation_triggers) trigger(value)
+                      WHERE trigger.value->>'id' = event.trigger_id
+                        AND trigger.value->>'type' = 'event'
+                        AND trigger.value->>'userWorkosId' = event.user_workos_id
+                        AND trigger.value->>'provider' = event.provider
+                        AND trigger.value->>'event' = event.event_type
+                        AND (
+                          trigger.value->>'activatedAt' IS NULL
+                          OR event.event_at >= (trigger.value->>'activatedAt')::timestamptz
+                        )
+                    )
+                  )
                   AND EXISTS (SELECT 1 FROM jsonb_array_elements(plugin.events) declaration
                     WHERE declaration->>'id' = event.event_type)
               )
@@ -208,12 +237,10 @@ export function startWorkflowEventWorker(
   });
 }
 
-export function eventHarness(
-  event: Pick<PendingWorkflowEvent, "workflowName" | "goal" | "harnessSpec">,
-) {
+export function eventHarness(event: Pick<PendingWorkflowEvent, "goal" | "harnessSpec">) {
   return {
     ...event.harnessSpec,
-    initialUserMessage: [`Task: ${event.workflowName}`, "", event.goal].join("\n"),
+    initialUserMessage: event.goal.trim(),
   };
 }
 

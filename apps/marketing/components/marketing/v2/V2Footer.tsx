@@ -9,6 +9,7 @@ const COLUMNS = [
     links: [
       { label: "Use cases", href: "/use-cases" },
       { label: "Pricing", href: "/pricing" },
+      { label: "Slack", href: "/slack" },
       { label: "Changelog", href: "https://my.opencompany.chat/changelog" },
     ],
   },
@@ -31,7 +32,9 @@ const COLUMNS = [
 ];
 
 const LEGAL = [
-  { label: "Support", href: "https://github.com/useopencompany/opencompany/issues" },
+  { label: "Privacy", href: "/privacy" },
+  { label: "Terms", href: "/terms" },
+  { label: "Support", href: "/support" },
   { label: "License", href: "https://github.com/useopencompany/opencompany/blob/main/LICENSE" },
   {
     label: "Security",

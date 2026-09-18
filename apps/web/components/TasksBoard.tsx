@@ -17,7 +17,7 @@ import {
 import { toast } from "@opencompany/ui/components/sonner";
 import { GitHubIcon } from "@opencompany/ui/icons";
 import { useLiveQuery } from "@tanstack/react-db";
-import { Archive, ArrowUp, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
+import { Archive, ArrowUpRight, LayoutGrid, ListTodo, Loader2, Rows3 } from "lucide-react";
 import Link from "next/link";
 import {
   type KeyboardEvent,
@@ -28,7 +28,7 @@ import {
   useTransition,
 } from "react";
 import { taskRowToView, useAppData } from "@/components/AppDataProvider";
-import { EmptyState, formatRelativeTime, TasksWorkflowsDisabledRoute } from "@/components/Routes";
+import { EmptyState, formatRelativeTime } from "@/components/Routes";
 import type { TaskView } from "@/components/Surface";
 import { useHydrated } from "@/components/useHydrated";
 import { formatUsdMicros } from "@/lib/cost-format";
@@ -36,11 +36,7 @@ import {
   getHeadlessTaskActivities,
   type HeadlessTaskActivityReadModel,
 } from "@/lib/headless-task-collections";
-import {
-  archiveHeadlessTask,
-  createHeadlessTaskComment,
-  newHeadlessTaskCommentId,
-} from "@/lib/headless-task-commands";
+import { archiveHeadlessTask } from "@/lib/headless-task-commands";
 import { extractGitHubPullRequestUrl } from "@/lib/pull-request-link";
 import {
   formatStartedAt,
@@ -103,14 +99,17 @@ export function TasksBoardRoute({
   workflowNames,
   initialViewMode = "board",
   initialTimeRange = "7d",
+  initialWorkflowId = null,
 }: {
   workflowNames: Record<string, string>;
   initialViewMode?: TaskViewMode;
   initialTimeRange?: TaskTimeRange;
+  /** Workflow slug to pre-select in the source filter, so a workflow can link to its own runs. */
+  initialWorkflowId?: string | null;
 }) {
-  const { featureFlags, taskRows, tasksReady } = useAppData();
+  const { taskRows, tasksReady } = useAppData();
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(initialWorkflowId);
   const [timeRange, setTimeRangeState] = useState<TaskTimeRange>(initialTimeRange);
   const [viewMode, setViewModeState] = useState<TaskViewMode>(initialViewMode);
   const [, startViewModeTransition] = useTransition();
@@ -185,7 +184,6 @@ export function TasksBoardRoute({
     ? (activeTasks.find((task) => task.id === selectedTaskId) ?? null)
     : null;
 
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
   if (!tasksReady) return <TasksBoardSkeleton />;
 
   return (
@@ -198,7 +196,7 @@ export function TasksBoardRoute({
                 Tasks
               </h1>
               <p className="text-[13px] leading-5 text-ink-subtle">
-                Background runs from workflows, schedules, and chat.
+                Background runs from workflows and chat.
               </p>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
@@ -317,7 +315,7 @@ export function TasksBoardSkeleton() {
               Tasks
             </h1>
             <p className="text-[13px] leading-5 text-ink-subtle">
-              Background runs from workflows, schedules, and chat.
+              Background runs from workflows and chat.
             </p>
           </header>
 
@@ -644,7 +642,7 @@ function TaskBoardSheet({
   workflowNames: Record<string, string>;
   onClose: () => void;
 }) {
-  const { schedules, workspace } = useAppData();
+  const { workspace } = useAppData();
   const hydrated = useHydrated();
   const [isArchiving, startArchiveTransition] = useTransition();
   const activityCollection = useMemo(
@@ -655,9 +653,6 @@ function TaskBoardSheet({
     (query) => (activityCollection ? query.from({ activity: activityCollection }) : undefined),
     [activityCollection],
   );
-  const schedule = task.scheduleId
-    ? (schedules.find((candidate) => candidate.id === task.scheduleId) ?? null)
-    : null;
   const settled = isSettledTaskStatus(task.status);
   const archivable = settled && Boolean(task.sessionId);
   const { summary, error: summaryError } = useTaskSummary(task.id, settled);
@@ -714,23 +709,13 @@ function TaskBoardSheet({
               {task.prompt}
             </p>
 
-            {task.scheduleId ? (
+            {task.scheduledFor ? (
               <section className="mt-4 flex flex-col gap-2">
                 <DetailLabel>Schedule</DetailLabel>
                 <div className="rounded-lg border border-border bg-canvas px-3 py-2.5">
-                  <div className="text-[12.5px] font-medium leading-5 text-ink">
-                    {schedule?.name ?? "Scheduled routine"}
+                  <div className="text-[12.5px] leading-5 text-ink-subtle">
+                    Scheduled for {formatStartedAt(task.scheduledFor)}
                   </div>
-                  {schedule ? (
-                    <div className="mt-0.5 font-mono text-[10.5px] leading-4 text-ink-subtle">
-                      {schedule.cron} · {schedule.timezone}
-                    </div>
-                  ) : null}
-                  {task.scheduledFor ? (
-                    <div className="mt-1 text-[11.5px] leading-4 text-ink-subtle">
-                      Scheduled for {formatStartedAt(task.scheduledFor)}
-                    </div>
-                  ) : null}
                 </div>
               </section>
             ) : null}
@@ -787,13 +772,6 @@ function TaskBoardSheet({
                   </li>
                 ))}
               </ol>
-              {task.sessionId ? (
-                <TaskCommentComposer
-                  taskId={task.id}
-                  workspaceId={workspace.id}
-                  active={!settled}
-                />
-              ) : null}
             </section>
           </div>
 
@@ -879,86 +857,6 @@ function TaskBoardSheet({
         </footer>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function TaskCommentComposer({
-  taskId,
-  workspaceId,
-  active,
-}: {
-  taskId: string;
-  workspaceId: string;
-  active: boolean;
-}) {
-  const [body, setBody] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const pendingComment = useRef<{ id: string; body: string } | null>(null);
-  // A run in flight gates posting, not composing: the textarea below stays editable so a comment
-  // can be drafted while the task works.
-  const postBlocked = active || submitting;
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (postBlocked || !body.trim()) return;
-    const command =
-      pendingComment.current?.body === body
-        ? pendingComment.current
-        : { id: newHeadlessTaskCommentId(), body };
-    pendingComment.current = command;
-    setSubmitting(true);
-    try {
-      await createHeadlessTaskComment(taskId, command, { scopeKey: workspaceId });
-      pendingComment.current = null;
-      setBody("");
-      toast.success("Comment posted. The task is running again.");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not post the comment.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <form className="border-t border-border pt-4" onSubmit={submit}>
-      <label htmlFor={`task-comment-${taskId}`} className="sr-only">
-        Add a comment
-      </label>
-      <div className="rounded-lg border border-border bg-canvas p-2 focus-within:border-ink/30">
-        <textarea
-          id={`task-comment-${taskId}`}
-          value={body}
-          onChange={(event) => {
-            setBody(event.target.value);
-            if (pendingComment.current?.body !== event.target.value) pendingComment.current = null;
-          }}
-          disabled={submitting}
-          maxLength={10_000}
-          rows={3}
-          placeholder="Add a comment…"
-          className="block w-full resize-none bg-transparent px-1 py-0.5 text-[12.5px] leading-5 text-ink outline-none placeholder:text-ink-subtle disabled:cursor-not-allowed disabled:opacity-60"
-        />
-        <div className="mt-2 flex items-center justify-between gap-3">
-          <span className="text-[11px] leading-4 text-ink-subtle">
-            {active
-              ? "Draft your comment now — you can post it when the current run finishes."
-              : "Posting a comment resumes this task."}
-          </span>
-          <button
-            type="submit"
-            aria-label="Post comment"
-            disabled={postBlocked || !body.trim()}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-ink text-canvas transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {submitting ? (
-              <Loader2 size={13} strokeWidth={1.75} className="animate-spin" />
-            ) : (
-              <ArrowUp size={13} strokeWidth={1.75} />
-            )}
-          </button>
-        </div>
-      </div>
-    </form>
   );
 }
 

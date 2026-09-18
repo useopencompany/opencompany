@@ -3,6 +3,8 @@
 import artifact1 from "./attio.json";
 import artifact2 from "./betterstack.json";
 import artifact0 from "./convex.json";
+import artifact22 from "./dash0.json";
+import artifact30 from "./doppler.json";
 import artifact3 from "./fathom.json";
 import artifact4 from "./github.json";
 import artifact5 from "./gmail.json";
@@ -13,20 +15,22 @@ import artifact6 from "./granola.json";
 import artifact10 from "./hubspot.json";
 import artifact11 from "./infisical.json";
 import artifact12 from "./jamie.json";
-import artifact13 from "./latitude.json";
-import artifact14 from "./linear.json";
-import artifact15 from "./neon.json";
-import artifact16 from "./notion.json";
-import artifact17 from "./posthog.json";
-import artifact19 from "./render.json";
-import artifact18 from "./resend.json";
-import artifact21 from "./signoz.json";
-import artifact22 from "./slack.json";
-import artifact24 from "./stripe.json";
-import artifact23 from "./supabase.json";
-import artifact20 from "./vercel.json";
-import artifact25 from "./x.json";
-import artifact26 from "./yc-advise.json";
+import artifact14 from "./latitude.json";
+import artifact13 from "./lead-research.json";
+import artifact15 from "./linear.json";
+import artifact16 from "./neon.json";
+import artifact17 from "./notion.json";
+import artifact18 from "./posthog.json";
+import artifact20 from "./render.json";
+import artifact19 from "./resend.json";
+import artifact23 from "./signoz.json";
+import artifact24 from "./slack.json";
+import artifact26 from "./stripe.json";
+import artifact25 from "./supabase.json";
+import artifact27 from "./todoist.json";
+import artifact21 from "./vercel.json";
+import artifact28 from "./x.json";
+import artifact29 from "./yc-advise.json";
 
 export const OFFICIAL_PLUGIN_ARTIFACTS = {
   convex: artifact0,
@@ -42,18 +46,22 @@ export const OFFICIAL_PLUGIN_ARTIFACTS = {
   hubspot: artifact10,
   infisical: artifact11,
   jamie: artifact12,
-  latitude: artifact13,
-  linear: artifact14,
-  neon: artifact15,
-  notion: artifact16,
-  posthog: artifact17,
-  resend: artifact18,
-  render: artifact19,
-  vercel: artifact20,
-  signoz: artifact21,
-  slack: artifact22,
-  supabase: artifact23,
-  stripe: artifact24,
-  x: artifact25,
-  "yc-advise": artifact26,
+  "lead-research": artifact13,
+  latitude: artifact14,
+  linear: artifact15,
+  neon: artifact16,
+  notion: artifact17,
+  posthog: artifact18,
+  resend: artifact19,
+  render: artifact20,
+  vercel: artifact21,
+  dash0: artifact22,
+  signoz: artifact23,
+  slack: artifact24,
+  supabase: artifact25,
+  stripe: artifact26,
+  todoist: artifact27,
+  x: artifact28,
+  "yc-advise": artifact29,
+  doppler: artifact30,
 };

@@ -34,13 +34,33 @@ describe("SettingsSidebar", () => {
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Repositories" }),
     ).toHaveAttribute("href", "/settings/repositories");
-    expect(
-      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Plugins" }),
-    ).toHaveAttribute("href", "/settings/plugins");
     expect(screen.queryByRole("link", { name: "Integrations" })).not.toBeInTheDocument();
     expect(
       within(workspaceGroup as HTMLElement).getByRole("link", { name: "Inference" }),
     ).toHaveAttribute("href", "/settings/workspace/inference");
+    expect(
+      within(workspaceGroup as HTMLElement).getByRole("link", { name: "Sandboxes" }),
+    ).toHaveAttribute("href", "/settings/workspace/sandboxes");
+  });
+
+  it("lists sandboxes directly below inference", () => {
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    const workspaceLinks = within(
+      screen.getByText("Workspace").parentElement as HTMLElement,
+    ).getAllByRole("link");
+    const labels = workspaceLinks.map((link) => link.textContent);
+
+    expect(labels.indexOf("Sandboxes")).toBe(labels.indexOf("Inference") + 1);
+  });
+
+  it("marks sandboxes active without also marking inference active", () => {
+    pathnameMock.value = "/settings/workspace/sandboxes";
+
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Sandboxes" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Inference" })).not.toHaveAttribute("aria-current");
   });
 
   it("marks workspace usage active without also marking members active", () => {
@@ -59,5 +79,13 @@ describe("SettingsSidebar", () => {
 
     expect(screen.getByRole("link", { name: "Inference" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Members" })).not.toHaveAttribute("aria-current");
+  });
+
+  // Skills and Plugins are primary-sidebar destinations, not settings pages. This rail stays a
+  // table of contents for /settings only, so it must not duplicate them.
+  it.each([["Skills"], ["Plugins"]])("keeps %s out of the settings rail", (label) => {
+    render(<SettingsSidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
   });
 });

@@ -8,15 +8,7 @@ import type {
   WorkflowDispatcher,
   WorkspaceSkillsRunner,
 } from "@opencompany/agent/chat-agent";
-import type {
-  BrowserUseProfileToolOutput,
-  DeleteTaskScheduleToolInput,
-  DeleteTaskScheduleToolOutput,
-  EditTaskScheduleToolInput,
-  EditTaskScheduleToolOutput,
-  ScheduleTaskToolInput,
-  ScheduleTaskToolOutput,
-} from "@opencompany/agent/chat-ui";
+import type { BrowserUseProfileToolOutput } from "@opencompany/agent/chat-ui";
 import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
@@ -34,9 +26,8 @@ import type {
   WriteArtifactToolResponse,
 } from "@opencompany/agent-runtime";
 import { assertSafeRelativePath } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { HarnessEngine } from "@opencompany/db/product-schema";
 import { executeApiWikiCommand } from "./api-wiki-client";
+import { executeApiWorkflowCommand } from "./api-workflow-client";
 import { publishInBandChatArtifact } from "./chat-artifacts";
 import { wakeCodexChatWorker } from "./codex-chat-worker";
 import { getDb } from "./db";
@@ -64,24 +55,15 @@ type Context = {
 export type HostTools = {
   bootstrap: ChatHostBootstrap;
   activeSkills: ChatHostBootstrap["activeSkills"];
-  startTask?: (
-    input: {
-      prompt: string;
-      name?: string;
-      model: AgentModelId;
-      engine?: HarnessEngine;
-    },
-    context: { toolCallId: string },
-  ) => Promise<StartedTask>;
-  scheduleTask?: (input: ScheduleTaskToolInput) => Promise<ScheduleTaskToolOutput>;
-  editTaskSchedule?: (input: EditTaskScheduleToolInput) => Promise<EditTaskScheduleToolOutput>;
-  deleteTaskSchedule?: (
-    input: DeleteTaskScheduleToolInput,
-  ) => Promise<DeleteTaskScheduleToolOutput>;
   workspaceSkills?: WorkspaceSkillsRunner;
   createWorkspaceSkill?: CreateWorkspaceSkillRunner;
   editWorkspaceSkill?: EditWorkspaceSkillRunner;
   runWiki?: (input: Record<string, unknown>, context: { toolCallId: string }) => Promise<unknown>;
+  postSlackMessage?: (input: {
+    channel?: string;
+    text: string;
+    messageKey: string;
+  }) => Promise<unknown>;
   writeArtifact: (
     input: WriteArtifactToolInput,
     context: { toolCallId: string },
@@ -129,17 +111,6 @@ export async function loadHostTools(
   return {
     bootstrap,
     activeSkills: bootstrap.activeSkills,
-    ...(bootstrap.taskToolsEnabled
-      ? {
-          startTask: (input, toolContext) =>
-            call("start_task", input, toolContext.toolCallId) as Promise<StartedTask>,
-          scheduleTask: (input) => call("schedule_task", input) as Promise<ScheduleTaskToolOutput>,
-          editTaskSchedule: (input) =>
-            call("edit_task_schedule", input) as Promise<EditTaskScheduleToolOutput>,
-          deleteTaskSchedule: (input) =>
-            call("delete_task_schedule", input) as Promise<DeleteTaskScheduleToolOutput>,
-        }
-      : {}),
     ...(bootstrap.skillToolsEnabled
       ? {
           workspaceSkills: (input) => call("workspace_skills", input),
@@ -159,6 +130,9 @@ export async function loadHostTools(
       : {}),
     runWiki: (input: Record<string, unknown>, wikiContext: { toolCallId: string }) =>
       call("wiki", input, wikiContext.toolCallId),
+    ...(bootstrap.slackChannelEnabled
+      ? { postSlackMessage: (input) => call("post_slack_message", input) }
+      : {}),
     writeArtifact: (input, artifactContext) =>
       call(
         "write_artifact",
@@ -210,10 +184,11 @@ export async function loadHostTools(
           },
         }
       : {}),
-    ...(bootstrap.taskToolsEnabled && bootstrap.workflows.length
+    ...(bootstrap.automationToolsEnabled
       ? {
           workflows: {
             catalog: bootstrap.workflows,
+            manage: (input, toolContext) => call("workflows", input, toolContext.toolCallId),
             execute: (input) => call("start_workflow", input) as Promise<StartedTask>,
           },
         }
@@ -303,6 +278,13 @@ async function callGateway(
       gatewayApiKey: context.env.vercelAiGatewayApiKey,
       // Wiki commands cross the authenticated HTTP boundary into apps/api; the
       // runner never touches the wiki database directly.
+      executeWorkflowCommand: (workflowInput) =>
+        executeApiWorkflowCommand({
+          ...workflowInput,
+          origin: context.env.apiOrigin,
+          token: context.env.apiInternalToken,
+          signal: context.signal,
+        }),
       executeWikiCommand: (wikiInput) =>
         executeApiWikiCommand({
           origin: context.env.apiOrigin,
@@ -314,21 +296,6 @@ async function callGateway(
           idempotencyKey: wikiInput.idempotencyKey,
           signal: context.signal,
         }),
-      planHarness: async ({ actorId, prompt }) => {
-        const plannerContext = await getHarnessPlannerContextForRunner(actorId, {
-          browserEnabled: context.env.browserEnabled,
-        });
-        const planned = await planHarnessForTask({
-          prompt,
-          model: "moonshotai/kimi-k2.6",
-          availableTools: plannerContext.availableTools,
-          githubRepositories: plannerContext.githubRepositories,
-          gatewayApiKey: context.env.vercelAiGatewayApiKey,
-          userWorkosId: actorId,
-          signal: context.signal,
-        });
-        return planned.harnessSpec;
-      },
     },
   });
   if (!response.ok) throw new Error(response.error);
@@ -341,6 +308,7 @@ function asBootstrap(value: unknown): ChatHostBootstrap {
     !Array.isArray(value.skills) ||
     !Array.isArray(value.activeSkills) ||
     !Array.isArray(value.browserProfiles) ||
+    typeof value.slackChannelEnabled !== "boolean" ||
     typeof value.skillToolsEnabled !== "boolean"
   ) {
     throw new Error("The Chat host-tool gateway returned an invalid bootstrap response.");

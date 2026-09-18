@@ -48,6 +48,10 @@
       "types": "./src/plugin-gateway-repository.ts",
       "default": "./src/plugin-gateway-repository.ts"
     },
+    "./plugin-pricing": {
+      "types": "./src/plugin-pricing.ts",
+      "default": "./src/plugin-pricing.ts"
+    },
     "./plugin-runtime-repository": {
       "types": "./src/plugin-runtime-repository.ts",
       "default": "./src/plugin-runtime-repository.ts"
@@ -91,6 +95,10 @@
     "./infisical-auth": {
       "types": "./src/infisical-auth.ts",
       "default": "./src/infisical-auth.ts"
+    },
+    "./doppler-auth": {
+      "types": "./src/doppler-auth.ts",
+      "default": "./src/doppler-auth.ts"
     },
     "./repo-configs": {
       "types": "./src/repo-configs.ts",
@@ -168,9 +176,17 @@
       "types": "./src/jamie.ts",
       "default": "./src/jamie.ts"
     },
+    "./convex-events": {
+      "types": "./src/convex-events.ts",
+      "default": "./src/convex-events.ts"
+    },
     "./granola": {
       "types": "./src/granola.ts",
       "default": "./src/granola.ts"
+    },
+    "./posthog-events": {
+      "types": "./src/posthog-events.ts",
+      "default": "./src/posthog-events.ts"
     },
     "./fathom": {
       "types": "./src/fathom.ts",
@@ -191,6 +207,10 @@
     "./linear": {
       "types": "./src/linear.ts",
       "default": "./src/linear.ts"
+    },
+    "./imessage": {
+      "types": "./src/imessage.ts",
+      "default": "./src/imessage.ts"
     },
     "./slack-bot": {
       "types": "./src/slack-bot.ts",
@@ -239,6 +259,22 @@
     "./task-action-approvals": {
       "types": "./src/task-action-approvals.ts",
       "default": "./src/task-action-approvals.ts"
+    },
+    "./session-subscriptions": {
+      "types": "./src/session-subscriptions.ts",
+      "default": "./src/session-subscriptions.ts"
+    },
+    "./test-task-schema": {
+      "types": "./src/test-task-schema.ts",
+      "default": "./src/test-task-schema.ts"
+    },
+    "./session-pull-requests": {
+      "types": "./src/session-pull-requests.ts",
+      "default": "./src/session-pull-requests.ts"
+    },
+    "./whatsapp": {
+      "types": "./src/whatsapp.ts",
+      "default": "./src/whatsapp.ts"
     }
   },
   "scripts": {

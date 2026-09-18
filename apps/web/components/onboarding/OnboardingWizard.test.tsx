@@ -1,16 +1,20 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingWizard } from "./OnboardingWizard";
 
 const mocks = vi.hoisted(() => ({
   captureProductEvent: vi.fn(),
-  checkWorkspaceSlugAction: vi.fn(),
   finishOnboardingAction: vi.fn(),
+  getOnboardingInstalledPluginsAction: vi.fn(),
+  getOnboardingSubscriptionsAction: vi.fn(),
+  installOfficialPlugin: vi.fn(),
+  pollCodexDeviceAuth: vi.fn(),
   push: vi.fn(),
   saveOnboardingProfileAction: vi.fn(),
   saveOnboardingWorkspaceAction: vi.fn(),
+  startCodexDeviceAuth: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -23,8 +27,9 @@ vi.mock("@opencompany/analytics/product/client", () => ({
 }));
 
 vi.mock("@/lib/onboarding-actions", () => ({
-  checkWorkspaceSlugAction: mocks.checkWorkspaceSlugAction,
   finishOnboardingAction: mocks.finishOnboardingAction,
+  getOnboardingInstalledPluginsAction: mocks.getOnboardingInstalledPluginsAction,
+  getOnboardingSubscriptionsAction: mocks.getOnboardingSubscriptionsAction,
   saveOnboardingProfileAction: mocks.saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction: mocks.saveOnboardingWorkspaceAction,
 }));
@@ -33,50 +38,79 @@ vi.mock("@/lib/onboarding-kickoff", () => ({
   queueOnboardingKickoff: vi.fn(() => true),
 }));
 
+vi.mock("@/lib/claude-code-auth", () => ({ saveClaudeCodeToken: vi.fn() }));
+vi.mock("@/lib/codex-auth", () => ({
+  pollCodexDeviceAuth: mocks.pollCodexDeviceAuth,
+  startCodexDeviceAuth: mocks.startCodexDeviceAuth,
+}));
+
+vi.mock("@/lib/official-plugin-catalog", async () => {
+  const stub = (name: string, label: string, connectionProvider: string) => ({
+    name,
+    label,
+    description: `${label} description`,
+    connectionProvider,
+    connectHref: `/api/integrations/${name}/start`,
+    Icon: () => null,
+    iconClassName: "",
+  });
+  return {
+    installOfficialPlugin: mocks.installOfficialPlugin,
+    OFFICIAL_MCP_PLUGINS: {
+      github: stub("github", "GitHub as you", "github_user"),
+      linear: stub("linear", "Linear", "linear"),
+      gmail: stub("gmail", "Gmail", "gmail"),
+      slack: stub("slack", "Slack", "slack"),
+      notion: stub("notion", "Notion", "notion"),
+    },
+  };
+});
+
+const OWNER_PROPS = {
+  user: {
+    workosUserId: "user_1",
+    name: "Ada Lovelace",
+    email: "ada@example.com",
+    avatarUrl: null,
+  },
+  currentWorkspaceName: "",
+  legacyBrainEnabled: false,
+  variant: "owner" as const,
+  initialStep: 0,
+  initialWorkspaceId: null,
+  initialWorkspaceName: "",
+  initialRole: null,
+  initialCompanyUrl: "",
+  initialReferral: null,
+};
+
 describe("OnboardingWizard", () => {
   beforeEach(() => {
-    mocks.captureProductEvent.mockReset();
-    mocks.checkWorkspaceSlugAction.mockReset();
-    mocks.checkWorkspaceSlugAction.mockResolvedValue({ slug: "acme", available: true });
-    mocks.finishOnboardingAction.mockReset();
+    vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
     mocks.finishOnboardingAction.mockResolvedValue({ ok: true });
-    mocks.push.mockReset();
-    mocks.saveOnboardingProfileAction.mockReset();
     mocks.saveOnboardingProfileAction.mockResolvedValue({ ok: true });
-    mocks.saveOnboardingWorkspaceAction.mockReset();
     mocks.saveOnboardingWorkspaceAction.mockResolvedValue({
       ok: true,
       workspaceId: "workspace_1",
       brainRef: null,
     });
+    mocks.getOnboardingSubscriptionsAction.mockResolvedValue({
+      claudeCode: { connected: false, needsReauth: false },
+      codex: { connected: false, needsReauth: false },
+    });
+    mocks.getOnboardingInstalledPluginsAction.mockResolvedValue([]);
+    mocks.installOfficialPlugin.mockResolvedValue({ name: "github" });
+    mocks.pollCodexDeviceAuth.mockReset();
+    mocks.startCodexDeviceAuth.mockReset();
   });
 
-  it("takes owners directly from profile to workspace to completion", async () => {
+  it("walks an owner through profile, workspace, subscriptions, plugins, and completion", async () => {
     const user = userEvent.setup();
-    render(
-      <OnboardingWizard
-        user={{
-          workosUserId: "user_1",
-          name: "Ada Lovelace",
-          email: "ada@example.com",
-          avatarUrl: null,
-        }}
-        currentWorkspaceName=""
-        legacyBrainEnabled={false}
-        variant="owner"
-        initialStep={0}
-        initialWorkspaceId={null}
-        initialWorkspaceName=""
-        initialSlug=""
-        initialRole={null}
-        initialCompanyUrl=""
-        initialReferral={null}
-      />,
-    );
+    render(<OnboardingWizard {...OWNER_PROPS} />);
 
     expect(screen.getByRole("heading", { name: "Welcome, Ada" })).toBeInTheDocument();
-    expect(screen.queryByText("Connect your sources")).not.toBeInTheDocument();
-    expect(screen.queryByText("Build your company Wiki")).not.toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Founder \/ CEO/u }));
     await user.type(screen.getByLabelText(/Company URL/u), "acme.com");
@@ -89,27 +123,186 @@ describe("OnboardingWizard", () => {
       role: "founder",
       companyUrl: "acme.com",
     });
+    // The workspace URL screen is gone; the slug is derived from the name.
+    expect(screen.queryByText("Workspace URL")).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Company name"), "Acme");
+    await user.type(screen.getByLabelText(/Company name/u), "Acme");
     await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(mocks.saveOnboardingWorkspaceAction).toHaveBeenCalledWith({ name: "Acme" });
+
+    expect(
+      await screen.findByRole("heading", { name: "Bring your own AI subscription" }),
+    ).toBeInTheDocument();
+    // Nothing connected yet, so the primary action reads as an explicit skip.
+    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Give your agent some tools" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Recommended")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
 
     expect(await screen.findByRole("heading", { name: "You're all set" })).toBeInTheDocument();
-    expect(
-      screen.getByText(/connect sources or import company context anytime/u),
-    ).toBeInTheDocument();
-    expect(mocks.saveOnboardingWorkspaceAction).toHaveBeenCalledWith({
-      name: "Acme",
-      slug: "acme",
-    });
-
     await user.click(screen.getByRole("button", { name: "Finish onboarding" }));
 
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
     expect(mocks.finishOnboardingAction).toHaveBeenCalledWith({ referralSource: null });
     expect(mocks.captureProductEvent).toHaveBeenCalledWith("onboarding_completed", {
       flow: "owner",
-      total_steps: 3,
+      total_steps: 5,
       workspace_id: "workspace_1",
     });
+  });
+
+  it("presents the Claude setup command as its own copyable line", async () => {
+    const user = userEvent.setup();
+    render(<OnboardingWizard {...OWNER_PROPS} initialStep={2} initialWorkspaceId="workspace_1" />);
+
+    const claudeCard = (await screen.findByText("Claude")).closest("div.rounded-xl");
+    expect(claudeCard).not.toBeNull();
+    await user.click(within(claudeCard as HTMLElement).getByRole("button", { name: "Connect" }));
+
+    expect(screen.getByText("Run this in your terminal:")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy claude setup-token" }));
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe("claude setup-token"),
+    );
+    expect(screen.getByPlaceholderText(/Paste your token/u)).toBeInTheDocument();
+  });
+
+  it("refreshes onboarding subscription state when Codex authentication completes", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getOnboardingSubscriptionsAction
+        .mockResolvedValueOnce({
+          claudeCode: { connected: false, needsReauth: false },
+          codex: { connected: false, needsReauth: false },
+        })
+        .mockResolvedValue({
+          claudeCode: { connected: false, needsReauth: false },
+          codex: { connected: true, needsReauth: false },
+        });
+      mocks.startCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "code_ready",
+          verificationUri: "https://example.com/device",
+          userCode: "ABCD-EFGH",
+          statusReason: null,
+        },
+      });
+      mocks.pollCodexDeviceAuth.mockResolvedValue({
+        ok: true,
+        flow: {
+          id: "gcodf_1",
+          status: "completed",
+          verificationUri: null,
+          userCode: null,
+          statusReason: null,
+        },
+      });
+      render(
+        <OnboardingWizard {...OWNER_PROPS} initialStep={2} initialWorkspaceId="workspace_1" />,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const codexCard = screen.getByText("ChatGPT").closest("div.rounded-xl");
+      expect(codexCard).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(within(codexCard as HTMLElement).getByRole("button", { name: "Connect" }));
+      });
+      expect(screen.getByRole("link", { name: "Open ChatGPT sign-in" })).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2500);
+      });
+
+      expect(mocks.pollCodexDeviceAuth).toHaveBeenCalledWith("gcodf_1");
+      expect(mocks.getOnboardingSubscriptionsAction).toHaveBeenCalledTimes(2);
+      expect(within(codexCard as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("installs and starts connecting the recommended plugin in one click", async () => {
+    const user = userEvent.setup();
+    const popup = { close: vi.fn(), focus: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    try {
+      render(
+        <OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />,
+      );
+
+      expect(
+        await screen.findByRole("heading", { name: "Give your agent some tools" }),
+      ).toBeInTheDocument();
+
+      const githubRow = screen.getByText("GitHub as you").closest("div.rounded-xl");
+      expect(githubRow).not.toBeNull();
+      await user.click(within(githubRow as HTMLElement).getByRole("button", { name: "Connect" }));
+
+      expect(open).toHaveBeenCalledWith(
+        "/api/integrations/github/start?returnTo=%2Fonboarding%2Fconnected",
+        "_blank",
+        "width=600,height=760,noopener=no,noreferrer=no",
+      );
+      expect(popup.focus).toHaveBeenCalledOnce();
+      await waitFor(() =>
+        expect(mocks.installOfficialPlugin).toHaveBeenCalledWith(
+          expect.objectContaining({ name: "github" }),
+        ),
+      );
+      expect(
+        await within(githubRow as HTMLElement).findByRole("button", { name: "Connect" }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Continue/u })).toBeInTheDocument();
+    } finally {
+      open.mockRestore();
+    }
+  });
+
+  it("consumes a same-tab connection result when browser storage is unavailable", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/onboarding?variant=owner&integration=github_user&setup=connected",
+    );
+    render(<OnboardingWizard {...OWNER_PROPS} initialStep={3} initialWorkspaceId="workspace_1" />);
+
+    const githubRow = (await screen.findByText("GitHub as you")).closest("div.rounded-xl");
+    expect(githubRow).not.toBeNull();
+    expect(within(githubRow as HTMLElement).getByText("Connected")).toBeInTheDocument();
+    expect(window.location.search).toBe("?variant=owner");
+  });
+
+  it("gives invited members a welcome and their own subscription step only", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        variant="member"
+        currentWorkspaceName="Acme"
+        initialWorkspaceId="workspace_1"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Welcome to Acme" })).toBeInTheDocument();
+    expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Bring your own AI subscription" }),
+    ).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByRole("heading", { name: "You're all set" })).toBeInTheDocument();
+    // Plugins are workspace-level and stay with the admin.
+    expect(screen.queryByText("Give your agent some tools")).not.toBeInTheDocument();
+    // Members are not asked the referral question.
+    expect(screen.queryByText(/how did you hear about opencompany/u)).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isSlackBotConfigured, SLACK_BOT_SCOPES, slackBotScopesSatisfied } from "./slack-bot";
+import {
+  isSlackBotConfigured,
+  SLACK_BOT_SCOPES,
+  slackBotCanReact,
+  slackBotDeliveryScopesSatisfied,
+  slackBotScopesSatisfied,
+} from "./slack-bot";
 
 const REQUIRED_ENVS = {
   INTEGRATION_CREDENTIAL_ENCRYPTION_KEY: "encryption-key",
@@ -29,7 +35,7 @@ describe("slackBotScopesSatisfied", () => {
     expect(slackBotScopesSatisfied([...SLACK_BOT_SCOPES, "extra:scope"])).toBe(true);
   });
 
-  it("is false for pre-v2 installs missing the DM/reaction/user scopes", () => {
+  it("is false for installs missing the user scopes needed for follow-up attribution", () => {
     const v1Scopes = [
       "app_mentions:read",
       "chat:write",
@@ -40,5 +46,22 @@ describe("slackBotScopesSatisfied", () => {
     ];
     expect(slackBotScopesSatisfied(v1Scopes)).toBe(false);
     expect(slackBotScopesSatisfied([])).toBe(false);
+  });
+
+  it("keeps existing installations operational while the email scope is reauthorized", () => {
+    const existingScopes = SLACK_BOT_SCOPES.filter((scope) => scope !== "users:read.email");
+    expect(slackBotDeliveryScopesSatisfied(existingScopes)).toBe(true);
+    expect(slackBotScopesSatisfied(existingScopes)).toBe(false);
+  });
+});
+
+describe("slackBotCanReact", () => {
+  it("lets a granted install mark thread replies and leaves older ones delivering unmarked", () => {
+    expect(slackBotCanReact([...SLACK_BOT_SCOPES])).toBe(true);
+
+    const beforeReactions = SLACK_BOT_SCOPES.filter((scope) => scope !== "reactions:write");
+    expect(slackBotCanReact(beforeReactions)).toBe(false);
+    expect(slackBotDeliveryScopesSatisfied(beforeReactions)).toBe(true);
+    expect(slackBotScopesSatisfied(beforeReactions)).toBe(false);
   });
 });

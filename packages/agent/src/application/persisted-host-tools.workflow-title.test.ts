@@ -45,7 +45,6 @@ describe("persisted workflow host tools", () => {
         wakeTaskWorker: vi.fn(),
         defer: vi.fn(),
         gatewayApiKey: "gateway-key",
-        planHarness: vi.fn(),
       },
       dependencies: {
         loadContext: vi.fn(async () => ({
@@ -54,16 +53,15 @@ describe("persisted workflow host tools", () => {
           workspaceName: "Acme",
           conversationId: "conversation_1",
           messageId: "message_1",
-          brainRef: null,
           email: "ada@example.test",
           firstName: "Ada",
           lastName: "Lovelace",
           timezone: "Europe/London",
-          taskToolsEnabled: true,
+          automationToolsEnabled: true,
           taskConversation: false,
           skillToolsEnabled: true,
+          slackChannelEnabled: false,
           subagentsEnabled: false,
-          legacyBrainEnabled: false,
         })),
       },
     });

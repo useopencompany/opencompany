@@ -40,6 +40,14 @@ are rejected with an instruction to refresh rather than being parsed through a l
 Attachments are uploaded to `/v1/attachments` and referenced by opaque IDs. Credential or storage
 locator fields never enter client DTOs.
 
+A coding session that opens a pull request gets a status badge on its sidebar row, for ordinary
+chats and Tasks alike. The runner records the link while the turn streams — from the hosted GitHub
+MCP `create_pull_request` tool or from `gh pr create` output, never from assistant prose — into
+`goat.session_pull_requests`, keyed on `chat_sessions` so both kinds of row read the same table.
+`GET /v1/session-pull-requests` returns those links, refreshing any non-terminal PR against GitHub
+behind a 60s TTL with the caller's own user token; merged and closed are final and never re-read.
+There is no GitHub webhook ingress, and this feature does not add one.
+
 Claude Code coding chats and Workflow steps share the model catalog in
 `packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
 `anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort
@@ -50,14 +58,20 @@ controls and a 1M-token context window. Claude Sonnet 5 remains the default.
 Manual, Workflow, schedule, and agent producers call shared application services. Creation writes a
 Task, its Conversation, initial Message, and Run atomically. Follow-ups use the Message command and
 cancellation targets the active Run. The runner applies per-Conversation FIFO, fenced leases, retries,
-and terminal settlement. An opencompany Task turn uses the same host-tool contract and runtime tool
-composition as an interactive opencompany turn, with task delegation and schedule tools restricted
-to main Chat conversations. The persisted host service checks the conversation kind on every call,
-so a Task cannot create another Task, start a Workflow, or manage schedules even through a direct
-tool request. Task bootstraps omit these tools and their routing instructions. The Task context adds
-autonomous-run instructions, larger call budgets, and the headless action catalog. All Task engines
-support one-time approval of connected actions set to Ask; headless callers without a durable Task
-still deny these requests.
+and terminal settlement.
+
+Main Chat cannot create a one-off Task. The agent's delegation move is `start_workflow`, which runs
+an active workspace Workflow as a tracked Task, plus the recurring-schedule tools. There is no
+`start_task` operation in the host-tool contract, so the capability cannot be reached from any chat
+surface; `POST /v1/tasks` remains the producer for manual Task creation outside the agent loop.
+
+An opencompany Task turn uses the same host-tool contract and runtime tool composition as an
+interactive opencompany turn, with Workflow and schedule tools restricted to main Chat
+conversations. The persisted host service checks the conversation kind on every call, so a Task
+cannot start a Workflow or manage schedules even through a direct tool request. Task bootstraps omit
+these tools and their routing instructions. The Task context adds autonomous-run instructions,
+larger call budgets, and the headless action catalog. All Task engines support one-time approval of
+connected actions set to Ask; headless callers without a durable Task still deny these requests.
 The opencompany engine uses its existing AI SDK approval continuation: the Run and Task pause for
 the user's decision, then the same tool call resumes with the recorded approval or denial.
 For Codex and Claude Code Tasks, the runner
@@ -68,6 +82,13 @@ Repeated requests for the same action and inputs reuse the result within that Ru
 require a new approval. If a worker dies after claiming an external write but before recording its
 result, recovery reports an uncertain outcome for inspection and does not repeat the write.
 
+Workflows carry the same visibility model as Skills. A company workflow belongs to the workspace:
+every member sees it, runs it with `#`, and can edit it. A personal workflow is visible only to its
+creator, who is also the only one who can run or edit it. Workflows created before visibility
+existed are company workflows. Only the creator — or an admin, for a workflow with no recorded
+creator — can change a workflow's visibility. A workflow can be fired by anyone who can see it, so
+it still draws Skills from the company scope only, whatever its own visibility.
+
 Workflows start as Draft and can save steps without instructions. Activation requires instructions
 in every step for manual, scheduled, and event triggers. In the editor, adding an empty step or
 clearing instructions returns the workflow to Draft; completing the steps does not reactivate it.
@@ -75,8 +96,18 @@ Saving a scheduled draft clears its next run and prepared execution plan. There 
 workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
 Plugin event setup, delivery guarantees, and Wiki ingestion retirement are documented in
 [Plugin events and workflows](plugin-events.md).
-Scheduled and event runs follow the step instructions. Optional additional run context is shared
-across steps, and existing custom context remains editable.
+Scheduled and event runs follow the step instructions. The editor does not author extra run
+context; the trigger prompt saved with a workflow is only the run's opening request and stays
+editable through the headless Workflow API.
+
+The editor's Advanced section carries workflow memory: one markdown document per workflow, off by
+default. While it is on, the current memory is injected into every run's system context and the run
+gets `read_workflow_memory` and `update_workflow_memory` (whole-document replace, capped at 20,000
+characters). Memory lives in `goat.workflow_memories`, not in the workflow row, so a run rewriting
+its memory never bumps the definition's version or reorders the workflow list, and toggling memory
+takes effect on the next run without re-planning a scheduled workflow's execution plan. It is served
+by `/v1/workflows/{workflowId}/memory` (GET, PATCH for the toggle, DELETE to clear) and is not part
+of the workflow read model.
 
 Canonical Tasks can be archived once their run has settled, including `waiting` ("Waiting for you"),
 `succeeded`, `failed`, and `canceled`. Archiving preserves the outcome and waiting state; it does not
@@ -85,6 +116,10 @@ resume execution. The UI and archive repository share this status rule in `@open
 The 35 known sessionless pre-cutover Tasks are intentionally separate. They remain readable through
 the actor-scoped compatibility API and cannot be replied to, canceled, or archived. ADR 0002 owns
 their retention gate.
+
+Workspace Slack Channels bind exact bot-authored threads to these same durable Task conversations.
+See [Slack Channels](slack-channels.md) for the subscription inbox, delivery outbox, authorization,
+and reconnect/expiry behavior.
 
 ## Knowledge, Skills, Plugins, and integrations
 
@@ -113,6 +148,20 @@ the client uses bounded, backoff polling with ordinary access reads instead of d
 GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
 re-check may refresh the expiring user token once per install attempt.
 
+Sandbox `gh` and HTTPS Git requests use an attempt-scoped GitHub broker. A private Unix
+socket carries `gh` HTTP traffic; a Git HTTPS remote helper carries Git traffic through an
+authenticated loopback relay without changing repository remotes. The runner checks the active
+attempt, lease, and workspace membership on every request, then resolves the current personal
+credential. Provider tokens stay in the runner. A GitHub 401 gets one conditional refresh and
+one replay of that rejected HTTP request; transport errors, 403s, and server errors do not
+replay mutations. This allows overlapping runs to survive shared OAuth rotation, including
+rotation in the middle of a CLI command. GitHub requests have a 128 MiB body limit.
+
+`GH_TOKEN` inside these sandboxes authenticates the local relay, not GitHub directly. Agents
+use `gh api` for authenticated API requests. Download redirects to other hosts travel directly
+from the sandbox over HTTPS without broker or GitHub credentials. The broker uses the existing
+runner public URL and internal signing secret; it requires no new deployed environment variables.
+
 ## Ownership rules
 
 - Public contracts and the typed client: `packages/protocol`. The barrel and `/client` both pull
@@ -129,6 +178,14 @@ re-check may refresh the expiring user token once per install attempt.
 All `/v1` routes require Actor authentication. Browser cookie mutations additionally enforce the
 allowed `Origin`. Command retries retain existing idempotency semantics, and schema changes require
 additive Drizzle migrations.
+
+The onboarding plugin step permits browser sessions with workspace membership to list plugins
+(`GET /v1/plugins`), preview imports (`POST /v1/plugins/imports/preview`), and install them
+(`POST /v1/plugins/imports`) before onboarding completes. The preceding subscription step can also
+read and connect Claude Code and Codex through the narrow `/v1/engine-auth/*` setup routes it uses.
+These exceptions apply only to browser sessions with an existing workspace membership; they retain
+Actor resolution, workspace permissions, origin checks, and rate limits. Ordinary product routes
+and bearer-token callers still require completed onboarding.
 
 The web WorkOS routes, cached API-backed identity resolver, and `activateWorkspace` remain the
 permanent browser-authentication shell. Production web code has zero `@opencompany/db` and zero
@@ -187,3 +244,19 @@ share IDs remain independent, unguessable capabilities. New share links require 
 and web validators; deploy those readers before enabling new writers in a staggered release, and
 retain reader compatibility when rolling back. Physical database names, storage roots, provider
 contracts, and deterministic ingestion IDs retain their existing names.
+
+### Chat context checkpoints
+
+The runner budgets hydrated model input before generation in both product chat and personal-agent
+turns. Image payloads remain typed vision inputs: local raster dimensions and documented model/detail
+rules determine their estimated context cost, independently of base64 size. Unreadable or remote
+image dimensions reserve the known model maximum; unverified models use a conservative 40k allowance.
+These are estimates, not provider billing counts. The model catalog remains the application budget.
+
+Compaction retains complete recent turns and the current request, then summarizes older text and
+actual images in bounded rolling requests. Each summary call records its own usage (including calls
+before a later failure), avoiding artificial long-context pricing from aggregated input counts.
+A checkpoint is persisted only after every batch and final-context validation succeeds. The original
+transcript is unchanged. Image count and encoded payload size are bounded separately from tokens:
+at most 20 images and 16 MiB of image transport data per active request or summary batch. Older
+images can age into a checkpoint; an oversized current request needs fewer or smaller attachments.

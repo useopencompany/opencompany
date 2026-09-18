@@ -27,6 +27,15 @@ export type ConversationRuntime = {
   updatedAt: Date;
 };
 
+export type ConversationComposerSettings = {
+  reasoningEffort: "low" | "medium" | "high" | "xhigh";
+  planModeEnabled?: boolean;
+  goalMode?: {
+    objective: string;
+    tokenBudget?: number | null;
+  } | null;
+};
+
 export const RUN_STATUSES = [
   "queued",
   "running",
@@ -78,10 +87,15 @@ export type Conversation = {
   title: string;
   engine: ChatEngine;
   model: string;
+  composerSettings: ConversationComposerSettings | null;
   messageShapeEpoch: number;
   runtime: ConversationRuntime | null;
   activityState: "working" | "idle";
   hasUnseen: boolean;
+  // A run of this Conversation is blocked on a pending approval or question. Independent of
+  // activityState and of hasUnseen: a foreground approval keeps the engine working, and reading
+  // the Conversation does not unblock it.
+  awaitingInput: boolean;
   pinnedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -277,6 +291,14 @@ export type CancelRunResult = {
   idempotentReplay: boolean;
 };
 
+// A queued Run promoted into the Run that was already executing when the user sent it. Steering
+// is only offered while that other Run is still working, so "no running Run to steer" is a
+// conflict the caller surfaces rather than a silent no-op.
+export type SteerRunResult = {
+  runId: string;
+  targetRunId: string;
+};
+
 export type ResolveApprovalCommand = {
   runId: string;
   approvalId: string;
@@ -331,6 +353,10 @@ export interface ChatRepository {
     limit: number;
   }): Promise<RunEventPage | null>;
   cancelRun(input: { actor: Actor; runId: string }): Promise<CancelRunResult | null>;
+  steerRun(input: {
+    actor: Actor;
+    runId: string;
+  }): Promise<{ result: SteerRunResult | null; found: boolean }>;
   resolveApproval(input: {
     actor: Actor;
     command: ResolveApprovalCommand;
@@ -561,6 +587,22 @@ export class ChatApplicationService {
       runId: resourceId(runId, "runId"),
     });
     if (!result) throw new CoreError("not_found", "Run not found.");
+    return result;
+  }
+
+  async steerRun(actor: Actor, runId: string): Promise<SteerRunResult> {
+    requirePermission(actor, CHAT_WRITE_PERMISSION);
+    const { result, found } = await this.repository.steerRun({
+      actor,
+      runId: resourceId(runId, "runId"),
+    });
+    if (!found) throw new CoreError("not_found", "Run not found.");
+    if (!result) {
+      throw new CoreError(
+        "conflict",
+        "That message is no longer waiting to be sent into a running turn.",
+      );
+    }
     return result;
   }
 

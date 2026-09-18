@@ -2,9 +2,7 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getAppUrl } from "../app-url";
 import { slackApiRequest } from "./slack";
 
-// The Slack answer bot is a second, separate Slack app from the user-token
-// ingestion app: it has a bot presence, receives app_mention events, and
-// posts answers back into channels. Installed once per workspace by an admin.
+// Workspace-owned Slack Channel installation, separate from personal Slack OAuth.
 
 export type SlackBotStatePayload = {
   userWorkosId: string;
@@ -30,34 +28,58 @@ const SLACK_BOT_ENVS = [
   "OPENCOMPANY_SLACK_BOT_STATE_SECRET",
 ] as const;
 
-// Bot scopes: receive mentions and channel/DM messages, reply, list channels
-// for the picker, read thread context, react for status acks, and resolve the
-// asking Slack user's email for goat-identity mapping.
-export const SLACK_BOT_SCOPES = [
-  "app_mentions:read",
+// Public workflow posts, delivery reconciliation, and bot-message filtering.
+const SLACK_BOT_DELIVERY_SCOPES = [
   "chat:write",
   "channels:read",
-  "groups:read",
   "channels:history",
-  "groups:history",
-  "im:history",
-  "reactions:write",
   "users:read",
-  "users:read.email",
 ] as const;
 
-// Installs made before a scope was added keep working for mentions; the
-// settings UI surfaces a reconnect banner until the granted set catches up.
+// Email attribution, the cosmetic per-workflow display name, thread progress reactions, and
+// reading the bot's own direct message threads are requested for new installs. Existing
+// installations can keep delivering while Settings asks an admin to reconnect and grant these
+// additive scopes; without them posts fall back to email-less attribution, the default bot
+// identity, and threads with no progress ack, and direct messages are not delivered to the
+// webhook at all.
+export const SLACK_BOT_SCOPES = [
+  ...SLACK_BOT_DELIVERY_SCOPES,
+  "users:read.email",
+  "chat:write.customize",
+  "reactions:write",
+  "im:history",
+] as const;
+
+// One Slack app has one bot user, so a workflow identity can only override the name and icon on
+// the message itself. Slack rejects those fields without this scope, so a delivery for an install
+// that predates it posts under the default identity instead of failing.
+export function slackBotCanCustomizeIdentity(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("chat:write.customize");
+}
+
+// The worker acks an inbound thread reply by reacting to that message. It is a progress signal,
+// never the answer, so an install that predates the scope keeps running its threads unmarked
+// instead of failing the follow-up it is annotating.
+export function slackBotCanReact(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("reactions:write");
+}
+
+// Slack withholds `message.im` entirely without this scope, so an install that predates it never
+// sees a direct message at all. Nothing fails; the bot is simply silent when someone writes to it,
+// which is why Settings has to name it rather than leave it to be discovered.
+export function slackBotCanReadDirectMessages(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("im:history");
+}
+
+// Settings surfaces missing grants as a reconnect requirement.
 export function slackBotScopesSatisfied(grantedScopes: readonly string[]): boolean {
   const granted = new Set(grantedScopes);
   return SLACK_BOT_SCOPES.every((scope) => granted.has(scope));
 }
 
-export function slackBotHasScope(
-  grantedScopes: readonly string[],
-  scope: (typeof SLACK_BOT_SCOPES)[number],
-): boolean {
-  return grantedScopes.includes(scope);
+export function slackBotDeliveryScopesSatisfied(grantedScopes: readonly string[]): boolean {
+  const granted = new Set(grantedScopes);
+  return SLACK_BOT_DELIVERY_SCOPES.every((scope) => granted.has(scope));
 }
 
 export function isSlackBotConfigured() {

@@ -21,16 +21,23 @@ corresponding control.
 | `session/list`, `session/delete`, `session/resume`, `session/close` | Not used | Durable chat sessions own lifecycle and resume through `session/load`. |
 | `session/set_mode` | Not used | Current adapters expose their mode through `session/set_config_option`. |
 
-Codex steering and Goal controls use capability-negotiated extension methods. The runner does not
-call an extension unless the adapter advertises the corresponding capability or is configured with
-the adapter's known steering method.
+Steering and Goal controls use capability-negotiated extension methods. The runner does not call an
+extension unless the adapter advertises the corresponding capability on the `initialize` response.
+
+| Extension request | Status | opencompany behavior |
+| --- | --- | --- |
+| `_session/steering` | Supported | Advertised by `_meta.steering.supported`. Injects a message the user promoted into the turn that is already running. Only an `injected` outcome consumes the promotion; `startedNewTurn` and any refusal leave the message queued so it runs as the next turn instead. |
+
+The opencompany engine offers the same product behavior without ACP: it has no adapter session, so a
+promoted message is appended to the message list at the next model step and projected into the
+transcript from the runner's own confirmed injection. See `docs/chat-operations.md`.
 
 ## Client methods
 
 | Agent-to-client method | Status | opencompany behavior |
 | --- | --- | --- |
 | `session/request_permission` | Supported | Creates a durable one-time approval, waits for the user's choice, and returns the matching ACP option ID. `allow_once` and `reject_once` are preferred when the agent supplies them; there is no persistent “always allow” product control. |
-| `elicitation/create` (`form`) | Supported with limits | Creates a durable question for up to three flat primitive fields. Supports strings, numbers, integers, booleans, titled single-selects, and one selection from a titled multi-select. Codex and Claude companion “Other” fields are folded into the related question. |
+| `elicitation/create` (`form`) | Supported with limits | Creates a durable question for up to three flat primitive fields. Codex exposes its native question tool in both Default and Plan modes; Claude Code maps `AskUserQuestion` to the same form. Supports strings, numbers, integers, booleans, titled single-selects, and one selection from a titled multi-select. Codex and Claude companion “Other” fields are folded into the related question. |
 | `elicitation/create` (`url`) | Supported | Presents the message and URL as a durable accept/decline question. The agent remains responsible for observing completion of the external flow. |
 | `elicitation/complete` | Accepted | The notification is accepted. The durable URL question has already been resolved when the user accepts or declines it, so no additional UI transition is applied. |
 | `fs/read_text_file`, `fs/write_text_file` | Not advertised | Sandbox agents access their shared checkout directly. The runner does not advertise ACP filesystem RPCs. |
@@ -48,7 +55,7 @@ Unknown extension requests receive JSON-RPC `-32601`. Unknown notifications are 
 | `plan` | Supported | Plan item. The pre-standard `plan_update` spelling is also accepted. |
 | `usage_update` | Supported | Context-window usage and cost metadata. Prompt-result token usage is handled separately. |
 | `session_info_update` | Partially supported | Goal metadata is projected. Titles, timestamps, and other session metadata remain owned by the opencompany chat session. |
-| `user_message_chunk` | Accepted, not projected | New user input is already stored by opencompany; loaded-session replay is drained before projection to avoid duplicates. |
+| `user_message_chunk` | Accepted, not projected | New user input is already stored by opencompany; loaded-session replay is drained before projection to avoid duplicates. Steered input is projected from the runner's own confirmed injection instead, so the transcript never depends on an adapter echo. |
 | `available_commands_update` | Accepted, not projected | Coding-chat commands are not currently exposed in the composer. |
 | `current_mode_update` | Accepted, not projected | The composer uses opencompany's selected run mode. |
 | `config_option_update` | Accepted, not projected | The composer uses opencompany's persisted engine settings. |

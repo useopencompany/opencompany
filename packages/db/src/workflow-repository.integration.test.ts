@@ -7,23 +7,27 @@ import {
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
   type CreateTaskResult,
-  SCHEDULE_READ_PERMISSION,
-  SCHEDULE_WRITE_PERMISSION,
-  TaskScheduleApplicationService,
   WORKFLOW_READ_PERMISSION,
   WORKFLOW_WRITE_PERMISSION,
   WorkflowApplicationService,
 } from "@opencompany/core";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
+import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveLegacyWorkflowSkillAccess } from "./harness";
 import { snapshotPGliteSchema } from "./test-schema-snapshot";
-import { PostgresTaskScheduleRepository, PostgresWorkflowRepository } from "./workflow-repository";
+import { PostgresWorkflowRepository } from "./workflow-repository";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const migrationPaths = [
   "drizzle/0207_goat_headless_workflow_foundation.sql",
   "drizzle/0222_goat_workflow_event_triggers.sql",
+  "drizzle/0275_workflow_personal_company_scope.sql",
+  "drizzle/0277_workflow_multiple_triggers.sql",
+  "drizzle/0291_workflow_slack_channel.sql",
+  "drizzle/0294_workflow_slack_avatar.sql",
+  "drizzle/0295_workflow_schedule_authorization.sql",
 ].map((migration) => path.join(repositoryRoot, migration));
 const dialect = new PgDialect();
 const now = new Date("2026-08-12T08:00:00.000Z");
@@ -32,13 +36,20 @@ const nextRunAt = new Date("2026-08-13T09:00:00.000Z");
 describe("Postgres Workflow and Recurring Task repositories", () => {
   let database: PGlite;
   let workflows: WorkflowApplicationService;
-  let schedules: TaskScheduleApplicationService;
   let migrationEvidence: {
     workflowVersion: number;
     workflowStepInstructions: string;
     workflowTriggerPrompt: string;
+    workflowTriggerCount: number;
+    workflowScope: string;
+    workflowScopeProjected: boolean;
+    workflowSlackChannelEnabled: boolean;
+    workflowSlackBotDisplayName: string;
+    workflowSlackBotAvatarUrl: string;
     workflowProjected: boolean;
     workflowScheduleProjected: boolean;
+    workflowScheduleVisibilityProjected: boolean;
+    personalWorkflowScheduleBackfilled: boolean;
     taskScheduleVersion: number;
     taskScheduleProjected: boolean;
   };
@@ -49,8 +60,8 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       await database.exec(BASE_SCHEMA);
       await database.exec("ALTER TABLE goat.workflows ADD COLUMN event_activated_at timestamptz");
       await database.exec(`
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('migration_user', true);
+      CREATE TABLE goat.channel_deliveries (id text PRIMARY KEY);
+      INSERT INTO goat.users (workos_user_id) VALUES ('migration_user');
       INSERT INTO goat.workspaces (id) VALUES ('migration_workspace');
       INSERT INTO goat.workflows (
         id, workspace_id, slug, name, instructions, model, trigger,
@@ -71,6 +82,17 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       );
     `);
       for (const migrationPath of migrationPaths) {
+        if (migrationPath.endsWith("0295_workflow_schedule_authorization.sql")) {
+          await database.exec(`
+            INSERT INTO goat.workflows (
+              id, workspace_id, slug, name, trigger, schedule_cron, schedule_enabled,
+              scope, created_by_workos_id
+            ) VALUES (
+              'migration_personal_workflow', 'migration_workspace', 'personal-workflow',
+              'Personal workflow', 'schedule', '0 8 * * *', true, 'personal', 'migration_user'
+            )
+          `);
+        }
         const migration = await readFile(migrationPath, "utf8");
         for (const statement of migration.split("--> statement-breakpoint")) {
           if (statement.trim()) await database.exec(statement);
@@ -81,8 +103,16 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
           workflow_version: number;
           workflow_step_instructions: string;
           workflow_trigger_prompt: string;
+          workflow_trigger_count: number;
+          workflow_scope: string;
+          workflow_scope_projected: boolean;
+          workflow_slack_channel_enabled: boolean;
+          workflow_slack_bot_display_name: string;
+          workflow_slack_bot_avatar_url: string;
           workflow_projected: boolean;
           workflow_schedule_projected: boolean;
+          workflow_schedule_visibility_projected: boolean;
+          personal_workflow_schedule_backfilled: boolean;
           task_schedule_version: number;
           task_schedule_projected: boolean;
         }>(`
@@ -98,6 +128,15 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             FROM goat.workflow_read_model_v1 AS projection
             WHERE projection.id = workflow.id
           ) AS workflow_trigger_prompt,
+          jsonb_array_length(workflow.automation_triggers) AS workflow_trigger_count,
+          workflow.scope AS workflow_scope,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_read_model_v1
+            WHERE id = workflow.id AND scope = workflow.scope
+          ) AS workflow_scope_projected,
+          workflow.slack_channel_enabled AS workflow_slack_channel_enabled,
+          workflow.slack_bot_display_name AS workflow_slack_bot_display_name,
+          workflow.slack_bot_avatar_url AS workflow_slack_bot_avatar_url,
           EXISTS (
             SELECT 1 FROM goat.workflow_read_model_v1
             WHERE id = workflow.id AND steps->0->>'instructions' = workflow.instructions
@@ -106,6 +145,18 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
             SELECT 1 FROM goat.workflow_schedule_read_model_v1
             WHERE workflow_id = workflow.id AND cron = workflow.schedule_cron
           ) AS workflow_schedule_projected,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_schedule_read_model_v1
+            WHERE workflow_id = workflow.id
+              AND scope = workflow.scope
+              AND created_by_workos_id IS NOT DISTINCT FROM workflow.created_by_workos_id
+          ) AS workflow_schedule_visibility_projected,
+          EXISTS (
+            SELECT 1 FROM goat.workflow_schedule_read_model_v1
+            WHERE workflow_id = 'migration_personal_workflow'
+              AND scope = 'personal'
+              AND created_by_workos_id = 'migration_user'
+          ) AS personal_workflow_schedule_backfilled,
           schedule.version AS task_schedule_version,
           EXISTS (
             SELECT 1 FROM goat.task_schedule_read_model_v1
@@ -121,8 +172,18 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
         workflowVersion: migrationRow?.workflow_version ?? 0,
         workflowStepInstructions: migrationRow?.workflow_step_instructions ?? "",
         workflowTriggerPrompt: migrationRow?.workflow_trigger_prompt ?? "",
+        workflowTriggerCount: migrationRow?.workflow_trigger_count ?? 0,
+        workflowScope: migrationRow?.workflow_scope ?? "",
+        workflowScopeProjected: migrationRow?.workflow_scope_projected ?? false,
+        workflowSlackChannelEnabled: migrationRow?.workflow_slack_channel_enabled ?? false,
+        workflowSlackBotDisplayName: migrationRow?.workflow_slack_bot_display_name ?? "",
+        workflowSlackBotAvatarUrl: migrationRow?.workflow_slack_bot_avatar_url ?? "",
         workflowProjected: migrationRow?.workflow_projected ?? false,
         workflowScheduleProjected: migrationRow?.workflow_schedule_projected ?? false,
+        workflowScheduleVisibilityProjected:
+          migrationRow?.workflow_schedule_visibility_projected ?? false,
+        personalWorkflowScheduleBackfilled:
+          migrationRow?.personal_workflow_schedule_backfilled ?? false,
         taskScheduleVersion: migrationRow?.task_schedule_version ?? 0,
         taskScheduleProjected: migrationRow?.task_schedule_projected ?? false,
       };
@@ -136,13 +197,14 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       DELETE FROM goat.workspace_members;
       DELETE FROM goat.users;
       DELETE FROM goat.workspaces;
-      INSERT INTO goat.users (workos_user_id, task_spawning_enabled)
-      VALUES ('user_1', true), ('user_2', true), ('user_disabled', false);
+      INSERT INTO goat.users (workos_user_id)
+      VALUES ('user_1'), ('user_2'), ('user_teammate'), ('user_disabled');
       INSERT INTO goat.workspaces (id) VALUES ('workspace_1'), ('workspace_2');
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES
         ('member_1', 'workspace_1', 'user_1', 'admin'),
         ('member_2', 'workspace_2', 'user_2', 'admin'),
+        ('member_teammate', 'workspace_1', 'user_teammate', 'member'),
         ('member_disabled', 'workspace_1', 'user_disabled', 'member');
     `);
     });
@@ -173,10 +235,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       ...options,
       newStepId: () => "step_new",
     });
-    schedules = new TaskScheduleApplicationService(
-      new PostgresTaskScheduleRepository(execute, { ids }),
-      options,
-    );
   });
 
   afterEach(async () => {
@@ -188,8 +246,19 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
       workflowVersion: 1,
       workflowStepInstructions: "Preserve these instructions.",
       workflowTriggerPrompt: "Run the legacy workflow.",
+      workflowTriggerCount: 1,
+      // Workflows that predate scopes belong to the whole workspace.
+      workflowScope: "company",
+      workflowScopeProjected: true,
+      // A workflow written before the Channels section could always post to Slack, so the toggle
+      // backfills to on and the identity stays the default bot.
+      workflowSlackChannelEnabled: true,
+      workflowSlackBotDisplayName: "",
+      workflowSlackBotAvatarUrl: "",
       workflowProjected: true,
       workflowScheduleProjected: true,
+      workflowScheduleVisibilityProjected: true,
+      personalWorkflowScheduleBackfilled: true,
       taskScheduleVersion: 1,
       taskScheduleProjected: true,
     });
@@ -238,6 +307,280 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     ).resolves.toMatchObject({ rows: [{ count: 1 }] });
   });
 
+  it("grants legacy Personal workflow Skill access only to the current owner member", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "personal-workflow-skill-access",
+      name: "Private report",
+      description: "Use private material",
+      scope: "personal",
+    });
+    const db = drizzle(database);
+
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_1",
+      }),
+    ).resolves.toBe("actor");
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_teammate",
+      }),
+    ).resolves.toBe("company");
+
+    await database.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'user_1'");
+    await expect(
+      resolveLegacyWorkflowSkillAccess(db, {
+        workspaceId: "workspace_1",
+        workflowId: created.workflow.slug,
+        userId: "user_1",
+      }),
+    ).resolves.toBe("company");
+  });
+
+  it("gives a new Workflow the Slack channel every existing row already had, and persists edits", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-channel-1",
+      name: "Weekly research",
+    });
+    expect(created.workflow.slackChannel).toEqual({
+      enabled: true,
+      displayName: "",
+      avatarUrl: "",
+    });
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Weekly research",
+      description: "",
+      steps: created.workflow.steps,
+      status: "draft",
+      trigger: { type: "manual" },
+      slackChannel: {
+        enabled: false,
+        displayName: "James",
+        avatarUrl: "https://example.com/james.png",
+      },
+    });
+    expect(updated.workflow.slackChannel).toEqual({
+      enabled: false,
+      displayName: "James",
+      avatarUrl: "https://example.com/james.png",
+    });
+    await expect(workflows.getWorkflow(actor(), created.workflow.id)).resolves.toMatchObject({
+      slackChannel: {
+        enabled: false,
+        displayName: "James",
+        avatarUrl: "https://example.com/james.png",
+      },
+    });
+  });
+
+  it("keeps personal Workflows out of every teammate read and mutation", async () => {
+    const teammate = actor({ userId: "user_teammate", role: "member" });
+    const personal = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-personal-1",
+      name: "Morning digest",
+      scope: "personal",
+    });
+    const company = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-company-1",
+      name: "Weekly research",
+      scope: "company",
+    });
+
+    expect(personal.workflow).toMatchObject({ scope: "personal", createdByUserId: "user_1" });
+    expect(company.workflow).toMatchObject({ scope: "company", createdByUserId: "user_1" });
+    await expect(workflows.listWorkflows(teammate, { limit: 10 })).resolves.toMatchObject({
+      workflows: [{ id: company.workflow.id }],
+    });
+    await expect(workflows.getWorkflow(teammate, personal.workflow.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      workflows.archiveWorkflow(teammate, personal.workflow.id, 1),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      workflows.updateWorkflow(teammate, personal.workflow.id, {
+        expectedVersion: 1,
+        name: "Stolen",
+        description: "",
+        steps: personal.workflow.steps,
+        status: "draft",
+        trigger: { type: "manual" },
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    // Electric filters the shape on the projected columns, so they have to carry the owner too.
+    await expect(
+      database.query<{ scope: string; created_by_workos_id: string }>(
+        `SELECT scope, created_by_workos_id FROM goat.workflow_read_model_v1 WHERE id = $1`,
+        [personal.workflow.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ scope: "personal", created_by_workos_id: "user_1" }],
+    });
+  });
+
+  it("projects Workflow visibility onto schedules and updates it when scope changes", async () => {
+    const personal = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "schedule-visibility-personal",
+      name: "Personal morning digest",
+      scope: "personal",
+    });
+    const company = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "schedule-visibility-company",
+      name: "Company morning digest",
+      scope: "company",
+    });
+    const activateSchedule = (workflow: typeof personal.workflow) =>
+      workflows.updateWorkflow(actor(), workflow.id, {
+        expectedVersion: 1,
+        name: workflow.name,
+        description: "",
+        steps: [
+          {
+            id: "step_1",
+            title: "Digest",
+            model: "provider/model",
+            instructions: "Write the morning digest.",
+          },
+        ],
+        status: "active",
+        trigger: { type: "schedule", cron: "0 9 * * *", timezone: "UTC" },
+      });
+    await activateSchedule(personal.workflow);
+    await activateSchedule(company.workflow);
+
+    const visibleScheduleIds = async (workspaceId: string, userId: string) =>
+      (
+        await database.query<{ id: string }>(
+          `SELECT id
+           FROM goat.workflow_schedule_read_model_v1
+           WHERE workspace_id = $1
+             AND (scope = 'company' OR created_by_workos_id = $2)
+           ORDER BY id`,
+          [workspaceId, userId],
+        )
+      ).rows.map((row) => row.id);
+
+    await expect(visibleScheduleIds("workspace_1", "user_1")).resolves.toEqual([
+      personal.workflow.id,
+      company.workflow.id,
+    ]);
+    await expect(visibleScheduleIds("workspace_1", "user_teammate")).resolves.toEqual([
+      company.workflow.id,
+    ]);
+    await expect(visibleScheduleIds("workspace_2", "user_2")).resolves.toEqual([]);
+
+    await workflows.updateWorkflow(actor(), company.workflow.id, {
+      expectedVersion: 2,
+      name: company.workflow.name,
+      description: "",
+      steps: [
+        {
+          id: "step_1",
+          title: "Digest",
+          model: "provider/model",
+          instructions: "Write the morning digest.",
+        },
+      ],
+      status: "active",
+      scope: "personal",
+      trigger: { type: "schedule", cron: "0 9 * * *", timezone: "UTC" },
+    });
+
+    await expect(visibleScheduleIds("workspace_1", "user_teammate")).resolves.toEqual([]);
+    await expect(visibleScheduleIds("workspace_1", "user_1")).resolves.toEqual([
+      personal.workflow.id,
+      company.workflow.id,
+    ]);
+  });
+
+  it("lets the creator share a personal Workflow and refuses a teammate the same change", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "workflow-share-1",
+      name: "Morning digest",
+      scope: "personal",
+    });
+    const definition = {
+      name: "Morning digest",
+      description: "",
+      steps: created.workflow.steps,
+      status: "draft" as const,
+      trigger: { type: "manual" as const },
+    };
+
+    const shared = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      ...definition,
+      expectedVersion: 1,
+      scope: "company",
+    });
+    expect(shared.workflow).toMatchObject({ scope: "company", createdByUserId: "user_1" });
+
+    // A member can edit a company workflow, but taking someone else's back to personal is not theirs.
+    await expect(
+      workflows.updateWorkflow(
+        actor({ userId: "user_teammate", role: "member" }),
+        shared.workflow.id,
+        {
+          ...definition,
+          expectedVersion: 2,
+          scope: "personal",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("refuses an admin someone else's workflow but lets one claim a workflow with no creator", async () => {
+    const admin = actor({ role: "admin" });
+    const teammate = actor({ userId: "user_teammate", role: "member" });
+    const owned = await workflows.createWorkflow(teammate, {
+      idempotencyKey: "workflow-admin-1",
+      name: "Teammate digest",
+      scope: "company",
+    });
+    const definition = {
+      description: "",
+      steps: owned.workflow.steps,
+      status: "draft" as const,
+      trigger: { type: "manual" as const },
+    };
+
+    // A scheduled workflow fires as a specific user, so an admin must not be able to hand a
+    // teammate's workflow to a private library it would keep running out of.
+    await expect(
+      workflows.updateWorkflow(admin, owned.workflow.id, {
+        ...definition,
+        name: "Teammate digest",
+        expectedVersion: 1,
+        scope: "personal",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    await database.query(
+      `INSERT INTO goat.workflows (
+         id, workspace_id, slug, name, description, instructions, model, steps,
+         trigger, schedule_timezone, schedule_prompt, schedule_enabled, status,
+         created_by_workos_id, version, created_at, updated_at
+       ) VALUES (
+         'workflow_legacy', 'workspace_1', 'legacy-digest', 'Legacy digest', '', '', '',
+         '[]'::jsonb, 'manual', 'UTC', '', false, 'draft', NULL, 1, $1, $1
+       )`,
+      [now],
+    );
+    const claimed = await workflows.updateWorkflow(admin, "workflow_legacy", {
+      ...definition,
+      name: "Legacy digest",
+      steps: [{ id: "step_1", title: "", model: "", instructions: "" }],
+      expectedVersion: 1,
+      scope: "personal",
+    });
+    expect(claimed.workflow).toMatchObject({ scope: "personal", createdByUserId: "user_1" });
+  });
+
   it("paginates Workflow and Recurring Task resources with actor-scoped opaque cursors", async () => {
     const firstWorkflow = await workflows.createWorkflow(actor(), {
       idempotencyKey: "workflow-page-1",
@@ -258,28 +601,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     await expect(
       workflows.listWorkflows(actor(), { cursor: "missing_workflow", limit: 1 }),
     ).resolves.toEqual({ workflows: [], nextCursor: null });
-
-    const scheduleCommand = {
-      name: "Recurring research",
-      cron: "0 9 * * *",
-      prompt: "Research changes.",
-    };
-    const firstSchedule = await schedules.createTaskSchedule(actor(), {
-      ...scheduleCommand,
-      idempotencyKey: "schedule-page-1",
-    });
-    const secondSchedule = await schedules.createTaskSchedule(actor(), {
-      ...scheduleCommand,
-      idempotencyKey: "schedule-page-2",
-    });
-    const schedulePage = await schedules.listTaskSchedules(actor(), { limit: 1 });
-    expect(schedulePage).toMatchObject({
-      schedules: [{ id: secondSchedule.schedule.id }],
-      nextCursor: secondSchedule.schedule.id,
-    });
-    await expect(
-      schedules.listTaskSchedules(actor(), { cursor: schedulePage.nextCursor!, limit: 1 }),
-    ).resolves.toMatchObject({ schedules: [{ id: firstSchedule.schedule.id }], nextCursor: null });
   });
 
   it("updates and archives a Workflow with optimistic concurrency and synchronized projections", async () => {
@@ -472,6 +793,64 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     });
   });
 
+  it("persists multiple independently executable triggers", async () => {
+    const created = await workflows.createWorkflow(actor(), {
+      idempotencyKey: "multi-trigger-workflow",
+      name: "Issue digest",
+    });
+    const eventTrigger = {
+      id: "trigger_event",
+      type: "event" as const,
+      provider: "linear",
+      event: "issue.created",
+      integrationId: "connection_1",
+      filters: {},
+      prompt: "Review the issue.",
+    };
+    const scheduleTrigger = {
+      id: "trigger_schedule",
+      type: "schedule" as const,
+      cron: "0 9 * * 1",
+      timezone: "UTC",
+      prompt: "Write the weekly digest.",
+      enabled: true,
+    };
+
+    const updated = await workflows.updateWorkflow(actor(), created.workflow.id, {
+      expectedVersion: 1,
+      name: "Issue digest",
+      description: "",
+      steps: [
+        {
+          id: "step_1",
+          title: "Digest",
+          model: "provider/model",
+          instructions: "Review issues and write a digest.",
+        },
+      ],
+      status: "active",
+      trigger: eventTrigger,
+      triggers: [eventTrigger, scheduleTrigger],
+    });
+
+    expect(updated.workflow.triggers).toEqual([
+      expect.objectContaining({ id: "trigger_event", type: "event" }),
+      expect.objectContaining({ id: "trigger_schedule", type: "schedule" }),
+    ]);
+    await expect(
+      database.query<{ trigger_ids: string[] }>(
+        `SELECT ARRAY(
+           SELECT trigger.value->>'id'
+           FROM goat.workflows workflow,
+             jsonb_array_elements(workflow.automation_triggers) trigger(value)
+           WHERE workflow.id = $1
+           ORDER BY trigger.value->>'id'
+         ) AS trigger_ids`,
+        [created.workflow.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ trigger_ids: ["trigger_event", "trigger_schedule"] }] });
+  });
+
   it("preserves activation for instruction edits and resets it for routing changes and reactivation", async () => {
     let clock = now;
     const service = new WorkflowApplicationService(
@@ -536,105 +915,6 @@ describe("Postgres Workflow and Recurring Task repositories", () => {
     clock = new Date(clock.getTime() + 60_000);
     expect(await save(changedRoute)).toEqual(clock);
   });
-
-  it("keeps Recurring Tasks actor-owned, feature-gated, idempotent, and versioned", async () => {
-    const command = {
-      idempotencyKey: "schedule-create-1",
-      name: "Weekly research",
-      sourceDescription: "Tasks page",
-      cron: "0 9 * * 1",
-      timezone: "Europe/Berlin",
-      prompt: "Research market changes.",
-    };
-    const first = await schedules.createTaskSchedule(actor(), command);
-    const replay = await schedules.createTaskSchedule(actor(), command);
-
-    expect(first).toMatchObject({
-      schedule: {
-        id: "schedule_2",
-        name: "Weekly research",
-        version: 1,
-      },
-      idempotentReplay: false,
-    });
-    expect(replay).toMatchObject({
-      schedule: { id: first.schedule.id },
-      transactionId: first.transactionId,
-      idempotentReplay: true,
-    });
-    await expect(
-      schedules.getTaskSchedule(
-        actor({ userId: "user_2", workspaceId: "workspace_2" }),
-        first.schedule.id,
-      ),
-    ).rejects.toMatchObject({ code: "not_found" });
-    await expect(
-      schedules.createTaskSchedule(actor({ userId: "user_disabled" }), {
-        ...command,
-        idempotencyKey: "disabled-schedule",
-      }),
-    ).rejects.toMatchObject({ code: "forbidden" });
-
-    await database.exec(`
-      INSERT INTO goat.task_schedules (
-        id, user_workos_id, workspace_id, name, source_description, cron, timezone,
-        prompt, planned_harness_spec, enabled, next_run_at, version, created_at, updated_at
-      ) VALUES (
-        'legacy_personal_schedule', 'user_1', NULL, 'Legacy personal schedule', '',
-        '0 8 * * *', 'UTC', 'Preserve this recurring Task.',
-        '{"engine":"opencompany","model":"provider/model"}'::jsonb,
-        true, '2026-08-13T08:00:00.000Z', 1, now(), now()
-      )
-    `);
-    await expect(schedules.listTaskSchedules(actor())).resolves.toMatchObject({
-      schedules: expect.arrayContaining([
-        expect.objectContaining({ id: "legacy_personal_schedule", version: 1 }),
-      ]),
-    });
-    await schedules.updateTaskSchedule(actor(), "legacy_personal_schedule", {
-      expectedVersion: 1,
-      name: "Legacy schedule retained",
-      cron: "0 8 * * *",
-      timezone: "UTC",
-      prompt: "Preserve this recurring Task.",
-    });
-    await expect(
-      database.query<{ workspace_id: string }>(
-        "SELECT workspace_id FROM goat.task_schedules WHERE id = $1",
-        ["legacy_personal_schedule"],
-      ),
-    ).resolves.toMatchObject({ rows: [{ workspace_id: "workspace_1" }] });
-
-    const paused = await schedules.setTaskScheduleEnabled(actor(), first.schedule.id, {
-      expectedVersion: 1,
-      enabled: false,
-    });
-    expect(paused.schedule).toMatchObject({ enabled: false, version: 2 });
-    await expect(
-      schedules.setTaskScheduleEnabled(actor(), first.schedule.id, {
-        expectedVersion: 1,
-        enabled: true,
-      }),
-    ).rejects.toMatchObject({ code: "conflict" });
-    await expect(
-      database.query<{ enabled: boolean; version: number }>(
-        "SELECT enabled, version FROM goat.task_schedule_read_model_v1 WHERE id = $1",
-        [first.schedule.id],
-      ),
-    ).resolves.toMatchObject({ rows: [{ enabled: false, version: 2 }] });
-
-    await schedules.archiveTaskSchedule(actor(), first.schedule.id, 2);
-    await database.exec(`
-      UPDATE goat.users
-      SET task_spawning_enabled = false
-      WHERE workos_user_id = 'user_1'
-    `);
-    await expect(schedules.createTaskSchedule(actor(), command)).resolves.toMatchObject({
-      schedule: { id: first.schedule.id, enabled: false, version: 3 },
-      transactionId: first.transactionId,
-      idempotentReplay: true,
-    });
-  });
 });
 
 function actor(overrides: Partial<Actor> = {}): Actor {
@@ -642,12 +922,7 @@ function actor(overrides: Partial<Actor> = {}): Actor {
     userId: "user_1",
     workspaceId: "workspace_1",
     role: "admin",
-    permissions: [
-      WORKFLOW_READ_PERMISSION,
-      WORKFLOW_WRITE_PERMISSION,
-      SCHEDULE_READ_PERMISSION,
-      SCHEDULE_WRITE_PERMISSION,
-    ],
+    permissions: [WORKFLOW_READ_PERMISSION, WORKFLOW_WRITE_PERMISSION],
     authenticationMethod: "session",
     ...overrides,
   };
@@ -659,15 +934,13 @@ function deterministicIds() {
   return {
     command: () => next("command"),
     workflow: () => next("workflow"),
-    taskSchedule: () => next("schedule"),
-    scheduleRun: (kind: "workflow" | "task") => next(`${kind}_run`),
+    scheduleRun: (kind: "workflow") => next(`${kind}_run`),
   };
 }
 
 function fakePlanner(): AutomationExecutionPlanner {
   return {
     prepareWorkflow: vi.fn(async () => executionPlan()),
-    prepareTaskSchedule: vi.fn(async () => executionPlan()),
   };
 }
 
@@ -713,10 +986,7 @@ function taskResult(): CreateTaskResult {
 
 const BASE_SCHEMA = `
   CREATE SCHEMA goat;
-  CREATE TABLE goat.users (
-    workos_user_id text PRIMARY KEY,
-    task_spawning_enabled boolean NOT NULL DEFAULT false
-  );
+  CREATE TABLE goat.users (workos_user_id text PRIMARY KEY);
   CREATE TABLE goat.workspaces (id text PRIMARY KEY);
   CREATE TABLE goat.workspace_members (
     id text PRIMARY KEY,

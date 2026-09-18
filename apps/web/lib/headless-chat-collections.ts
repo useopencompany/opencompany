@@ -15,6 +15,7 @@ import { electricCollectionOptions } from "@tanstack/electric-db-collection";
 import { createCollection } from "@tanstack/react-db";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { clearChatSyncError, recordChatSyncError } from "./headless-chat-sync-status";
+import { awaitCollectionTransaction } from "./headless-collection-reconciliation";
 
 function readModelUrl(readModel: ChatReadModel) {
   return `${headlessChatApiBaseUrl()}/v1/read-models/${readModel}`;
@@ -24,6 +25,18 @@ function shapeOptions(readModel: ChatReadModel) {
   return {
     url: readModelUrl(readModel),
     fetchClient: createHeadlessChatApiFetch(),
+  };
+}
+
+// Electric marks a collection ready even when its shape stream fails, so without this the rows it
+// already holds freeze in place: a transcript renders as a silent empty conversation, and a Run or
+// engine session keeps reporting the last status it saw. Record the failure for the retry surface
+// and return {} to keep the shape stream retrying with Electric's backoff.
+function keepStreamRetrying(message: string, conversationId: string) {
+  return (error: unknown) => {
+    console.warn(message, { conversationId, error });
+    recordChatSyncError(conversationId);
+    return {};
   };
 }
 
@@ -46,14 +59,7 @@ function createMessages(conversationId: string, messageShapeEpoch: number) {
       shapeOptions: {
         ...shapeOptions("chat-messages-v2"),
         params: { conversationId, messageShapeEpoch: String(messageShapeEpoch) },
-        // Electric already marks the collection ready on error, so without this the transcript
-        // renders as a silent empty conversation. Record the failure for the retry surface and
-        // return {} to keep the shape stream retrying with Electric's backoff.
-        onError: (error) => {
-          console.warn("Chat transcript sync failed; retrying.", { conversationId, error });
-          recordChatSyncError(conversationId);
-          return {};
-        },
+        onError: keepStreamRetrying("Chat transcript sync failed; retrying.", conversationId),
       },
       getKey: (row) => row.id,
     }),
@@ -68,6 +74,7 @@ function createRuns(conversationId: string) {
       shapeOptions: {
         ...shapeOptions("chat-runs-v1"),
         params: { conversationId },
+        onError: keepStreamRetrying("Chat run sync failed; retrying.", conversationId),
       },
       getKey: (row) => row.id,
     }),
@@ -82,6 +89,7 @@ function createEngineSession(conversationId: string) {
       shapeOptions: {
         ...shapeOptions("engine-sessions-v1"),
         params: { conversationId },
+        onError: keepStreamRetrying("Engine session sync failed; retrying.", conversationId),
       },
       // goat_codex_chat_sessions_chat_session_idx guarantees one engine session per Conversation.
       getKey: (row) => row.conversationId,
@@ -293,9 +301,9 @@ export async function awaitHeadlessChatTransaction(input: {
     const runs = getHeadlessChatRuns(input.conversationId);
     const conversations = getHeadlessChatConversations();
     await Promise.all([
-      conversations.utils.awaitTxId(transactionId, input.timeoutMs),
-      messages.utils.awaitTxId(transactionId, input.timeoutMs),
-      runs.utils.awaitTxId(transactionId, input.timeoutMs),
+      awaitCollectionTransaction(conversations, transactionId, input.timeoutMs),
+      awaitCollectionTransaction(messages, transactionId, input.timeoutMs),
+      awaitCollectionTransaction(runs, transactionId, input.timeoutMs),
     ]);
   } finally {
     const remaining = (pendingMessageTransactionWaits.get(input.conversationId) ?? 1) - 1;
@@ -313,7 +321,7 @@ export async function awaitHeadlessConversationTransaction(
   if (!Number.isSafeInteger(transactionId) || transactionId < 1) {
     throw new Error("The API returned an invalid Electric transaction identifier.");
   }
-  await getHeadlessChatConversations().utils.awaitTxId(transactionId, timeoutMs);
+  await awaitCollectionTransaction(getHeadlessChatConversations(), transactionId, timeoutMs);
 }
 
 export type HeadlessChatMessageReadModel = MessageSummaryReadModel;

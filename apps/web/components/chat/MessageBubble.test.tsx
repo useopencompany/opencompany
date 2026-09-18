@@ -1,10 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import {
+  ACP_TOOLS_MCP_SERVER_NAME,
   CODEX_APPROVAL_TOOL_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_MCP_TOOL_NAME,
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
+  CODEX_SUBAGENT_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -13,6 +15,7 @@ import {
   BRAIN_TOOL_NAME,
   BRAIN_TOOL_PART_TYPE,
   type ChatUiMessage,
+  USE_ACTION_TOOL_NAME,
   USE_ACTION_TOOL_PART_TYPE,
 } from "@/lib/chat-ui";
 import { getVisibleBrainCitationCount } from "./AssistantTextBubble";
@@ -439,10 +442,10 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.getByText("Run search public and private in Slack?")).toBeVisible();
     expect(screen.getByText("launch plan")).toBeVisible();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Always allow" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Always allow this tool" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Deny" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Always allow" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Always allow this tool" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
     expect(onActionApproval).not.toHaveBeenCalled();
@@ -458,9 +461,128 @@ describe("MessageBubble historical presentation details", () => {
     expect(screen.queryByTestId("chat-action-approval")).not.toBeInTheDocument();
     expect(screen.getByTestId("chat-tool-call-use_action")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Always allow" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Always allow this tool" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Deny" })).not.toBeInTheDocument();
     expect(presentationMocks.load).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a summary-backed pending question expanded while loading its full request", async () => {
+    const onCodexAction = vi.fn(async () => undefined);
+    const summaryMessage = {
+      id: "assistant_pending_question_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-17T16:00:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            detail: "Which coding agent should we test first?",
+          },
+        },
+      ],
+    } as ChatUiMessage;
+    const fullMessage = {
+      ...summaryMessage,
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "approval-requested",
+          input: {
+            label: "Question",
+            interactionId: "interaction_123",
+            question: "Which coding agent should we test first?",
+            questions: [
+              {
+                id: "target",
+                header: "Test target",
+                question: "Which coding agent should we test first?",
+                options: [{ label: "Codex", description: "Test Codex first." }],
+              },
+            ],
+          },
+        },
+      ],
+    } as ChatUiMessage;
+    let resolvePresentation!: (message: ChatUiMessage) => void;
+    presentationMocks.load.mockReturnValueOnce(
+      new Promise<ChatUiMessage>((resolve) => {
+        resolvePresentation = resolve;
+      }),
+    );
+
+    render(
+      <MessageBubble
+        message={summaryMessage}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={onCodexAction}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-codex-question")).toBeVisible();
+    expect(screen.getByText("The coding engine needs your input")).toBeVisible();
+    expect(screen.getByText("Loading details…")).toBeVisible();
+    expect(
+      screen.queryByTestId(`chat-tool-call-${CODEX_QUESTION_TOOL_NAME}`),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(presentationMocks.load).toHaveBeenCalledOnce());
+
+    await act(async () => resolvePresentation(fullMessage));
+
+    expect(await screen.findByRole("radio", { name: /Codex/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send answer" })).toBeEnabled();
+  });
+
+  it("leaves a resolved summary-backed question compact", () => {
+    const message = {
+      id: "assistant_resolved_question_summary",
+      role: "assistant",
+      metadata: {
+        sessionId: "conversation_1",
+        presentation: {
+          source: "summary",
+          updatedAt: "2026-09-17T16:01:00.000Z",
+        },
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_QUESTION_TOOL_NAME,
+          toolCallId: "question_1",
+          state: "output-available",
+          input: {
+            label: "Question",
+            detail: "Which coding agent should we test first?",
+          },
+          output: { status: "answered" },
+        },
+      ],
+    } as ChatUiMessage;
+
+    render(
+      <MessageBubble
+        message={message}
+        taskLookup={emptyTaskLookup}
+        onCodexAction={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.queryByTestId("chat-codex-question")).not.toBeInTheDocument();
+    expect(screen.getByTestId(`chat-tool-call-${CODEX_QUESTION_TOOL_NAME}`)).toBeVisible();
+    expect(presentationMocks.load).not.toHaveBeenCalled();
   });
 
   it("shows loading and retry states before replacing a compact tool summary with full detail", async () => {
@@ -880,7 +1002,7 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
 
     const toolCall = screen.getByTestId("chat-tool-call-use_action");
-    const disclosure = within(toolCall).getByRole("button", { name: /Linear List Issues/i });
+    const disclosure = within(toolCall).getByRole("button", { name: /Linear · List issues/u });
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
     expect(within(toolCall).queryByText("Done")).not.toBeInTheDocument();
     expect(within(toolCall).queryByText("Input")).not.toBeInTheDocument();
@@ -1052,7 +1174,7 @@ describe("MessageBubble assistant errors", () => {
     render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
 
     const disclosure = screen.getByRole("button", {
-      name: /Linear · Save Comment.*Declined/u,
+      name: /Linear · Save comment.*Declined/u,
     });
     expect(disclosure).toBeVisible();
     expect(screen.queryByText("Approved")).not.toBeInTheDocument();
@@ -1670,6 +1792,41 @@ describe("MessageBubble Codex interactions", () => {
     expect(screen.getByText("Inspect viewer")).toBeVisible();
   });
 
+  it("starts running subagents collapsed and lets the user expand their trace", async () => {
+    const message: ChatUiMessage = {
+      id: "assistant_running_subagent",
+      role: "assistant",
+      parts: [
+        {
+          type: `tool-${CODEX_SUBAGENT_TOOL_NAME}`,
+          toolCallId: "subagent_running",
+          state: "input-available",
+          input: { label: "Subagent", description: "Inspect the repository" },
+          children: [
+            {
+              type: `tool-${CODEX_COMMAND_TOOL_NAME}`,
+              toolCallId: "subagent_command",
+              state: "output-available",
+              input: { description: "Search the code", command: "rg SubagentRow" },
+              output: { status: "completed", exitCode: 0 },
+            },
+          ],
+        } as unknown as ChatUiMessage["parts"][number],
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} turnActive />);
+
+    const disclosure = screen.getByTitle("Subagent").closest("button")!;
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Search the code")).not.toBeInTheDocument();
+
+    await userEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Search the code")).toBeVisible();
+  });
+
   it("waits for the assistant turn to finish before compacting completed work", () => {
     const message: ChatUiMessage = {
       id: "assistant_active_trace",
@@ -1898,9 +2055,9 @@ describe("MessageBubble Codex interactions", () => {
           toolCallId: "mcp_1",
           state: "output-available",
           input: {
-            title: "List available actions",
-            server: "opencompany",
-            tool: "list_actions",
+            title: "List open tickets",
+            server: "acme-desk",
+            tool: "list_tickets",
           },
           output: { status: "completed", result: "[]" },
         },
@@ -1911,9 +2068,52 @@ describe("MessageBubble Codex interactions", () => {
 
     expect(screen.getByText("Read 2 lines")).toBeVisible();
     expect(screen.getByText("chat-ui.ts")).toBeVisible();
-    expect(screen.getByText("List available actions")).toBeVisible();
-    expect(screen.getByText("opencompany · list_actions")).toBeVisible();
+    expect(screen.getByText("List open tickets")).toBeVisible();
+    expect(screen.getByText("acme-desk · list_tickets")).toBeVisible();
     expect(screen.queryByText(CODEX_MCP_TOOL_NAME)).not.toBeInTheDocument();
+  });
+
+  it("badges a coding session's connected action with the service it touched", () => {
+    const message: ChatUiMessage = {
+      id: "assistant_action",
+      role: "assistant",
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_action",
+          state: "output-available",
+          input: {
+            server: ACP_TOOLS_MCP_SERVER_NAME,
+            tool: USE_ACTION_TOOL_NAME,
+            arguments: { action: "plugin:linear:linear.create_issue", params: { title: "Ship" } },
+          },
+          output: { status: "completed", result: '{"ok":true}' },
+        },
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "mcp_action_failed",
+          state: "output-available",
+          input: {
+            server: ACP_TOOLS_MCP_SERVER_NAME,
+            tool: USE_ACTION_TOOL_NAME,
+            arguments: { action: "gmail.send_email", params: {} },
+          },
+          output: { status: "failed", error: "Gmail is not connected." },
+        },
+      ] as ChatUiMessage["parts"],
+    };
+
+    const { container } = render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByText("Linear · Create issue")).toBeVisible();
+    expect(container.querySelector("svg.lucide-circle-dot-dashed")).toBeNull();
+    // The service mark takes the status icon's place, so a failure has to stay spelled out.
+    expect(screen.getByText("Gmail · Send email")).toBeVisible();
+    expect(screen.getByText("Failed")).toBeVisible();
+    expect(screen.getByText("Gmail is not connected.")).toBeVisible();
+    expect(screen.queryByText(/opencompany · use_action/)).not.toBeInTheDocument();
   });
 
   it("shows a one-line Thinking preview and keeps the full reasoning expandable", async () => {
@@ -2182,4 +2382,29 @@ describe("getVisibleBrainCitationCount", () => {
       }),
     ).toBe(1);
   });
+});
+
+it("shows automatic approval on the action row and explains it in details", async () => {
+  const message: ChatUiMessage = {
+    id: "automatic-example",
+    role: "assistant",
+    parts: [
+      {
+        type: USE_ACTION_TOOL_PART_TYPE,
+        toolCallId: "call",
+        state: "output-available",
+        input: { action: "plugin:linear:linear.get_issue", params: { id: "ENG-1" } },
+        output: {
+          ok: true,
+          action: "plugin:linear:linear.get_issue",
+          result: { title: "Example" },
+          automaticApproval: { reason: "routine_action" },
+        },
+      } as never,
+    ],
+  };
+  render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+  expect(screen.getByText("Automatically approved")).toBeVisible();
+  await userEvent.click(screen.getByText("Automatically approved"));
+  expect(screen.getByText("Approved as a routine action within your request.")).toBeVisible();
 });

@@ -5,16 +5,17 @@ export type ChatHostToolOperation =
   | "create_workspace_skill"
   | "edit_workspace_skill"
   | "workspace_skills"
-  | "start_task"
-  | "schedule_task"
-  | "edit_task_schedule"
-  | "delete_task_schedule"
   | "start_workflow"
+  | "workflows"
   | "browser_use_profile"
   | "browser_end_profile"
   | "browser"
   | "wiki"
-  | "write_artifact";
+  | "write_artifact"
+  // Gateway operation names are a runner/web wire contract, so this one keeps its
+  // original value while the model-facing tool is SLACK_BOT_TOOL_NAME. Renaming
+  // it would break every in-flight run across a partial deploy.
+  | "post_slack_message";
 
 export type ChatHostToolGatewayRequest = {
   operation: ChatHostToolOperation;
@@ -55,7 +56,10 @@ export type ChatHostBootstrap = {
     timezone: string;
   };
   workspaceName: string;
-  taskToolsEnabled: boolean;
+  automationToolsEnabled: boolean;
+  // The Slack send tool is only registered for a workflow run whose Channels section keeps Slack
+  // on, so an ordinary chat never sees a tool it cannot use.
+  slackChannelEnabled: boolean;
   skillToolsEnabled: boolean;
   subagentsEnabled: boolean;
   browserToolsEnabled: boolean;
@@ -67,16 +71,6 @@ export type ChatHostBootstrap = {
   skills: Array<{ id: string; name: string; description: string }>;
   activeSkills: ChatHostSkill[];
   workflows: Array<{ id: string; name: string; description: string }>;
-  recurringSchedules: Array<{
-    id: string;
-    name: string;
-    cron: string;
-    timezone: string;
-    enabled: boolean;
-    nextRunAt: string;
-    prompt: string;
-    sourceDescription: string;
-  }>;
 };
 
 export type ChatHostToolGatewayResponse =

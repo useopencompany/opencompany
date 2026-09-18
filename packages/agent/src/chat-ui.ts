@@ -4,6 +4,7 @@ import {
   type ActionGatewayResponse,
   type ActionSummary,
   CHAT_ARTIFACT_DATA_PART_TYPE,
+  CHAT_STEERING_DATA_PART_TYPE,
   type CodexCommandToolInput,
   type CodexCommandToolOutput,
   type DescribeActionsInput,
@@ -30,6 +31,12 @@ import type {
 } from "./actions/types";
 import { finiteDurationMs } from "./chat-timing";
 import type { CodexComposerSettingsView } from "./codex-chat-settings";
+import type {
+  ReadWorkflowMemoryToolInput,
+  ReadWorkflowMemoryToolOutput,
+  UpdateWorkflowMemoryToolInput,
+  UpdateWorkflowMemoryToolOutput,
+} from "./workflow-memory";
 import type { WorkspaceSkillsInput } from "./workspace-skill-tools";
 
 export {
@@ -52,13 +59,12 @@ export const START_TASK_TOOL_NAME = "start_task";
 export const START_TASK_TOOL_PART_TYPE = `tool-${START_TASK_TOOL_NAME}` as const;
 export const START_WORKFLOW_TOOL_NAME = "start_workflow";
 export const START_WORKFLOW_TOOL_PART_TYPE = `tool-${START_WORKFLOW_TOOL_NAME}` as const;
-export const SCHEDULE_TASK_TOOL_NAME = "schedule_task";
-export const SCHEDULE_TASK_TOOL_PART_TYPE = `tool-${SCHEDULE_TASK_TOOL_NAME}` as const;
-export const EDIT_TASK_SCHEDULE_TOOL_NAME = "edit_task_schedule";
-export const EDIT_TASK_SCHEDULE_TOOL_PART_TYPE = `tool-${EDIT_TASK_SCHEDULE_TOOL_NAME}` as const;
-export const DELETE_TASK_SCHEDULE_TOOL_NAME = "delete_task_schedule";
-export const DELETE_TASK_SCHEDULE_TOOL_PART_TYPE =
-  `tool-${DELETE_TASK_SCHEDULE_TOOL_NAME}` as const;
+// Named for how people ask for it: workflow instructions say "send this with the
+// opencompany Slack bot", and the model has to pick this over a member's personal
+// Slack plugin action, which can also post messages.
+export const SLACK_BOT_TOOL_NAME = "opencompany_slack_bot_send_message";
+/** Model-facing name before the tool was renamed; kept so old transcripts still label correctly. */
+export const LEGACY_SLACK_BOT_TOOL_NAME = "post_slack_message";
 export const BRAIN_TOOL_NAME = "goat_brain";
 export const BRAIN_TOOL_PART_TYPE = `tool-${BRAIN_TOOL_NAME}` as const;
 export const SAVE_TO_BRAIN_TOOL_NAME = "save_to_brain";
@@ -229,71 +235,6 @@ export type StartWorkflowToolInput = {
 };
 
 export type StartWorkflowToolOutput = StartTaskToolOutput;
-
-export type ScheduleTaskToolInput = {
-  prompt: string;
-  name: string;
-  cron: string;
-  timezone?: string;
-  sourceDescription?: string;
-  reason?: string;
-};
-
-export type ScheduleTaskToolOutput = {
-  scheduleId: string;
-  scheduleName: string;
-  cron: string;
-  timezone: string;
-  nextRunAt: string;
-  prompt: string;
-  status: "scheduled";
-};
-
-export type EditTaskScheduleToolInput = {
-  scheduleId?: string;
-  scheduleName?: string;
-  name?: string;
-  prompt?: string;
-  cron?: string;
-  timezone?: string;
-  sourceDescription?: string;
-  reason?: string;
-};
-
-export type EditTaskScheduleToolOutput =
-  | {
-      ok: true;
-      scheduleId: string;
-      scheduleName: string;
-      cron: string;
-      timezone: string;
-      nextRunAt: string;
-      status: "updated";
-    }
-  | {
-      ok: false;
-      error: string;
-      status: "not_found" | "ambiguous" | "invalid";
-    };
-
-export type DeleteTaskScheduleToolInput = {
-  scheduleId?: string;
-  scheduleName?: string;
-  reason?: string;
-};
-
-export type DeleteTaskScheduleToolOutput =
-  | {
-      ok: true;
-      scheduleId: string;
-      scheduleName: string;
-      status: "deleted";
-    }
-  | {
-      ok: false;
-      error: string;
-      status: "not_found" | "ambiguous" | "invalid";
-    };
 
 export type BrainCliCommand =
   | "help"
@@ -557,6 +498,9 @@ type BrowserChatTools = {
 };
 
 export type ChatTools = {
+  workflows: { input: import("./workflow-tool").WorkflowToolInput; output: unknown };
+  // Main chat can no longer create a one-off task, but stored transcripts still hold
+  // `start_task` parts. Keep the shape so old conversations keep rendering their Task card.
   start_task: {
     input: StartTaskToolInput;
     output: StartTaskToolOutput;
@@ -564,18 +508,6 @@ export type ChatTools = {
   start_workflow: {
     input: StartWorkflowToolInput;
     output: StartWorkflowToolOutput;
-  };
-  schedule_task: {
-    input: ScheduleTaskToolInput;
-    output: ScheduleTaskToolOutput;
-  };
-  edit_task_schedule: {
-    input: EditTaskScheduleToolInput;
-    output: EditTaskScheduleToolOutput;
-  };
-  delete_task_schedule: {
-    input: DeleteTaskScheduleToolInput;
-    output: DeleteTaskScheduleToolOutput;
   };
   goat_brain: {
     input: BrainToolInput;
@@ -637,10 +569,20 @@ export type ChatTools = {
     input: CodexCommandToolInput;
     output: CodexCommandToolOutput;
   };
+  read_workflow_memory: {
+    input: ReadWorkflowMemoryToolInput;
+    output: ReadWorkflowMemoryToolOutput;
+  };
+  update_workflow_memory: {
+    input: UpdateWorkflowMemoryToolInput;
+    output: UpdateWorkflowMemoryToolOutput;
+  };
 } & BrowserChatTools;
 
 export type ChatDataTypes = {
   "artifact-file": PublishedChatArtifact;
+  // A user message injected into a coding turn that was already running (ACP steering).
+  steering: { text: string; itemId?: string };
 };
 
 export type ChatUiMessage = UIMessage<ChatMessageMetadata, ChatDataTypes, ChatTools>;
@@ -712,6 +654,7 @@ export type ChatSessionView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   updatedAt?: string;
   messages: ChatUiMessage[];
 };
@@ -723,7 +666,15 @@ export type ConversationRuntimeView = {
   updatedAt: string;
 };
 
-export type ChatState = "working" | "done_unseen" | "done_seen";
+/**
+ * What a Conversation row means to the reader, in priority order.
+ *
+ * `awaiting_input` leads because it is the only state the reader can clear by acting: the run is
+ * parked on an approval or a question and will not move until they answer. It deliberately
+ * outranks `working` — a foreground approval holds the engine open while it polls, so a
+ * blocked Conversation would otherwise render as a spinner that never resolves.
+ */
+export type ChatState = "awaiting_input" | "working" | "done_unseen" | "done_seen";
 
 export type ChatSummaryView = {
   id: string;
@@ -734,8 +685,9 @@ export type ChatSummaryView = {
   runtime?: ConversationRuntimeView | null;
   activityState?: "working" | "idle";
   hasUnseen?: boolean;
+  awaitingInput?: boolean;
   // Compatibility fallback for optimistic and rolling-deploy snapshots. Live API rows own
-  // activityState/hasUnseen and always take precedence.
+  // activityState/hasUnseen/awaitingInput and always take precedence.
   state?: ChatState;
   preview: string;
   updatedAt: string;
@@ -747,8 +699,9 @@ export type ChatSummaryView = {
 export const PINNED_CHAT_LIMIT = 20;
 
 export function chatSummaryState(
-  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "state">,
+  chat: Pick<ChatSummaryView, "activityState" | "hasUnseen" | "awaitingInput" | "state">,
 ): ChatState {
+  if (chat.awaitingInput) return "awaiting_input";
   if (chat.activityState === "working") return "working";
   if (chat.activityState === "idle") return chat.hasUnseen ? "done_unseen" : "done_seen";
   return chat.state ?? "done_seen";
@@ -1019,6 +972,16 @@ function parseDebugTraceUiMessageParts(
     if (part.type === CHAT_ARTIFACT_DATA_PART_TYPE) {
       const artifact = parsePublishedChatArtifact({ ok: true, artifact: part.data });
       if (artifact) parts.push({ type: CHAT_ARTIFACT_DATA_PART_TYPE, data: artifact });
+      continue;
+    }
+    if (part.type === CHAT_STEERING_DATA_PART_TYPE && isRecord(part.data)) {
+      const { text, itemId } = part.data;
+      if (typeof text === "string" && text.trim()) {
+        parts.push({
+          type: CHAT_STEERING_DATA_PART_TYPE,
+          data: { text, ...(typeof itemId === "string" ? { itemId } : {}) },
+        });
+      }
       continue;
     }
     if (isPersistedToolPart(part)) {

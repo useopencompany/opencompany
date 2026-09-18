@@ -9,18 +9,18 @@ import {
   BookOpen,
   Check,
   ChevronsUpDown,
-  House,
   Inbox,
   ListTodo,
   Loader2,
   LogOut,
+  Navigation,
   PanelLeft,
   Pin,
-  PlugZap,
   Plus,
   Puzzle,
   ScrollText,
   Settings,
+  Sparkles,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -30,6 +30,7 @@ import {
   type FormEvent,
   type MouseEventHandler,
   useEffect,
+  useId,
   useMemo,
   useState,
   useTransition,
@@ -39,6 +40,7 @@ import { SidebarBots } from "@/components/Bots";
 import { BrainSwitcher } from "@/components/BrainSwitcher";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
+import { PullRequestBadge } from "@/components/PullRequestBadge";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
 import {
   conversationDragProps,
@@ -47,6 +49,7 @@ import {
   SidebarProjects,
   type SidebarRowDragProps,
   useSidebarProjects,
+  useSidebarRowPadding,
 } from "@/components/SidebarProjects";
 import { SidebarSectionHeader, useCollapsedSidebarSection } from "@/components/SidebarSection";
 import { SidebarWikis, useSidebarWikis } from "@/components/SidebarWikis";
@@ -61,11 +64,13 @@ import {
   restoreOptimisticArchive,
 } from "@/lib/optimistic-archives";
 import { useOptimisticChatSummaries } from "@/lib/optimistic-chat-summaries";
+import type { SessionPullRequest } from "@/lib/session-pull-requests";
 import {
   orderSidebarWorkItems,
   type SidebarTaskView,
   type SidebarWorkItem,
 } from "@/lib/sidebar-items";
+import { useSessionPullRequests } from "@/lib/use-session-pull-requests";
 import { activeWikiSlugFromPathname } from "@/lib/wiki-routes";
 import { createWorkspaceAction, switchWorkspaceAction } from "@/lib/workspace-actions";
 
@@ -101,21 +106,21 @@ function Icon({ className }: { className?: string }) {
 function SidebarNavRow({
   href,
   icon: Icon,
+  iconClassName,
   label,
   active,
   // A row highlights for its whole subtree, but only one element on a page can be the current
   // one. The Tasks row hands that claim to the task it lists when the reader is inside a task.
   current = active,
-  incomplete = false,
   count,
   onClick,
 }: {
   href: string;
   icon: LucideIcon;
+  iconClassName?: string;
   label: string;
   active: boolean;
   current?: boolean;
-  incomplete?: boolean;
   count?: number;
   onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
@@ -131,16 +136,15 @@ function SidebarNavRow({
       <Icon
         size={14}
         strokeWidth={1.75}
-        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}`}
+        className={`shrink-0 ${active ? "text-ink" : "text-ink/60 group-hover:text-ink/80"}${
+          iconClassName ? ` ${iconClassName}` : ""
+        }`}
       />
       <span className="truncate tracking-[-0.005em]">{label}</span>
       {count ? (
         <span className="ml-auto shrink-0 text-[12px] tabular-nums leading-none text-ink-subtle">
           {count}
         </span>
-      ) : null}
-      {incomplete ? (
-        <span aria-hidden="true" className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
       ) : null}
     </IntentPrefetchLink>
   );
@@ -155,25 +159,24 @@ export function Sidebar({
   onToggleCollapsed: () => void;
   showCollapseButton?: boolean;
 }) {
-  const { featureFlags, mcpSetup, reviewCount, sidebarTasks, user } = useAppData();
+  const { featureFlags, reviewCount, sidebarTasks, user } = useAppData();
   const wikis = useSidebarWikis();
   const pathname = usePathname();
-  const mcpSetupActive = !mcpSetup.completedAt && pathname === "/settings/mcp";
   const homeActive = pathname === "/";
   const reviewActive = pathname === "/review";
   const tasksActive = pathname === "/tasks" || pathname.startsWith("/tasks/");
   // The Tasks row hands the current-page claim to the Task's own row, but only when the list
   // actually holds one: an older or archived Task has no row, and the page still has to say where
   // the reader is.
-  const openTaskHasRow =
-    featureFlags.taskSpawning &&
-    sidebarTasks.some((task) => isTaskRouteActive(pathname, taskHref(task.displayId)));
+  const openTaskHasRow = sidebarTasks.some((task) =>
+    isTaskRouteActive(pathname, taskHref(task.displayId)),
+  );
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
   // `/wiki/sources` and `/wiki/import` are static routes under /wiki, not wikis, so neither marks
   // a row as current. Bare `/wiki` redirects, so it is only ever in flight.
   const activeWikiSlug = activeWikiSlugFromPathname(pathname);
-  const pluginsActive =
-    pathname === "/settings/plugins" || pathname.startsWith("/settings/plugins/");
+  const pluginsActive = pathname === "/plugins" || pathname.startsWith("/plugins/");
+  const skillsActive = pathname === "/skills" || pathname.startsWith("/skills/");
 
   return (
     <aside
@@ -205,8 +208,11 @@ export function Sidebar({
         <nav aria-label="opencompany primary" className="flex flex-col gap-px px-2 pt-2">
           <SidebarNavRow
             href="/"
-            icon={House}
-            label="Home"
+            icon={Navigation}
+            // The only clean paper-plane outline in the set; turned so it points down at the
+            // composer this row opens.
+            iconClassName="rotate-[25deg]"
+            label="New Chat"
             active={homeActive}
             onClick={(event) => {
               if (
@@ -230,32 +236,19 @@ export function Sidebar({
               count={reviewCount}
             />
           ) : null}
-          {featureFlags.taskSpawning ? (
-            <>
-              <SidebarNavRow
-                href="/tasks"
-                icon={ListTodo}
-                label="Tasks"
-                active={tasksActive}
-                current={tasksActive && !openTaskHasRow}
-              />
-              <SidebarNavRow
-                href="/workflows"
-                icon={Workflow}
-                label="Workflows"
-                active={workflowsActive}
-              />
-            </>
-          ) : null}
-          {!mcpSetup.completedAt ? (
-            <SidebarNavRow
-              href="/settings/mcp"
-              icon={PlugZap}
-              label="Connect MCP"
-              active={mcpSetupActive}
-              incomplete
-            />
-          ) : null}
+          <SidebarNavRow
+            href="/tasks"
+            icon={ListTodo}
+            label="Tasks"
+            active={tasksActive}
+            current={tasksActive && !openTaskHasRow}
+          />
+          <SidebarNavRow
+            href="/workflows"
+            icon={Workflow}
+            label="Workflows"
+            active={workflowsActive}
+          />
         </nav>
 
         {/* Brains */}
@@ -281,12 +274,8 @@ export function Sidebar({
 
         {/* Account / settings footer */}
         <div className="px-2 pb-3 pt-2">
-          <SidebarNavRow
-            href="/settings/plugins"
-            icon={Puzzle}
-            label="Plugins"
-            active={pluginsActive}
-          />
+          <SidebarNavRow href="/plugins" icon={Puzzle} label="Plugins" active={pluginsActive} />
+          <SidebarNavRow href="/skills" icon={Sparkles} label="Skills" active={skillsActive} />
           <SidebarFeedback />
           <SidebarAccountMenu />
         </div>
@@ -448,6 +437,7 @@ function SidebarWorkList() {
   const router = useRouter();
   const [, startTransition] = useTransition();
   const localChatStates = useLocalChatStates();
+  const pullRequests = useSessionPullRequests();
   const optimisticChats = useOptimisticChatSummaries();
   const optimisticChatIds = useMemo(
     () =>
@@ -464,7 +454,12 @@ function SidebarWorkList() {
 
   useEffect(() => {
     for (const chat of recentChats) {
-      if (localChatStates.get(chat.id) === "working" && chatSummaryState(chat) === "working") {
+      // The optimistic state only bridges the gap until the durable projection reports a live run.
+      // `awaiting_input` is one of those reports, so it hands off the same way `working` does —
+      // otherwise a chat that parks on an approval mid-stream never drops its local spinner.
+      if (localChatStates.get(chat.id) !== "working") continue;
+      const state = chatSummaryState(chat);
+      if (state === "working" || state === "awaiting_input") {
         clearLocalChatState(chat.id, "working");
       }
     }
@@ -481,11 +476,9 @@ function SidebarWorkList() {
   // which of two copies of a row is the real one.
   const filedInProject = (conversationId: string) => projects.membership.has(conversationId);
   const pinnedChats = recentChats.filter((chat) => isPinned(chat) && !filedInProject(chat.id));
-  // Tasks follow the same flag as the Tasks nav row.
-  const showTasks = featureFlags.taskSpawning;
   const workItems = orderSidebarWorkItems({
     chats: recentChats.filter((chat) => !isPinned(chat) && !filedInProject(chat.id)),
-    tasks: showTasks ? sidebarTasks.filter((task) => !filedInProject(task.conversationId)) : [],
+    tasks: sidebarTasks.filter((task) => !filedInProject(task.conversationId)),
   });
 
   // The row goes on the click. The write and the projection behind it take about a second, and
@@ -577,6 +570,7 @@ function SidebarWorkList() {
         active={pathname === href}
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
+        pullRequest={pullRequests.get(chat.id) ?? null}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
         dragProps={optimistic ? {} : rowDragProps(chat.id)}
@@ -597,6 +591,7 @@ function SidebarWorkList() {
         task={item.task}
         state={item.state}
         href={href}
+        pullRequest={pullRequests.get(item.task.conversationId) ?? null}
         active={isTaskRouteActive(pathname, href)}
         dragProps={rowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
@@ -619,7 +614,7 @@ function SidebarWorkList() {
     for (const conversationId of project.conversationIds) {
       const task = tasksByConversation.get(conversationId);
       if (task) {
-        if (showTasks) tasks.push(task);
+        tasks.push(task);
         continue;
       }
       const chat = chatsById.get(conversationId);
@@ -723,6 +718,7 @@ function SidebarChatRow({
   active,
   optimistic,
   localState,
+  pullRequest,
   pinned,
   pinning,
   dragProps,
@@ -736,6 +732,8 @@ function SidebarChatRow({
   active: boolean;
   optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
+  /** The PR this chat's coding agent opened, when it opened one. */
+  pullRequest: SessionPullRequest | null;
   pinned: boolean;
   pinning: boolean;
   // Lets the row be dragged into a sidebar Project. Empty when Projects are off, and for a chat
@@ -747,12 +745,10 @@ function SidebarChatRow({
   onArchive: () => void;
 }) {
   const state = resolveSidebarChatState({ chat, localState });
-  const content = (
-    <>
-      <SidebarChatStateIndicator state={state} />
-      <span className="truncate tracking-[-0.005em]">{chat.title}</span>
-    </>
-  );
+  const contentPadding = useSidebarRowPadding();
+  const runStateDescriptionId = useRunStateDescription(state);
+  const marked = hasSessionMarker({ state, pullRequest });
+  const content = <span className="truncate tracking-[-0.005em]">{chat.title}</span>;
   return (
     <div
       {...dragProps}
@@ -760,11 +756,22 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {marked ? (
+        <SidebarSessionStatus
+          state={state}
+          runStateDescriptionId={runStateDescriptionId}
+          pullRequest={pullRequest}
+          className={contentPadding}
+        />
+      ) : null}
       {optimistic ? (
         <button
           type="button"
+          aria-describedby={runStateDescriptionId}
           onClick={onRequestComposerFocus}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-[5px] pl-2 pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          className={`flex min-w-0 flex-1 items-center rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+          }`}
         >
           {content}
         </button>
@@ -785,7 +792,10 @@ function SidebarChatRow({
             onRequestComposerFocus();
           }}
           aria-current={active ? "page" : undefined}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+          aria-describedby={runStateDescriptionId}
+          className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+          }`}
         >
           {content}
         </IntentPrefetchLink>
@@ -824,16 +834,95 @@ function SidebarChatRow({
   );
 }
 
+/**
+ * Whether a session has anything to show in its marker slot: a run that is live, waiting, or
+ * finished unseen, or — once the result is seen — the pull request it opened.
+ *
+ * A settled, seen session with no pull request has nothing to say, and the row renders no slot at
+ * all rather than an empty one. Most rows in a real Recents list are in exactly that state, so a
+ * reserved slot left the majority of the list indented behind a column of blank space.
+ */
+function hasSessionMarker(input: {
+  state: ReturnType<typeof chatSummaryState>;
+  pullRequest: SessionPullRequest | null;
+}) {
+  return input.state !== "done_seen" || Boolean(input.pullRequest);
+}
+
+/**
+ * The marker at a session row's left edge follows the session lifecycle: a live run owns that
+ * position, then an unread result, then its pull request after the result is seen.
+ *
+ * It leads the row rather than trailing it because the state of the work an agent left behind is
+ * something the reader scans a column for, the way they scan the row's own title — not a control
+ * they reach for. Trailing, it also had to share the pin's column and disappear on hover.
+ *
+ * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
+ * GitHub, and an anchor inside an anchor is invalid HTML. The marker carries the row's left
+ * padding, and the link beside it drops to `SIDEBAR_ROW_LINK_PADDING`, the gap between them. A row
+ * with nothing to mark skips the slot and gives that padding to its link instead, so its title
+ * starts at the list's own left edge — see `hasSessionMarker`.
+ *
+ * The slot is a fixed 18px whatever it holds, so a session moving between differently sized status
+ * glyphs never shifts its own title.
+ */
+function SidebarSessionStatus({
+  state,
+  runStateDescriptionId,
+  pullRequest,
+  className,
+}: {
+  state: ReturnType<typeof chatSummaryState>;
+  /** Set by `useRunStateDescription` when the row's link describes itself with this marker. */
+  runStateDescriptionId: string | undefined;
+  pullRequest: SessionPullRequest | null;
+  className?: string;
+}) {
+  return (
+    <span className={`flex shrink-0 items-center ${className ?? ""}`}>
+      {state === "done_seen" && pullRequest ? (
+        <PullRequestBadge pullRequest={pullRequest} />
+      ) : (
+        <span className="flex size-[18px] shrink-0 items-center justify-center">
+          <ChatStateIndicator state={state} surface="sidebar" id={runStateDescriptionId} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The gap between a marker slot and the title beside it. Only a row that renders a marker uses it:
+ * the slot carries the row's own padding, so the link after it needs nothing more. A row with no
+ * marker takes that padding itself.
+ */
+const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
+
+/**
+ * Ties a row's link to its run-state slot for screen readers.
+ *
+ * `awaiting_input` is the one state `ChatStateIndicator` gives an accessible name, because it is
+ * the difference between a run that is progressing and one that is stuck on the reader. The slot
+ * sits beside the link rather than inside it, so that name no longer falls into the link's own —
+ * a reader moving link by link would hear the session's title and nothing about it waiting. The
+ * link points back at the indicator instead, which puts the state in its description.
+ */
+function useRunStateDescription(state: ReturnType<typeof chatSummaryState>) {
+  const id = useId();
+  return state === "awaiting_input" ? id : undefined;
+}
+
 function resolveSidebarChatState(input: {
   chat: ChatSummaryView;
   localState: ReturnType<typeof chatSummaryState> | null;
 }) {
+  const state = chatSummaryState(input.chat);
+  // A parked run outranks the optimistic spinner, on the render before the handoff effect below
+  // clears it as well as after. The local state is this tab guessing that a run it just started is
+  // live; `awaiting_input` is the server saying that run is stuck on the reader.
+  if (state === "awaiting_input") return state;
   if (input.localState === "working") return "working";
-  return input.localState ?? chatSummaryState(input.chat);
-}
-
-function SidebarChatStateIndicator({ state }: { state: ReturnType<typeof chatSummaryState> }) {
-  return <ChatStateIndicator state={state} surface="sidebar" />;
+  return input.localState ?? state;
 }
 
 /**
@@ -848,6 +937,7 @@ function SidebarTaskRow({
   state,
   href,
   active,
+  pullRequest,
   dragProps,
   onArchive,
 }: {
@@ -855,11 +945,16 @@ function SidebarTaskRow({
   state: ReturnType<typeof chatSummaryState>;
   href: string;
   active: boolean;
+  /** The PR this Task's coding agent opened, when it opened one. */
+  pullRequest: SessionPullRequest | null;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
+  const contentPadding = useSidebarRowPadding();
+  const runStateDescriptionId = useRunStateDescription(state);
+  const marked = hasSessionMarker({ state, pullRequest });
   return (
     <div
       {...dragProps}
@@ -867,22 +962,36 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
+      {marked ? (
+        <SidebarSessionStatus
+          state={state}
+          runStateDescriptionId={runStateDescriptionId}
+          pullRequest={pullRequest}
+          // A Task row is two lines tall. Centred across both, the column would sit at a different
+          // height from the row's own text and from every one-line chat row above it.
+          className={`mt-[6px] self-start ${contentPadding}`}
+        />
+      ) : null}
       <Link
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-l-md py-[5px] pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        aria-describedby={runStateDescriptionId}
+        className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+        }`}
       >
-        <ChatStateIndicator state={state} surface="sidebar" className="mt-[7px] self-start" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>
           <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
         </span>
       </Link>
-      {/* Empty stand-in for the chat row's pin control, so the archive icon lands in the same
-          column on every row the reader hovers down the list. */}
+      {/* Stand-in for the chat row's pin control, so the archive icon lands in the same column on
+          every row the reader hovers down the list. A Task row is two lines tall, so both this
+          slot and the archive beside it are pulled up against the title: centred across both lines
+          they would sit at a different height from the row's own text and read as misaligned. */}
       <span aria-hidden="true" className="h-6 w-6 shrink-0" />
-      <span className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center">
+      <span className="mr-1 mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
         {archivable ? (
           <button
             type="button"

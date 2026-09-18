@@ -1,6 +1,9 @@
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import {
   isSlackBotConfigured,
+  slackBotCanCustomizeIdentity,
+  slackBotCanReact,
+  slackBotCanReadDirectMessages,
   slackBotScopesSatisfied,
 } from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -14,7 +17,7 @@ import {
   type SlackConversationRef,
 } from "@opencompany/db/slack-bot";
 import { getBrainAccess } from "@opencompany/db/workspaces";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, sql } from "drizzle-orm";
 import { ApiError } from "./errors";
 
 type DbLike = any;
@@ -31,6 +34,9 @@ export type SlackBotWorkspaceSettings = {
   installed: boolean;
   status: "connected" | "needs_reauth" | "sync_failed" | "not_connected";
   needsScopeUpgrade: boolean;
+  canCustomizeIdentity: boolean;
+  canReact: boolean;
+  canReadDirectMessages: boolean;
   teamName: string | null;
   statusReason: string | null;
   destinationCount: number;
@@ -97,10 +103,12 @@ export function createSlackBotSettingsService(input: {
 
   return {
     async getWorkspaceSettings(actor) {
-      const integration = actor.role === "admin" ? await integrationFor(actor) : null;
+      // Workflow authors need to know whether a custom identity can actually be delivered. Keep
+      // connection metadata admin-only, but expose the workspace-level capability to every member.
+      const integration = await integrationFor(actor);
       const installed = Boolean(integration && integration.status !== "disconnected");
       let destinationCount = 0;
-      if (integration && installed) {
+      if (actor.role === "admin" && integration && installed) {
         const [row] = await db
           .select({ value: count() })
           .from(brainSources)
@@ -113,13 +121,23 @@ export function createSlackBotSettingsService(input: {
           );
         destinationCount = Number(row?.value ?? 0);
       }
+      const deliveries =
+        actor.role === "admin" && integration
+          ? await db.execute(
+              sql`SELECT id FROM goat.channel_deliveries WHERE integration_id = ${integration.id} AND status IN ('uncertain', 'failed') LIMIT 1`,
+            )
+          : [];
+      const deliveryNeedsAttention =
+        (Array.isArray(deliveries) ? deliveries : (deliveries.rows ?? [])).length > 0;
       return {
         isAdmin: actor.role === "admin",
         configured: isSlackBotConfigured(),
         installed,
         status:
           integration && integration.status !== "disconnected"
-            ? integration.status
+            ? deliveryNeedsAttention && integration.status === "connected"
+              ? "sync_failed"
+              : integration.status
             : "not_connected",
         needsScopeUpgrade: Boolean(
           integration &&
@@ -127,8 +145,26 @@ export function createSlackBotSettingsService(input: {
             integration.status === "connected" &&
             !slackBotScopesSatisfied(integration.scopes),
         ),
-        teamName: integration?.connectionLabel ?? null,
-        statusReason: integration?.statusReason ?? null,
+        canCustomizeIdentity: Boolean(
+          integration &&
+            integration.status === "connected" &&
+            slackBotCanCustomizeIdentity(integration.scopes),
+        ),
+        canReact: Boolean(
+          integration && integration.status === "connected" && slackBotCanReact(integration.scopes),
+        ),
+        canReadDirectMessages: Boolean(
+          integration &&
+            integration.status === "connected" &&
+            slackBotCanReadDirectMessages(integration.scopes),
+        ),
+        teamName: actor.role === "admin" ? (integration?.connectionLabel ?? null) : null,
+        statusReason:
+          actor.role !== "admin"
+            ? null
+            : deliveryNeedsAttention
+              ? "A Slack delivery could not be confirmed. It has not been reposted to avoid duplicates."
+              : (integration?.statusReason ?? null),
         destinationCount,
       };
     },
@@ -141,13 +177,21 @@ export function createSlackBotSettingsService(input: {
       if (!integration) {
         throw new ApiError(404, "not_found", "The Slack bot is not connected.");
       }
-      await markIntegrationStatus({
-        userWorkosId: integration.userWorkosId,
-        integrationId: integration.id,
-        provider: "slack_bot",
-        status: "disconnected",
-        statusReason: "Disconnected by a workspace admin.",
-        db,
+      await db.transaction(async (tx: DbLike) => {
+        await markIntegrationStatus({
+          userWorkosId: integration.userWorkosId,
+          integrationId: integration.id,
+          provider: "slack_bot",
+          status: "disconnected",
+          statusReason: "Disconnected by a workspace admin.",
+          db: tx,
+        });
+        await tx.execute(
+          sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE integration_id = ${integration.id}`,
+        );
+        await tx.execute(
+          sql`UPDATE goat.channel_deliveries SET status = 'canceled', error = NULL WHERE integration_id = ${integration.id} AND status = 'pending'`,
+        );
       });
     },
 

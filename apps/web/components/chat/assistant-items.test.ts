@@ -1,10 +1,12 @@
 import {
+  ACP_TOOLS_MCP_SERVER_NAME,
   CODEX_COMMAND_TOOL_NAME,
   CODEX_FILE_CHANGE_TOOL_NAME,
   CODEX_MCP_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
+import { SLACK_BOT_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
 import { toolCallViewFromPart } from "./assistant-items";
 
 describe("coding transcript tool presentations", () => {
@@ -24,6 +26,30 @@ describe("coding transcript tool presentations", () => {
       detail: "git status --short && bun test",
       detailChips: ["git status --short && bun test"],
     });
+  });
+
+  it("names the destination of a Slack post without spilling the message body", () => {
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_root",
+        state: "input-available",
+        input: { channel: "#product", text: "Shipped the Gmail trigger.", messageKey: "summary" },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "#product" });
+
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_reply",
+        state: "input-available",
+        input: {
+          text: "Label filter only, 25 per pass, 5 minute interval.",
+          messageKey: "summary-detail",
+          replyToMessageKey: "summary",
+        },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "Thread reply" });
   });
 
   it("never exposes internal coding tool names when richer fields are absent", () => {
@@ -123,16 +149,16 @@ describe("coding transcript tool presentations", () => {
     expect(todo).toMatchObject({ label: "Plan", detailChips: ["2 items"] });
   });
 
-  it("renders true MCP calls as server and tool chips", () => {
+  it("renders third-party MCP calls as server and tool chips", () => {
     const tool = toolCallViewFromPart({
       type: "dynamic-tool",
       toolName: CODEX_MCP_TOOL_NAME,
       toolCallId: "mcp_1",
       state: "output-available",
       input: {
-        title: "List available actions",
-        server: "opencompany",
-        tool: "list_actions",
+        title: "List open tickets",
+        server: "acme-desk",
+        tool: "list_tickets",
         arguments: {
           server: "spoofed-server",
           tool: "spoofed-tool",
@@ -145,8 +171,123 @@ describe("coding transcript tool presentations", () => {
     });
 
     expect(tool).toMatchObject({
-      label: "List available actions",
-      detailChips: ["opencompany · list_actions"],
+      label: "List open tickets",
+      detailChips: ["acme-desk · list_tickets"],
+      actionSource: null,
+    });
+  });
+
+  it("names opencompany host tool calls after the capability, not the MCP plumbing", () => {
+    const tool = toolCallViewFromPart({
+      type: "dynamic-tool",
+      toolName: CODEX_MCP_TOOL_NAME,
+      toolCallId: "mcp_host",
+      state: "output-available",
+      input: {
+        title: "List available actions",
+        server: ACP_TOOLS_MCP_SERVER_NAME,
+        tool: "list_actions",
+      },
+      output: { status: "completed", result: "[]" },
+    });
+
+    expect(tool).toMatchObject({
+      label: "List actions",
+      detailChips: [],
+      actionSource: null,
+    });
+  });
+
+  it("names a connected action after the service it ran against", () => {
+    const tool = toolCallViewFromPart({
+      type: "dynamic-tool",
+      toolName: CODEX_MCP_TOOL_NAME,
+      toolCallId: "mcp_action",
+      state: "output-available",
+      input: {
+        server: ACP_TOOLS_MCP_SERVER_NAME,
+        tool: USE_ACTION_TOOL_NAME,
+        arguments: {
+          action: "plugin:linear:linear.create_issue",
+          params: { title: "Ship action rows" },
+        },
+      },
+      output: { status: "completed", result: '{"ok":true}' },
+    });
+
+    expect(tool).toMatchObject({
+      label: "Linear · Create issue",
+      detailChips: [],
+      actionSource: "linear",
+    });
+  });
+
+  it("keeps a failed connected action readable", () => {
+    const tool = toolCallViewFromPart({
+      type: "dynamic-tool",
+      toolName: CODEX_MCP_TOOL_NAME,
+      toolCallId: "mcp_action_failed",
+      state: "output-available",
+      input: {
+        server: ACP_TOOLS_MCP_SERVER_NAME,
+        tool: USE_ACTION_TOOL_NAME,
+        arguments: { action: "gmail.send_email", params: {} },
+      },
+      output: { status: "failed", error: "Gmail is not connected." },
+    });
+
+    expect(tool).toMatchObject({
+      label: "Gmail · Send email",
+      detailChips: ["Gmail is not connected."],
+      actionSource: "gmail",
+      status: "failed",
+    });
+  });
+});
+
+describe("connected action rows in the opencompany chat", () => {
+  it("leads with the service and the action, and keeps cost on the chip", () => {
+    const tool = toolCallViewFromPart({
+      type: `tool-${USE_ACTION_TOOL_NAME}`,
+      toolCallId: "action_1",
+      state: "output-available",
+      input: { action: "lead.search_prospects", params: { query: "seed-stage founders" } },
+      output: {
+        ok: true,
+        action: "lead.search_prospects",
+        result: {
+          untrustedProviderData: true,
+          resultCount: 12,
+          cost: { state: "settled", totalUsdMicros: 240_000 },
+        },
+      },
+    });
+
+    expect(tool).toMatchObject({
+      label: "Lead research · Search prospects",
+      detail: "12 results · $0.24",
+      actionSource: "lead",
+    });
+  });
+
+  it("shows why a connected action failed", () => {
+    const tool = toolCallViewFromPart({
+      type: `tool-${USE_ACTION_TOOL_NAME}`,
+      toolCallId: "action_2",
+      state: "output-available",
+      input: { action: "x_account.post_tweet", params: {} },
+      output: {
+        ok: false,
+        action: "x_account.post_tweet",
+        error: { code: "not_connected", message: "Connect your X account first." },
+      },
+    });
+
+    expect(tool).toMatchObject({
+      label: "X · Post tweet",
+      detail: "Connect your X account first.",
+      actionSource: "x",
+      status: "failed",
     });
   });
 });

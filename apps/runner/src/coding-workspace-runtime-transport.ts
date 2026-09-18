@@ -9,8 +9,15 @@ import { CLOUD_CODING_ENGINE_CONFIG, shellQuote } from "@opencompany/agent-runti
 import { createLogger } from "@opencompany/observability";
 import WebSocket, { type RawData, WebSocketServer } from "ws";
 import {
+  CodingWorkspaceFileError,
+  listCodingWorkspaceDirectory,
+  normalizeWorkspaceRelativePath,
+  readCodingWorkspaceFile,
+  writeCodingWorkspaceFile,
+} from "./coding-workspace-files";
+import {
   type CodingWorkspaceSession,
-  discoverCodingWorkspacePreviewPorts,
+  inspectCodingWorkspacePreviewPorts,
   isAllowedPreviewPort,
   loadCodingWorkspaceSession,
 } from "./coding-workspace-runtime";
@@ -37,6 +44,10 @@ const RUNTIME_PROTOCOL = "goat-coding-workspace-v1";
 const TICKET_PROTOCOL_PREFIX = "goat-ticket.";
 const TMUX_SESSION = "goat-coding-workspace";
 const HEARTBEAT_INTERVAL_MS = 60_000;
+// Terminal keystrokes and control messages are tiny, but a file save carries the whole
+// document as one JSON frame. The editor caps a saveable file at 256 KB, and this leaves
+// room for JSON escaping on top of it.
+const MAX_RUNTIME_PAYLOAD_BYTES = 1_024 * 1_024;
 const PREVIEW_UPSTREAM_CONNECT_TIMEOUT_MS = 15_000;
 const PREVIEW_SESSION_CACHE_MS = 5_000;
 const MAX_PREVIEW_SESSION_CACHE_ENTRIES = 256;
@@ -60,7 +71,7 @@ type RunnerServerFactory = (
 export function createCodingWorkspaceTransport(env: RunnerEnv) {
   const runtimeWebSockets = new WebSocketServer({
     noServer: true,
-    maxPayload: 64 * 1_024,
+    maxPayload: MAX_RUNTIME_PAYLOAD_BYTES,
     handleProtocols(protocols) {
       return protocols.has(RUNTIME_PROTOCOL) ? RUNTIME_PROTOCOL : false;
     },
@@ -231,6 +242,7 @@ export function attachRuntimeConnection(
   let terminalHandle: Awaited<ReturnType<SandboxHandle["pty"]["create"]>> | null = null;
   let disposed = false;
   let operation = Promise.resolve();
+  let lastPreviewPortsFingerprint: string | null = null;
 
   // Terminal input bypasses the control-operation queue: keystrokes must never wait
   // behind a port scan or preview lookup. A tiny sub-frame batch window avoids one
@@ -284,6 +296,13 @@ export function attachRuntimeConnection(
   };
 
   sendControl({ type: "status", status: "ready" });
+  logger.info("Coding workspace runtime connected", {
+    event: "opencompany.goat_coding_workspace_runtime_connected",
+    coding_session_id: session.id,
+    chat_session_id: session.chatSessionId,
+    sandbox_id: session.sandboxId,
+    engine: session.engine,
+  });
   let heartbeatReceived = true;
   webSocket.on("pong", () => {
     heartbeatReceived = true;
@@ -339,17 +358,65 @@ export function attachRuntimeConnection(
   };
 
   const refreshPorts = async () => {
-    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, { workDirectory });
-    sendControl({ type: "ports", ports });
+    const startedAt = Date.now();
+    const discovery = await inspectCodingWorkspacePreviewPorts(sandbox, { workDirectory });
+    sendControl({ type: "ports", ...discovery });
+    const fingerprint = discovery.ports
+      .map((candidate) => `${candidate.port}:${candidate.isHttp ? "http" : "listener"}`)
+      .join(",");
+    const outsideWorkspaceFingerprint = discovery.outsideWorkspacePorts
+      .map((candidate) => `${candidate.port}:${candidate.isHttp ? "http" : "listener"}`)
+      .join(",");
+    const combinedFingerprint = `${fingerprint}|${outsideWorkspaceFingerprint}`;
+    if (combinedFingerprint !== lastPreviewPortsFingerprint) {
+      lastPreviewPortsFingerprint = combinedFingerprint;
+      logger.info("Coding workspace preview ports changed", {
+        event: "opencompany.goat_coding_workspace_preview_ports_changed",
+        coding_session_id: session.id,
+        chat_session_id: session.chatSessionId,
+        sandbox_id: session.sandboxId,
+        engine: session.engine,
+        duration_ms: Date.now() - startedAt,
+        discovered_port_count: discovery.ports.length,
+        http_port_count: discovery.ports.filter((candidate) => candidate.isHttp).length,
+        discovered_ports: fingerprint,
+        outside_workspace_port_count: discovery.outsideWorkspacePorts.length,
+        outside_workspace_http_port_count: discovery.outsideWorkspacePorts.filter(
+          (candidate) => candidate.isHttp,
+        ).length,
+        outside_workspace_ports: outsideWorkspaceFingerprint,
+      });
+    }
   };
 
   const openPreview = async (port: number) => {
+    const startedAt = Date.now();
     if (!env.previewBaseDomain) {
+      logPreviewOpenFailure("not_configured", port, startedAt);
       throw new Error("Preview is not configured on this runner.");
     }
-    if (!isAllowedPreviewPort(port)) throw new Error("That preview port is reserved or invalid.");
-    const ports = await discoverCodingWorkspacePreviewPorts(sandbox, { workDirectory });
-    if (!ports.some((candidate) => candidate.port === port)) {
+    if (!isAllowedPreviewPort(port)) {
+      logPreviewOpenFailure("invalid_port", port, startedAt);
+      throw new Error("That preview port is reserved or invalid.");
+    }
+    const discovery = await inspectCodingWorkspacePreviewPorts(sandbox, { workDirectory });
+    if (!discovery.ports.some((candidate) => candidate.port === port)) {
+      const outsideWorkspace = discovery.outsideWorkspacePorts.some(
+        (candidate) => candidate.port === port,
+      );
+      logPreviewOpenFailure(
+        outsideWorkspace ? "outside_workspace" : "not_listening",
+        port,
+        startedAt,
+        {
+          discovered_ports: discovery.ports.map((candidate) => candidate.port).join(","),
+        },
+      );
+      if (outsideWorkspace) {
+        throw new Error(
+          `Port ${port} is listening outside this coding workspace. Restart it from the workspace directory.`,
+        );
+      }
       throw new Error(`Nothing is listening on port ${port}.`);
     }
     const signed = createCodingWorkspacePreviewCapability({
@@ -363,6 +430,89 @@ export function attachRuntimeConnection(
       url: previewUrl(signed.capability, env.previewBaseDomain, env.previewProtocol),
       expiresAt: signed.expiresAt,
     });
+    logger.info("Coding workspace preview opened", {
+      event: "opencompany.goat_coding_workspace_preview_opened",
+      coding_session_id: session.id,
+      chat_session_id: session.chatSessionId,
+      sandbox_id: session.sandboxId,
+      engine: session.engine,
+      preview_port: port,
+      duration_ms: Date.now() - startedAt,
+    });
+  };
+
+  const logPreviewOpenFailure = (
+    failureReason: string,
+    port: number,
+    startedAt: number,
+    context: Record<string, unknown> = {},
+  ) => {
+    logger.warn("Coding workspace preview failed to open", {
+      event: "opencompany.goat_coding_workspace_preview_open_failed",
+      coding_session_id: session.id,
+      chat_session_id: session.chatSessionId,
+      sandbox_id: session.sandboxId,
+      engine: session.engine,
+      preview_port: port,
+      failure_reason: failureReason,
+      duration_ms: Date.now() - startedAt,
+      ...context,
+    });
+  };
+
+  const listFiles = async (relativePath: string) => {
+    sendControl({
+      type: "files.listing",
+      ...(await listCodingWorkspaceDirectory(sandbox, { workDirectory, relativePath })),
+    });
+  };
+
+  const openFile = async (relativePath: string) => {
+    sendControl({
+      type: "files.content",
+      ...(await readCodingWorkspaceFile(sandbox, { workDirectory, relativePath })),
+    });
+  };
+
+  const saveFile = async (relativePath: string, content: unknown, baseRevision: unknown) => {
+    if (typeof content !== "string") {
+      throw new CodingWorkspaceFileError("The file contents are missing.", "invalid_path");
+    }
+    sendControl({
+      type: "files.saved",
+      ...(await writeCodingWorkspaceFile(sandbox, {
+        workDirectory,
+        relativePath,
+        content,
+        baseRevision: typeof baseRevision === "string" ? baseRevision : null,
+      })),
+    });
+  };
+
+  // File errors stay on the files channel so a failed save never clears the preview or
+  // terminal state, and they carry the scope so the editor can attribute a failure to the
+  // tree, the open file, or the save it just attempted.
+  const runFileOperation = async (
+    scope: "list" | "open" | "save",
+    rawPath: unknown,
+    operate: (relativePath: string) => Promise<void>,
+  ) => {
+    let relativePath = "";
+    try {
+      relativePath = normalizeWorkspaceRelativePath(rawPath);
+      await operate(relativePath);
+    } catch (error) {
+      sendControl({
+        type: "files.error",
+        scope,
+        path: relativePath,
+        code: error instanceof CodingWorkspaceFileError ? error.code : "failed",
+        message:
+          error instanceof CodingWorkspaceFileError
+            ? error.message
+            : "The workspace could not complete that file request.",
+      });
+    }
   };
 
   webSocket.on("message", (raw, isBinary) => {
@@ -393,11 +543,30 @@ export function attachRuntimeConnection(
           await refreshPorts();
         } else if (message.type === "preview.open") {
           await openPreview(Number(message.port));
+        } else if (message.type === "files.list") {
+          await runFileOperation("list", message.path, listFiles);
+        } else if (message.type === "files.open") {
+          await runFileOperation("open", message.path, openFile);
+        } else if (message.type === "files.save") {
+          await runFileOperation("save", message.path, (relativePath) =>
+            saveFile(relativePath, message.content, message.baseRevision),
+          );
         } else if (message.type === "ping") {
           sendControl({ type: "pong" });
         }
       })
       .catch((error) => {
+        if (message.type === "ports.refresh") {
+          logger.warn("Coding workspace preview operation failed", {
+            event: "opencompany.goat_coding_workspace_preview_operation_failed",
+            coding_session_id: session.id,
+            chat_session_id: session.chatSessionId,
+            sandbox_id: session.sandboxId,
+            engine: session.engine,
+            operation: message.type,
+            error,
+          });
+        }
         sendControl({
           type: "error",
           message: error instanceof Error ? error.message : "Runtime request failed.",
@@ -411,6 +580,13 @@ export function attachRuntimeConnection(
     pendingInput = [];
     pendingInputBytes = 0;
     clearInterval(heartbeat);
+    logger.info("Coding workspace runtime disconnected", {
+      event: "opencompany.goat_coding_workspace_runtime_disconnected",
+      coding_session_id: session.id,
+      chat_session_id: session.chatSessionId,
+      sandbox_id: session.sandboxId,
+      engine: session.engine,
+    });
     void terminalHandle?.kill().catch(() => {});
     void restoreTimeout(session.id, sandbox, env.codexChatIdleTimeoutMs).catch((error) => {
       logger.warn("Failed to restore coding workspace idle timeout", {
@@ -424,7 +600,9 @@ export function attachRuntimeConnection(
 type RuntimeControlMessage =
   | { type: "terminal.attach" | "terminal.resize"; cols?: number; rows?: number }
   | { type: "ports.refresh" | "ping" }
-  | { type: "preview.open"; port?: number };
+  | { type: "preview.open"; port?: number }
+  | { type: "files.list" | "files.open"; path?: unknown }
+  | { type: "files.save"; path?: unknown; content?: unknown; baseRevision?: unknown };
 
 async function proxyPreviewHttp(
   request: IncomingMessage,

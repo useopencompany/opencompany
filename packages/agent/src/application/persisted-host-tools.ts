@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   CHAT_HOST_TOOL_CONTRACT_VERSIONS,
   type ChatHostToolGatewayRequest,
@@ -10,13 +9,14 @@ import {
   chatSessions,
   codexChatSessions,
   codexChatTurns,
+  tasks,
   users,
+  workflows,
   workspaceMembers,
   workspaces,
 } from "@opencompany/db/product-schema";
-import { DEFAULT_BRAIN_SLUG, listAccessibleBrains } from "@opencompany/db/workspaces";
 import { createLogger } from "@opencompany/observability";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
 import {
   browserProfilesAvailable,
   createAgentSession,
@@ -25,6 +25,7 @@ import {
   resolveActiveAgentSession,
 } from "../browser-profiles/index";
 import { createChatBrowserToolSession } from "../browser-tools-runtime";
+import { postWorkflowSlackMessage } from "../integrations/slack-channel";
 import {
   activateAndListChatSessionSkills,
   createWorkspaceSkillForActor,
@@ -34,12 +35,6 @@ import {
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
 } from "../skills";
-import {
-  createTaskScheduleForUser,
-  deleteTaskScheduleForUser,
-  listTaskSchedulesForUser,
-  updateTaskScheduleForUser,
-} from "../task-schedules";
 import { refineWorkflowTaskTitle } from "../workflow-task-title";
 import { createTaskFromWorkflow } from "../workflow-tasks";
 import { listWorkflowCatalog } from "../workflows";
@@ -57,11 +52,16 @@ export type PersistedHostRuntime = {
   wakeTaskWorker: () => Promise<unknown> | unknown;
   defer: (work: Promise<unknown>) => void;
   gatewayApiKey: string;
-  planHarness: (input: { actorId: string; prompt: string }) => Promise<HarnessSpec>;
   /**
-   * Executes a `wiki` tool command through the API-owned boundary. The runner
+   * Executes workflow and wiki commands through the API-owned boundary. The runner
    * injects an HTTP client that reaches apps/api; there is no direct-DB path.
    */
+  executeWorkflowCommand?: (input: {
+    workspaceId: string;
+    actorId: string;
+    toolInput: Record<string, unknown>;
+    idempotencyKey: string;
+  }) => Promise<unknown>;
   executeWikiCommand?: (input: {
     workspaceId: string;
     actorId: string;
@@ -83,9 +83,6 @@ export function executePersistedChatHostTool(input: {
   };
   const dependencies: ChatHostToolServiceDependencies = {
     loadContext: loadHostContext,
-    listBrains: ({ actorId, workspaceId }) =>
-      listAccessibleBrains({ userWorkosId: actorId, workspaceId }),
-    defaultBrainSlug: DEFAULT_BRAIN_SLUG,
     browserProfilesAvailable,
     createAgentSession: ({ actorId, conversationId, messageId, ...session }) =>
       createAgentSession({
@@ -123,26 +120,6 @@ export function executePersistedChatHostTool(input: {
     createWorkspaceSkill: createWorkspaceSkillForActor,
     manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
-    createTask: (task) =>
-      createTaskForActor(
-        {
-          ...task,
-          source: "agent",
-          idempotencyKey: taskSpawnIdempotencyKey(input.request.turnId, input.request.toolCallId),
-        },
-        taskDependencies,
-      ),
-    listSchedules: listTaskSchedulesForUser,
-    createSchedule: ({ actorId, workspaceId, ...schedule }) =>
-      createTaskScheduleForUser(
-        { ...schedule, userWorkosId: actorId, workspaceId },
-        { planHarness: input.runtime.planHarness },
-      ),
-    updateSchedule: (actorId, scheduleId, schedule) =>
-      updateTaskScheduleForUser(actorId, scheduleId, schedule, {
-        planHarness: input.runtime.planHarness,
-      }),
-    deleteSchedule: deleteTaskScheduleForUser,
     createWorkflowTask: async ({ actorId, ...workflow }) => {
       const task = await createTaskFromWorkflow(
         { ...workflow, userWorkosId: actorId },
@@ -152,7 +129,9 @@ export function executePersistedChatHostTool(input: {
               {
                 ...task,
                 source: "workflow",
-                idempotencyKey: `workflow:${input.request.turnId}`,
+                // Keyed per workflow, not per turn: a turn may start several distinct workflows,
+                // and each needs its own Task while a transport retry of the same one replays.
+                idempotencyKey: `workflow:${input.request.turnId}:${workflow.mention.id}`,
               },
               taskDependencies,
             ),
@@ -207,6 +186,12 @@ export function executePersistedChatHostTool(input: {
         idempotencyKey,
       });
     },
+    manageWorkflows: (command) => {
+      if (!input.runtime.executeWorkflowCommand)
+        throw new Error("Workflow management is unavailable.");
+      return input.runtime.executeWorkflowCommand(command);
+    },
+    postSlackMessage: postWorkflowSlackMessage,
     writeArtifact: () => {
       throw new Error("Artifact publishing is not configured for this runtime.");
     },
@@ -246,12 +231,6 @@ export function executePersistedChatHostTool(input: {
   });
 }
 
-export function taskSpawnIdempotencyKey(turnId: string, toolCallId?: string) {
-  if (!toolCallId) return `agent:${turnId}`;
-  const invocationHash = createHash("sha256").update(toolCallId).digest("hex");
-  return `agent:${turnId}:tool:${invocationHash}`;
-}
-
 async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostContext | null> {
   // Cleanup is deliberately allowed after terminal projection; every model-visible
   // operation remains fenced to a running turn and the same persisted principal.
@@ -260,20 +239,28 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
   const [row] = await getDb()
     .select({
       conversationKind: chatSessions.kind,
+      harness: codexChatSessions.harness,
       userWorkosId: codexChatSessions.userWorkosId,
       workspaceId: codexChatSessions.workspaceId,
       chatSessionId: codexChatSessions.chatSessionId,
-      brainRef: codexChatSessions.brainRef,
       userMessageId: codexChatTurns.userMessageId,
       email: users.email,
       firstName: users.firstName,
       lastName: users.lastName,
       timezone: users.timezone,
-      taskSpawningEnabled: users.taskSpawningEnabled,
       subagentsEnabled: users.subagentsEnabled,
-      legacyBrainEnabled: workspaces.legacyBrainEnabled,
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
+      slackChannelEnabled: workflows.slackChannelEnabled,
+      // A Task opened from a Slack direct message has no workflow to read the toggle from. Its
+      // open thread subscription is the equivalent grant: the Task exists to answer that thread.
+      // A workflow Task keeps reading the toggle, so retiring a workflow still withholds the tool
+      // from a Task whose Slack thread is still open.
+      slackThreadSubscribed: sql<boolean>`${tasks.workflowId} IS NULL AND EXISTS (
+        SELECT 1 FROM goat.session_subscriptions subscription
+        WHERE subscription.session_id = ${codexChatSessions.chatSessionId}
+          AND subscription.source = 'slack_thread' AND subscription.status = 'waiting'
+          AND subscription.expires_at > now())`,
     })
     .from(codexChatSessions)
     .innerJoin(chatSessions, eq(chatSessions.id, codexChatSessions.chatSessionId))
@@ -294,6 +281,19 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       ),
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
+    // Only a workflow run can post to Slack, and only while its Channels section keeps Slack on.
+    // Tasks store the workflow slug, so the creation-time fence keeps an old Task from inheriting
+    // a later workflow that reused the same slug after archival.
+    .leftJoin(tasks, eq(tasks.sessionId, codexChatSessions.chatSessionId))
+    .leftJoin(
+      workflows,
+      and(
+        eq(workflows.workspaceId, tasks.workspaceId),
+        eq(workflows.slug, tasks.workflowId),
+        isNull(workflows.archivedAt),
+        lte(workflows.createdAt, tasks.createdAt),
+      ),
+    )
     .where(
       and(
         eq(codexChatSessions.id, command.sessionId),
@@ -311,16 +311,17 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     workspaceName: row.workspaceName,
     conversationId: row.chatSessionId,
     messageId: row.userMessageId,
-    brainRef: row.legacyBrainEnabled ? row.brainRef : null,
     email: row.email,
     firstName: row.firstName,
     lastName: row.lastName,
     timezone: row.timezone,
-    taskToolsEnabled: row.taskSpawningEnabled && row.workspaceRole === "admin",
-    // Read-only and personal, so unlike task spawning this needs no admin role.
-    subagentsEnabled: row.subagentsEnabled,
+    slackChannelEnabled: row.slackChannelEnabled === true || row.slackThreadSubscribed === true,
+    // The iMessage personal agent is a phone surface: no workflow, schedule or subagent tools
+    // even for admins. Its runner does not wire those runners either; this is the server fence.
+    automationToolsEnabled: row.workspaceRole === "admin" && row.harness !== "personal_agent",
+    // Read-only and personal, so unlike the automation tools this needs no admin role.
+    subagentsEnabled: row.subagentsEnabled && row.harness !== "personal_agent",
     skillToolsEnabled: true,
-    legacyBrainEnabled: row.legacyBrainEnabled,
   };
 }
 

@@ -9,34 +9,6 @@ import type {
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { toast } from "@opencompany/ui/components/sonner";
-import {
-  AttioIcon,
-  BetterStackIcon,
-  ConvexIcon,
-  FathomIcon,
-  GitHubIcon,
-  GmailIcon,
-  GoogleAdminIcon,
-  GoogleCalendarIcon,
-  GoogleDriveIcon,
-  GranolaIcon,
-  HubSpotIcon,
-  InfisicalIcon,
-  JamieIcon,
-  LatitudeIcon,
-  LinearIcon,
-  NeonIcon,
-  NotionIcon,
-  PostHogIcon,
-  RenderIcon,
-  ResendIcon,
-  SigNozIcon,
-  SlackIcon,
-  StripeIcon,
-  SupabaseIcon,
-  VercelIcon,
-  XIcon,
-} from "@opencompany/ui/icons";
 import { cn } from "@opencompany/ui/lib/utils";
 import {
   Archive,
@@ -59,8 +31,8 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
+import { PageContent } from "@/components/PageContent";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
-import { SettingsContent } from "@/components/SettingsChrome";
 import {
   approveHeadlessPluginMcp,
   archiveHeadlessPlugin,
@@ -72,15 +44,16 @@ import {
   revokeHeadlessPluginMcp,
 } from "@/lib/headless-knowledge-commands";
 import {
-  OFFICIAL_MCP_PLUGIN_METADATA,
+  installOfficialPlugin,
+  OFFICIAL_MCP_PLUGINS,
+  OFFICIAL_PLUGINS,
+  OFFICIAL_SKILL_PLUGINS,
+  type OfficialPluginConfig,
+} from "@/lib/official-plugin-catalog";
+import {
   OFFICIAL_PLUGIN_CATEGORIES,
-  OFFICIAL_SKILL_PLUGIN_METADATA,
-  type OfficialMcpPluginMetadata,
-  type OfficialMcpPluginName,
   type OfficialPluginCategory,
-  type OfficialPluginMetadata,
   type OfficialPluginName,
-  type OfficialSkillPluginMetadata,
   type OfficialSkillPluginName,
   officialPluginUpdateAvailable,
 } from "@/lib/official-plugins";
@@ -135,288 +108,80 @@ type PluginReportView = {
   collisions: PluginCollisionView[];
 };
 
-type OfficialPluginAppearance = {
-  Icon: typeof LinearIcon;
-  iconClassName: string;
-};
-
-export type OfficialPluginConfig = OfficialPluginMetadata & OfficialPluginAppearance;
-export type OfficialMcpPluginConfig = OfficialMcpPluginMetadata & OfficialPluginAppearance;
-export type OfficialSkillPluginConfig = OfficialSkillPluginMetadata & OfficialPluginAppearance;
-
-export const OFFICIAL_MCP_PLUGINS = {
-  attio: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.attio,
-    Icon: AttioIcon,
-    iconClassName: "bg-[#111111] text-white",
-  },
-  betterstack: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.betterstack,
-    Icon: BetterStackIcon,
-    iconClassName: "bg-[#1B1F23] text-white",
-  },
-  fathom: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.fathom,
-    Icon: FathomIcon,
-    iconClassName: "bg-[#101820] text-white",
-  },
-  github: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.github,
-    Icon: GitHubIcon,
-    iconClassName: "bg-[#181717] text-white",
-  },
-  gmail: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.gmail,
-    Icon: GmailIcon,
-    iconClassName: "bg-white text-[#EA4335]",
-  },
-  granola: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.granola,
-    Icon: GranolaIcon,
-    iconClassName: "bg-[#F0EBE1] text-[#1A1714]",
-  },
-  "google-admin": {
-    ...OFFICIAL_MCP_PLUGIN_METADATA["google-admin"],
-    Icon: GoogleAdminIcon,
-    iconClassName: "bg-white",
-  },
-  "google-calendar": {
-    ...OFFICIAL_MCP_PLUGIN_METADATA["google-calendar"],
-    Icon: GoogleCalendarIcon,
-    iconClassName: "bg-[#1A73E8] text-white",
-  },
-  "google-drive": {
-    ...OFFICIAL_MCP_PLUGIN_METADATA["google-drive"],
-    Icon: GoogleDriveIcon,
-    iconClassName: "bg-white text-[#1FA463]",
-  },
-  hubspot: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.hubspot,
-    Icon: HubSpotIcon,
-    iconClassName: "bg-[#FF7A59] text-white",
-  },
-  infisical: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.infisical,
-    Icon: InfisicalIcon,
-    iconClassName: "bg-[#6C47FF] text-white",
-  },
-  jamie: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.jamie,
-    Icon: JamieIcon,
-    iconClassName: "bg-[#5B5BD6] text-white",
-  },
-  latitude: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.latitude,
-    Icon: LatitudeIcon,
-    iconClassName: "bg-[#171717] text-white",
-  },
-  linear: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.linear,
-    Icon: LinearIcon,
-    iconClassName: "bg-[#5E6AD2] text-white",
-  },
-  neon: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.neon,
-    Icon: NeonIcon,
-    iconClassName: "bg-[#00E599] text-[#0B0F14]",
-  },
-  notion: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.notion,
-    Icon: NotionIcon,
-    iconClassName: "bg-white text-black",
-  },
-  posthog: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.posthog,
-    Icon: PostHogIcon,
-    iconClassName: "bg-[#F54E00] text-white",
-  },
-  convex: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.convex,
-    Icon: ConvexIcon,
-    iconClassName: "bg-surface-muted",
-  },
-  render: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.render,
-    Icon: RenderIcon,
-    iconClassName: "bg-[#0B0D0E] text-white",
-  },
-  vercel: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.vercel,
-    Icon: VercelIcon,
-    iconClassName: "bg-black text-white",
-  },
-  supabase: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.supabase,
-    Icon: SupabaseIcon,
-    iconClassName: "bg-[#003D2B] text-[#3ECF8E]",
-  },
-  resend: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.resend,
-    Icon: ResendIcon,
-    iconClassName: "bg-black text-white",
-  },
-  signoz: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.signoz,
-    Icon: SigNozIcon,
-    iconClassName: "bg-[#0B0D0E] text-white",
-  },
-  slack: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.slack,
-    Icon: SlackIcon,
-    iconClassName: "bg-white text-[#4A154B]",
-  },
-  stripe: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.stripe,
-    Icon: StripeIcon,
-    iconClassName: "bg-[#635BFF] text-white",
-  },
-  x: {
-    ...OFFICIAL_MCP_PLUGIN_METADATA.x,
-    Icon: XIcon,
-    iconClassName: "bg-black text-white",
-  },
-} as const satisfies Record<OfficialMcpPluginName, OfficialMcpPluginConfig>;
-
-export const OFFICIAL_SKILL_PLUGINS = {
-  "yc-advise": {
-    ...OFFICIAL_SKILL_PLUGIN_METADATA["yc-advise"],
-    Icon: Sparkles,
-    iconClassName: "bg-[#F26522] text-white",
-  },
-} as const satisfies Record<OfficialSkillPluginName, OfficialSkillPluginConfig>;
-
-export const OFFICIAL_PLUGINS = {
-  ...OFFICIAL_MCP_PLUGINS,
-  ...OFFICIAL_SKILL_PLUGINS,
-} as const satisfies Record<OfficialPluginName, OfficialPluginConfig>;
-
-export const GITHUB_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.github.name;
-export const GITHUB_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.github.source;
-export const GMAIL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.gmail.name;
-export const GMAIL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.gmail.source;
-export const GRANOLA_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.granola.name;
-export const GRANOLA_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.granola.source;
-export const GOOGLE_CALENDAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-calendar"].name;
-export const GOOGLE_CALENDAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-calendar"].source;
-export const GOOGLE_DRIVE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS["google-drive"].name;
-export const GOOGLE_DRIVE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS["google-drive"].source;
-export const HUBSPOT_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.hubspot.name;
-export const HUBSPOT_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.hubspot.source;
-export const INFISICAL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.infisical.name;
-export const INFISICAL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.infisical.source;
-export const JAMIE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.jamie.name;
-export const JAMIE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.jamie.source;
-export const ATTIO_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.attio.name;
-export const ATTIO_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.attio.source;
-export const LATITUDE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.latitude.name;
-export const LATITUDE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.latitude.source;
-export const LINEAR_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.linear.name;
-export const LINEAR_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.linear.source;
-export const NEON_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.neon.name;
-export const NEON_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.neon.source;
-export const NOTION_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.notion.name;
-export const NOTION_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.notion.source;
-export const POSTHOG_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.posthog.name;
-export const POSTHOG_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.posthog.source;
-export const RENDER_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.render.name;
-export const RENDER_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.render.source;
-export const VERCEL_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.vercel.name;
-export const VERCEL_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.vercel.source;
-export const BETTERSTACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.betterstack.name;
-export const BETTERSTACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.betterstack.source;
-export const FATHOM_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.fathom.name;
-export const FATHOM_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.fathom.source;
-export const SIGNOZ_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.signoz.name;
-export const SIGNOZ_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.signoz.source;
-export const SLACK_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.slack.name;
-export const SLACK_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.slack.source;
-export const STRIPE_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.stripe.name;
-export const STRIPE_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.stripe.source;
-export const X_PLUGIN_NAME = OFFICIAL_MCP_PLUGINS.x.name;
-export const X_PLUGIN_SOURCE = OFFICIAL_MCP_PLUGINS.x.source;
-export const YC_ADVISE_PLUGIN_NAME = OFFICIAL_SKILL_PLUGINS["yc-advise"].name;
-export const YC_ADVISE_PLUGIN_SOURCE = OFFICIAL_SKILL_PLUGINS["yc-advise"].source;
-
-export async function installOfficialPlugin(
-  config: OfficialPluginConfig,
-  preview?: PluginImportPreviewDto,
-) {
-  const confirmed = preview ?? (await previewHeadlessPluginImport({ url: config.source }));
-  if (confirmed.manifest.name.toLocaleLowerCase() !== config.name) {
-    throw new Error(
-      `Expected the ${config.name} plugin, but this source contains ${confirmed.manifest.name}.`,
-    );
-  }
-  const result = await importHeadlessPlugin({
-    url: config.source,
-    expectedResolvedCommit: confirmed.source.resolvedCommit,
-    expectedIntegrity: confirmed.integrity,
-  });
-  return result.plugin;
-}
-
-export function installOfficialMcpPlugin(
-  config: OfficialMcpPluginConfig,
-  preview?: PluginImportPreviewDto,
-) {
-  return installOfficialPlugin(config, preview);
-}
-
-export function installOfficialLinearPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.linear, preview);
-}
-
-export function installOfficialGitHubPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.github, preview);
-}
-
-export function installOfficialGmailPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.gmail, preview);
-}
-
-export function installOfficialGoogleCalendarPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-calendar"], preview);
-}
-
-export function installOfficialGoogleDrivePlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS["google-drive"], preview);
-}
-
-export function installOfficialHubSpotPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.hubspot, preview);
-}
-
-export function installOfficialAttioPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.attio, preview);
-}
-
-export function installOfficialLatitudePlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.latitude, preview);
-}
-
-export function installOfficialNeonPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.neon, preview);
-}
-
-export function installOfficialBetterStackPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.betterstack, preview);
-}
-
-export function installOfficialPostHogPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.posthog, preview);
-}
-
-export function installOfficialSigNozPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.signoz, preview);
-}
-
-export function installOfficialSlackPlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.slack, preview);
-}
-
-export function installOfficialStripePlugin(preview?: PluginImportPreviewDto) {
-  return installOfficialMcpPlugin(OFFICIAL_MCP_PLUGINS.stripe, preview);
-}
+export type {
+  OfficialManagedPluginConfig,
+  OfficialMcpPluginConfig,
+  OfficialPluginConfig,
+  OfficialSkillPluginConfig,
+} from "@/lib/official-plugin-catalog";
+export {
+  ATTIO_PLUGIN_NAME,
+  ATTIO_PLUGIN_SOURCE,
+  BETTERSTACK_PLUGIN_NAME,
+  BETTERSTACK_PLUGIN_SOURCE,
+  FATHOM_PLUGIN_NAME,
+  FATHOM_PLUGIN_SOURCE,
+  GITHUB_PLUGIN_NAME,
+  GITHUB_PLUGIN_SOURCE,
+  GMAIL_PLUGIN_NAME,
+  GMAIL_PLUGIN_SOURCE,
+  GOOGLE_CALENDAR_PLUGIN_NAME,
+  GOOGLE_CALENDAR_PLUGIN_SOURCE,
+  GOOGLE_DRIVE_PLUGIN_NAME,
+  GOOGLE_DRIVE_PLUGIN_SOURCE,
+  GRANOLA_PLUGIN_NAME,
+  GRANOLA_PLUGIN_SOURCE,
+  HUBSPOT_PLUGIN_NAME,
+  HUBSPOT_PLUGIN_SOURCE,
+  INFISICAL_PLUGIN_NAME,
+  INFISICAL_PLUGIN_SOURCE,
+  installOfficialAttioPlugin,
+  installOfficialBetterStackPlugin,
+  installOfficialGitHubPlugin,
+  installOfficialGmailPlugin,
+  installOfficialGoogleCalendarPlugin,
+  installOfficialGoogleDrivePlugin,
+  installOfficialHubSpotPlugin,
+  installOfficialLatitudePlugin,
+  installOfficialLinearPlugin,
+  installOfficialMcpPlugin,
+  installOfficialNeonPlugin,
+  installOfficialPlugin,
+  installOfficialPostHogPlugin,
+  installOfficialSigNozPlugin,
+  installOfficialSlackPlugin,
+  installOfficialStripePlugin,
+  JAMIE_PLUGIN_NAME,
+  JAMIE_PLUGIN_SOURCE,
+  LATITUDE_PLUGIN_NAME,
+  LATITUDE_PLUGIN_SOURCE,
+  LINEAR_PLUGIN_NAME,
+  LINEAR_PLUGIN_SOURCE,
+  NEON_PLUGIN_NAME,
+  NEON_PLUGIN_SOURCE,
+  NOTION_PLUGIN_NAME,
+  NOTION_PLUGIN_SOURCE,
+  OFFICIAL_MANAGED_PLUGINS,
+  OFFICIAL_MCP_PLUGINS,
+  OFFICIAL_PLUGINS,
+  OFFICIAL_SKILL_PLUGINS,
+  POSTHOG_PLUGIN_NAME,
+  POSTHOG_PLUGIN_SOURCE,
+  RENDER_PLUGIN_NAME,
+  RENDER_PLUGIN_SOURCE,
+  SIGNOZ_PLUGIN_NAME,
+  SIGNOZ_PLUGIN_SOURCE,
+  SLACK_PLUGIN_NAME,
+  SLACK_PLUGIN_SOURCE,
+  STRIPE_PLUGIN_NAME,
+  STRIPE_PLUGIN_SOURCE,
+  VERCEL_PLUGIN_NAME,
+  VERCEL_PLUGIN_SOURCE,
+  X_PLUGIN_NAME,
+  X_PLUGIN_SOURCE,
+  YC_ADVISE_PLUGIN_NAME,
+  YC_ADVISE_PLUGIN_SOURCE,
+} from "@/lib/official-plugin-catalog";
 
 type PluginCatalogFilter = "all" | "installed" | "featured" | OfficialPluginCategory;
 
@@ -435,14 +200,16 @@ function pluginCatalogFilterLabel(filter: Exclude<PluginCatalogFilter, "all">) {
   return filter === "featured" ? "Featured" : OFFICIAL_PLUGIN_CATEGORIES[filter];
 }
 
-export function PluginsSettings({
+export function PluginsRoute({
   plugins,
   canEdit,
   workspaceId,
+  dopplerConnected = false,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
   workspaceId: string;
+  dopplerConnected?: boolean;
 }) {
   const router = useRouter();
   const { integrations } = useAppData();
@@ -457,8 +224,7 @@ export function PluginsSettings({
     () => new Map(plugins.map((plugin) => [plugin.name.toLocaleLowerCase(), plugin] as const)),
     [plugins],
   );
-  // An enabled MCP plugin without its account connection cannot run, so the catalog must not
-  // claim it is "Enabled". Skills-only plugins never need a connection.
+  // Connection-backed plugins need an account before they can be used.
   const pluginsMissingConnection = useMemo(() => {
     const names = new Set<string>();
     for (const config of Object.values(OFFICIAL_MCP_PLUGINS)) {
@@ -467,8 +233,11 @@ export function PluginsSettings({
         names.add(config.name);
       }
     }
+    if (installedPlugins.get("doppler")?.status === "enabled" && !dopplerConnected) {
+      names.add("doppler");
+    }
     return names;
-  }, [installedPlugins, integrations]);
+  }, [installedPlugins, integrations, dopplerConnected]);
   const installedConfigs = configs.filter((config) => installedPlugins.has(config.name));
   const pluginsWithUpdates = new Set<OfficialPluginName>();
   for (const config of configs) {
@@ -505,7 +274,7 @@ export function PluginsSettings({
       try {
         await installOfficialPlugin(config);
         toast.success(`${config.label} ${updating ? "updated" : "installed"}.`);
-        router.push(`/settings/plugins/${config.name}`);
+        router.push(`/plugins/${config.name}`);
         // API mutations do not invalidate the catalog cached for back navigation.
         router.refresh();
       } catch (cause) {
@@ -564,12 +333,12 @@ export function PluginsSettings({
   };
 
   return (
-    <SettingsContent title="Plugins" contentClassName="max-w-[960px]">
+    <PageContent title="Plugins" contentClassName="max-w-[960px]">
       <PluginConnectionFeedback />
       {canEdit ? (
         <div className="mb-5 flex justify-end">
           <Link
-            href="/settings/plugins/add-mcp"
+            href="/plugins/add-mcp"
             className={buttonVariants({ variant: "outline", size: "sm" })}
           >
             <ServerCog className="mr-2 size-4" />
@@ -649,7 +418,7 @@ export function PluginsSettings({
                 {visibleCustomPlugins.map((plugin) => (
                   <IntentPrefetchLink
                     key={plugin.id}
-                    href={`/settings/plugins/${plugin.name}`}
+                    href={`/plugins/${plugin.name}`}
                     className="flex items-center gap-3 p-4 hover:bg-surface-hover"
                   >
                     <ServerCog className="size-5 shrink-0 text-ink-subtle" />
@@ -698,7 +467,7 @@ export function PluginsSettings({
           )}
         </div>
       </div>
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -758,7 +527,7 @@ function PluginCatalogSection({
               className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2.5 transition-colors duration-150 hover:bg-surface-hover"
             >
               <IntentPrefetchLink
-                href={`/settings/plugins/${config.name}`}
+                href={`/plugins/${config.name}`}
                 className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
               >
                 <span
@@ -774,6 +543,7 @@ function PluginCatalogSection({
                     <span className="truncate text-[13.5px] font-medium leading-5 text-ink">
                       {config.label}
                     </span>
+                    {config.kind === "managed" ? <PaidBadge /> : null}
                     {plugin ? (
                       <PluginStatus
                         status={plugin.status}
@@ -800,7 +570,7 @@ function PluginCatalogSection({
                 </Button>
               ) : plugin ? (
                 <IntentPrefetchLink
-                  href={`/settings/plugins/${config.name}`}
+                  href={`/plugins/${config.name}`}
                   className={cn(
                     buttonVariants({ variant: "outline", size: "sm" }),
                     "h-8 rounded-full px-3 text-[12px] text-ink shadow-none",
@@ -854,7 +624,7 @@ export function OfficialSkillPluginDetail({
   name,
   canEdit,
 }: {
-  name: OfficialSkillPluginName;
+  name: Exclude<OfficialSkillPluginName, "doppler">;
   canEdit: boolean;
 }) {
   const config = OFFICIAL_SKILL_PLUGINS[name];
@@ -894,10 +664,10 @@ export function OfficialSkillPluginDetail({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={config.label}
       description={config.description}
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       <section className="flex flex-wrap items-start gap-3 rounded-lg border border-border bg-surface p-4">
         <span
@@ -979,7 +749,7 @@ export function OfficialSkillPluginDetail({
       </section>
 
       {installError ? <p className="text-[12.5px] text-danger">{installError}</p> : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -989,12 +759,15 @@ export function PluginDetail({
   title,
   description,
   officialPluginName,
+  billingSection,
 }: {
   plugin: PluginInstallationDto;
   canEdit: boolean;
   title?: string;
   description?: string;
   officialPluginName?: OfficialPluginName;
+  // Rendered above the package internals for a paid plugin: prices and the daily spending limit.
+  billingSection?: ReactNode;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -1020,7 +793,7 @@ export function PluginDetail({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={title ?? plugin.manifest.name}
       description={
         description ??
@@ -1028,7 +801,7 @@ export function PluginDetail({
           ? "An immutable Agent Plugin package with passive Skills and separately approved MCP servers."
           : "An immutable Agent Plugin package with passive Skills and no executable MCP servers.")
       }
-      backLink={{ href: "/settings/plugins", label: "Plugins" }}
+      backLink={{ href: "/plugins", label: "Plugins" }}
     >
       {!canEdit ? (
         <p className="text-[13px] leading-5 text-ink-subtle">
@@ -1065,6 +838,8 @@ export function PluginDetail({
         <SectionLabel>Status</SectionLabel>
         <PluginStatus status={plugin.status} />
       </section>
+
+      {billingSection}
 
       <details className="group rounded-lg border border-border bg-surface-muted">
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink-muted">
@@ -1253,7 +1028,7 @@ export function PluginDetail({
               onClick={() =>
                 mutate(
                   () => archiveHeadlessPlugin(plugin.name),
-                  () => router.push("/settings/plugins"),
+                  () => router.push("/plugins"),
                 )
               }
               className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink disabled:opacity-60"
@@ -1313,7 +1088,7 @@ export function PluginDetail({
           </div>
         </div>
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -1642,6 +1417,14 @@ function CollisionReport({ collisions }: { collisions: PluginCollisionView[] }) 
         </ul>
       )}
     </section>
+  );
+}
+
+export function PaidBadge() {
+  return (
+    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
+      Paid
+    </span>
   );
 }
 

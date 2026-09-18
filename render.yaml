@@ -11,7 +11,6 @@ services:
     numInstances: 1
     image:
       url: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
-    healthCheckPath: /v1/health
     disk:
       name: opencompany-electric-data
       mountPath: /var/electric
@@ -161,6 +160,21 @@ services:
         sync: false
       - key: OPENCOMPANY_SLACK_BOT_STATE_SECRET
         sync: false
+      # iMessage personal assistant (messages.dev): webhook ingress and pairing replies.
+      - key: KAPSO_API_KEY
+        sync: false
+      - key: KAPSO_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_LINE_HANDLE
+        sync: false
+      - key: MESSAGES_API_KEY
+        sync: false
+      - key: KAPSO_WEBHOOK_SECRET
+        sync: false
+      - key: MESSAGES_WEBHOOK_SECRET
+        sync: false
+      - key: MESSAGES_LINE_HANDLE
+        sync: false
       # Feedback submission moved behind POST /v1/feedback in the #1203 5a1
       # cutover: the API dispatches sidebar feedback to Linear. Optional — when
       # unset, feedback submission fails with a clear error and nothing else
@@ -248,6 +262,10 @@ services:
       - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT
         sync: false
       - key: OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
+      # Sentry-compatible Better Stack DSN. Without it API exceptions only reach
+      # platform logs, so the release preflight requires it.
+      - key: BETTER_STACK_ERRORS_DSN
         sync: false
       - key: OBSERVABILITY_ENABLED
         sync: false
@@ -385,6 +403,17 @@ services:
         sync: false
       - key: EXA_API_KEY
         sync: false
+      # iMessage personal assistant sends from the runner (messages.dev).
+      - key: KAPSO_API_KEY
+        sync: false
+      - key: KAPSO_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_LINE_HANDLE
+        sync: false
+      - key: MESSAGES_API_KEY
+        sync: false
+      - key: MESSAGES_LINE_HANDLE
+        sync: false
       - key: APIFY_API_TOKEN
         sync: false
       - key: MONID_API_KEY
@@ -417,7 +446,12 @@ services:
       # Optional opencompany rendered-browser task tools.
       - key: RUNNER_OPENCOMPANY_BROWSER_ENABLED
         sync: false
-      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE
+      # One built E2B template alias per user-selectable cloud sandbox size.
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL
+        sync: false
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD
+        sync: false
+      - key: OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE
         sync: false
       - key: RUNNER_CODEX_MODEL
         sync: false

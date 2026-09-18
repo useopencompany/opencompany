@@ -52,6 +52,9 @@ const migrationPaths = [
   "0261_persistent_bots.sql",
   "0263_personal_company_skills.sql",
   "0270_opencompany_sidebar_projects.sql",
+  "0276_sandbox_size_tiers.sql",
+  "0279_goat_awaiting_input_state.sql",
+  "0286_coding_chat_steering.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -634,6 +637,48 @@ describe("Postgres Chat repositories", () => {
     expect(row.summary_bytes * 10).toBeLessThan(row.presentation_bytes);
   });
 
+  it("pins a new coding session to the workspace sandbox size and never resizes it later", async () => {
+    await database.query(
+      `UPDATE goat.workspaces SET sandbox_size = 'small' WHERE id = 'workspace_1'`,
+    );
+
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "sandbox-size-pin",
+      content: "Start a coding session.",
+      engine: "codex",
+      model: "provider/model",
+    });
+
+    const sizeOf = async () =>
+      (
+        await database.query<{ sandbox_size: string }>(
+          "SELECT sandbox_size FROM goat.codex_chat_sessions WHERE chat_session_id = $1",
+          [created.conversationId],
+        )
+      ).rows[0]?.sandbox_size;
+
+    expect(await sizeOf()).toBe("small");
+
+    // A later workspace change must not reach a session that already exists: its
+    // sandbox is already running on the size it was created with.
+    await database.query(
+      `UPDATE goat.workspaces SET sandbox_size = 'large' WHERE id = 'workspace_1'`,
+    );
+    await service.createMessage(actor(), {
+      idempotencyKey: "sandbox-size-pin-second-turn",
+      conversationId: created.conversationId,
+      content: "Keep going.",
+      engine: "codex",
+      model: "provider/model",
+    });
+
+    expect(await sizeOf()).toBe("small");
+
+    await database.query(
+      `UPDATE goat.workspaces SET sandbox_size = 'standard' WHERE id = 'workspace_1'`,
+    );
+  });
+
   it.each(["opencompany", "codex", "claude_code"] as const)(
     "returns and atomically refreshes the %s runtime summary without exposing raw errors",
     async (engine) => {
@@ -692,6 +737,46 @@ describe("Postgres Chat repositories", () => {
       expect(JSON.stringify(failed)).not.toContain(rawError);
     },
   );
+
+  it("returns the latest engine turn settings with Conversation list and detail reads", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "composer-settings-first",
+      content: "Use medium reasoning.",
+      engine: "codex",
+      model: "provider/model",
+      settings: { reasoningEffort: "medium" },
+    });
+    await service.createMessage(actor(), {
+      idempotencyKey: "composer-settings-latest",
+      conversationId: created.conversationId,
+      content: "Switch to low reasoning and plan mode.",
+      engine: "codex",
+      model: "provider/model",
+      settings: {
+        reasoningEffort: "low",
+        planModeReasoningEffort: "high",
+        goalMode: { objective: "Finish the migration", tokenBudget: 80_000 },
+      },
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET created_at = created_at + interval '1 second'
+       WHERE chat_session_id = $1 AND prompt = 'Switch to low reasoning and plan mode.'`,
+      [created.conversationId],
+    );
+
+    const expected = {
+      reasoningEffort: "low",
+      planModeEnabled: true,
+      goalMode: { objective: "Finish the migration", tokenBudget: 80_000 },
+    };
+    await expect(service.getConversation(actor(), created.conversationId)).resolves.toMatchObject({
+      composerSettings: expected,
+    });
+    await expect(service.listConversations(actor())).resolves.toMatchObject({
+      conversations: [{ id: created.conversationId, composerSettings: expected }],
+    });
+  });
 
   it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {
     const created = await service.createMessage(actor(), {
@@ -2189,6 +2274,174 @@ describe("Postgres Chat repositories", () => {
     ).resolves.toBeNull();
   });
 
+  it("promotes a queued Run into the running Run without letting it start twice", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-active",
+      content: "Fix the failing build.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_steer', lease_owner = 'worker_steer'
+       WHERE id = $1`,
+      [running.runId],
+    );
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-queued",
+      content: "Also update the changelog.",
+      engine: "codex",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+    // Promotion is intent only: the Run stays queued and claimable, so a turn that ends before the
+    // runner injects it simply runs the message next.
+    expect(
+      (
+        await database.query<{ status: string; steer_into_run_id: string | null }>(
+          "SELECT status, steer_into_run_id FROM goat.codex_chat_turns WHERE id = $1",
+          [queued.runId],
+        )
+      ).rows,
+    ).toEqual([{ status: "queued", steer_into_run_id: running.runId }]);
+    // Pressing Steer twice must not queue the message into the turn twice.
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+
+    // A Run a worker has already claimed is being answered, not waiting.
+    await database.query(
+      "UPDATE goat.codex_chat_turns SET status = 'running', attempts = 1 WHERE id = $1",
+      [queued.runId],
+    );
+    await expect(service.steerRun(actor(), queued.runId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(service.steerRun(actor(), "run_missing")).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("refuses to steer a Message carrying attachments the injection would drop", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-active",
+      content: "Start the migration.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_a', lease_owner = 'worker_a'
+       WHERE id = $1`,
+      [running.runId],
+    );
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-attachment-queued",
+      content: "Use this screenshot.",
+      engine: "codex",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+    await database.query(
+      `UPDATE goat.chat_messages SET attachments = $2 WHERE id = (
+         SELECT user_message_id FROM goat.codex_chat_turns WHERE id = $1
+       )`,
+      [
+        queued.runId,
+        JSON.stringify([
+          { id: "attachment_1", filename: "shot.png", mediaType: "image/png", sizeBytes: 10 },
+        ]),
+      ],
+    );
+
+    // Steering sends text prompt blocks only, so promoting this Message would drop the file.
+    await expect(service.steerRun(actor(), queued.runId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
+
+  it("steers and removes a queued Run on a Task conversation without ending the Task", async () => {
+    const running = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-task-active",
+      content: "Draft the launch plan.",
+      engine: "opencompany",
+      model: "provider/model",
+    });
+    const queued = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-task-queued",
+      content: "Lead with the pricing change.",
+      engine: "opencompany",
+      model: "provider/model",
+      conversationId: running.conversationId,
+    });
+    // A Task conversation is the same Conversation, Run, and Message shape a Chat uses. Viewing one
+    // shows that session, so it steers and queues the same way. (The Task write path builds these
+    // rows through createTaskCommentAndRun; this test only needs the shape they leave behind.)
+    await database.query("UPDATE goat.chat_sessions SET kind = 'task' WHERE id = $1", [
+      running.conversationId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id, status, stage)
+       VALUES ('task_steer', 'user_1', 'workspace_1', $1, 'running', 'running')`,
+      [running.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_turns
+       SET status = 'running', attempts = 1, lease_id = 'lease_task', lease_owner = 'worker_task'
+       WHERE id = $1`,
+      [running.runId],
+    );
+
+    await expect(service.steerRun(actor(), queued.runId)).resolves.toEqual({
+      runId: queued.runId,
+      targetRunId: running.runId,
+    });
+
+    // Dropping the queued message must not end the Task: the turn it was queued behind is still
+    // producing work.
+    await expect(service.cancelRun(actor(), queued.runId)).resolves.toMatchObject({
+      status: "canceled",
+    });
+    expect(
+      (
+        await database.query<{ status: string; stage: string }>(
+          "SELECT status, stage FROM goat.tasks WHERE id = 'task_steer'",
+        )
+      ).rows,
+    ).toEqual([{ status: "running", stage: "running" }]);
+
+    // With nothing else pending, stopping the live Run still stops the Task. The Run itself stays
+    // running until the worker settles the interrupt.
+    await expect(service.cancelRun(actor(), running.runId)).resolves.toMatchObject({
+      status: "running",
+    });
+    expect(
+      (
+        await database.query<{ status: string; stage: string }>(
+          "SELECT status, stage FROM goat.tasks WHERE id = 'task_steer'",
+        )
+      ).rows,
+    ).toEqual([{ status: "canceled", stage: "canceled" }]);
+  });
+
+  it("refuses to steer a Run in another member's conversation", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "send-steer-foreign",
+      content: "Private work.",
+      engine: "codex",
+      model: "provider/model",
+    });
+    await expect(
+      service.steerRun(actor({ userId: "user_3", role: "member" }), created.runId),
+    ).rejects.toMatchObject({ code: "not_found" });
+  });
+
   it("projects queued cancellation to the assistant, runtime, and semantic log", async () => {
     const created = await service.createMessage(actor(), {
       idempotencyKey: "send-cancel",
@@ -2799,6 +3052,9 @@ const BASE_SCHEMA = `
     brain_ref text,
     workspace_id text,
     host_tool_contract_version text,
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
+    supervisor_template_version text,
     sandbox_id text,
     codex_thread_id text,
     active_turn_id text,
@@ -2819,6 +3075,8 @@ const BASE_SCHEMA = `
     status text NOT NULL DEFAULT 'queued',
     prompt text NOT NULL,
     settings jsonb NOT NULL DEFAULT '{}',
+    execution_backend text NOT NULL DEFAULT 'runner_attached',
+    execution_backend_version integer NOT NULL DEFAULT 1,
     error text,
     interrupt_requested_at timestamptz,
     attempts integer NOT NULL DEFAULT 0,

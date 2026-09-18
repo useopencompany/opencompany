@@ -15,18 +15,18 @@ describe("durable plugin event delivery", () => {
   beforeAll(async () => {
     await database.exec(`
       CREATE SCHEMA goat;
-      CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, task_spawning_enabled boolean, onboarded_at timestamptz);
+      CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, onboarded_at timestamptz);
       CREATE TABLE goat.workspace_members (workspace_id text, user_workos_id text);
       CREATE TABLE goat.integrations (id text PRIMARY KEY, provider text, workspace_id text, user_workos_id text, status text, external_id text);
       CREATE TABLE goat.plugins (workspace_id text, owner_user_id text, name text, status text, archived_at timestamptz, events jsonb, event_modes jsonb);
-      CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text, slug text, name text, trigger text, status text, archived_at timestamptz, event_user_workos_id text, event_config jsonb, event_harness_spec jsonb, event_activated_at timestamptz);
+      CREATE TABLE goat.workflows (id text PRIMARY KEY, workspace_id text, slug text, name text, trigger text, status text, archived_at timestamptz, event_user_workos_id text, event_config jsonb, event_harness_spec jsonb, event_activated_at timestamptz, automation_triggers jsonb NOT NULL DEFAULT '[]'::jsonb);
       CREATE TABLE goat.tasks (id text PRIMARY KEY);
       CREATE TABLE goat.workflow_event_runs (
-        id text PRIMARY KEY, workflow_id text REFERENCES goat.workflows(id), workspace_id text, user_workos_id text,
+        id text PRIMARY KEY, workflow_id text REFERENCES goat.workflows(id), trigger_id text NOT NULL DEFAULT 'legacy', workspace_id text, user_workos_id text,
         workflow_slug text, workflow_name text, provider text, event_type text, delivery_id text, goal text, harness_spec jsonb, event_at timestamptz,
         task_id text REFERENCES goat.tasks(id), status text DEFAULT 'pending', attempt_count int DEFAULT 0,
         next_attempt_at timestamptz DEFAULT '2026-09-12T20:00:00Z', last_error text,
-        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), UNIQUE (workflow_id, provider, delivery_id)
+        created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), UNIQUE (workflow_id, trigger_id, provider, delivery_id)
       );
     `);
   }, 30_000);
@@ -34,12 +34,12 @@ describe("durable plugin event delivery", () => {
   beforeEach(async () => {
     await database.exec(`
       TRUNCATE goat.workflow_event_runs, goat.tasks, goat.workflows, goat.plugins, goat.integrations, goat.workspace_members, goat.users CASCADE;
-      INSERT INTO goat.users VALUES ('user_1', true, now());
+      INSERT INTO goat.users VALUES ('user_1', now());
       INSERT INTO goat.workspace_members VALUES ('workspace_1', 'user_1');
       INSERT INTO goat.integrations VALUES ('connection_1', 'linear', NULL, 'user_1', 'connected', 'organization_1');
       INSERT INTO goat.plugins VALUES ('workspace_1', 'user_1', 'linear', 'enabled', NULL, '[{"id":"issue.created","filters":[]}]', '{"issue.created":true}');
       INSERT INTO goat.workflows VALUES ('workflow_1', 'workspace_1', 'issue-review', 'Review issue', 'event', 'active', NULL, 'user_1',
-        '{"type":"event","provider":"linear","event":"issue.created","integrationId":"connection_1","filters":{},"prompt":"Review this issue."}', '{}', '2026-09-12T19:00:00Z');
+        '{"type":"event","provider":"linear","event":"issue.created","integrationId":"connection_1","filters":{},"prompt":"Review this issue."}', '{}', '2026-09-12T19:00:00Z', '[]');
     `);
   });
   async function enqueue(eventAt = now, deliveryId = "delivery_1") {

@@ -20,10 +20,13 @@ describe("workspace automation lifecycle", () => {
     ]);
     const db = { select: vi.fn(() => builder) };
 
-    await expect(listWorkflowCatalog("workspace_1", db as never)).resolves.toEqual([
+    await expect(listWorkflowCatalog("workspace_1", "user_1", db as never)).resolves.toEqual([
       { id: "launch-brief", name: "Launch brief", description: "Prepare the brief" },
     ]);
-    expect(renderQuery(builder.whereValue).params).toContain("active");
+    const catalogQuery = renderQuery(builder.whereValue);
+    expect(catalogQuery.params).toContain("active");
+    // Personal workflows belong to their creator, so the reader is part of every catalog query.
+    expect(catalogQuery.params).toContain("user_1");
   });
 
   it("refuses to fire a draft workflow even when its slug resolves", async () => {
@@ -43,6 +46,7 @@ describe("workspace automation lifecycle", () => {
     await expect(
       resolveWorkflowMention({
         workspaceId: "workspace_1",
+        userId: "user_1",
         mention: { id: "launch-brief" },
         db: db as never,
       }),
@@ -66,6 +70,7 @@ describe("workspace automation lifecycle", () => {
     await expect(
       resolveWorkflowMention({
         workspaceId: "workspace_1",
+        userId: "user_1",
         mention: { id: "launch-brief" },
         db: db as never,
       }),

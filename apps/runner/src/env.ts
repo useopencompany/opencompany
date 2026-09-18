@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { CODEX_DEFAULT_MODEL_ID } from "@opencompany/agent-runtime";
+import type { SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { loadEncryptionKey } from "@opencompany/crypto";
 import { DEFAULT_CODING_AGENT_TURN_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
 
@@ -31,6 +32,12 @@ export type RunnerEnv = {
   previewBaseDomain?: string | undefined;
   previewProtocol?: "http" | "https" | undefined;
   exaApiKey: string | undefined;
+  // Provider configuration for personal assistant phone channels.
+  kapsoApiKey?: string | undefined;
+  kapsoPhoneNumberId?: string | undefined;
+  whatsappLineHandle?: string | undefined;
+  messagesApiKey?: string | undefined;
+  messagesLineHandle?: string | undefined;
   browserEnabled: boolean;
   // Google OAuth client, shared by the Gmail, Google Calendar, and Google Drive integrations. The runner
   // needs it to refresh per-account access tokens against Google's token endpoint.
@@ -41,7 +48,10 @@ export type RunnerEnv = {
   // token endpoint before snapshot enrichment.
   hubspotOAuthClientId?: string | undefined;
   hubspotOAuthClientSecret?: string | undefined;
-  codexE2bTemplate: string | undefined;
+  // One E2B template alias per user-selectable sandbox size. E2B fixes vCPU and RAM
+  // at template build time, so the size a workspace picks is which template the
+  // runner spawns from. Unset entries fall back to E2B's stock `codex` template.
+  codexE2bTemplates: Record<SandboxSize, string | undefined>;
   // Ownership boundary for managed E2B sandbox reconciliation. Every creator and reconciler in
   // one runner deployment must use the same value; local setup generates a workspace-specific
   // namespace so a local runner sharing the E2B project cannot select production sandboxes.
@@ -92,12 +102,21 @@ export function loadEnv(): RunnerEnv {
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
+    kapsoApiKey: optionalEnv("KAPSO_API_KEY"),
+    kapsoPhoneNumberId: optionalEnv("KAPSO_PHONE_NUMBER_ID"),
+    whatsappLineHandle: optionalEnv("WHATSAPP_LINE_HANDLE"),
+    messagesApiKey: optionalEnv("MESSAGES_API_KEY"),
+    messagesLineHandle: optionalEnv("MESSAGES_LINE_HANDLE"),
     browserEnabled: optionalBooleanEnv("RUNNER_OPENCOMPANY_BROWSER_ENABLED", false),
     googleOAuthClientId: optionalEnv("GOOGLE_OAUTH_CLIENT_ID"),
     googleOAuthClientSecret: optionalEnv("GOOGLE_OAUTH_CLIENT_SECRET"),
     hubspotOAuthClientId: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_ID"),
     hubspotOAuthClientSecret: optionalEnv("OPENCOMPANY_HUBSPOT_CLIENT_SECRET"),
-    codexE2bTemplate: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE"),
+    codexE2bTemplates: {
+      small: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL"),
+      standard: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD"),
+      large: optionalEnv("OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE"),
+    },
     sandboxNamespace: requiredEnv("RUNNER_SANDBOX_NAMESPACE"),
     blobReadWriteToken: optionalEnv("BLOB_READ_WRITE_TOKEN"),
     codexTimeoutMs: optionalPositiveIntegerEnv(

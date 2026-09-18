@@ -1926,6 +1926,195 @@
       "when": 1789668400000,
       "tag": "0274_default_wiki_company",
       "breakpoints": true
+    },
+    {
+      "idx": 275,
+      "version": "7",
+      "when": 1789754800000,
+      "tag": "0275_workflow_personal_company_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 276,
+      "version": "7",
+      "when": 1789841200000,
+      "tag": "0276_sandbox_size_tiers",
+      "breakpoints": true
+    },
+    {
+      "idx": 277,
+      "version": "7",
+      "when": 1789927600000,
+      "tag": "0277_workflow_multiple_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 278,
+      "version": "7",
+      "when": 1789927600001,
+      "tag": "0278_dash0_plugin",
+      "breakpoints": true
+    },
+    {
+      "idx": 279,
+      "version": "7",
+      "when": 1790014000001,
+      "tag": "0279_goat_awaiting_input_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 280,
+      "version": "7",
+      "when": 1790100400001,
+      "tag": "0280_goat_awaiting_input_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 281,
+      "version": "7",
+      "when": 1790100400002,
+      "tag": "0281_doppler_cli_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 282,
+      "version": "7",
+      "when": 1790100400003,
+      "tag": "0282_durable_session_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 283,
+      "version": "7",
+      "when": 1790100400004,
+      "tag": "0283_tasks_workflows_general_availability",
+      "breakpoints": true
+    },
+    {
+      "idx": 284,
+      "version": "7",
+      "when": 1790100400005,
+      "tag": "0284_slack_thread_participants",
+      "breakpoints": true
+    },
+    {
+      "idx": 285,
+      "version": "7",
+      "when": 1790100400006,
+      "tag": "0285_paid_plugins",
+      "breakpoints": true
+    },
+    {
+      "idx": 286,
+      "version": "7",
+      "when": 1790100400007,
+      "tag": "0286_coding_chat_steering",
+      "breakpoints": true
+    },
+    {
+      "idx": 287,
+      "version": "7",
+      "when": 1790100400008,
+      "tag": "0287_coding_chat_steering_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 288,
+      "version": "7",
+      "when": 1790100400009,
+      "tag": "0288_execution_backend_compatibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 289,
+      "version": "7",
+      "when": 1790100400010,
+      "tag": "0289_opencompany_todoist_integration",
+      "breakpoints": true
+    },
+    {
+      "idx": 290,
+      "version": "7",
+      "when": 1790100400011,
+      "tag": "0290_workflow_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 291,
+      "version": "7",
+      "when": 1790100400012,
+      "tag": "0291_workflow_slack_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 292,
+      "version": "7",
+      "when": 1790100400013,
+      "tag": "0292_channel_delivery_bot_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 293,
+      "version": "7",
+      "when": 1790100400014,
+      "tag": "0293_session_pull_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 294,
+      "version": "7",
+      "when": 1790100400015,
+      "tag": "0294_workflow_slack_avatar",
+      "breakpoints": true
+    },
+    {
+      "idx": 295,
+      "version": "7",
+      "when": 1790100400016,
+      "tag": "0295_workflow_schedule_authorization",
+      "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "7",
+      "when": 1790100400017,
+      "tag": "0296_channel_delivery_thread_parent",
+      "breakpoints": true
+    },
+    {
+      "idx": 297,
+      "version": "7",
+      "when": 1790100400018,
+      "tag": "0297_slack_direct_message_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 298,
+      "version": "7",
+      "when": 1790100400019,
+      "tag": "0298_posthog_event_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 299,
+      "version": "7",
+      "when": 1790100400020,
+      "tag": "0299_imessage_personal_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 300,
+      "version": "7",
+      "when": 1790100400021,
+      "tag": "0300_whatsapp_personal_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 301,
+      "version": "7",
+      "when": 1790100400022,
+      "tag": "0301_approve_for_me",
+      "breakpoints": true
     }
   ]
 }

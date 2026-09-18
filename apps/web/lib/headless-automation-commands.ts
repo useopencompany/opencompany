@@ -2,15 +2,11 @@
 
 import {
   type ArchiveVersionBody,
-  type CreateTaskScheduleBody,
   type CreateWorkflowBody,
   createApiClient,
   type InvokeWorkflowBody,
-  type SetTaskScheduleEnabledBody,
-  type UpdateTaskScheduleBody,
   type UpdateWorkflowBody,
 } from "@opencompany/protocol";
-import { awaitHeadlessTaskScheduleTransaction } from "./headless-automation-collections";
 import { workflowDtoToCatalogItem } from "./headless-automation-types";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
 import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
@@ -70,6 +66,27 @@ export async function archiveHeadlessWorkflow(
   return (await response.json()).data;
 }
 
+export async function setHeadlessWorkflowMemoryEnabled(
+  workflowId: string,
+  enabled: boolean,
+  options: ClientOptions = {},
+) {
+  const response = await automationClient(options).v1.workflows[":workflowId"].memory.$patch({
+    param: { workflowId },
+    json: { enabled },
+  });
+  if (!response.ok) throw await automationResponseError(response, "Workflow memory update failed");
+  return (await response.json()).data;
+}
+
+export async function clearHeadlessWorkflowMemory(workflowId: string, options: ClientOptions = {}) {
+  const response = await automationClient(options).v1.workflows[":workflowId"].memory.$delete({
+    param: { workflowId },
+  });
+  if (!response.ok) throw await automationResponseError(response, "Workflow memory clear failed");
+  return (await response.json()).data;
+}
+
 export async function invokeHeadlessWorkflow(
   workflowId: string,
   command: InvokeWorkflowBody,
@@ -90,71 +107,6 @@ export async function runHeadlessWorkflowNow(workflowId: string, options: Scoped
     header: { "idempotency-key": `web-workflow-run:${crypto.randomUUID()}` },
   });
   if (!response.ok) throw await automationResponseError(response, "Workflow run failed");
-  return reconcileCreatedTask((await response.json()).data, options);
-}
-
-export async function createHeadlessTaskSchedule(
-  command: CreateTaskScheduleBody,
-  options: ScopedClientOptions,
-) {
-  const response = await automationClient(options).v1.schedules.$post({
-    header: { "idempotency-key": `web-task-schedule:${crypto.randomUUID()}` },
-    json: command,
-  });
-  if (!response.ok) {
-    throw await automationResponseError(response, "Recurring Task creation failed");
-  }
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data.schedule;
-}
-
-export async function updateHeadlessTaskSchedule(
-  scheduleId: string,
-  command: UpdateTaskScheduleBody | SetTaskScheduleEnabledBody,
-  options: ScopedClientOptions,
-) {
-  const response = await automationClient(options).v1.schedules[":scheduleId"].$patch({
-    param: { scheduleId },
-    json: command,
-  });
-  if (!response.ok) {
-    throw await automationResponseError(response, "Recurring Task update failed");
-  }
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data.schedule;
-}
-
-export async function archiveHeadlessTaskSchedule(
-  scheduleId: string,
-  command: ArchiveVersionBody,
-  options: ScopedClientOptions,
-) {
-  const response = await automationClient(options).v1.schedules[":scheduleId"].archive.$post({
-    param: { scheduleId },
-    json: command,
-  });
-  if (!response.ok) {
-    throw await automationResponseError(response, "Recurring Task archive failed");
-  }
-  const data = (await response.json()).data;
-  await reconcileCommittedProjection(
-    awaitHeadlessTaskScheduleTransaction(data.transactionId, collectionOptions(options)),
-  );
-  return data;
-}
-
-export async function runHeadlessTaskScheduleNow(scheduleId: string, options: ScopedClientOptions) {
-  const response = await automationClient(options).v1.schedules[":scheduleId"]["run-now"].$post({
-    param: { scheduleId },
-    header: { "idempotency-key": `web-task-schedule-run:${crypto.randomUUID()}` },
-  });
-  if (!response.ok) throw await automationResponseError(response, "Recurring Task run failed");
   return reconcileCreatedTask((await response.json()).data, options);
 }
 

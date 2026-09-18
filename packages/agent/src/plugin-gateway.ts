@@ -32,6 +32,11 @@ import {
   loadConvexMcpWorkerConnection,
 } from "./integrations/convex-mcp";
 import {
+  DASH0_MCP_ENDPOINT_URL,
+  getDash0IntegrationState,
+  loadDash0McpWorkerConnection,
+} from "./integrations/dash0-mcp";
+import {
   FATHOM_MCP_ENDPOINT_URL,
   getFathomMcpIntegrationState,
   loadFathomMcpWorkerConnection,
@@ -140,6 +145,11 @@ import {
   loadSupabaseMcpWorkerConnection,
   SUPABASE_MCP_ENDPOINT_URL,
 } from "./integrations/supabase-mcp";
+import {
+  getTodoistMcpIntegrationState,
+  loadTodoistMcpWorkerConnection,
+  TODOIST_MCP_ENDPOINT_URL,
+} from "./integrations/todoist-mcp";
 import {
   getVercelIntegrationState,
   loadVercelMcpWorkerConnection,
@@ -269,6 +279,12 @@ const providerBindings = {
     getState: getSupabaseMcpIntegrationState,
     loadConnection: loadSupabaseMcpWorkerConnection,
   },
+  todoist: {
+    provider: "todoist",
+    endpointUrl: TODOIST_MCP_ENDPOINT_URL,
+    getState: getTodoistMcpIntegrationState,
+    loadConnection: loadTodoistMcpWorkerConnection,
+  },
   resend: {
     provider: "resend",
     endpointUrl: RESEND_MCP_ENDPOINT_URL,
@@ -298,6 +314,12 @@ const providerBindings = {
     endpointUrl: SIGNOZ_MCP_ENDPOINT_URL,
     getState: getSigNozIntegrationState,
     loadConnection: loadSigNozMcpWorkerConnection,
+  },
+  dash0: {
+    provider: "dash0",
+    endpointUrl: DASH0_MCP_ENDPOINT_URL,
+    getState: getDash0IntegrationState,
+    loadConnection: loadDash0McpWorkerConnection,
   },
   stripe: {
     provider: "stripe",

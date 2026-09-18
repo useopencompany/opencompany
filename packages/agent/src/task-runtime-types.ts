@@ -71,7 +71,9 @@ export type TaskToolName =
   | "list_actions"
   | "describe_actions"
   | "use_action"
-  | "update_task_status";
+  | "update_task_status"
+  | "read_workflow_memory"
+  | "update_workflow_memory";
 
 export type TaskSkillId = "first-principles" | "yc-office-hours";
 

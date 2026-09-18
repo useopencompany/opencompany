@@ -1,0 +1,98 @@
+---
+title: Convex
+description: Connect one Convex deployment to inspect schemas and data, and start Workflows when a function fails.
+---
+
+## What the plugin does
+
+The official Convex plugin connects opencompany to one Convex cloud deployment through the official
+Convex CLI MCP server. It can read deployment metadata, table schemas, and function specifications,
+and — with approval — read documents, run read-only queries, pull logs, and run functions.
+
+Installing the plugin gives the agent on-demand access to the deployment. Convex's log stream is
+used separately, to start Workflows when a function fails.
+
+## Connect Convex
+
+1. Open **Plugins** and choose **Convex**.
+2. Install the official plugin.
+3. In Convex, open the deployment's **Settings → Deploy keys** and generate a key. Grant it
+   `deployment:functions:runInternalQueries` and `deployment:data:view` so opencompany can validate
+   the connection, and `deployment:integrations:write` if you also want error events.
+4. Paste the `dev:` or `prod:` key into **Convex deploy key** and save it.
+
+One key connects one deployment. Project tokens, personal login credentials, preview-project keys,
+self-hosted endpoints, and unscoped admin keys are not accepted.
+
+## Trigger a Workflow
+
+Convex's **Function failed** event (`function.failed`) starts a Workflow when a function in the
+connected deployment fails. It carries the function path, the error and its stack, the request id,
+and the write-conflict or scheduler context that explains why the call ran at all — enough for an
+agent to pull the rest of the request through the Convex tools and start triaging.
+
+1. Open **Plugins → Convex** and install or update the plugin.
+2. Save a deploy key that has `deployment:integrations:write`.
+3. In **Error events**, choose **Turn on**. opencompany creates a webhook
+   [log stream](https://docs.convex.dev/production/integrations/log-streams/) on the deployment and
+   stores the signing secret Convex returns. Nothing is copied by hand in either direction.
+4. Turn on **Function failed**. Events are off by default.
+5. Open a Workflow, choose **On an event → Convex → Function failed**, and select your deployment.
+6. Optionally set **Function type** to *Query*, *Mutation*, *Action*, or *HTTP action*. Leaving it
+   empty runs the Workflow for every failing function.
+7. Write the step instructions and activate the Workflow.
+
+Log streams require a **Convex Pro plan**. Convex allows one webhook log stream per deployment, so
+if that deployment already streams somewhere else, opencompany says so rather than replacing it.
+
+opencompany subscribes the stream to `verification` and `function_execution` only, so Convex does
+not bill you for streaming console lines or per-minute usage statistics that opencompany would
+discard. Every delivery's HMAC-SHA256 signature is verified before it is read.
+
+**Repeat failures are grouped.** A failing Convex query reruns on every subscription invalidation,
+so one bug can fail hundreds of times a second. Failures of the same function with the same error
+start one Workflow run per 15-minute window, not one run per failed execution; the task says how
+many failures the delivery carried. Failures that reach opencompany more than 15 minutes after they
+happened are recorded but do not start a run, so a delayed batch cannot wake an agent for an
+incident that is already over.
+
+For a first test, use a step such as:
+
+```text
+A Convex function just failed. Use the Convex tools to pull the full request by its request id and
+read the function's spec, then find the cause in the repository and report it with the file and line
+you believe is responsible. Do not change code.
+```
+
+**Turn off** in **Error events** deletes the log stream in Convex, so Convex stops sending — and
+stops billing you for — deliveries opencompany can no longer accept.
+
+If no run appears, check that the deploy key still has `deployment:integrations:write`, that the
+event is on, and that the Workflow is active with a matching **Function type** filter. **Error
+events** reports when Convex last reached opencompany; Convex sends a verification event right after
+the stream is created, so that timestamp should appear within a minute of turning it on.
+
+## Permission defaults
+
+- Deployment metadata, table schemas, and function specifications are **On**.
+- Reading documents, running read-only queries, and reading logs are **Ask**.
+- Running a function is **Ask** because it may execute a mutation or an action with external
+  effects.
+- Reading and changing environment variables is **Off**.
+
+New or unrecognized Convex tools require confirmation until they are reviewed and classified.
+
+## Limitations
+
+- Production deployments expose only metadata, schemas, and function specifications. Turning a
+  permission **On** does not relax this.
+- Convex's insights tool is unavailable with deploy-key authentication and is omitted.
+- Log streams and exception reporting are Convex Pro features.
+- Convex delivers log events best-effort: a burst can be dropped under high throughput, so
+  `function.failed` is a trigger, not an audit trail.
+- The event covers failed function executions. A `console.error` inside a function that then
+  succeeds is not a failure and does not fire it.
+
+See [Convex's MCP documentation](https://docs.convex.dev/ai/convex-mcp-server) and
+[log stream documentation](https://docs.convex.dev/production/integrations/log-streams/) for
+provider-specific details.

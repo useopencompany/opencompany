@@ -5,6 +5,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { Archive, ArrowLeft, Inbox } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { AWAITING_INPUT_LABEL } from "@/components/ChatStateIndicator";
 import { useCreditBalance } from "@/components/chat/useCreditBalance";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
 import { QuickChatComposer, Surface } from "@/components/Surface";
@@ -50,7 +51,12 @@ export function ReviewInboxRoute() {
     (item: ReviewItem) => item.unread && !readItems.has(item.conversationId),
     [readItems],
   );
-  const unreadCount = useMemo(() => items.filter(isUnread).length, [isUnread, items]);
+  // Parked runs count even once read: opening one does not answer its request, so it is still
+  // work outstanding. This matches the sidebar badge, which reads the same rule.
+  const outstandingCount = useMemo(
+    () => items.filter((item) => item.awaitingInput || isUnread(item)).length,
+    [isUnread, items],
+  );
 
   const selectedId = openItem?.conversationId ?? null;
   const selected = selectedId
@@ -122,9 +128,9 @@ export function ReviewInboxRoute() {
           <h1 className="text-[14px] font-semibold leading-tight tracking-tight text-ink">
             For review
           </h1>
-          {unreadCount > 0 ? (
+          {outstandingCount > 0 ? (
             <span className="ml-auto text-[12px] tabular-nums leading-none text-ink-subtle">
-              {unreadCount}
+              {outstandingCount}
             </span>
           ) : null}
         </header>
@@ -185,7 +191,14 @@ export function ReviewInboxRoute() {
  * queue stays where it was, and the finished conversation comes back to it.
  */
 function ReviewStartComposer() {
-  const { claudeCodeConnected, codexConnected, featureFlags, user, workspace } = useAppData();
+  const {
+    claudeCodeConnected,
+    codexConnected,
+    featureFlags,
+    sharedModelAccessEnabled,
+    user,
+    workspace,
+  } = useAppData();
   const { balance: creditBalance } = useCreditBalance();
 
   return (
@@ -198,8 +211,8 @@ function ReviewStartComposer() {
           defaultModel={DEFAULT_MODEL}
           codexConnected={codexConnected}
           claudeCodeConnected={claudeCodeConnected}
-          taskSpawningEnabled={featureFlags.taskSpawning}
           autoModelRoutingEnabled={featureFlags.autoModelRouting}
+          sharedModelAccessEnabled={sharedModelAccessEnabled}
           creditBalance={creditBalance}
           workspaceId={workspace.id}
         />
@@ -233,14 +246,26 @@ function ReviewListRow({
         aria-current={selected ? "true" : undefined}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md py-2 pl-2 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
       >
-        <span
-          aria-hidden="true"
-          data-testid={unread ? "review-item-unread" : "review-item-read"}
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${unread ? "bg-info" : "bg-transparent"}`}
-        />
+        {item.awaitingInput ? (
+          <span
+            role="img"
+            aria-label={AWAITING_INPUT_LABEL}
+            title={AWAITING_INPUT_LABEL}
+            data-testid="review-item-awaiting-input"
+            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            data-testid={unread ? "review-item-unread" : "review-item-read"}
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${unread ? "bg-info" : "bg-transparent"}`}
+          />
+        )}
         {/* A read item stays in the queue until it is archived, so it recedes rather than
-            disappears: same row, less weight, so unread work still reads as the top of the list. */}
-        <span className={`min-w-0 flex-1 ${unread ? "" : "opacity-55"}`}>
+            disappears: same row, less weight, so unread work still reads as the top of the list.
+            A parked run keeps full weight however often it has been opened — reading it is not
+            what resolves it. */}
+        <span className={`min-w-0 flex-1 ${unread || item.awaitingInput ? "" : "opacity-55"}`}>
           <span className="flex min-w-0 items-baseline gap-2">
             <span className="truncate text-[13px] font-medium leading-tight text-ink">
               {item.title}
@@ -343,7 +368,6 @@ function ReviewChatConversation({
   onClose: () => void;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   // The sidebar list is bounded by recency, so an older unread chat is missing from it. The queue
   // item carries everything needed to open the conversation; the summary only sharpens it.
   const summary = data.recentChats.find((chat) => chat.id === conversationId) ?? null;
@@ -371,17 +395,14 @@ function ReviewChatConversation({
       key={data.activeBrain?.id ?? "no-brain"}
       tasks={data.tasks}
       allTasks={data.allTasks}
-      schedules={data.schedules}
       defaultModel={DEFAULT_MODEL}
       initialChat={initialChat}
       recentChats={data.recentChats}
       archivedChats={data.archivedChats}
       codexConnected={data.codexConnected}
       claudeCodeConnected={data.claudeCodeConnected}
-      taskSpawningEnabled={data.featureFlags.taskSpawning}
       autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
       workspaceId={data.workspace.id}
-      userName={userName}
       userWorkosId={data.user.workosUserId}
       // Closing this pane returns to the list rather than navigating home and cancelling a run
       // that is still going; the queue, not the chat route, is where the reader came from.

@@ -43,15 +43,19 @@ describe("CapabilitiesPanel", () => {
         isAdmin={false}
       />,
     );
-    expect(screen.getAllByRole("switch")).toHaveLength(8);
+    // Prospecting is sold through the Lead research plugin and has no toggle here.
+    expect(screen.getAllByRole("switch")).toHaveLength(7);
     for (const toggle of screen.getAllByRole("switch")) {
       expect(toggle).toBeChecked();
       expect(toggle).toHaveAttribute("aria-disabled", "true");
     }
     expect(screen.getByText(/Only workspace admins can change/i)).toBeVisible();
     expect(screen.getByText(/underlying provider cost/i)).toBeVisible();
-    expect(screen.getByText("Prospecting")).toBeVisible();
-    expect(screen.getByText(/Look up work emails for known prospects/i)).toBeVisible();
+    expect(screen.queryByText("Prospecting")).toBeNull();
+    expect(screen.getByRole("link", { name: /plugin page/i })).toHaveAttribute(
+      "href",
+      "/plugins/lead-research",
+    );
     expect(screen.getByText("AI image generation")).toBeVisible();
   });
 

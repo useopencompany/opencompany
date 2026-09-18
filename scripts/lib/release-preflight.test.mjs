@@ -51,8 +51,10 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     ],
   );
 
-  assertExcludes([...groups.api.required, ...groups.api.optional], ["BETTER_STACK_ERRORS_DSN"]);
+  // The API and runner install the shared Bun exception reporter, so a missing DSN must fail
+  // the release instead of silently downgrading to local-only error logs.
   assertIncludes(groups.api.required, [
+    "BETTER_STACK_ERRORS_DSN",
     "WORKOS_MOBILE_CLIENT_ID",
     "GITHUB_USER_APP_SLUG",
     "GITHUB_USER_APP_CLIENT_ID",
@@ -68,6 +70,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 
   assertIncludes(groups.runner.required, [
+    "BETTER_STACK_ERRORS_DSN",
     "BLOB_READ_WRITE_TOKEN",
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -124,6 +127,19 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   );
 });
 
+test("Render health checks are limited to web services", async () => {
+  const services = readRenderServices(await readFile(renderUrl, "utf8"));
+
+  for (const service of services) {
+    if (!service.hasHealthCheckPath) continue;
+    assert.equal(
+      service.type,
+      "web",
+      `${service.name} is a ${service.type}; Render only accepts healthCheckPath on web services`,
+    );
+  }
+});
+
 function readGroups(source) {
   const startMarker = "const groups = ";
   const start = source.indexOf(startMarker);
@@ -161,6 +177,17 @@ function readRenderShutdownDelay(render, serviceName) {
   const match = service.match(/^\s+maxShutdownDelaySeconds:\s+(\d+)$/mu);
   assert.ok(match, `${serviceName} is missing maxShutdownDelaySeconds`);
   return Number(match[1]);
+}
+
+function readRenderServices(render) {
+  return render
+    .split(/(?=^  - type:)/gmu)
+    .slice(1)
+    .map((service) => ({
+      type: service.match(/^  - type:\s+(\S+)$/mu)?.[1],
+      name: service.match(/^    name:\s+(\S+)$/mu)?.[1],
+      hasHealthCheckPath: /^    healthCheckPath:/mu.test(service),
+    }));
 }
 
 function groupKeys(group) {

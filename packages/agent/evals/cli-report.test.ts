@@ -55,7 +55,7 @@ describe("benchmark CLI", () => {
     const options = parseCli([]);
     expect(options.k).toBe(4);
     expect(options.models).toEqual(DEFAULT_MODELS);
-    expect(options.scenarios).toHaveLength(9);
+    expect(options.scenarios).toHaveLength(12);
     expect(options.variants).toEqual(["v5"]);
   });
   it("filters id/tag unions and optional baseline paths", () => {
@@ -73,6 +73,7 @@ describe("benchmark CLI", () => {
       "approval-resume",
       "linear-file-issue",
       "linear-ambiguous-update",
+      "workflow-safe-activation",
     ]);
     expect(options.saveBaseline).toBe(".context/bench/baseline.json");
     expect(options.compare).toBe("old.json");

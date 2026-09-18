@@ -11,15 +11,17 @@ export type TaskTimeRange = "24h" | "2d" | "7d" | "30d" | "90d" | "all";
 type UserPreferences = {
   timezone: string;
   botsEnabled: boolean;
-  taskSpawningEnabled: boolean;
   wikiEnabled: true;
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
+  whatsappEnabled: boolean;
 };
 
 export async function updateTimezoneAction(timezone: string) {
@@ -32,13 +34,6 @@ export async function updateBotsAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.botsEnabled } as const;
-}
-
-export async function updateTaskSpawningAction(enabled: boolean) {
-  const preferences = await patchPreferences({ taskSpawningEnabled: enabled === true });
-  revalidatePath("/");
-  revalidatePath("/settings/preferences");
-  return { ok: true, enabled: preferences.taskSpawningEnabled } as const;
 }
 
 export async function updateTaskViewModeAction(mode: TaskViewMode) {
@@ -104,4 +99,25 @@ async function patchPreferences(body: Partial<UserPreferences>): Promise<UserPre
     throw await serverApiError(response, "Preferences could not be saved.");
   }
   return (await response.json()).data;
+}
+
+export async function updateImessageAction(enabled: boolean) {
+  const preferences = await patchPreferences({ imessageEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.imessageEnabled } as const;
+}
+
+export async function updateWhatsappAction(enabled: boolean) {
+  const preferences = await patchPreferences({ whatsappEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.whatsappEnabled } as const;
+}
+
+export async function updateApproveForMeAction(enabled: boolean) {
+  const preferences = await patchPreferences({ approveForMeEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.approveForMeEnabled } as const;
 }

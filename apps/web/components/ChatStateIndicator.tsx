@@ -7,14 +7,42 @@ type ChatStateIndicatorProps = {
   surface: "home" | "sidebar";
   showSeen?: boolean;
   className?: string;
+  /**
+   * Set when something else on the row describes itself with this indicator. Only the
+   * `awaiting_input` branch carries it, because that is the only state with a name to lend.
+   */
+  id?: string | undefined;
 };
+
+export const AWAITING_INPUT_LABEL = "Waiting for you";
 
 export function ChatStateIndicator({
   state,
   surface,
   showSeen = false,
   className,
+  id,
 }: ChatStateIndicatorProps) {
+  if (state === "awaiting_input") {
+    // The only indicator with an accessible name: every other state describes what the agent is
+    // doing, this one is a request aimed at the reader, and it is the difference between a run
+    // that is progressing and one that is stuck on them.
+    return (
+      <span
+        id={id}
+        role="img"
+        aria-label={AWAITING_INPUT_LABEL}
+        title={AWAITING_INPUT_LABEL}
+        data-testid={`${surface}-chat-awaiting-input`}
+        className={cn(
+          surface === "home" ? "h-2 w-2" : "h-1.5 w-1.5",
+          "shrink-0 rounded-full bg-warning",
+          className,
+        )}
+      />
+    );
+  }
+
   if (state === "working") {
     return (
       <LoaderCircle

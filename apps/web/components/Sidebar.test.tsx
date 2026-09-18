@@ -14,7 +14,9 @@ import {
   clearAllOptimisticChatSummaries,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { AWAITING_INPUT_LABEL } from "./ChatStateIndicator";
 import { Sidebar } from "./Sidebar";
+import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const routerMock = vi.hoisted(() => ({
@@ -32,9 +34,7 @@ const workspacesMock = vi.hoisted(() => ({
     role: "admin" | "member";
   }>,
 }));
-const mcpSetupMock = vi.hoisted(() => ({ completedAt: null as string | null }));
 const featureFlagsMock = vi.hoisted(() => ({
-  taskSpawning: false,
   autoModelRouting: false,
   legacyBrain: true,
   reviewInbox: false,
@@ -57,7 +57,8 @@ const recentChatsMock = vi.hoisted(() => ({
     } | null;
     activityState?: "working" | "idle";
     hasUnseen?: boolean;
-    state?: "working" | "done_unseen" | "done_seen";
+    awaitingInput?: boolean;
+    state?: "awaiting_input" | "working" | "done_unseen" | "done_seen";
     preview: string;
     updatedAt: string;
     lastSeenAt?: string | null;
@@ -72,6 +73,7 @@ const sidebarTasksMock = vi.hoisted(() => ({
     name: string;
     status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled";
     hasUnseen: boolean;
+    awaitingInput?: boolean;
     updatedAt: string;
   }>,
 }));
@@ -160,6 +162,26 @@ vi.mock("@/lib/headless-task-commands", () => taskCommandsMock);
 
 vi.mock("@/lib/headless-chat-collections", () => chatCollectionMocks);
 
+const sessionPullRequestsMock = vi.hoisted(() => ({
+  value: [] as Array<{
+    conversationId: string;
+    repository: string;
+    number: number;
+    url: string;
+    state: "draft" | "open" | "blocked" | "merged" | "closed";
+  }>,
+}));
+
+// The hook polls the API on a timer; these tests are about what a row renders for a given link,
+// so the network is replaced by the fixture list.
+vi.mock("@/lib/use-session-pull-requests", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/use-session-pull-requests")>();
+  return {
+    ...actual,
+    useSessionPullRequests: () => actual.indexByConversation(sessionPullRequestsMock.value),
+  };
+});
+
 // The provider applies the user's pending archives to the chat list it publishes, so the mock does
 // the same: these tests are about what the sidebar shows between the click and the projection.
 vi.mock("@/components/AppDataProvider", async () => {
@@ -221,14 +243,13 @@ vi.mock("@/components/AppDataProvider", async () => {
         recentChats,
         openChats: recentChats,
         featureFlags: {
-          taskSpawning: featureFlagsMock.taskSpawning,
           autoModelRouting: featureFlagsMock.autoModelRouting,
           legacyBrain: featureFlagsMock.legacyBrain,
           reviewInbox: featureFlagsMock.reviewInbox,
           sidebarProjects: featureFlagsMock.sidebarProjects,
         },
         reviewCount: reviewCountMock.value,
-        mcpSetup: { preferredClient: null, completedAt: mcpSetupMock.completedAt },
+        mcpSetup: { preferredClient: null, completedAt: null },
       };
     },
   };
@@ -279,8 +300,6 @@ describe("Sidebar", () => {
     pathnameMock.value = "/";
     workspaceRoleMock.value = "admin";
     workspacesMock.value = [{ id: "goat_ws_1", name: "Ada's Workspace", role: "admin" }];
-    mcpSetupMock.completedAt = null;
-    featureFlagsMock.taskSpawning = false;
     featureFlagsMock.legacyBrain = true;
     featureFlagsMock.reviewInbox = false;
     featureFlagsMock.sidebarProjects = false;
@@ -291,6 +310,7 @@ describe("Sidebar", () => {
     recentChatsMock.value = [];
     tasksMock.value = [];
     sidebarTasksMock.value = [];
+    sessionPullRequestsMock.value = [];
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
     clearOptimisticArchives();
@@ -307,11 +327,14 @@ describe("Sidebar", () => {
     expect(container.querySelector('svg[viewBox="0 0 100 100"]')).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    const home = within(nav).getByRole("link", { name: "Home" });
+    const home = within(nav).getByRole("link", { name: "New Chat" });
     expect(home).toHaveAttribute("href", "/");
     expect(home).toHaveAttribute("aria-current", "page");
-    expect(within(nav).queryByRole("link", { name: "Tasks" })).not.toBeInTheDocument();
-    expect(within(nav).queryByRole("link", { name: "Workflows" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Tasks" })).toHaveAttribute("href", "/tasks");
+    expect(within(nav).getByRole("link", { name: "Workflows" })).toHaveAttribute(
+      "href",
+      "/workflows",
+    );
     expect(within(nav).queryByRole("link", { name: "Brain" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "Wiki" })).not.toBeInTheDocument();
     expect(screen.getByText("Brains")).toBeInTheDocument();
@@ -326,9 +349,12 @@ describe("Sidebar", () => {
     expect(account).toBeInTheDocument();
 
     const plugins = screen.getByRole("link", { name: "Plugins" });
-    expect(plugins).toHaveAttribute("href", "/settings/plugins");
+    expect(plugins).toHaveAttribute("href", "/plugins");
+    const skills = screen.getByRole("link", { name: "Skills" });
+    expect(skills).toHaveAttribute("href", "/skills");
     const feedback = screen.getByRole("button", { name: "Feedback" });
-    expect(plugins.nextElementSibling).toBe(feedback);
+    expect(plugins.nextElementSibling).toBe(skills);
+    expect(skills.nextElementSibling).toBe(feedback);
     expect(feedback.nextElementSibling).toBe(account);
     expect(screen.queryByRole("link", { name: "Changelog" })).not.toBeInTheDocument();
   });
@@ -344,7 +370,7 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const section = await screen.findByRole("region", { name: "Wiki" });
-      const links = within(section).getAllByRole("link");
+      const links = await within(section).findAllByRole("link");
       expect(links.map((link) => link.textContent)).toEqual(["Company", "Handbook"]);
       expect(links[0]).toHaveAttribute("href", "/wiki/company");
       expect(links[1]).toHaveAttribute("href", "/wiki/handbook");
@@ -645,10 +671,18 @@ describe("Sidebar", () => {
   });
 
   it("marks Plugins active throughout plugin settings", () => {
-    pathnameMock.value = "/settings/plugins/linear";
+    pathnameMock.value = "/plugins/linear";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     expect(screen.getByRole("link", { name: "Plugins" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("marks Skills active throughout skill settings", () => {
+    pathnameMock.value = "/skills/weekly-report";
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByRole("link", { name: "Skills" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Plugins" })).not.toHaveAttribute("aria-current");
   });
 
   it("keeps the wiki visible and hides legacy Brain navigation by default", async () => {
@@ -777,7 +811,7 @@ describe("Sidebar", () => {
     window.addEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    await user.click(screen.getByRole("link", { name: "Home" }));
+    await user.click(screen.getByRole("link", { name: "New Chat" }));
 
     expect(homeNavigation).toHaveBeenCalledOnce();
     window.removeEventListener(HOME_NAVIGATION_EVENT, homeNavigation);
@@ -788,28 +822,15 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "New Chat" })).not.toHaveAttribute("aria-current");
     expect(screen.getByRole("link", { name: "General" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("shows MCP setup until the first successful query is verified", () => {
+  it("keeps MCP setup out of the primary nav", () => {
     pathnameMock.value = "/settings/mcp";
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-    const setup = screen.getByRole("link", { name: "Connect MCP" });
-    expect(setup).toHaveAttribute("href", "/settings/mcp");
-    expect(setup).toHaveAttribute("aria-current", "page");
-  });
-
-  it("hides MCP setup after completion", () => {
-    pathnameMock.value = "/settings/mcp";
-    mcpSetupMock.completedAt = "2026-07-13T09:00:00.000Z";
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.queryByRole("link", { name: "Connect your brain" })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Account menu for Ada Lovelace" }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect MCP" })).not.toBeInTheDocument();
   });
 
   it("does not mark home active on chat subroutes", () => {
@@ -817,11 +838,10 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
-    expect(within(nav).getByRole("link", { name: "Home" })).not.toHaveAttribute("aria-current");
+    expect(within(nav).getByRole("link", { name: "New Chat" })).not.toHaveAttribute("aria-current");
   });
 
   it("shows the Tasks and Workflows nav when the beta feature is enabled", () => {
-    featureFlagsMock.taskSpawning = true;
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
@@ -844,7 +864,6 @@ describe("Sidebar", () => {
 
   it("shows the Tasks nav on nested task routes without inline task rows", () => {
     pathnameMock.value = "/tasks/TASK-7";
-    featureFlagsMock.taskSpawning = true;
     tasksMock.value = [
       {
         id: "goat_task_workflow",
@@ -871,7 +890,7 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
     const primaryNav = screen.getByRole("navigation", { name: "opencompany primary" });
-    const home = within(primaryNav).getByRole("link", { name: "Home" });
+    const home = within(primaryNav).getByRole("link", { name: "New Chat" });
     const tasks = within(primaryNav).getByRole("link", { name: "Tasks" });
     const workflows = within(primaryNav).getByRole("link", { name: "Workflows" });
     expect(tasks).toHaveAttribute("href", "/tasks");
@@ -931,21 +950,7 @@ describe("Sidebar", () => {
     expect(within(recentNav).queryByRole("link", { name: "Pinned chat" })).not.toBeInTheDocument();
   });
 
-  it("keeps Tasks out of Recents while Tasks are disabled", () => {
-    featureFlagsMock.taskSpawning = false;
-    sidebarTasksMock.value = [
-      taskRow("task_hidden", { name: "Hidden task", updatedAt: "2026-07-14T09:05:00.000Z" }),
-    ];
-    recentChatsMock.value = [chatRow("chat_only", { title: "Only chat" })];
-
-    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
-
-    expect(screen.getByRole("navigation", { name: "Recents" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Hidden task/ })).not.toBeInTheDocument();
-  });
-
   it("lists chats and tasks together in one recency-ordered section", () => {
-    featureFlagsMock.taskSpawning = true;
     recentChatsMock.value = [
       chatRow("chat_older", {
         title: "Older chat",
@@ -1008,7 +1013,6 @@ describe("Sidebar", () => {
   });
 
   it("shows the same unread dot and working spinner for tasks as for chats", () => {
-    featureFlagsMock.taskSpawning = true;
     sidebarTasksMock.value = [
       taskRow("task_running", {
         displayId: "T-1",
@@ -1038,9 +1042,84 @@ describe("Sidebar", () => {
     expect(screen.getAllByTestId(/sidebar-chat-/)).toHaveLength(2);
   });
 
+  it("shows a parked run over a retained local working state", () => {
+    pathnameMock.value = "/";
+    // This tab started the run and is still holding its optimistic spinner when the approval lands.
+    setLocalChatState("goat_chat_parked", "working");
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_parked",
+        title: "Parked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
+  });
+
+  it("marks a task blocked on an approval as waiting for the reader, not as an unread result", () => {
+    sidebarTasksMock.value = [
+      taskRow("task_waiting", {
+        displayId: "T-1",
+        name: "Waiting task",
+        status: "waiting",
+        // Already opened once. The request is still unanswered, so the row must still say so.
+        hasUnseen: false,
+        updatedAt: "2026-07-14T09:05:00.000Z",
+      }),
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Waiting for you")).toBeInTheDocument();
+  });
+
+  it("marks a chat blocked on a foreground approval as waiting, not as still working", () => {
+    pathnameMock.value = "/";
+    recentChatsMock.value = [
+      {
+        id: "goat_chat_blocked",
+        title: "Blocked on approval",
+        model: "claude-sonnet-5",
+        engine: "opencompany",
+        codexComposerSettings: null,
+        runtime: {
+          status: "running",
+          activeRunId: "goat_codex_chat_turn_1",
+          hasError: false,
+          updatedAt: "2026-07-14T09:01:00.000Z",
+        },
+        // The MCP call polls while it waits, so the runtime is genuinely running.
+        activityState: "working",
+        hasUnseen: false,
+        awaitingInput: true,
+        preview: "Approve send_email?",
+        updatedAt: "2026-07-14T09:01:00.000Z",
+        pinnedAt: null,
+      },
+    ];
+
+    render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+    expect(screen.getByTestId("sidebar-chat-awaiting-input")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
+  });
+
   it("archives a settled task from its row and offers no archive on a running one", async () => {
     const user = userEvent.setup();
-    featureFlagsMock.taskSpawning = true;
     pathnameMock.value = "/tasks/T-2";
     sidebarTasksMock.value = [
       taskRow("task_running", {
@@ -1077,7 +1156,6 @@ describe("Sidebar", () => {
 
   it("keeps the Tasks nav row current on the board itself", () => {
     pathnameMock.value = "/tasks";
-    featureFlagsMock.taskSpawning = true;
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
@@ -1092,7 +1170,6 @@ describe("Sidebar", () => {
   // claim rather than leaving the page with nothing marked current.
   it("keeps the Tasks nav row current on a task the list does not hold", () => {
     pathnameMock.value = "/tasks/T-99";
-    featureFlagsMock.taskSpawning = true;
     sidebarTasksMock.value = [taskRow("task_other", { displayId: "T-1", name: "Other task" })];
 
     render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
@@ -1106,7 +1183,6 @@ describe("Sidebar", () => {
   });
 
   it("marks a task row current on its run subroute and a lowercased display id", () => {
-    featureFlagsMock.taskSpawning = true;
     pathnameMock.value = "/tasks/t-12/run";
     sidebarTasksMock.value = [
       taskRow("task_open", { displayId: "T-12", name: "Open task", status: "running" }),
@@ -1125,7 +1201,6 @@ describe("Sidebar", () => {
 
   it("restores the task row and reports the failure when archiving rejects", async () => {
     const user = userEvent.setup();
-    featureFlagsMock.taskSpawning = true;
     taskCommandsMock.archiveHeadlessTask.mockRejectedValueOnce(new Error("network unavailable"));
     sidebarTasksMock.value = [
       taskRow("task_settled", { displayId: "T-2", name: "Settled task", status: "succeeded" }),
@@ -1587,7 +1662,7 @@ describe("Sidebar", () => {
 
     const nav = screen.getByRole("navigation", { name: "opencompany primary" });
     const links = within(nav).getAllByRole("link");
-    expect(links[0]).toHaveTextContent("Home");
+    expect(links[0]).toHaveTextContent("New Chat");
     expect(links[1]).toHaveTextContent("For review");
     expect(links[1]).toHaveTextContent("3");
     expect(links[1]).toHaveAttribute("href", "/review");
@@ -1612,6 +1687,270 @@ describe("Sidebar", () => {
       "aria-current",
       "page",
     );
+  });
+
+  function rowOf(title: string) {
+    const row = screen.getByRole("link", { name: new RegExp(title) }).parentElement;
+    if (!(row instanceof HTMLElement)) throw new Error(`No row for "${title}".`);
+    return row;
+  }
+
+  /** The row's leading marker slot, or null when the session has nothing to mark. */
+  function markerSlotOf(title: string) {
+    const first = rowOf(title).firstElementChild;
+    return first instanceof HTMLElement && first.tagName === "SPAN" ? first : null;
+  }
+
+  describe("Pull request badge", () => {
+    function chatWithPullRequest(state: "draft" | "open" | "blocked" | "merged" | "closed") {
+      recentChatsMock.value = [archivableChat("conversation_pr", "Rework onboarding copy")];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state,
+        },
+      ];
+    }
+
+    it("links a chat row's badge to the pull request it opened", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      expect(badge).toHaveAttribute("href", "https://github.com/acme/web/pull/42");
+      expect(badge).toHaveAttribute("target", "_blank");
+      expect(badge).toHaveAccessibleName("Pull request open: acme/web #42");
+      expect(badge).toHaveAttribute("data-state", "open");
+    });
+
+    it("names each state so colour is never the only signal", () => {
+      for (const [state, label] of [
+        ["blocked", "Pull request blocked: acme/web #42"],
+        ["merged", "Pull request merged: acme/web #42"],
+        ["draft", "Draft pull request: acme/web #42"],
+        ["closed", "Pull request closed: acme/web #42"],
+      ] as const) {
+        chatWithPullRequest(state);
+        const { unmount } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+        expect(screen.getByTestId("sidebar-pull-request-badge")).toHaveAccessibleName(label);
+        unmount();
+      }
+    });
+
+    it("shows a badge on a Task row, keyed by the Task's conversation", () => {
+      sidebarTasksMock.value = [
+        {
+          id: "task_1",
+          conversationId: "conversation_task",
+          displayId: "TASK-1717",
+          name: "Main commits not deployed",
+          status: "succeeded",
+          hasUnseen: false,
+          updatedAt: "2026-07-14T09:00:00.000Z",
+        },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_task",
+          repository: "acme/web",
+          number: 7,
+          url: "https://github.com/acme/web/pull/7",
+          state: "merged",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByTestId("sidebar-pull-request-badge")).toHaveAttribute(
+        "href",
+        "https://github.com/acme/web/pull/7",
+      );
+    });
+
+    it("shows no badge for a session that has not opened a pull request", () => {
+      recentChatsMock.value = [archivableChat("conversation_plain", "YC customer meetings")];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+    });
+
+    it("keeps the badge and the pin control on a pinned chat, in their own columns", () => {
+      recentChatsMock.value = [
+        {
+          ...archivableChat("conversation_pr", "Rework onboarding copy"),
+          pinnedAt: "2026-07-14T09:00:00.000Z",
+        },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByTestId("sidebar-pull-request-badge")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Unpin Rework onboarding copy" }),
+      ).toBeInTheDocument();
+    });
+
+    it("leads the row with the badge, before the session name", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      const title = screen.getByText("Rework onboarding copy");
+      expect(badge.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps the badge out of the row's own link, so no anchor nests in another", () => {
+      chatWithPullRequest("open");
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const badge = screen.getByTestId("sidebar-pull-request-badge");
+      expect(badge.parentElement?.closest("a")).toBeNull();
+    });
+
+    it("leaves a plain chat unindented when another row has a pull request", () => {
+      recentChatsMock.value = [
+        archivableChat("conversation_pr", "Rework onboarding copy"),
+        archivableChat("conversation_plain", "YC customer meetings"),
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(screen.getByRole("link", { name: "YC customer meetings" })).toHaveClass("pl-2");
+      expect(markerSlotOf("YC customer meetings")).toBeNull();
+      expect(rowOf("Rework onboarding copy").firstElementChild).toHaveClass("pl-2");
+      expect(screen.getByRole("link", { name: "Rework onboarding copy" })).toHaveClass("pl-1.5");
+    });
+  });
+
+  describe("Session status marker", () => {
+    it("puts a live spinner, unread dot, and settled pull request on one edge", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_unseen" },
+        archivableChat("conversation_pr", "Rework onboarding copy"),
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_pr",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      for (const title of ["Linear triage", "Review launch plan", "Rework onboarding copy"]) {
+        expect(markerSlotOf(title)).toHaveClass("pl-2");
+        expect(screen.getByRole("link", { name: title })).toHaveClass("pl-1.5");
+      }
+      expect(
+        within(rowOf("Linear triage")).getByTestId("sidebar-chat-working"),
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf("Review launch plan")).getByTestId("sidebar-chat-unseen"),
+      ).toBeInTheDocument();
+      expect(
+        within(rowOf("Rework onboarding copy")).getByTestId("sidebar-pull-request-badge"),
+      ).toBeInTheDocument();
+    });
+
+    it("starts a settled session with nothing to mark at the list's left edge", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(markerSlotOf("YC customer meetings")).toBeNull();
+      expect(screen.getByRole("link", { name: "YC customer meetings" })).toHaveClass("pl-2");
+      expect(markerSlotOf("Linear triage")).toHaveClass("pl-2");
+    });
+
+    it("shows only the spinner while a session with a pull request is running", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_working",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const row = rowOf("Linear triage");
+      expect(within(row).getByTestId("sidebar-chat-working")).toBeInTheDocument();
+      expect(within(row).queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+    });
+
+    it("shows an unread dot before revealing a completed session's pull request", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_unseen" },
+      ];
+      sessionPullRequestsMock.value = [
+        {
+          conversationId: "conversation_unread",
+          repository: "acme/web",
+          number: 42,
+          url: "https://github.com/acme/web/pull/42",
+          state: "open",
+        },
+      ];
+      const { rerender } = render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      let row = rowOf("Review launch plan");
+      expect(within(row).getByTestId("sidebar-chat-unseen")).toBeInTheDocument();
+      expect(within(row).queryByTestId("sidebar-pull-request-badge")).not.toBeInTheDocument();
+
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_seen" },
+      ];
+      rerender(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      row = rowOf("Review launch plan");
+      expect(within(row).queryByTestId("sidebar-chat-unseen")).not.toBeInTheDocument();
+      expect(within(row).getByTestId("sidebar-pull-request-badge")).toBeInTheDocument();
+    });
+
+    // The marker sits beside the row's link, not inside it, so "Waiting for you" no longer lands
+    // in the link's own name. A reader moving link by link has to hear it some other way.
+    it("describes a parked session's link with the run-state slot", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_parked", "Rework onboarding copy"), awaitingInput: true },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(
+        screen.getByRole("link", { name: /Rework onboarding copy/ }),
+      ).toHaveAccessibleDescription(AWAITING_INPUT_LABEL);
+      // Nothing to say about a settled session, so the link claims no description at all.
+      expect(screen.getByRole("link", { name: /YC customer meetings/ })).not.toHaveAttribute(
+        "aria-describedby",
+      );
+    });
   });
 
   describe("Projects", () => {
@@ -1644,7 +1983,6 @@ describe("Sidebar", () => {
 
     it("lists a project's chats and keeps them out of Recents", async () => {
       featureFlagsMock.sidebarProjects = true;
-      featureFlagsMock.taskSpawning = true;
       recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
       sidebarTasksMock.value = [taskRow("task_filed")];
       projectsApiMock.listProjects.mockResolvedValue([
@@ -1664,6 +2002,36 @@ describe("Sidebar", () => {
       expect(within(recents).getByRole("link", { name: "chat_loose title" })).toBeInTheDocument();
       expect(within(recents).queryByRole("link", { name: "chat_filed title" })).toBeNull();
       expect(within(recents).queryByRole("link", { name: /task_filed name/ })).toBeNull();
+    });
+
+    it("indents a folder's rows and leaves loose Recents rows flush", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
+      sidebarTasksMock.value = [taskRow("task_filed")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_filed", "conversation_task_filed"]),
+        project("project_2", "Empty"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      const projects = await findLoadedProjects();
+      // The indent lands on whatever leads the row: the status slot when the session has a marker,
+      // and the link itself when it has none. These fixtures are settled and seen, so it is the
+      // link.
+      for (const name of ["chat_filed title", /task_filed name/]) {
+        const row = within(projects).getByRole("link", { name }).parentElement;
+        expect(row?.firstElementChild).toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
+      }
+      expect(within(projects).getByText("No chats")).toHaveClass(
+        SIDEBAR_NESTED_ROW_PADDING_CLASSNAME,
+      );
+
+      const recents = screen.getByRole("navigation", { name: "Recents" });
+      const looseRow = within(recents).getByRole("link", {
+        name: "chat_loose title",
+      }).parentElement;
+      expect(looseRow?.firstElementChild).not.toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);
     });
 
     it("files a chat dropped on a project and keeps the row out of Recents", async () => {
@@ -1999,6 +2367,7 @@ function taskRow(
     name: `${id} name`,
     status: "succeeded",
     hasUnseen: false,
+    awaitingInput: false,
     updatedAt: "2026-07-14T09:00:00.000Z",
     ...overrides,
   };

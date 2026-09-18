@@ -124,7 +124,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          taskSpawningEnabled: true,
           legacyBrainEnabled: true,
         },
       ],
@@ -170,8 +169,6 @@ describe("API authentication", () => {
           "brain:write",
           "workflow:read",
           "workflow:write",
-          "schedule:read",
-          "schedule:write",
         ],
       },
     });
@@ -203,13 +200,12 @@ describe("API authentication", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("withholds Workflow and schedule permissions while Tasks & Workflows is disabled", async () => {
+  it("grants Workflow permissions to every workspace member", async () => {
     const execute = vi.fn(async (_query: SQL) => ({
       rows: [
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -238,6 +234,8 @@ describe("API authentication", () => {
       "wiki:read",
       "wiki:write",
       "skill:write",
+      "workflow:read",
+      "workflow:write",
     ]);
   });
 
@@ -247,7 +245,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_mobile",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -399,7 +396,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "admin",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -467,7 +463,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: true,
           legacyBrainEnabled: false,
         },
       ],
@@ -514,7 +509,6 @@ describe("API authentication", () => {
         {
           workspaceId: "workspace_1",
           role: "member",
-          taskSpawningEnabled: false,
           legacyBrainEnabled: false,
         },
       ],
@@ -535,7 +529,116 @@ describe("API authentication", () => {
     const compiled = compiledActorQuery(execute);
     expect(compiled.sql).not.toContain("onboarded_at");
   });
+
+  // Onboarding creates the workspace two steps before it marks the user
+  // onboarded. The subscription and plugin steps run in between, so their
+  // routes must resolve an Actor from workspace membership alone.
+  it.each([
+    ["GET", "/v1/engine-auth/claude-code"],
+    ["PUT", "/v1/engine-auth/claude-code"],
+    ["GET", "/v1/engine-auth/codex"],
+    ["POST", "/v1/engine-auth/codex/device"],
+    ["POST", "/v1/engine-auth/codex/device/flow_1/poll"],
+    ["GET", "/v1/plugins"],
+    ["POST", "/v1/plugins/imports/preview"],
+    ["POST", "/v1/plugins/imports"],
+  ])("resolves %s %s for a browser session mid-onboarding", async (method, path) => {
+    const execute = vi.fn(async (_query: SQL) => ({
+      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+    }));
+    const authenticate = browserSessionAuthenticator(execute);
+
+    const result = await authenticate(
+      new Request(`https://api.example.test${path}`, {
+        method,
+        headers: { Cookie: "wos-session=sealed-session" },
+      }),
+    );
+
+    expect(result.actor).toMatchObject({ userId: "user_1", workspaceId: "workspace_1" });
+    expect(compiledActorQuery(execute).sql).not.toContain("onboarded_at");
+  });
+
+  it.each([
+    ["GET", "/v1/conversations"],
+    ["DELETE", "/v1/engine-auth/claude-code"],
+    ["DELETE", "/v1/engine-auth/codex"],
+    ["PUT", "/v1/engine-auth/codex/workspace"],
+    ["POST", "/v1/plugins/custom"],
+  ])("keeps the onboarding gate on %s %s", async (method, path) => {
+    const execute = vi.fn(async (_query: SQL) => ({
+      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+    }));
+    const authenticate = browserSessionAuthenticator(execute);
+
+    await authenticate(
+      new Request(`https://api.example.test${path}`, {
+        method,
+        headers: { Cookie: "wos-session=sealed-session" },
+      }),
+    );
+
+    expect(compiledActorQuery(execute).sql).toContain("onboarded_at");
+  });
+
+  it("never waives the onboarding gate for bearer credentials", async () => {
+    const execute = vi.fn(async (_query: SQL) => ({
+      rows: [{ workspaceId: "workspace_1", role: "admin", legacyBrainEnabled: false }],
+    }));
+    const authenticate = createWorkOsApiAuthenticator(execute, {
+      audience: "api_resource",
+      authKitDomain: "https://example.authkit.app",
+      verifyJwt: vi.fn(async () => ({
+        payload: { sub: "user_1", org_id: "org_1", sid: "session_1" },
+        protectedHeader: { alg: "RS256" },
+      })) as never,
+    });
+
+    await authenticate(
+      new Request("https://api.example.test/v1/engine-auth/claude-code", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${testToken({ client_id: "client_connect" })}` },
+      }),
+    );
+
+    expect(compiledActorQuery(execute).sql).toContain("onboarded_at");
+  });
+
+  it("explains the missing workspace instead of the onboarding gate on setup routes", async () => {
+    const execute = vi.fn(async (_query: SQL) => ({ rows: [] }));
+    const authenticate = browserSessionAuthenticator(execute);
+
+    await expect(
+      authenticate(
+        new Request("https://api.example.test/v1/engine-auth/codex/device", {
+          method: "POST",
+          headers: { Cookie: "wos-session=sealed-session" },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      status: 403,
+      message: "Create your workspace before connecting accounts or installing plugins.",
+    });
+  });
 });
+
+function browserSessionAuthenticator(execute: (query: SQL) => Promise<unknown>) {
+  return createWorkOsApiAuthenticator(execute, {
+    cookiePassword: "a-secure-cookie-password-with-32-chars",
+    workos: {
+      userManagement: {
+        loadSealedSession: async () => ({
+          authenticate: async () => ({
+            authenticated: true,
+            user: { id: "user_1" },
+            organizationId: "org_1",
+            sessionId: "session_1",
+          }),
+        }),
+      },
+    } as never,
+  });
+}
 
 function testToken(payload: Record<string, unknown>) {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");

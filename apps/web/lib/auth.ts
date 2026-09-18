@@ -23,13 +23,15 @@ export type IdentityUser = {
   avatarUrl: string | null;
   timezone: string;
   botsEnabled?: boolean;
-  taskSpawningEnabled: boolean;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
+  imessageEnabled: boolean;
+  whatsappEnabled: boolean;
   /** @deprecated Wiki is always enabled. */
   wikiEnabled: true;
   taskViewMode: "board" | "list";
@@ -230,13 +232,15 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     avatarUrl: user.avatarUrl,
     timezone: user.timezone,
     botsEnabled: user.botsEnabled === true,
-    taskSpawningEnabled: user.taskSpawningEnabled,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
+    approveForMeEnabled: user.approveForMeEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
     reviewInboxEnabled: user.reviewInboxEnabled,
     sidebarProjectsEnabled: user.sidebarProjectsEnabled,
     subagentsEnabled: user.subagentsEnabled,
     pastSessionAccessEnabled: user.pastSessionAccessEnabled,
+    imessageEnabled: user.imessageEnabled,
+    whatsappEnabled: user.whatsappEnabled,
     wikiEnabled: true,
     taskViewMode: user.taskViewMode,
     taskTimeRange: user.taskTimeRange,

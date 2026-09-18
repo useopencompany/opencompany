@@ -19,6 +19,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import { GitHubInstallGapCard } from "@/components/GitHubRepositoryAccess";
+import { actionRowLabel, actionSourceLabel, actionVerb } from "@/lib/action-identity";
 import {
   BRAIN_TOOL_NAME,
   BROWSER_USE_PROFILE_TOOL_NAME,
@@ -27,12 +28,10 @@ import {
   CODEX_PLAN_TOOL_NAME,
   CODEX_QUESTION_TOOL_NAME,
   type CodexCommandToolOutput,
-  DELETE_TASK_SCHEDULE_TOOL_NAME,
-  EDIT_TASK_SCHEDULE_TOOL_NAME,
-  SCHEDULE_TASK_TOOL_NAME,
   USE_ACTION_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { githubInstallGapCandidate } from "@/lib/github-repository-access";
+import { actionSourceMark } from "@/lib/service-marks";
 import { ApprovalCard, type ApprovalChoice } from "./ApprovalCard";
 import { type ApprovalPresentation, approvalPresentation } from "./approval-presentation";
 import {
@@ -46,6 +45,15 @@ import {
   HistoricalPresentationDetailStatus,
   useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
+import { WorkflowToolCard } from "./WorkflowToolCard";
+
+// Recurring Tasks were removed; saved transcripts still contain their tool calls, so the icon
+// treatment stays keyed off the retired names.
+const RETIRED_SCHEDULE_TOOL_NAMES = new Set([
+  "schedule_task",
+  "edit_task_schedule",
+  "delete_task_schedule",
+]);
 
 export type CodexToolAction =
   | { type: "implement-plan" }
@@ -92,9 +100,15 @@ export function ToolCallItem({
       allowActionApproval &&
       onActionApproval,
   );
-  // Summary params can omit recipients or truncate message bodies. Fetch the complete request
-  // automatically, keeping the decision card visible while approval waits for that detail.
-  useHistoricalPresentationDetail(expanded || pendingApproval, detail);
+  const pendingQuestion = Boolean(
+    !readOnly &&
+      tool.name === CODEX_QUESTION_TOOL_NAME &&
+      tool.status === "waiting" &&
+      onCodexAction,
+  );
+  // Summary params can omit recipients, question choices, or message bodies. Fetch the complete
+  // request automatically, keeping the blocking card visible while it waits for that detail.
+  useHistoricalPresentationDetail(expanded || pendingApproval || pendingQuestion, detail);
   const disclosure: ToolCallDisclosure = {
     expanded,
     onToggle: () => {
@@ -104,6 +118,16 @@ export function ToolCallItem({
     },
   };
 
+  if (
+    tool.name === "workflows" &&
+    tool.state === "output-available" &&
+    isRecord(tool.output) &&
+    isRecord(tool.output.workflow) &&
+    typeof tool.output.workflow.name === "string" &&
+    typeof tool.output.workflow.slug === "string"
+  ) {
+    return <WorkflowToolCard output={tool.output} />;
+  }
   if (pendingApproval && onActionApproval) {
     if (tool.name === USE_ACTION_TOOL_NAME && managedCapabilityActionFromTool(tool)) {
       return (
@@ -124,6 +148,9 @@ export function ToolCallItem({
         detail={detail}
       />
     );
+  }
+  if (pendingQuestion && detail && detail.state !== "loaded") {
+    return <PendingCodexQuestionCard detail={detail} />;
   }
   if (detail && detail.state !== "loaded")
     return <ToolCallRow tool={tool} detail={detail} {...disclosure} />;
@@ -198,9 +225,7 @@ function LegacyCapabilityApprovalRow({ tool }: { tool: ToolCallView }) {
       className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
     >
       <div className="text-[12px] font-semibold text-ink">Approve paid capability?</div>
-      <p className="mt-1 text-[12px] leading-5 text-ink-muted">
-        {capabilitySourceLabel(approval.source)} · {capabilityActionLabel(approval.action)}
-      </p>
+      <p className="mt-1 text-[12px] leading-5 text-ink-muted">{actionRowLabel(approval.action)}</p>
       <p className="mt-1 text-[11px] leading-4 text-ink-subtle">
         Maximum charge {formatUsdMicros(approval.maxCostUsdMicros)}. The final charge may be lower.
       </p>
@@ -297,8 +322,8 @@ function CapabilityApprovalCard({
   const presentation: ApprovalPresentation = {
     ...approvalPresentation(tool.input),
     kind: "capability",
-    source: capabilitySourceLabel(quote?.source ?? action.split(".", 1)[0] ?? ""),
-    question: `Run the ${capabilityActionLabel(quote?.action ?? action).toLowerCase()} lookup?`,
+    source: actionSourceLabel(quote?.source ?? action),
+    question: `Run the ${actionVerb(quote?.action ?? action) ?? "requested"} lookup?`,
   };
 
   return (
@@ -381,16 +406,17 @@ function ActionApprovalCard({
     // and this card unmounts into the resolved row.
   };
 
-  // A custom MCP server can redefine what an action name does at any time, so a standing
-  // permission for one of its actions would not mean what the user agreed to.
-  const alwaysAllowed =
-    allowAlways && !taskApproval && !/^plugin:custom-[a-f0-9]{24}:/.test(action);
+  // Every plugin action is one discovered MCP tool, so its standing permission is saved against
+  // that tool alone — approving "label this thread" can no longer grant automatic "trash thread".
+  // Native actions have no tool key and still save against their capability, as before.
+  const pluginTool = action.startsWith("plugin:");
+  const alwaysAllowed = allowAlways && !taskApproval;
   const allow: ApprovalChoice[] = [
     ...(alwaysAllowed
       ? [
           {
             id: "accept_always" satisfies ActionApprovalDecision,
-            label: "Always allow",
+            label: pluginTool ? "Always allow this tool" : "Always allow",
             busyLabel: "Saving...",
             disabled: !approvalAvailable,
           },
@@ -472,28 +498,6 @@ function managedCapabilityActionFromTool(tool: ToolCallView) {
   if (!isRecord(tool.input) || typeof tool.input.action !== "string") return null;
   const source = tool.input.action.split(".", 1)[0] ?? "";
   return MANAGED_CAPABILITY_SOURCE_IDS.has(source) ? tool.input.action : null;
-}
-
-function capabilitySourceLabel(source: string) {
-  const labels: Record<string, string> = {
-    x: "X",
-    linkedin: "LinkedIn",
-    youtube: "YouTube",
-    instagram: "Instagram",
-    tiktok: "TikTok",
-    lead: "Prospecting",
-    seo: "SEO",
-  };
-  return labels[source] ?? source;
-}
-
-function capabilityActionLabel(action: string) {
-  const name = action.split(".").at(-1) ?? action;
-  return name
-    .split("_")
-    .filter(Boolean)
-    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
 }
 
 function capabilityApprovalStatusLabel(status: string) {
@@ -586,6 +590,20 @@ type CodexQuestion = {
   isOther: boolean;
   options: Array<{ label: string; description: string }>;
 };
+
+function PendingCodexQuestionCard({ detail }: { detail: HistoricalPresentationDetailController }) {
+  return (
+    <div
+      data-testid="chat-codex-question"
+      className="max-w-[92%] rounded-xl border border-border bg-surface px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)]"
+    >
+      <div className="text-[12px] font-semibold text-ink">The coding engine needs your input</div>
+      <div className="mt-2">
+        <HistoricalPresentationDetailStatus detail={detail} />
+      </div>
+    </div>
+  );
+}
 
 function CodexQuestionRow({
   tool,
@@ -813,8 +831,18 @@ function ToolCallRow({
   detail?: HistoricalPresentationDetailController;
 } & ToolCallDisclosure) {
   const meta = getToolCallMeta(tool);
-  const Icon = meta.icon;
+  // A connected action leads with the service's own mark: which system the agent touched is the
+  // first thing a reader looks for. Its outcome then has to come from the status text, which is
+  // why a failure stays spelled out on these rows.
+  const mark = tool.actionSource ? actionSourceMark(tool.actionSource) : null;
+  const Icon = mark?.Icon ?? meta.icon;
+  const showStatusText =
+    tool.statusText !== "Done" && (mark !== null || tool.statusText !== "Failed");
   const hasOutput = tool.output !== undefined;
+  const automaticallyApproved =
+    isRecord(tool.output) &&
+    isRecord(tool.output.automaticApproval) &&
+    tool.output.automaticApproval.reason === "routine_action";
   const screenshotUrl = browserScreenshotUrl(tool.output);
   const browserProfileLiveView = browserProfileLiveViewFromTool(tool);
   const detailChips =
@@ -836,20 +864,31 @@ function ToolCallRow({
             strokeWidth={1.9}
             className={`shrink-0 text-ink-subtle transition-transform ${expanded ? "rotate-90" : ""}`}
           />
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          {/* The service badge is the plugin catalog's treatment at row scale, so the same
+              integration looks the same wherever the product shows it. */}
+          <span
+            className={`flex h-4 w-4 shrink-0 items-center justify-center ${mark ? `rounded ${mark.iconClassName}` : ""}`}
+          >
             <Icon
-              size={11}
+              size={mark ? 9 : 11}
               strokeWidth={1.75}
-              className={`${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`}
+              className={
+                mark
+                  ? undefined
+                  : `${meta.className} ${meta.spin ? "animate-[spin_3s_linear_infinite]" : ""}`
+              }
             />
           </span>
           <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
             {tool.label}
           </span>
+          {automaticallyApproved ? (
+            <span className="shrink-0 text-[10.5px] text-ink-subtle">Automatically approved</span>
+          ) : null}
           {detailChips.map((detail, index) => (
             <ToolDetailChip key={`${detail}-${index}`} detail={detail} />
           ))}
-          {tool.statusText !== "Done" && tool.statusText !== "Failed" ? (
+          {showStatusText ? (
             <span className={`${meta.className} shrink-0 text-[10.5px] font-medium`}>
               {tool.statusText}
             </span>
@@ -862,6 +901,11 @@ function ToolCallRow({
             <HistoricalPresentationDetailStatus detail={detail} />
           ) : (
             <>
+              {automaticallyApproved ? (
+                <p className="mb-2 text-[11px] text-ink-muted">
+                  Approved as a routine action within your request.
+                </p>
+              ) : null}
               <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
               {hasOutput ? (
                 <ToolPreviewBlock
@@ -1001,9 +1045,7 @@ export function SubagentRow({
   children: ReactNode;
   detail?: HistoricalPresentationDetailController;
 }) {
-  // Expanded while the subagent is still working so its live trace is visible; collapsed once it
-  // finishes to keep the transcript tidy (the user can re-open it).
-  const [expanded, setExpanded] = useState(tool.status === "running" || tool.status === "waiting");
+  const [expanded, setExpanded] = useState(false);
   useHistoricalPresentationDetail(expanded, detail);
   const meta = getToolCallMeta(tool);
   // The coding engines return `result`; the opencompany engine's run_subagent returns `summary`.
@@ -1397,16 +1439,10 @@ function getToolCallMeta(tool: ToolCallView): {
     icon:
       tool.name === BRAIN_TOOL_NAME
         ? BookOpen
-        : tool.name === SCHEDULE_TASK_TOOL_NAME ||
-            tool.name === EDIT_TASK_SCHEDULE_TOOL_NAME ||
-            tool.name === DELETE_TASK_SCHEDULE_TOOL_NAME
+        : RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name)
           ? CalendarClock
           : CircleDotDashed,
     className: "text-amber-500",
-    spin:
-      tool.name !== BRAIN_TOOL_NAME &&
-      tool.name !== SCHEDULE_TASK_TOOL_NAME &&
-      tool.name !== EDIT_TASK_SCHEDULE_TOOL_NAME &&
-      tool.name !== DELETE_TASK_SCHEDULE_TOOL_NAME,
+    spin: tool.name !== BRAIN_TOOL_NAME && !RETIRED_SCHEDULE_TOOL_NAMES.has(tool.name),
   };
 }

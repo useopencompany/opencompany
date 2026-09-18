@@ -9,6 +9,7 @@ import {
   GOOGLE_DOCS_WRITE_SCOPE,
   GOOGLE_DRIVE_FILE_SCOPE,
   GOOGLE_DRIVE_READ_SCOPE,
+  GOOGLE_SHEETS_WRITE_SCOPE,
 } from "./integrations/google-drive-scopes";
 import { SLACK_MCP_RECONNECT_REASON, SLACK_MCP_USER_SCOPES } from "./integrations/slack-scopes";
 
@@ -153,7 +154,12 @@ describe("Google Drive integration state", () => {
         id: "gint_drive",
         provider: "google_drive",
         status: "connected",
-        scopes: [GOOGLE_DRIVE_READ_SCOPE, GOOGLE_DRIVE_FILE_SCOPE, GOOGLE_DOCS_WRITE_SCOPE],
+        scopes: [
+          GOOGLE_DRIVE_READ_SCOPE,
+          GOOGLE_DRIVE_FILE_SCOPE,
+          GOOGLE_DOCS_WRITE_SCOPE,
+          GOOGLE_SHEETS_WRITE_SCOPE,
+        ],
       },
     ]);
 
@@ -181,6 +187,26 @@ describe("SigNoz integration state", () => {
       expect.objectContaining({
         integrationId: "gint_signoz",
         provider: "signoz",
+        connected: true,
+      }),
+    ]);
+  });
+  it("surfaces the personal MCP account for official plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_dash0",
+        provider: "dash0",
+        externalId: "dash0_mcp_eu_west_1",
+        accountName: "Dash0",
+        status: "connected",
+        scopes: [],
+      },
+    ]);
+
+    expect(state.personalAccounts.dash0).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_dash0",
+        provider: "dash0",
         connected: true,
       }),
     ]);
@@ -456,6 +482,30 @@ describe("Resend integration state", () => {
   });
 });
 
+describe("Todoist integration state", () => {
+  it("exposes the personal MCP connection to plugin settings", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_todoist_mcp",
+        provider: "todoist",
+        externalId: "todoist_mcp",
+        accountName: "Todoist",
+        connectionLabel: "leo@meetjamie.ai",
+        status: "connected",
+        scopes: ["data:read_write"],
+        capabilityModes: { read: "on", query: "ask", write: "ask", draft: "off" },
+      },
+    ]);
+
+    expect(state.personalAccounts.todoist).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_todoist_mcp",
+        connectionLabel: "leo@meetjamie.ai",
+      }),
+    ]);
+  });
+});
+
 describe("Granola integration state", () => {
   it("keeps MCP tool authorization separate from legacy API ingestion", () => {
     const state = integrationStateFromRows([
@@ -489,6 +539,39 @@ describe("Granola integration state", () => {
     });
     expect(state.personalAccounts.granola).toEqual([
       expect.objectContaining({ integrationId: "gint_granola_ingest" }),
+    ]);
+  });
+});
+
+describe("PostHog integration state", () => {
+  it("keeps MCP tools separate from the analytics event connection", () => {
+    const state = integrationStateFromRows([
+      {
+        id: "gint_posthog_mcp",
+        provider: "posthog",
+        externalId: "posthog_mcp",
+        accountName: "Product team",
+        status: "connected",
+      },
+      {
+        id: "gint_posthog_events",
+        provider: "posthog",
+        externalId: "posthog_events",
+        connectionLabel: "Project 12345 · EU",
+        status: "connected",
+      },
+    ]);
+
+    expect(state.posthog).toMatchObject({
+      integrationId: "gint_posthog_mcp",
+      connected: true,
+    });
+    expect(state.personalAccounts.posthog).toEqual([
+      expect.objectContaining({
+        integrationId: "gint_posthog_events",
+        connectionLabel: "Project 12345 · EU",
+        connected: true,
+      }),
     ]);
   });
 });

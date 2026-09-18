@@ -562,15 +562,7 @@ function normalizePublishArtifactInput(value: unknown): PublishArtifactInput {
   const requestedPath = boundedText(value.path, 4_096);
   if (!requestedPath) throw new Error("path is required.");
   const artifactId = boundedText(value.artifact_id, 200);
-  const expectedVersion = value.expected_version;
-  if (
-    expectedVersion !== undefined &&
-    (typeof expectedVersion !== "number" ||
-      !Number.isSafeInteger(expectedVersion) ||
-      expectedVersion < 1)
-  ) {
-    throw new Error("expected_version must be a positive integer.");
-  }
+  const expectedVersion = normalizeExpectedArtifactVersion(value, artifactId);
   return {
     path: requestedPath,
     ...(value.title !== undefined
@@ -597,15 +589,7 @@ function normalizeWriteArtifactInput(
   const title = requiredBoundedString(value.title, "title", 160);
   if (typeof value.content !== "string") throw new Error("content must be a string.");
   const artifactId = boundedText(value.artifact_id, 200);
-  const expectedVersion = value.expected_version;
-  if (
-    expectedVersion !== undefined &&
-    (typeof expectedVersion !== "number" ||
-      !Number.isSafeInteger(expectedVersion) ||
-      expectedVersion < 1)
-  ) {
-    throw new Error("expected_version must be a positive integer.");
-  }
+  const expectedVersion = normalizeExpectedArtifactVersion(value, artifactId);
   return {
     filename,
     mediaType,
@@ -617,6 +601,27 @@ function normalizeWriteArtifactInput(
     ...(artifactId ? { artifact_id: artifactId } : {}),
     ...(typeof expectedVersion === "number" ? { expected_version: expectedVersion } : {}),
   };
+}
+
+function normalizeExpectedArtifactVersion(
+  value: Record<string, unknown>,
+  artifactId: string | undefined,
+) {
+  // Function-calling models sometimes serialize omitted optional fields as an empty string plus a
+  // placeholder version. A blank artifact_id unambiguously means a new artifact, so discard its
+  // coupled placeholder instead of making the model regenerate the entire document to retry.
+  if (!artifactId && typeof value.artifact_id === "string") return undefined;
+
+  const expectedVersion = value.expected_version;
+  if (
+    expectedVersion !== undefined &&
+    (typeof expectedVersion !== "number" ||
+      !Number.isSafeInteger(expectedVersion) ||
+      expectedVersion < 1)
+  ) {
+    throw new Error("expected_version must be a positive integer.");
+  }
+  return typeof expectedVersion === "number" ? expectedVersion : undefined;
 }
 
 async function loadPublishableSandboxFile(input: {

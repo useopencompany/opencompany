@@ -8,6 +8,10 @@ import {
   startBetterStackMcpOAuth,
 } from "@opencompany/agent/integrations/betterstack-mcp";
 import {
+  completeDash0McpOAuth,
+  startDash0McpOAuth,
+} from "@opencompany/agent/integrations/dash0-mcp";
+import {
   completeFathomMcpOAuth,
   startFathomMcpOAuth,
 } from "@opencompany/agent/integrations/fathom-mcp";
@@ -56,6 +60,10 @@ import {
   completeSupabaseMcpOAuth,
   startSupabaseMcpOAuth,
 } from "@opencompany/agent/integrations/supabase-mcp";
+import {
+  completeTodoistMcpOAuth,
+  startTodoistMcpOAuth,
+} from "@opencompany/agent/integrations/todoist-mcp";
 import {
   completeVercelMcpOAuth,
   startVercelMcpOAuth,
@@ -114,6 +122,11 @@ vi.mock("@opencompany/agent/integrations/signoz-mcp", async (importOriginal) => 
   startSigNozMcpOAuth: vi.fn(),
   completeSigNozMcpOAuth: vi.fn(),
 }));
+vi.mock("@opencompany/agent/integrations/dash0-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startDash0McpOAuth: vi.fn(),
+  completeDash0McpOAuth: vi.fn(),
+}));
 vi.mock("@opencompany/agent/integrations/vercel-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   startVercelMcpOAuth: vi.fn(),
@@ -133,6 +146,11 @@ vi.mock("@opencompany/agent/integrations/supabase-mcp", async (importOriginal) =
   ...(await importOriginal<Record<string, unknown>>()),
   startSupabaseMcpOAuth: vi.fn(),
   completeSupabaseMcpOAuth: vi.fn(),
+}));
+vi.mock("@opencompany/agent/integrations/todoist-mcp", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  startTodoistMcpOAuth: vi.fn(),
+  completeTodoistMcpOAuth: vi.fn(),
 }));
 vi.mock("@opencompany/agent/integrations/resend-mcp", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -163,11 +181,13 @@ const PROVIDERS: McpOAuthProvider[] = [
   "notion",
   "stripe",
   "supabase",
+  "todoist",
   "resend",
   "latitude",
   "betterstack",
   "fathom",
   "signoz",
+  "dash0",
   "jamie",
   "vercel",
 ];
@@ -183,11 +203,13 @@ const flowMocks = {
   stripe: { start: startStripeMcpOAuth, complete: completeStripeMcpOAuth },
   notion: { start: startNotionMcpOAuth, complete: completeNotionMcpOAuth },
   supabase: { start: startSupabaseMcpOAuth, complete: completeSupabaseMcpOAuth },
+  todoist: { start: startTodoistMcpOAuth, complete: completeTodoistMcpOAuth },
   resend: { start: startResendMcpOAuth, complete: completeResendMcpOAuth },
   latitude: { start: startLatitudeMcpOAuth, complete: completeLatitudeMcpOAuth },
   betterstack: { start: startBetterStackMcpOAuth, complete: completeBetterStackMcpOAuth },
   fathom: { start: startFathomMcpOAuth, complete: completeFathomMcpOAuth },
   signoz: { start: startSigNozMcpOAuth, complete: completeSigNozMcpOAuth },
+  dash0: { start: startDash0McpOAuth, complete: completeDash0McpOAuth },
   jamie: { start: startJamieMcpOAuth, complete: completeJamieMcpOAuth },
   vercel: { start: startVercelMcpOAuth, complete: completeVercelMcpOAuth },
 } as const;
@@ -231,7 +253,7 @@ function mintState(provider: McpOAuthProvider, overrides: Record<string, unknown
     provider,
     userWorkosId: "user_1",
     integrationId: "gint_mcp_1",
-    returnTo: `/settings/plugins/${provider}`,
+    returnTo: `/plugins/${provider}`,
     expiresAt: Date.now() + 600_000,
     nonce: "nonce_1",
     ...overrides,
@@ -262,7 +284,7 @@ describe("remote MCP OAuth ingress", () => {
       const response = await ingress().start(
         provider,
         new Request(
-          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/plugins/${provider}`,
+          `https://api.example.com/integrations/${provider}/start?returnTo=/plugins/${provider}`,
         ),
       );
       expect(response.status, provider).toBe(302);
@@ -271,7 +293,7 @@ describe("remote MCP OAuth ingress", () => {
       );
       expect(flowMocks[provider].start).toHaveBeenCalledWith({
         userWorkosId: "user_1",
-        returnTo: `/settings/plugins/${provider}`,
+        returnTo: `/plugins/${provider}`,
         db: sentinelDb,
       });
     }
@@ -286,11 +308,11 @@ describe("remote MCP OAuth ingress", () => {
       const response = await ingress().start(
         provider,
         new Request(
-          `https://api.example.com/integrations/${provider}/start?returnTo=/settings/plugins/${provider}`,
+          `https://api.example.com/integrations/${provider}/start?returnTo=/plugins/${provider}`,
         ),
       );
       expect(response.headers.get("location"), provider).toBe(
-        `https://opencompany.example.com/settings/plugins/${provider}?integration=${provider}&setup=connected`,
+        `https://opencompany.example.com/plugins/${provider}?integration=${provider}&setup=connected`,
       );
     }
   });
@@ -302,20 +324,18 @@ describe("remote MCP OAuth ingress", () => {
       new Request("https://api.example.com/integrations/neon/start"),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/plugins/neon?integration=neon&setup=error&reason=start_failed",
+      "https://opencompany.example.com/plugins/neon?integration=neon&setup=error&reason=start_failed",
     );
   });
 
   it("does not start Vercel OAuth until the provider approves the production callback", async () => {
     const response = await ingress().start(
       "vercel",
-      new Request(
-        "https://api.example.com/integrations/vercel/start?returnTo=/settings/plugins/vercel",
-      ),
+      new Request("https://api.example.com/integrations/vercel/start?returnTo=/plugins/vercel"),
     );
 
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/plugins/vercel?integration=vercel&setup=error&reason=provider_approval_required",
+      "https://opencompany.example.com/plugins/vercel?integration=vercel&setup=error&reason=provider_approval_required",
     );
     expect(startVercelMcpOAuth).not.toHaveBeenCalled();
   });
@@ -336,7 +356,7 @@ describe("remote MCP OAuth ingress", () => {
         ),
       );
       expect(response.headers.get("location"), provider).toBe(
-        `https://opencompany.example.com/settings/plugins/${provider}?integration=${provider}&setup=error&reason=invalid_state`,
+        `https://opencompany.example.com/plugins/${provider}?integration=${provider}&setup=error&reason=invalid_state`,
       );
       expect(flowMocks[provider].complete).not.toHaveBeenCalled();
     }
@@ -351,7 +371,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/plugins/posthog?integration=posthog&setup=error&reason=session_mismatch",
+      "https://opencompany.example.com/plugins/posthog?integration=posthog&setup=error&reason=session_mismatch",
     );
     expect(completePostHogMcpOAuth).not.toHaveBeenCalled();
   });
@@ -390,7 +410,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/plugins/latitude?integration=latitude&setup=connected",
+      "https://opencompany.example.com/plugins/latitude?integration=latitude&setup=connected",
     );
     expect(completeLatitudeMcpOAuth).toHaveBeenCalledWith({
       userWorkosId: "user_1",
@@ -430,7 +450,7 @@ describe("remote MCP OAuth ingress", () => {
       ),
     );
     expect(response.headers.get("location")).toBe(
-      "https://opencompany.example.com/settings/plugins/linear?integration=linear&setup=error&reason=token_exchange_failed",
+      "https://opencompany.example.com/plugins/linear?integration=linear&setup=error&reason=token_exchange_failed",
     );
   });
 });

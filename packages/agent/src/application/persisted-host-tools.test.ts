@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatHostToolServiceDependencies } from "./host-tools";
-import { executePersistedChatHostTool, taskSpawnIdempotencyKey } from "./persisted-host-tools";
+import { executePersistedChatHostTool } from "./persisted-host-tools";
 
 const listSkillCatalog = vi.hoisted(() => vi.fn(async () => []));
 vi.mock("../skills", async (importOriginal) => ({
@@ -18,7 +18,6 @@ function executeHostTool(input: {
       wakeTaskWorker: vi.fn(),
       defer: vi.fn(),
       gatewayApiKey: "gateway-key",
-      planHarness: vi.fn(),
     },
     ...(input.dependencies ? { dependencies: input.dependencies } : {}),
   });
@@ -35,37 +34,22 @@ describe("headless Chat host tools", () => {
           workspaceName: "opencompany",
           conversationId: "task_conversation",
           messageId: "message_1",
-          brainRef: null,
           email: "ada@example.test",
           firstName: "Ada",
           lastName: "Lovelace",
           timezone: "UTC",
-          taskToolsEnabled: false,
+          automationToolsEnabled: false,
           taskConversation: true,
           skillToolsEnabled: true,
+          slackChannelEnabled: false,
           subagentsEnabled: false,
-          legacyBrainEnabled: false,
         }),
-        listBrains: async () => [],
         browserProfilesAvailable: () => false,
         activateAndListSkills: async () => [],
       },
     });
     expect(response.ok).toBe(true);
     expect(listSkillCatalog).toHaveBeenCalledWith("workspace_1", undefined, "user_1", "company");
-  });
-
-  it("derives stable, distinct task idempotency keys from each tool call", () => {
-    expect(taskSpawnIdempotencyKey("turn_1", "call_1")).toBe(
-      taskSpawnIdempotencyKey("turn_1", "call_1"),
-    );
-    expect(taskSpawnIdempotencyKey("turn_1", "call_1")).not.toBe(
-      taskSpawnIdempotencyKey("turn_1", "call_2"),
-    );
-    expect(taskSpawnIdempotencyKey("turn_1")).toBe("agent:turn_1");
-    expect(taskSpawnIdempotencyKey("turn_1", "provider id with spaces")).toMatch(
-      /^agent:turn_1:tool:[a-f0-9]{64}$/,
-    );
   });
 
   it("reattaches the matching authenticated browser profile after a worker recovery", async () => {
@@ -99,15 +83,14 @@ describe("headless Chat host tools", () => {
           workspaceName: "opencompany",
           conversationId: "conversation_1",
           messageId: "message_1",
-          brainRef: null,
           email: "ada@example.test",
           firstName: "Ada",
           lastName: "Lovelace",
           timezone: "Europe/London",
-          taskToolsEnabled: true,
+          automationToolsEnabled: true,
           skillToolsEnabled: true,
+          slackChannelEnabled: false,
           subagentsEnabled: false,
-          legacyBrainEnabled: false,
         })),
         browserProfilesAvailable: () => true,
         listBrowserProfiles: vi.fn(async () => [activeSession.profile]),

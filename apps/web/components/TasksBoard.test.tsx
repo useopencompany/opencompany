@@ -7,28 +7,12 @@ import { TASK_BOARD_COLUMN_CAP, TasksBoardRoute } from "./TasksBoard";
 
 const appDataMock = vi.hoisted(() => ({
   featureFlags: {
-    taskSpawning: true,
     autoModelRouting: false,
     legacyBrain: false,
   },
   workspace: { id: "workspace_1" },
   taskRows: [] as TaskRow[],
   tasksReady: true,
-  schedules: [
-    {
-      id: "schedule_1",
-      name: "Monday briefing",
-      sourceDescription: "Weekly briefing",
-      cron: "0 9 * * 1",
-      timezone: "Europe/Berlin",
-      prompt: "Prepare the weekly briefing",
-      enabled: true,
-      lastRunAt: null,
-      nextRunAt: "2026-08-03T07:00:00.000Z",
-      createdAt: "2026-07-01T09:00:00.000Z",
-      updatedAt: "2026-07-01T09:00:00.000Z",
-    },
-  ],
 }));
 
 const archiveTaskMock = vi.hoisted(() => vi.fn(async () => ({ ok: true as const, error: null })));
@@ -46,6 +30,13 @@ const summaryMock = vi.hoisted(() => ({
   },
 }));
 const activityRowsMock = vi.hoisted(() => ({ rows: [] as Array<Record<string, unknown>> }));
+
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return { ...actual, useRouter: () => routerMock };
+});
 
 vi.mock("@tanstack/react-db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-db")>();
@@ -92,7 +83,6 @@ vi.mock("@/components/AppDataProvider", () => ({
 vi.mock("@/components/Routes", () => ({
   formatRelativeTime: () => "2m ago",
   EmptyState: ({ title }: { title: string }) => <div>{title}</div>,
-  TasksWorkflowsDisabledRoute: () => <div>Tasks &amp; Workflows is a beta feature</div>,
 }));
 
 vi.mock("@/lib/headless-task-commands", () => ({
@@ -131,7 +121,6 @@ describe("TasksBoardRoute", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
-    appDataMock.featureFlags.taskSpawning = true;
     appDataMock.taskRows = [];
     appDataMock.tasksReady = true;
     activityRowsMock.rows = [];
@@ -316,39 +305,12 @@ describe("TasksBoardRoute", () => {
 
     const sheet = screen.getByRole("dialog");
     expect(within(sheet).getByRole("button", { name: "Archive" })).toBeDisabled();
-    expect(
-      within(sheet).getByText(
-        "Draft your comment now — you can post it when the current run finishes.",
-      ),
-    ).toBeVisible();
-
-    const composer = within(sheet).getByLabelText("Add a comment");
-    expect(composer).toBeEnabled();
-    fireEvent.change(composer, { target: { value: "also check the staging deploy" } });
-    expect(composer).toHaveValue("also check the staging deploy");
-    expect(within(sheet).getByRole("button", { name: "Post comment" })).toBeDisabled();
-    expect(createCommentMock).not.toHaveBeenCalled();
-  });
-
-  it("posts a settled Task comment verbatim and resumes through the canonical command", async () => {
-    const user = userEvent.setup();
-    appDataMock.taskRows = [
-      taskRow({ id: "waiting", name: "Approve the launch", status: "waiting" }),
-    ];
-    render(<TasksBoardRoute workflowNames={{}} />);
-    await user.click(screen.getByRole("link", { name: "Open Approve the launch" }));
-
-    const sheet = screen.getByRole("dialog");
-    const body = "  Approved.\n  Keep the original rollout order.  ";
-    fireEvent.change(within(sheet).getByLabelText("Add a comment"), { target: { value: body } });
-    await user.click(within(sheet).getByRole("button", { name: "Post comment" }));
-
-    await waitFor(() =>
-      expect(createCommentMock).toHaveBeenCalledWith(
-        "waiting",
-        { id: "task_activity_comment_test", body },
-        { scopeKey: "workspace_1" },
-      ),
+    // The peek is a read-only summary. Talking to a Task happens in its session, where the message
+    // can be queued behind the live turn and steered into it.
+    expect(within(sheet).queryByLabelText("Add a comment")).not.toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "Open full view" })).toHaveAttribute(
+      "href",
+      "/tasks/TASK-running",
     );
   });
 
@@ -662,6 +624,31 @@ describe("TasksBoardRoute", () => {
     expect(screen.getByText("Research competitors")).toBeInTheDocument();
   });
 
+  it("opens pre-filtered when a workflow's run history links here", () => {
+    appDataMock.taskRows = [
+      taskRow({
+        id: "ship-feature",
+        name: "Add workflow filtering",
+        status: "running",
+        workflow_id: "ship-feature",
+      }),
+      taskRow({ id: "ad-hoc", name: "Research competitors", status: "running" }),
+    ];
+
+    render(
+      <TasksBoardRoute
+        workflowNames={{ "ship-feature": "Ship feature" }}
+        initialWorkflowId="ship-feature"
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Filter tasks by workflow" })).toHaveTextContent(
+      "#Ship feature",
+    );
+    expect(screen.getByText("Add workflow filtering")).toBeInTheDocument();
+    expect(screen.queryByText("Research competitors")).not.toBeInTheDocument();
+  });
+
   it("offers workflow slugs from task history when the workflow is no longer active", async () => {
     const user = userEvent.setup();
     appDataMock.taskRows = [
@@ -677,14 +664,6 @@ describe("TasksBoardRoute", () => {
 
     await user.click(screen.getByRole("combobox", { name: "Filter tasks by workflow" }));
     expect(await screen.findByRole("option", { name: "#old-launch-flow" })).toBeInTheDocument();
-  });
-
-  it("shows the Tasks & Workflows beta gate when disabled", () => {
-    appDataMock.featureFlags.taskSpawning = false;
-
-    render(<TasksBoardRoute workflowNames={{}} />);
-
-    expect(screen.getByText("Tasks & Workflows is a beta feature")).toBeInTheDocument();
   });
 
   it("switches to a grouped list view and persists the choice per user", async () => {

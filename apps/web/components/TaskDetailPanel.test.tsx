@@ -43,7 +43,6 @@ vi.mock("@/components/AppDataProvider", () => ({
     codexConnected: false,
     claudeCodeConnected: false,
     featureFlags: {
-      taskSpawning: true,
       autoModelRouting: false,
       legacyBrain: false,
     },
@@ -106,10 +105,31 @@ describe("TaskDetailPanel", () => {
       status: "succeeded",
     });
     expect(mocks.surfaceProps).toMatchObject({
-      taskSpawningEnabled: true,
       workspaceId: "workspace_1",
-      userName: "Ada",
       userWorkosId: "user_1",
+    });
+  });
+
+  it("preserves the model selected for a Codex task", () => {
+    const run = buildHarnessRun({
+      task: {
+        ...task(),
+        engine: "codex",
+        model: "openai/gpt-6-astra",
+        harnessSpec: {
+          engine: "codex",
+          model: "openai/gpt-6-astra",
+        },
+      },
+      messages: [],
+      events: [],
+    });
+
+    render(<TaskDetailPanel initialRun={run} />);
+
+    expect(mocks.surfaceProps?.initialChat).toMatchObject({
+      engine: "codex",
+      model: "openai/gpt-6-astra",
     });
   });
 
@@ -215,6 +235,121 @@ describe("TaskDetailPanel", () => {
     mocks.runRows = [activeRun];
     view.rerender(<TaskDetailPanel initialRun={initialRun} />);
     expect(mocks.surfaceProps?.taskConversation).toMatchObject({ status: "waiting" });
+  });
+
+  it("keeps a queued message from becoming the Task's active run", () => {
+    const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
+    mocks.tasks = [initialTask];
+    mocks.runRows = [
+      { id: "run_working", status: "running", createdAt: "2026-01-01T00:00:00.000Z" },
+      // The user's message, sent while the turn above was still working.
+      { id: "run_queued", status: "queued", createdAt: "2026-01-01T00:05:00.000Z" },
+    ];
+
+    render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "running",
+      activeRunId: "run_working",
+    });
+  });
+
+  it("times a resumed task from the live task, then its active run", () => {
+    const initialTask = {
+      ...task(),
+      status: "running" as const,
+      stage: "running" as const,
+      updatedAt: new Date("2026-01-01T00:00:00.000Z"),
+    };
+    mocks.tasks = [
+      {
+        ...initialTask,
+        updatedAt: "2026-01-01T02:26:59.000Z",
+      },
+    ];
+
+    const view = render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: null,
+      startedAtMs: Date.parse("2026-01-01T02:26:59.000Z"),
+    });
+
+    mocks.runRows = [
+      {
+        id: "run_resumed",
+        status: "running",
+        createdAt: "2026-01-01T02:27:00.000Z",
+      },
+    ];
+    view.rerender(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      activeRunId: "run_resumed",
+      startedAtMs: Date.parse("2026-01-01T02:27:00.000Z"),
+    });
+  });
+
+  it("ignores a stale live Run projection once the Task itself has settled", () => {
+    const settledAt = "2026-09-17T15:16:34.320Z";
+    const initialTask = { ...task(), status: "running" as const, stage: "running" as const };
+    mocks.tasks = [
+      { ...initialTask, status: "succeeded", stage: "completed", updatedAt: settledAt },
+    ];
+    // The Run shape has not delivered the settlement yet: its row still says running, stamped
+    // before the Task settled.
+    mocks.runRows = [
+      {
+        id: "run_stale",
+        status: "running",
+        createdAt: "2026-09-17T15:13:27.984Z",
+        updatedAt: "2026-09-17T15:16:04.100Z",
+      },
+    ];
+
+    const view = render(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "succeeded",
+      activeRunId: null,
+      startedAtMs: Date.parse(settledAt),
+    });
+
+    // A follow-up queued after the settlement is the Task's next turn and must still show.
+    mocks.runRows = [
+      ...mocks.runRows,
+      {
+        id: "run_follow_up",
+        status: "queued",
+        createdAt: "2026-09-17T15:20:00.000Z",
+        updatedAt: "2026-09-17T15:20:00.000Z",
+      },
+    ];
+    view.rerender(
+      <TaskDetailPanel
+        initialRun={buildHarnessRun({ task: initialTask, messages: [], events: [] })}
+      />,
+    );
+    expect(mocks.surfaceProps?.taskConversation).toMatchObject({
+      status: "queued",
+      activeRunId: "run_follow_up",
+    });
   });
 
   it("adopts the live canonical Task status after its active Run completes", () => {

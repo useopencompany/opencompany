@@ -20,15 +20,33 @@ import {
   type GoogleDriveMcpTicketPayload,
   verifyGoogleDriveMcpTicket,
 } from "./google-drive-mcp-ticket";
-import { googleDriveMcpScopesSatisfied } from "./google-drive-scopes";
+import {
+  GOOGLE_DRIVE_MCP_SHEETS_UPGRADE_REASON,
+  googleDriveMcpScopesSatisfied,
+  hasGoogleSheetsWriteScope,
+} from "./google-drive-scopes";
+import {
+  googleSpreadsheetUrl,
+  MAX_SPREADSHEET_CELL_CHARS,
+  MAX_SPREADSHEET_CELLS,
+  MAX_SPREADSHEET_RANGE_CHARS,
+  MAX_SPREADSHEET_READ_LINES,
+  MAX_SPREADSHEET_WRITE_LINES,
+  sanitizeSpreadsheetValues,
+  spreadsheetRangeForSheet,
+} from "./google-sheets-values";
 
 const DRIVE_BASE = "https://www.googleapis.com/drive/v3";
 const DRIVE_UPLOAD_BASE = "https://www.googleapis.com/upload/drive/v3";
 const DOCS_BASE = "https://docs.googleapis.com/v1";
+const SHEETS_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
 const MCP_MAX_DURATION_SECONDS = 120;
 const MAX_FILE_ID_CHARS = 512;
 const MAX_FILE_NAME_CHARS = 300;
 const MAX_TAB_ID_CHARS = 512;
+const MAX_SHEET_TITLE_CHARS = 300;
+const MAX_SHEETS_PER_SPREADSHEET = 200;
+const DEFAULT_SPREADSHEET_COLUMNS = 26;
 const MAX_QUERY_CHARS = 1_000;
 const MAX_PAGE_TOKEN_CHARS = 2_048;
 const MAX_FIND_TEXT_CHARS = 20_000;
@@ -72,13 +90,25 @@ const TOOL_CAPABILITIES = {
   download_file_content: "query",
   get_file_permissions: "query",
   read_file_content: "query",
+  get_spreadsheet_values: "query",
   copy_file: "write",
   create_file: "write",
   replace_document_text: "write",
   replace_document_contents: "write",
+  update_spreadsheet_values: "write",
+  append_spreadsheet_values: "write",
 } as const satisfies Record<string, CapabilityId>;
 
 type GoogleDriveMcpToolName = keyof typeof TOOL_CAPABILITIES;
+
+// Every tool that calls the Sheets API. They need a grant the Drive plugin did not request before
+// they existed, so they are registered only for accounts that have it rather than being advertised
+// and then rejected by Google.
+const SHEETS_TOOLS = new Set<GoogleDriveMcpToolName>([
+  "get_spreadsheet_values",
+  "update_spreadsheet_values",
+  "append_spreadsheet_values",
+]);
 type DbLike = any;
 type DriveApiCall = typeof googleApiCall;
 type DriveApiDownload = typeof googleApiDownload;
@@ -229,6 +259,82 @@ const replaceDocumentContentsSchema = {
     .describe("Optional Google Docs tab id. When omitted, the first document tab is replaced."),
 };
 
+const spreadsheetRangeSchema = z.string().trim().min(1).max(MAX_SPREADSHEET_RANGE_CHARS);
+
+const spreadsheetMajorDimensionSchema = z
+  .enum(["ROWS", "COLUMNS"])
+  .optional()
+  .describe("Whether values are grouped by rows or columns. Defaults to ROWS.");
+
+const spreadsheetValueInputOptionSchema = z
+  .enum(["RAW", "USER_ENTERED"])
+  .optional()
+  .describe(
+    "How Google Sheets interprets the written values. Defaults to USER_ENTERED so numbers, dates, and formulas behave like a manual edit.",
+  );
+
+const spreadsheetValuesSchema = z
+  .array(
+    z
+      .array(
+        z.union([z.string().max(MAX_SPREADSHEET_CELL_CHARS), z.number(), z.boolean(), z.null()]),
+      )
+      .min(1)
+      .max(MAX_SPREADSHEET_CELLS),
+  )
+  .min(1)
+  .max(MAX_SPREADSHEET_WRITE_LINES)
+  .refine((rows) => rows.reduce((total, row) => total + row.length, 0) <= MAX_SPREADSHEET_CELLS, {
+    message: `values may cover at most ${MAX_SPREADSHEET_CELLS} cells.`,
+  });
+
+const getSpreadsheetValuesSchema = {
+  fileId: fileIdSchema.describe("Google Drive file id for the Google Sheet to read."),
+  range: spreadsheetRangeSchema
+    .optional()
+    .describe(
+      "A1 notation range, for example 'Weekly KPIs'!A1:Z100. Defaults to every value in the first sheet. The returned values are anchored at the range's top-left cell, so use them to resolve the exact cell to write.",
+    ),
+  majorDimension: spreadsheetMajorDimensionSchema,
+  valueRenderOption: z
+    .enum(["FORMATTED_VALUE", "UNFORMATTED_VALUE", "FORMULA"])
+    .optional()
+    .describe("How cell values are represented. Defaults to FORMATTED_VALUE."),
+  dateTimeRenderOption: z
+    .enum(["SERIAL_NUMBER", "FORMATTED_STRING"])
+    .optional()
+    .describe(
+      "How dates, times, and durations are represented when valueRenderOption is not FORMATTED_VALUE. Defaults to SERIAL_NUMBER.",
+    ),
+};
+
+const updateSpreadsheetValuesSchema = {
+  fileId: fileIdSchema.describe("Google Drive file id for the Google Sheet to edit."),
+  range: spreadsheetRangeSchema.describe(
+    "A1 notation range to overwrite, for example 'Weekly KPIs'!K4:K4. Read the sheet first so the range addresses the intended cells.",
+  ),
+  values: spreadsheetValuesSchema.describe(
+    "2D array of values to write. Each inner array is one row under the default ROWS majorDimension. Use an empty string to clear a cell.",
+  ),
+  majorDimension: spreadsheetMajorDimensionSchema,
+  valueInputOption: spreadsheetValueInputOptionSchema,
+};
+
+const appendSpreadsheetValuesSchema = {
+  fileId: fileIdSchema.describe("Google Drive file id for the Google Sheet to append to."),
+  range: spreadsheetRangeSchema.describe(
+    "A1 notation range Google Sheets uses to detect the existing table, for example 'Weekly KPIs'!A1:K.",
+  ),
+  values: spreadsheetValuesSchema.describe(
+    "2D array of rows to append. Each inner array is one row under the default ROWS majorDimension.",
+  ),
+  majorDimension: spreadsheetMajorDimensionSchema,
+  valueInputOption: spreadsheetValueInputOptionSchema,
+};
+
+const SPREADSHEET_INSTRUCTIONS =
+  " Always read a spreadsheet with get_spreadsheet_values before writing to it: resolve the sheet title and the exact target range from the returned grid, then use update_spreadsheet_values to change existing cells or append_spreadsheet_values to add rows.";
+
 const READ_ANNOTATIONS = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -254,6 +360,57 @@ const REPLACE_CONTENTS_ANNOTATIONS = {
   ...EDIT_ANNOTATIONS,
   idempotentHint: true,
 } as const;
+
+type McpServer = Parameters<Parameters<typeof createMcpHandler>[0]>[0];
+
+function registerSpreadsheetReadTool(
+  server: McpServer,
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  request: Request,
+) {
+  server.registerTool(
+    "get_spreadsheet_values",
+    {
+      title: "Read Google Sheet values",
+      description:
+        "Read cell values from a Google Sheet in A1 notation, with the spreadsheet's sheet titles and grid sizes. Use this before editing a sheet so writes address the intended cells.",
+      inputSchema: getSpreadsheetValuesSchema,
+      annotations: READ_ANNOTATIONS,
+    },
+    async (args) => runTool(() => getSpreadsheetValues(apiCall, payload, args, request.signal)),
+  );
+}
+
+function registerSpreadsheetWriteTools(
+  server: McpServer,
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  request: Request,
+) {
+  server.registerTool(
+    "update_spreadsheet_values",
+    {
+      title: "Update Google Sheet values",
+      description:
+        "Overwrite the cells of one A1 notation range in an existing Google Sheet. Use only when the user requested this spreadsheet change, and read the range first so nothing unintended is overwritten.",
+      inputSchema: updateSpreadsheetValuesSchema,
+      annotations: EDIT_ANNOTATIONS,
+    },
+    async (args) => runTool(() => updateSpreadsheetValues(apiCall, payload, args, request.signal)),
+  );
+  server.registerTool(
+    "append_spreadsheet_values",
+    {
+      title: "Append Google Sheet rows",
+      description:
+        "Insert rows after the table Google Sheets detects in an A1 notation range, without overwriting anything below it. Use this to add new records; use update_spreadsheet_values to change existing cells.",
+      inputSchema: appendSpreadsheetValuesSchema,
+      annotations: CREATE_ANNOTATIONS,
+    },
+    async (args) => runTool(() => appendSpreadsheetValues(apiCall, payload, args, request.signal)),
+  );
+}
 
 export function createGoogleDriveMcpService(input: {
   db: DbLike;
@@ -348,6 +505,9 @@ export function createGoogleDriveMcpService(input: {
             async (args) =>
               runTool(() => readFileContent(apiCall, apiDownload, payload, args, request.signal)),
           );
+          if (authorization.sheetsEnabled) {
+            registerSpreadsheetReadTool(server, apiCall, payload, request);
+          }
           server.registerTool(
             "copy_file",
             {
@@ -394,11 +554,13 @@ export function createGoogleDriveMcpService(input: {
             async (args) =>
               runTool(() => replaceDocumentContents(apiCall, payload, args, request.signal)),
           );
+          if (authorization.sheetsEnabled) {
+            registerSpreadsheetWriteTools(server, apiCall, payload, request);
+          }
         },
         {
           serverInfo: { name: "opencompany-google-drive", version: "0.2.0" },
-          instructions:
-            "Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change. Use replace_document_text for every focused edit, including additions: replace a unique nearby anchor with that same anchor plus the new content. This preserves surrounding formatting and interactive state. Use replace_document_contents only when the user explicitly requested a full rewrite; use markdown so headings, lists, checkboxes, and inline styles become native Docs formatting, or legacy text only for deliberately unformatted content. Full replacement reconstructs the body and cannot preserve embedded content or interactive checkbox state.",
+          instructions: `Use search_files or list_recent_files to find file ids, read_file_content for bounded natural-language content, and write tools only after the user requested a Drive change.${authorization.sheetsEnabled ? SPREADSHEET_INSTRUCTIONS : ""} Use replace_document_text for every focused edit, including additions: replace a unique nearby anchor with that same anchor plus the new content. This preserves surrounding formatting and interactive state. Use replace_document_contents only when the user explicitly requested a full rewrite; use markdown so headings, lists, checkboxes, and inline styles become native Docs formatting, or legacy text only for deliberately unformatted content. Full replacement reconstructs the body and cannot preserve embedded content or interactive checkbox state.`,
         },
         {
           streamableHttpEndpoint: "/mcp/plugins/google-drive",
@@ -440,10 +602,14 @@ async function authorizeTicket(db: DbLike, payload: GoogleDriveMcpTicketPayload)
       response: unauthorized("The connected Google Drive account must be reauthorized."),
     };
   }
+  const sheetsEnabled = hasGoogleSheetsWriteScope(row.scopes ?? []);
   if (payload.operation.type === "tools/call") {
     const capability = TOOL_CAPABILITIES[payload.operation.tool as GoogleDriveMcpToolName];
     if (!capability || capability !== payload.operation.capability) {
       return forbidden("The Google Drive MCP ticket does not authorize this tool.");
+    }
+    if (!sheetsEnabled && SHEETS_TOOLS.has(payload.operation.tool as GoogleDriveMcpToolName)) {
+      return forbidden(GOOGLE_DRIVE_MCP_SHEETS_UPGRADE_REASON);
     }
     const toolMode = row.toolModes?.[payload.operation.tool];
     const mode = isCapabilityMode(toolMode)
@@ -451,7 +617,7 @@ async function authorizeTicket(db: DbLike, payload: GoogleDriveMcpTicketPayload)
       : effectiveCapabilityMode("google_drive", capability, row.capabilityModes);
     if (mode === "off") return forbidden("This Google Drive capability is disabled.");
   }
-  return { ok: true as const };
+  return { ok: true as const, sheetsEnabled };
 }
 
 async function authorizeRequest(request: Request, payload: GoogleDriveMcpTicketPayload) {
@@ -872,6 +1038,175 @@ async function listComments(
     .map((comment) => compactComment(asRecord(comment)));
 }
 
+async function getSpreadsheetValues(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof getSpreadsheetValuesSchema>>,
+  signal: AbortSignal,
+) {
+  const spreadsheet = await getSpreadsheetOutline(apiCall, payload, args.fileId, signal);
+  // Naming the whole first sheet would ask Google for every populated cell and parse all of it
+  // before the sanitizer discarded the excess, so the default range is clamped to the cell budget
+  // using the grid this outline already reports. `spreadsheet.sheets` carries the real dimensions,
+  // so a caller that needs more can ask for an explicit range.
+  const range = args.range ?? defaultSpreadsheetRange(spreadsheet.sheets[0]!);
+
+  const url = spreadsheetValuesUrl(args.fileId, range);
+  if (args.majorDimension) url.searchParams.set("majorDimension", args.majorDimension);
+  if (args.valueRenderOption) url.searchParams.set("valueRenderOption", args.valueRenderOption);
+  if (args.dateTimeRenderOption) {
+    url.searchParams.set("dateTimeRenderOption", args.dateTimeRenderOption);
+  }
+  const response = asRecord(await callGoogle(apiCall, payload, "GET", url, signal));
+  const shaped = sanitizeSpreadsheetValues(response.values);
+
+  return {
+    spreadsheet,
+    range: boundedString(response.range, MAX_SPREADSHEET_RANGE_CHARS) ?? range,
+    majorDimension: boundedString(response.majorDimension, 20) ?? args.majorDimension ?? "ROWS",
+    values: shaped.values,
+    truncated: shaped.truncated,
+  };
+}
+
+async function updateSpreadsheetValues(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof updateSpreadsheetValuesSchema>>,
+  signal: AbortSignal,
+) {
+  const url = spreadsheetValuesUrl(args.fileId, args.range);
+  url.searchParams.set("valueInputOption", args.valueInputOption ?? "USER_ENTERED");
+  const response = asRecord(
+    await callGoogle(apiCall, payload, "PUT", url, signal, {
+      range: args.range,
+      majorDimension: args.majorDimension ?? "ROWS",
+      values: args.values,
+    }),
+  );
+  return {
+    spreadsheet: {
+      id: confirmedSpreadsheetId(response.spreadsheetId, args.fileId),
+      viewUrl: googleSpreadsheetUrl(args.fileId),
+      updatedRange: boundedString(response.updatedRange, MAX_SPREADSHEET_RANGE_CHARS),
+      updatedRows: nonNegativeSafeInteger(response.updatedRows),
+      updatedColumns: nonNegativeSafeInteger(response.updatedColumns),
+      updatedCells: nonNegativeSafeInteger(response.updatedCells),
+    },
+  };
+}
+
+async function appendSpreadsheetValues(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  args: z.infer<z.ZodObject<typeof appendSpreadsheetValuesSchema>>,
+  signal: AbortSignal,
+) {
+  const url = spreadsheetValuesUrl(args.fileId, args.range);
+  url.pathname += ":append";
+  url.searchParams.set("valueInputOption", args.valueInputOption ?? "USER_ENTERED");
+  // Always insert. Sheets' other mode overwrites whatever sits below the detected table, which is
+  // silent data loss from a tool the model reaches for to add a row. Overwriting is
+  // update_spreadsheet_values' job, where the caller names the range it is replacing.
+  url.searchParams.set("insertDataOption", "INSERT_ROWS");
+  const response = asRecord(
+    await callGoogle(apiCall, payload, "POST", url, signal, {
+      range: args.range,
+      majorDimension: args.majorDimension ?? "ROWS",
+      values: args.values,
+    }),
+  );
+  const updates = asRecord(response.updates);
+  return {
+    spreadsheet: {
+      id: confirmedSpreadsheetId(response.spreadsheetId ?? updates.spreadsheetId, args.fileId),
+      viewUrl: googleSpreadsheetUrl(args.fileId),
+      tableRange: boundedString(response.tableRange, MAX_SPREADSHEET_RANGE_CHARS),
+      updatedRange: boundedString(updates.updatedRange, MAX_SPREADSHEET_RANGE_CHARS),
+      updatedRows: nonNegativeSafeInteger(updates.updatedRows),
+      updatedColumns: nonNegativeSafeInteger(updates.updatedColumns),
+      updatedCells: nonNegativeSafeInteger(updates.updatedCells),
+    },
+  };
+}
+
+async function getSpreadsheetOutline(
+  apiCall: DriveApiCall,
+  payload: GoogleDriveMcpTicketPayload,
+  fileId: string,
+  signal: AbortSignal,
+) {
+  const url = new URL(`${SHEETS_BASE}/${encodeURIComponent(fileId)}`);
+  url.searchParams.set(
+    "fields",
+    "spreadsheetId,properties.title,sheets.properties(sheetId,title,index,gridProperties(rowCount,columnCount))",
+  );
+  const response = asRecord(await callGoogle(apiCall, payload, "GET", url, signal));
+  const sheets = asArray(response.sheets)
+    .slice(0, MAX_SHEETS_PER_SPREADSHEET)
+    .flatMap((value) => {
+      const properties = asRecord(asRecord(value).properties);
+      const title = boundedString(properties.title, MAX_SHEET_TITLE_CHARS);
+      if (!title) return [];
+      const grid = asRecord(properties.gridProperties);
+      return [
+        {
+          title,
+          index: nonNegativeSafeInteger(properties.index),
+          rowCount: nonNegativeSafeInteger(grid.rowCount),
+          columnCount: nonNegativeSafeInteger(grid.columnCount),
+        },
+      ];
+    });
+  if (sheets.length === 0) throw new Error("Google Sheets returned a spreadsheet with no sheets.");
+  return {
+    id: confirmedSpreadsheetId(response.spreadsheetId, fileId),
+    title: truncateText(string(asRecord(response.properties).title), MAX_FILE_NAME_CHARS),
+    viewUrl: googleSpreadsheetUrl(fileId),
+    sheets,
+  };
+}
+
+function defaultSpreadsheetRange(sheet: {
+  title: string;
+  rowCount?: number | undefined;
+  columnCount?: number | undefined;
+}) {
+  const columns = Math.min(sheet.columnCount ?? DEFAULT_SPREADSHEET_COLUMNS, MAX_SPREADSHEET_CELLS);
+  const rows = Math.min(
+    sheet.rowCount ?? MAX_SPREADSHEET_READ_LINES,
+    MAX_SPREADSHEET_READ_LINES,
+    Math.max(1, Math.floor(MAX_SPREADSHEET_CELLS / Math.max(1, columns))),
+  );
+  return `${spreadsheetRangeForSheet(sheet.title)}!A1:${a1ColumnLabel(columns)}${rows}`;
+}
+
+// Google Sheets columns are bijective base-26: 1 is A, 26 is Z, 27 is AA.
+function a1ColumnLabel(column: number) {
+  let remaining = Math.max(1, column);
+  let label = "";
+  while (remaining > 0) {
+    const index = (remaining - 1) % 26;
+    label = String.fromCharCode(65 + index) + label;
+    remaining = Math.floor((remaining - 1) / 26);
+  }
+  return label;
+}
+
+function spreadsheetValuesUrl(fileId: string, range: string) {
+  return new URL(
+    `${SHEETS_BASE}/${encodeURIComponent(fileId)}/values/${encodeURIComponent(range)}`,
+  );
+}
+
+function confirmedSpreadsheetId(value: unknown, expectedId: string) {
+  const spreadsheetId = boundedString(value, MAX_FILE_ID_CHARS);
+  if (spreadsheetId !== expectedId) {
+    throw new Error("Google Sheets did not confirm the requested spreadsheet.");
+  }
+  return spreadsheetId;
+}
+
 function readableDownload(fileId: string, mimeType: string) {
   const url = fileUrl(fileId);
   if (mimeType === GOOGLE_DOC_MIME_TYPE) {
@@ -1228,7 +1563,7 @@ function googleConnection(payload: GoogleDriveMcpTicketPayload) {
 async function callGoogle(
   apiCall: DriveApiCall,
   payload: GoogleDriveMcpTicketPayload,
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "PUT",
   url: URL,
   signal: AbortSignal,
   body?: unknown,

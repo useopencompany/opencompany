@@ -103,7 +103,7 @@ API. The App must request Contents, Issues, and Pull requests read/write plus Ac
 Commit statuses, and Metadata read, with expiring user tokens and user authorization during
 installation enabled. Set
 its Setup URL to
-`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/settings/plugins/github` and enable redirect-on-update so App
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
@@ -114,6 +114,9 @@ processes.
 `INTEGRATION_CREDENTIAL_ENCRYPTION_KEY`) that seals the macOS desktop app's Google sign-in handoff
 token. Add it to prod `/web` before enabling desktop distribution. The release preflight requires it
 for the web app so a deployment cannot expose the desktop auth flow without its sealing key.
+For local development, `bun run setup` generates a valid key in `.env.local` and mirrors it to
+`apps/web/.env.local`. Valid keys are preserved on reruns and shared env pulls; invalid personal
+overrides fail setup with instructions. `bun run setup -- --check` reports desktop-auth readiness.
 
 `REDIS_URL` is optional for correctness but required by the production activation preflight. When
 configured for both `apps/api` and `apps/runner`, it
@@ -170,6 +173,34 @@ The token expires after roughly 40 minutes and must never have `PAY`, `WRITE`, o
 cannot upload receipts, initiate or cancel payments, exchange currency, or return card-sensitive
 data. Store production values in Infisical `prod` `/runner`. This evaluation has no public Settings
 flow and is intentionally omitted from the customer integration index.
+
+## iMessage personal assistant
+
+`MESSAGES_API_KEY`, `MESSAGES_WEBHOOK_SECRET`, and `MESSAGES_LINE_HANDLE` configure the
+[messages.dev](https://www.messages.dev) line behind the iMessage personal assistant
+([design and operations](./imessage-channel.md)). All three live in Infisical `prod` `/api`; the
+key and line handle also live in `prod` `/runner`, which performs the sends. Locally they belong in
+`dev` `/web` and `dev` `/runner`. The webhook secret is minted when the line's webhook is created in
+the messages.dev dashboard for `${OPENCOMPANY_API_ORIGIN}/webhooks/imessage/events` with the
+`message.received` event. The feature is off for every member until they turn on the iMessage beta
+switch in Preferences, so a missing value only surfaces as "not available on this deployment" on
+the Channels → iMessage page; release preflight still requires the variables so the channel cannot
+silently disappear from a release.
+
+## WhatsApp personal assistant
+
+The Kapso-backed beta uses `KAPSO_API_KEY`, `KAPSO_PHONE_NUMBER_ID`,
+`KAPSO_WEBHOOK_SECRET`, and `WHATSAPP_LINE_HANDLE` in Infisical `prod` `/api`.
+The runner needs the same API key, phone number ID, and line handle in `prod` `/runner`.
+For local development use `dev` `/web` and `dev` `/runner`; setup keeps these server-only.
+The ID is Meta's numeric phone-number ID, not the displayed phone number. The line handle
+is the displayed E.164 number including `+`. The webhook secret is the Kapso webhook's
+signing secret, not a Meta verification token.
+
+Release preflight requires these values in both hosted services. See
+[WhatsApp setup and launch verification](./whatsapp-channel.md) before enabling the beta.
+An enabled member sees “not available on this deployment” when the API configuration is
+incomplete. Configuration presence does not establish provider account eligibility or delivery.
 
 ## Local generated values
 

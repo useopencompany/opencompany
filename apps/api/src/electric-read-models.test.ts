@@ -23,8 +23,6 @@ const actor = {
     "task:write",
     "workflow:read",
     "workflow:write",
-    "schedule:read",
-    "schedule:write",
   ],
   authenticationMethod: "session" as const,
 };
@@ -88,7 +86,7 @@ describe("Electric read models", () => {
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("has_unseen");
   });
 
-  it("projects API-owned activity and unseen state on Conversation rows", async () => {
+  it("projects API-owned activity, unseen, and awaiting-input state on Conversation rows", async () => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -109,6 +107,7 @@ describe("Electric read models", () => {
                 last_seen_at: "2026-08-10 20:00:00+00",
                 activity_state: "working",
                 has_unseen: "true",
+                awaiting_input: "true",
                 runtime_status: "running",
                 active_run_id: "run_1",
                 runtime_has_error: "false",
@@ -127,6 +126,7 @@ describe("Electric read models", () => {
               "electric-schema": JSON.stringify({
                 id: { type: "text" },
                 has_unseen: { type: "bool" },
+                awaiting_input: { type: "bool" },
                 runtime_has_error: { type: "bool" },
               }),
             },
@@ -143,6 +143,7 @@ describe("Electric read models", () => {
 
     expect(requestedUrl?.searchParams.get("columns")).toContain("activity_state");
     expect(requestedUrl?.searchParams.get("columns")).toContain("has_unseen");
+    expect(requestedUrl?.searchParams.get("columns")).toContain("awaiting_input");
     expect(requestedUrl?.searchParams.get("columns")).toContain("runtime_status");
     expect(requestedUrl?.searchParams.get("columns")).toContain("message_shape_epoch");
     expect(requestedUrl?.searchParams.get("columns")?.split(",")).not.toContain("error");
@@ -161,6 +162,9 @@ describe("Electric read models", () => {
           lastSeenAt: "2026-08-10T20:00:00.000Z",
           activityState: "working",
           hasUnseen: true,
+          // A foreground approval keeps the engine open, so the row is both working and blocked
+          // on the reader. The client picks the signal it needs rather than losing one to the other.
+          awaitingInput: true,
           messageShapeEpoch: 3,
           runtime: {
             status: "running",
@@ -246,7 +250,7 @@ describe("Electric read models", () => {
     ]);
   });
 
-  it("serves integration accounts with a provider-contract-scoped shape", async () => {
+  it.each(["notion", "custom_mcp"])("streams %s integration accounts", async (provider) => {
     let requestedUrl: URL | undefined;
     const proxy = new ElectricReadModelProxy({
       electricUrl: "https://electric.example.test",
@@ -260,7 +264,7 @@ describe("Electric read models", () => {
               id: "integration_1",
               user_workos_id: "must-not-cross",
               workspace_id: "workspace_1",
-              provider: "notion",
+              provider,
               external_id: "123456",
               connection_label: "opencompany",
               account_name: "opencompany",
@@ -270,6 +274,7 @@ describe("Electric read models", () => {
               status_reason: null,
               scopes: JSON.stringify(["repo"]),
               capability_modes: JSON.stringify({ repositories: "on" }),
+              tool_modes: JSON.stringify({ "list-broadcasts": "on" }),
               oauth_access_token: "must-not-cross",
             },
           },
@@ -312,6 +317,7 @@ describe("Electric read models", () => {
       "render",
       "vercel",
       "signoz",
+      "dash0",
       "stripe",
       "latitude",
       "posthog",
@@ -319,12 +325,15 @@ describe("Electric read models", () => {
       "notion",
       "supabase",
       "resend",
+      "todoist",
       "x_account",
+      "custom_mcp",
     ]);
     expect(requestedUrl?.searchParams.get("columns")).not.toContain("credential");
+    expect(requestedUrl?.searchParams.get("columns")?.split(",")).toContain("tool_modes");
     expect((await response.json())[0]?.value).toEqual({
       id: "integration_1",
-      provider: "notion",
+      provider,
       workspaceId: "workspace_1",
       externalId: "123456",
       connectionLabel: "opencompany",
@@ -335,6 +344,7 @@ describe("Electric read models", () => {
       statusReason: null,
       scopes: ["repo"],
       capabilityModes: { repositories: "on" },
+      toolModes: { "list-broadcasts": "on" },
     });
   });
 
@@ -1224,6 +1234,7 @@ describe("Electric read models", () => {
               reported_status: "done",
               outcome_comment: "Reviewed",
               has_unseen: true,
+              awaiting_input: false,
               archived_at: null,
               created_at: "2026-08-11 10:00:00+00",
               updated_at: "2026-08-11 10:01:00+00",
@@ -1271,6 +1282,7 @@ describe("Electric read models", () => {
             comment: "Reviewed",
           },
           hasUnseen: true,
+          awaitingInput: false,
           archivedAt: null,
           createdAt: "2026-08-11T10:00:00.000Z",
           updatedAt: "2026-08-11T10:01:00.000Z",
@@ -1363,6 +1375,8 @@ describe("Electric read models", () => {
           },
         ]),
         status: "active",
+        scope: "company",
+        created_by_workos_id: "user_1",
         trigger: JSON.stringify({
           type: "schedule",
           cron: "0 9 * * 1",
@@ -1381,6 +1395,8 @@ describe("Electric read models", () => {
       "goat.workflow_schedule_read_model_v1": {
         id: "workflow_1",
         workflow_id: "workflow_1",
+        scope: "company",
+        created_by_workos_id: "user_1",
         workflow_slug: "weekly-research",
         name: "Weekly research",
         cron: "0 9 * * 1",
@@ -1392,22 +1408,6 @@ describe("Electric read models", () => {
         version: "2",
         created_at: "2026-08-12 08:00:00+00",
         updated_at: "2026-08-12 08:05:00+00",
-        workspace_id: "must-not-cross",
-      },
-      "goat.task_schedule_read_model_v1": {
-        id: "schedule_1",
-        name: "Daily research",
-        source_description: "Tasks page",
-        cron: "0 9 * * *",
-        timezone: "UTC",
-        prompt: "Research changes.",
-        enabled: false,
-        last_run_at: null,
-        next_run_at: "2026-08-13 09:00:00+00",
-        version: "3",
-        created_at: "2026-08-12 08:00:00+00",
-        updated_at: "2026-08-12 08:05:00+00",
-        actor_id: "must-not-cross",
         workspace_id: "must-not-cross",
       },
     };
@@ -1427,7 +1427,7 @@ describe("Electric read models", () => {
       }) as typeof fetch,
     });
 
-    const [workflowResponse, workflowScheduleResponse, taskScheduleResponse] = await Promise.all([
+    const [workflowResponse, workflowScheduleResponse] = await Promise.all([
       proxy.stream({
         actor,
         readModel: "workflows-v1",
@@ -1438,21 +1438,23 @@ describe("Electric read models", () => {
         readModel: "workflow-schedules-v1",
         requestUrl: new URL("https://api.example.test/v1/read-models/workflow-schedules-v1"),
       }),
-      proxy.stream({
-        actor,
-        readModel: "task-schedules-v1",
-        requestUrl: new URL("https://api.example.test/v1/read-models/task-schedules-v1"),
-      }),
     ]);
 
     expect(requestedUrls.map((url) => url.searchParams.get("table"))).toEqual([
       "goat.workflow_read_model_v1",
       "goat.workflow_schedule_read_model_v1",
-      "goat.task_schedule_read_model_v1",
     ]);
-    expect(requestedUrls[0]?.searchParams.get("where")).toBe('"workspace_id" = $1');
-    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"actor_id" = $1');
-    expect(requestedUrls[2]?.searchParams.get("where")).toContain('"workspace_id" IS NULL');
+    // Personal workflows belong to their creator, so the shape itself withholds a teammate's.
+    expect(requestedUrls[0]?.searchParams.get("where")).toBe(
+      '"workspace_id" = $1 AND ("scope" = \'company\' OR "created_by_workos_id" = $2)',
+    );
+    expect(requestedUrls[1]?.searchParams.get("where")).toBe(
+      '"workspace_id" = $1 AND ("scope" = \'company\' OR "created_by_workos_id" = $2)',
+    );
+    expect(requestedUrls[1]?.searchParams.get("params[1]")).toBe("workspace_1");
+    expect(requestedUrls[1]?.searchParams.get("params[2]")).toBe("user_1");
+    expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("scope");
+    expect(requestedUrls[1]?.searchParams.get("columns")).not.toContain("created_by_workos_id");
     expect((await workflowResponse.json())[0]?.value).toEqual({
       id: "workflow_1",
       slug: "weekly-research",
@@ -1467,6 +1469,8 @@ describe("Electric read models", () => {
         },
       ],
       status: "active",
+      scope: "company",
+      createdByUserId: "user_1",
       trigger: {
         type: "schedule",
         cron: "0 9 * * 1",
@@ -1486,20 +1490,6 @@ describe("Electric read models", () => {
       workflowId: "workflow_1",
       workflowSlug: "weekly-research",
       version: 2,
-    });
-    expect((await taskScheduleResponse.json())[0]?.value).toEqual({
-      id: "schedule_1",
-      name: "Daily research",
-      sourceDescription: "Tasks page",
-      cron: "0 9 * * *",
-      timezone: "UTC",
-      prompt: "Research changes.",
-      enabled: false,
-      lastRunAt: null,
-      nextRunAt: "2026-08-13T09:00:00.000Z",
-      version: 3,
-      createdAt: "2026-08-12T08:00:00.000Z",
-      updatedAt: "2026-08-12T08:05:00.000Z",
     });
   });
 

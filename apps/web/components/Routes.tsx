@@ -1,5 +1,6 @@
 "use client";
 
+import { scheduleSummary } from "@opencompany/agent-runtime";
 import type {
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
@@ -10,8 +11,17 @@ import type {
   SkillSourceDto,
 } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@opencompany/ui/components/tooltip";
-import { cn } from "@opencompany/ui/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@opencompany/ui/components/dialog";
+import { FilterPills } from "@opencompany/ui/components/filter-pills";
+import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
+import { toast } from "@opencompany/ui/components/sonner";
 import { useLiveQuery } from "@tanstack/react-db";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -24,15 +34,18 @@ import {
   FolderOpen,
   Inbox,
   Link2,
-  ListTodo,
   Loader2,
-  LockKeyhole,
   Mail,
   Monitor,
   Moon,
+  MoreHorizontal,
+  Pencil,
   Plus,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
   Sun,
+  Trash2,
   UserRound,
   Users,
   Workflow,
@@ -56,17 +69,35 @@ import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { McpSetupGuide } from "@/components/McpSetupGuide";
+import { ModelProviderIcon } from "@/components/ModelProviderIcon";
+import { PageContent } from "@/components/PageContent";
 import { RepositorySettings } from "@/components/RepositorySettings";
-import { SettingsContent } from "@/components/SettingsChrome";
+import {
+  SandboxSettingsPanel,
+  type SandboxSizeOptionView,
+} from "@/components/SandboxSettingsPanel";
+import {
+  SCOPE_FILTERS,
+  ScopeBadge,
+  ScopeField,
+  type ScopeFilter,
+  ScopeFilterTabs,
+  type Scope as SkillScope,
+} from "@/components/ScopeControls";
+import { StatusDot } from "@/components/StatusDot";
 import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
 import { useTaskRun } from "@/components/useTaskRun";
 import { useTaskSeenAcknowledgement } from "@/components/useTaskSeenAcknowledgement";
+import { WorkflowTemplatesButton } from "@/components/WorkflowTemplatesButton";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { getHeadlessWorkflows } from "@/lib/headless-automation-collections";
-import { createHeadlessWorkflow } from "@/lib/headless-automation-commands";
+import {
+  archiveHeadlessWorkflow,
+  createHeadlessWorkflow,
+} from "@/lib/headless-automation-commands";
 import type { WorkflowListItem } from "@/lib/headless-automation-types";
 import {
   archiveHeadlessSkill,
@@ -82,15 +113,20 @@ import {
 import type { BrainOverviewStats, BrainSnapshot } from "@/lib/headless-knowledge-types";
 import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
+import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
+  updateApproveForMeAction,
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateImessageAction,
   updatePastSessionAccessAction,
   updateReviewInboxAction,
   updateSidebarProjectsAction,
   updateSubagentsAction,
-  updateTaskSpawningAction,
+  updateWhatsappAction,
 } from "@/lib/user-preferences";
+import { DEFAULT_WORKFLOW_MODEL_TOKEN, WORKFLOW_MODEL_OPTIONS } from "@/lib/workflow-model-options";
+import type { WorkflowTemplateMissingPlugin } from "@/lib/workflow-templates";
 
 export function HomeRoute({
   chatId,
@@ -107,7 +143,6 @@ export function HomeRoute({
   initialChat?: ChatSessionView | null;
 }) {
   const data = useAppData();
-  const userName = data.user.firstName?.trim() || data.user.email.split("@")[0] || "there";
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
@@ -135,19 +170,18 @@ export function HomeRoute({
         key={data.activeBrain?.id ?? "no-brain"}
         tasks={data.tasks}
         allTasks={data.allTasks}
-        schedules={data.schedules}
         defaultModel={DEFAULT_MODEL}
         initialChat={initialChat}
         newChatProjectId={projectId}
         newChatProjectName={projectName}
+        userFirstName={data.user.firstName}
         recentChats={data.recentChats}
         archivedChats={data.archivedChats}
         codexConnected={data.codexConnected}
         claudeCodeConnected={data.claudeCodeConnected}
-        taskSpawningEnabled={data.featureFlags.taskSpawning}
+        sharedModelAccessEnabled={data.sharedModelAccessEnabled}
         autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
         workspaceId={data.workspace.id}
-        userName={userName}
         userWorkosId={data.user.workosUserId}
       />
     </main>
@@ -165,7 +199,7 @@ export function SettingsRoute({
   const initials = getInitials(user.firstName, user.lastName, user.email);
 
   return (
-    <SettingsContent title="Account" description="Your personal profile for this workspace.">
+    <PageContent title="Account" description="Your personal profile for this workspace.">
       <section className="flex items-center gap-3">
         {user.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -206,7 +240,7 @@ export function SettingsRoute({
       </section>
 
       {browserProfilesEnabled ? <BrowserProfilesSettings /> : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -214,7 +248,7 @@ export function InferenceSettingsRoute() {
   const { integrations, workspace } = useAppData();
 
   return (
-    <SettingsContent
+    <PageContent
       title="Inference"
       description="Connect model subscriptions and choose how your workspace runs AI."
     >
@@ -223,7 +257,30 @@ export function InferenceSettingsRoute() {
         claudeCode={integrations.claude_code}
         canManage={workspace.role === "admin"}
       />
-    </SettingsContent>
+    </PageContent>
+  );
+}
+
+export function SandboxSettingsRoute({
+  sandboxSize,
+  sandboxSizeOptions,
+}: {
+  sandboxSize: WorkspaceSandboxSizeResult;
+  sandboxSizeOptions: SandboxSizeOptionView[];
+}) {
+  const { workspace } = useAppData();
+
+  return (
+    <PageContent
+      title="Sandboxes"
+      description="Control the machines your cloud coding sessions run on."
+    >
+      <SandboxSettingsPanel
+        canManage={workspace.role === "admin"}
+        sandboxSize={sandboxSize}
+        sandboxSizeOptions={sandboxSizeOptions}
+      />
+    </PageContent>
   );
 }
 
@@ -233,7 +290,7 @@ export function McpSettingsRoute() {
     [user.firstName, user.lastName].filter(Boolean).join(" ").trim() || "Teammate";
 
   return (
-    <SettingsContent
+    <PageContent
       title="MCP"
       description="Connect Claude, ChatGPT, or Cursor to everything you can access in opencompany."
     >
@@ -244,7 +301,7 @@ export function McpSettingsRoute() {
         initialCompletedAt={mcpSetup.completedAt}
         hideHeader
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -252,7 +309,20 @@ export function PreferencesSettingsRoute() {
   const { featureFlags } = useAppData();
 
   return (
-    <SettingsContent title="Preferences" description="Experimental features and app behavior.">
+    <PageContent title="Preferences" description="Experimental features and app behavior.">
+      <section className="flex flex-col gap-1">
+        <h2 className="mb-1.5 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
+          Permissions
+        </h2>
+        <BetaFeatureSwitch
+          icon={ShieldCheck}
+          label="Approve for me"
+          description="Let AI approve routine plugin actions in your chats and tasks. Important or uncertain actions still ask you."
+          checked={featureFlags.approveForMe === true}
+          update={updateApproveForMeAction}
+        />
+      </section>
+
       <section className="flex flex-col gap-2">
         <h2 className="mb-1 text-[12px] font-medium uppercase tracking-[0.07em] text-ink-subtle">
           Appearance
@@ -277,13 +347,6 @@ export function PreferencesSettingsRoute() {
           description="Create named bots for ongoing work and return to their conversations from the sidebar."
           checked={featureFlags.bots === true}
           update={updateBotsAction}
-        />
-        <BetaFeatureSwitch
-          icon={ListTodo}
-          label="Tasks & Workflows"
-          description="Fire workflows, run tracked background tasks, and schedule recurring routines."
-          checked={featureFlags.taskSpawning}
-          update={updateTaskSpawningAction}
         />
         <BetaFeatureSwitch
           icon={Sparkles}
@@ -313,8 +376,22 @@ export function PreferencesSettingsRoute() {
           checked={featureFlags.subagents}
           update={updateSubagentsAction}
         />
+        <BetaFeatureSwitch
+          icon={Smartphone}
+          label="iMessage assistant"
+          description="Text a personal assistant from your phone. Link your number under Channels → iMessage. It answers with web search, the Wiki, Skills and your connected plugins."
+          checked={featureFlags.imessage}
+          update={updateImessageAction}
+        />
+        <BetaFeatureSwitch
+          icon={Smartphone}
+          label="WhatsApp assistant"
+          description="Text a personal assistant from a German or other EEA number. Link your number under Channels → WhatsApp. It answers with web search, the Wiki, Skills and your connected plugins."
+          checked={featureFlags.whatsapp}
+          update={updateWhatsappAction}
+        />
       </section>
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -328,7 +405,7 @@ export function RepositoriesSettingsRoute({
   canEdit: boolean;
 }) {
   return (
-    <SettingsContent
+    <PageContent
       title="Repositories"
       description="Give coding agents the environment and setup steps they need for each repository."
     >
@@ -337,7 +414,7 @@ export function RepositoriesSettingsRoute({
         initialConfigs={configs}
         canEdit={canEdit}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -410,7 +487,7 @@ function AppearanceSection() {
   );
 }
 
-export function FathomSettingsRoute() {
+export function FathomIngestionRoute() {
   const { activeBrain, featureFlags, integrations } = useAppData();
   const brainSourcesHref =
     featureFlags.legacyBrain && activeBrain
@@ -418,16 +495,16 @@ export function FathomSettingsRoute() {
       : null;
 
   return (
-    <SettingsContent
+    <PageContent
       title="Fathom ingestion"
       description="Legacy API-key ingestion for Brain"
-      backLink={{ href: "/settings/plugins/fathom", label: "Fathom plugin" }}
+      backLink={{ href: "/plugins/fathom", label: "Fathom plugin" }}
     >
       <FathomIntegrationSetup
         initialState={integrations.fathom}
         brainSourcesHref={brainSourcesHref}
       />
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -500,42 +577,13 @@ function BrainSettingsRoute({ brain }: { brain: BrainSummaryView }) {
 
 export function TaskDetailRoute({ taskId }: { taskId: string }) {
   const run = useTaskRun(taskId);
-  const { featureFlags } = useAppData();
   // The route resolves a display id as well as a canonical id, so the acknowledgment keys off the
-  // run's own identifier rather than the one in the URL. A disabled workspace renders the beta
-  // notice instead of a result, so there is nothing there to acknowledge.
-  useTaskSeenAcknowledgement(featureFlags.taskSpawning ? (run?.task.id ?? null) : null);
-
-  if (!featureFlags.taskSpawning) return <TasksWorkflowsDisabledRoute />;
+  // run's own identifier rather than the one in the URL.
+  useTaskSeenAcknowledgement(run?.task.id ?? null);
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       {run ? <TaskDetailPanel initialRun={run} /> : <TaskRouteSkeleton label="Loading task" />}
-    </main>
-  );
-}
-
-export function TasksWorkflowsDisabledRoute() {
-  return (
-    <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[720px] flex-col gap-4 pb-24 pt-16 sm:pt-24">
-          <BackLink href="/" label="Chat" />
-          <h1 className="text-[24px] font-semibold leading-tight text-ink">
-            Tasks &amp; Workflows is a beta feature
-          </h1>
-          <p className="text-[13px] leading-5 text-ink-subtle">
-            Enable Tasks &amp; Workflows in Preferences to fire workflows, run background tasks, and
-            set up recurring routines.
-          </p>
-          <Link
-            href="/settings/preferences"
-            className="inline-flex w-fit rounded-md border border-border bg-surface px-3 py-2 text-[13px] font-medium text-ink hover:bg-surface-hover"
-          >
-            Open Preferences
-          </Link>
-        </div>
-      </div>
     </main>
   );
 }
@@ -696,17 +744,33 @@ function getInitials(firstName: string | null, lastName: string | null, email: s
 
 // --- Workflows ---------------------------------------------------------------
 
+const WORKFLOW_RUN_WINDOW_MS = 30 * 24 * 60 * 60 * 1_000;
+
 export function WorkflowsRoute({
   workflows,
   workspaceId,
   canEdit,
+  ownerNames,
+  templateMissingPlugins,
 }: {
   workflows: WorkflowListItem[];
   workspaceId: string;
   canEdit: boolean;
+  /**
+   * Creator WorkOS id to display name, so each row can name its owner without a client fetch.
+   * `null` when the member list could not be loaded, which blanks the column instead of guessing.
+   */
+  ownerNames: Record<string, string> | null;
+  /** Required plugins each template is still missing, keyed by template id; `null` hides the hints. */
+  templateMissingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
 }) {
   const router = useRouter();
+  const data = useAppData();
   const [creating, setCreating] = useState(false);
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
+  const [workflowToDelete, setWorkflowToDelete] = useState<WorkflowListItem | null>(null);
+  const [deletedWorkflowIds, setDeletedWorkflowIds] = useState<ReadonlySet<string>>(new Set());
+  const [isDeleting, startDeleting] = useTransition();
   const hydrated = useHydrated();
   const workflowCollection = useMemo(
     () => (hydrated ? getHeadlessWorkflows(workspaceId) : null),
@@ -719,56 +783,145 @@ export function WorkflowsRoute({
   const visibleWorkflows = useMemo(
     () =>
       ((!hydrated || workflowsLoading ? workflows : (workflowRows ?? [])) as WorkflowListItem[])
-        .filter((workflow) => !workflow.archivedAt)
+        .filter((workflow) => !workflow.archivedAt && !deletedWorkflowIds.has(workflow.id))
         .toSorted((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()),
-    [hydrated, workflowRows, workflows, workflowsLoading],
+    [deletedWorkflowIds, hydrated, workflowRows, workflows, workflowsLoading],
   );
+  const runStats = useMemo(
+    () => workflowRunStats(data.allTasks ?? data.tasks),
+    [data.allTasks, data.tasks],
+  );
+  const scopedWorkflows = visibleWorkflows.filter(
+    (workflow) => scopeFilter === "all" || workflow.scope === scopeFilter,
+  );
+
+  const deleteWorkflow = () => {
+    if (!workflowToDelete || isDeleting) return;
+    const workflow = workflowToDelete;
+    startDeleting(async () => {
+      try {
+        await archiveHeadlessWorkflow(workflow.id, { expectedVersion: workflow.version });
+        setDeletedWorkflowIds((current) => new Set(current).add(workflow.id));
+        setWorkflowToDelete(null);
+        toast.success(`Deleted “${workflow.name}”.`);
+      } catch (cause) {
+        toast.error(cause instanceof Error ? cause.message : "The workflow could not be deleted.");
+      }
+    });
+  };
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
       <div className="flex min-h-0 w-full flex-1 justify-center overflow-y-auto px-6">
-        <div className="flex w-full max-w-[760px] flex-col gap-8 pb-24 pt-16 sm:pt-24">
-          <header className="flex items-start justify-between gap-4">
+        <div className="flex w-full max-w-[1040px] flex-col gap-8 pb-24 pt-10 sm:pt-12">
+          <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex flex-col gap-1.5">
               <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
                 Workflows
               </h1>
               <p className="text-[13px] leading-5 text-ink-subtle">
                 Automations you fire with <span className="font-medium text-ink">#</span> in chat;
-                each run becomes a Task.
+                each run becomes a Task. Keep one to yourself or share it with the company.
               </p>
             </div>
             {canEdit ? (
-              <button
-                type="button"
-                onClick={() => setCreating(true)}
-                className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-surface px-3 text-[13px] font-medium text-ink transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-              >
-                <Plus size={14} strokeWidth={2} />
-                New workflow
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <WorkflowTemplatesButton
+                  missingPlugins={templateMissingPlugins}
+                  scope={scopeFilter === "all" ? "company" : scopeFilter}
+                />
+                <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
+                  <Plus size={14} strokeWidth={2} />
+                  New workflow
+                </Button>
+              </div>
             ) : null}
           </header>
 
-          {visibleWorkflows.length === 0 ? (
-            <EmptyState
-              icon={Workflow}
-              title="No workflows yet"
-              description={
-                canEdit
-                  ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
-                  : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
-              }
+          <section aria-labelledby="workflow-list-heading" className="flex min-w-0 flex-col gap-3">
+            <h2 id="workflow-list-heading" className="sr-only">
+              Workflow list
+            </h2>
+            <FilterPills
+              label="Workflow scope"
+              value={scopeFilter}
+              onChange={setScopeFilter}
+              options={SCOPE_FILTERS.map((filter) => ({
+                value: filter.value,
+                label: filter.label,
+                count:
+                  filter.value === "all"
+                    ? visibleWorkflows.length
+                    : visibleWorkflows.filter((workflow) => workflow.scope === filter.value).length,
+              }))}
             />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {visibleWorkflows.map((workflow) => (
-                <li key={workflow.slug}>
-                  <WorkflowListRow workflow={workflow} />
-                </li>
-              ))}
-            </ul>
-          )}
+
+            {scopedWorkflows.length === 0 ? (
+              <EmptyState
+                icon={Workflow}
+                title={
+                  scopeFilter === "all" ? "No workflows yet" : `No ${scopeFilter} workflows yet`
+                }
+                description={
+                  canEdit
+                    ? "Create a workflow to automate a recurring job. Fire it with # in chat, and each run shows up as a Task."
+                    : "Workflows are automations your workspace admins set up. Fire one with # in chat and each run becomes a Task."
+                }
+              />
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+                <table className="w-full min-w-[820px] table-fixed text-left">
+                  <caption className="sr-only">Workflows and recent run activity</caption>
+                  <colgroup>
+                    <col className="w-[26%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[15%]" />
+                    <col className="w-[19%]" />
+                    <col className="w-[11%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-12" />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-border-subtle text-[11.5px] font-medium text-ink-subtle">
+                      <th scope="col" className="px-4 py-3 font-medium">
+                        Name
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Owner
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Model
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Trigger
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Runs (30d)
+                      </th>
+                      <th scope="col" className="px-3 py-3 font-medium">
+                        Last executed
+                      </th>
+                      <th scope="col" className="py-3 pr-2">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scopedWorkflows.map((workflow) => (
+                      <WorkflowTableRow
+                        key={workflow.id}
+                        workflow={workflow}
+                        stats={runStats.get(workflow.slug)}
+                        ownerName={workflowOwnerName(workflow, ownerNames)}
+                        canEdit={canEdit}
+                        onDelete={() => setWorkflowToDelete(workflow)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </div>
       </div>
 
@@ -778,6 +931,12 @@ export function WorkflowsRoute({
           namePlaceholder="Weekly investor update"
           descriptionPlaceholder="What this workflow does"
           submitLabel="Create workflow"
+          initialScope={scopeFilter === "all" ? "company" : scopeFilter}
+          scopeHint={(scope) =>
+            scope === "personal"
+              ? "Only you can see and run it"
+              : "Everyone in the workspace can run and edit it"
+          }
           create={async (input) => {
             const workflow = await createHeadlessWorkflow(input);
             return { ok: true, slug: workflow.slug };
@@ -786,99 +945,243 @@ export function WorkflowsRoute({
           onCreated={(slug) => router.push(`/workflows/${encodeURIComponent(slug)}`)}
         />
       ) : null}
+
+      <Dialog
+        open={workflowToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !isDeleting) setWorkflowToDelete(null);
+        }}
+      >
+        <DialogContent className="max-w-[420px] gap-5">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Delete workflow?</DialogTitle>
+            <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
+              “{workflowToDelete?.name}” will be removed from the workflow list. Existing Task runs
+              will stay in your history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isDeleting}
+              onClick={() => setWorkflowToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" size="sm" disabled={isDeleting} onClick={deleteWorkflow}>
+              {isDeleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              Delete workflow
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
 
-function WorkflowListRow({ workflow }: { workflow: WorkflowListItem }) {
+function WorkflowTableRow({
+  workflow,
+  stats,
+  ownerName,
+  canEdit,
+  onDelete,
+}: {
+  workflow: WorkflowListItem;
+  stats: { runCount: number; lastExecutedAt: string } | undefined;
+  ownerName: string;
+  canEdit: boolean;
+  onDelete: () => void;
+}) {
+  const model = workflowModelPresentation(workflow);
+  const triggerLabel = workflowTriggerLabel(workflow);
+  const statusLabel = workflow.status === "active" ? "Active" : "Draft";
+
   return (
-    <IntentPrefetchLink
-      href={`/workflows/${encodeURIComponent(workflow.slug)}`}
-      className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
-    >
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-medium leading-tight text-ink">
+    <tr className="group border-b border-border-subtle text-[13px] text-ink last:border-b-0 hover:bg-surface-hover/60">
+      <td className="px-4 py-3.5">
+        <IntentPrefetchLink
+          href={`/workflows/${encodeURIComponent(workflow.slug)}`}
+          className="flex min-w-0 items-center gap-2 rounded-sm font-medium focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        >
+          <span
+            role="img"
+            aria-label={statusLabel}
+            title={statusLabel}
+            className="inline-flex shrink-0 items-center"
+          >
+            <StatusDot status={workflow.status} />
+          </span>
+          <span className="truncate" title={workflow.name}>
             {workflow.name}
           </span>
-          <ItemStatusBadge status={workflow.status} />
+        </IntentPrefetchLink>
+      </td>
+      <td className="truncate px-3 py-3.5 text-ink-muted" title={ownerName}>
+        {ownerName}
+      </td>
+      <td className="px-3 py-3.5 text-ink-muted" title={model.label}>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ModelProviderIcon
+            modelId={model.modelId}
+            size={13}
+            strokeWidth={1.9}
+            className="shrink-0 text-ink-subtle"
+          />
+          <span className="truncate">{model.label}</span>
         </span>
-        {workflow.description.trim() ? (
-          <span className="mt-0.5 block truncate text-[12.5px] leading-5 text-ink-subtle">
-            {workflow.description}
-          </span>
-        ) : null}
-        {workflow.trigger.type === "schedule" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <CalendarClock size={12} strokeWidth={1.8} className="shrink-0" />
-            <span className="truncate">
-              {workflow.trigger.cron} · {workflow.trigger.timezone}
-            </span>
-          </span>
-        ) : null}
-        {workflow.trigger.type === "event" ? (
-          <span className="mt-1 inline-flex max-w-full items-center gap-1.5 truncate text-[11.5px] leading-4 text-ink-subtle">
-            <span className="truncate">
-              {workflow.trigger.provider} · {workflow.trigger.event}
-              {workflow.trigger.filters.team
-                ? ` · ${workflow.trigger.filters.team.key ?? workflow.trigger.filters.team.name}`
-                : ""}
-            </span>
-          </span>
-        ) : null}
-      </span>
-      <span className="shrink-0 text-[11.5px] leading-4 text-ink-subtle">
-        {formatRelativeTime(workflow.updatedAt)}
-      </span>
-    </IntentPrefetchLink>
+      </td>
+      <td className="truncate px-3 py-3.5 text-ink-muted" title={triggerLabel}>
+        {triggerLabel}
+      </td>
+      <td className="px-3 py-3.5 tabular-nums text-ink-muted">{stats?.runCount ?? 0}</td>
+      <td className="px-3 py-3.5 text-ink-muted">
+        {stats ? formatRelativeTime(stats.lastExecutedAt) : "Never"}
+      </td>
+      <td className="py-2 pr-2 text-right">
+        <WorkflowRowMenu workflow={workflow} canEdit={canEdit} onDelete={onDelete} />
+      </td>
+    </tr>
   );
+}
+
+function WorkflowRowMenu({
+  workflow,
+  canEdit,
+  onDelete,
+}: {
+  workflow: WorkflowListItem;
+  canEdit: boolean;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const href = `/workflows/${encodeURIComponent(workflow.slug)}`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        type="button"
+        aria-label={`Actions for ${workflow.name}`}
+        className="inline-flex size-7 items-center justify-center rounded-md text-ink-subtle opacity-70 transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 group-hover:opacity-100 data-[popup-open]:bg-surface-hover data-[popup-open]:text-ink data-[popup-open]:opacity-100"
+      >
+        <MoreHorizontal size={16} strokeWidth={2} />
+      </PopoverTrigger>
+      <PopoverContent align="end" sideOffset={6} className="w-[180px] bg-surface p-1 text-ink">
+        <IntentPrefetchLink
+          href={href}
+          onClick={() => setOpen(false)}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:bg-surface-hover"
+        >
+          <Pencil size={13} strokeWidth={1.9} />
+          {canEdit ? "Edit details" : "View details"}
+        </IntentPrefetchLink>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-danger transition-colors duration-150 hover:bg-danger/10 focus:outline-none focus-visible:bg-danger/10"
+          >
+            <Trash2 size={13} strokeWidth={1.9} />
+            Delete
+          </button>
+        ) : null}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Workflows created before scopes carry no creator, and a creator who left the workspace is no
+// longer in the member list. Both still need a readable owner cell.
+function workflowOwnerName(workflow: WorkflowListItem, ownerNames: Record<string, string> | null) {
+  if (!workflow.createdByUserId) return "Workspace";
+  if (!ownerNames) return "—";
+  return ownerNames[workflow.createdByUserId] ?? "Former member";
+}
+
+// The Model cell shows one model per workflow: its label plus the provider mark. Steps can each
+// pick their own model, so a workflow that mixes them collapses to a count with no provider, and
+// an empty `modelId` falls back to the generic sparkle so the column stays aligned.
+function workflowModelPresentation(workflow: WorkflowListItem): {
+  label: string;
+  modelId: string;
+} {
+  const defaultOption = WORKFLOW_MODEL_OPTIONS.find(
+    (option) => option.token === DEFAULT_WORKFLOW_MODEL_TOKEN,
+  );
+  const fallback = { label: defaultOption?.label ?? "Default", modelId: defaultOption?.id ?? "" };
+  const models = new Map<string, string>();
+  for (const step of workflow.steps) {
+    const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === step.model);
+    if (option) models.set(option.label, option.id);
+    else if (step.model.trim()) models.set(step.model.trim(), "");
+    else models.set(fallback.label, fallback.modelId);
+  }
+  if (models.size === 0) return fallback;
+  if (models.size === 1) {
+    const [label, modelId] = Array.from(models)[0]!;
+    return { label, modelId };
+  }
+  return { label: `${models.size} models`, modelId: "" };
+}
+
+function workflowTriggerLabel(workflow: WorkflowListItem) {
+  const triggers = workflow.triggers?.length ? workflow.triggers : [workflow.trigger];
+  const trigger = triggers[0];
+  if (!trigger || trigger.type === "manual") return "Manual";
+  const label =
+    trigger.type === "schedule"
+      ? scheduleSummary(trigger)
+      : `${titleCaseToken(trigger.provider)} · ${titleCaseToken(trigger.event)}`;
+  return triggers.length > 1 ? `${label} +${triggers.length - 1}` : label;
+}
+
+function titleCaseToken(value: string) {
+  const words = value.trim().replace(/[._-]+/gu, " ");
+  return words ? words.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase()) : "Event";
+}
+
+function workflowRunStats(
+  tasks: readonly { workflowId?: string | null; createdAt: string }[],
+  now = Date.now(),
+) {
+  const stats = new Map<string, { runCount: number; lastExecutedAt: string }>();
+  const windowStart = now - WORKFLOW_RUN_WINDOW_MS;
+  for (const task of tasks) {
+    if (!task.workflowId) continue;
+    const executedAt = new Date(task.createdAt).getTime();
+    if (!Number.isFinite(executedAt)) continue;
+    const current = stats.get(task.workflowId);
+    const lastExecutedAt =
+      !current || executedAt > new Date(current.lastExecutedAt).getTime()
+        ? task.createdAt
+        : current.lastExecutedAt;
+    stats.set(task.workflowId, {
+      runCount: (current?.runCount ?? 0) + (executedAt >= windowStart ? 1 : 0),
+      lastExecutedAt,
+    });
+  }
+  return stats;
 }
 
 // --- Skills (settings) -------------------------------------------------------
 
-type SkillScope = "personal" | "company";
-const SKILL_SCOPE_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "company", label: "Company" },
-  { value: "personal", label: "Personal" },
-] as const;
-
-export function SkillsSettingsRoute({
-  skills,
-  canEdit,
-}: {
-  skills: SkillListItemDto[];
-  canEdit: boolean;
-}) {
+export function SkillsRoute({ skills, canEdit }: { skills: SkillListItemDto[]; canEdit: boolean }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [scopeFilter, setScopeFilter] = useState<"all" | SkillScope>("all");
+  const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const creationScope = scopeFilter === "company" ? "company" : "personal";
   const visibleSkills = skills.filter(
     (skill) => scopeFilter === "all" || skill.scope === scopeFilter,
   );
 
   return (
-    <SettingsContent title="Skills">
+    <PageContent title="Skills">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div role="group" aria-label="Skill scope" className="flex flex-wrap items-center gap-2">
-          {SKILL_SCOPE_FILTERS.map((filter) => (
-            <Button
-              key={filter.value}
-              variant={scopeFilter === filter.value ? "default" : "secondary"}
-              size="sm"
-              aria-pressed={scopeFilter === filter.value}
-              onClick={() => setScopeFilter(filter.value)}
-              className={cn(
-                "h-8 rounded-full px-3 text-[13px] font-normal shadow-none",
-                scopeFilter !== filter.value && "text-ink-muted hover:text-ink",
-              )}
-            >
-              {filter.label}
-            </Button>
-          ))}
-        </div>
+        <ScopeFilterTabs label="Skill scope" value={scopeFilter} onChange={setScopeFilter} />
         {canEdit ? (
           <div className="ml-auto flex items-center gap-2">
             <Button
@@ -921,24 +1224,24 @@ export function SkillsSettingsRoute({
         <ImportSkillDialog
           initialScope={creationScope}
           onClose={() => setImporting(false)}
-          onInstalled={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
+          onInstalled={(name) => router.push(`/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
       {creating ? (
         <WorkspaceSkillDialog
           initialScope={creationScope}
           onClose={() => setCreating(false)}
-          onSaved={(name) => router.push(`/settings/skills/${encodeURIComponent(name)}`)}
+          onSaved={(name) => router.push(`/skills/${encodeURIComponent(name)}`)}
         />
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
 function SkillListRow({ skill }: { skill: SkillListItemDto }) {
   return (
     <IntentPrefetchLink
-      href={`/settings/skills/${encodeURIComponent(skill.id)}`}
+      href={`/skills/${encodeURIComponent(skill.id)}`}
       className="group flex items-center gap-3 rounded-lg border border-border bg-surface px-3.5 py-3 transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
     >
       <span className="min-w-0 flex-1">
@@ -994,7 +1297,7 @@ export function SkillBundleRoute({
     startMutation(async () => {
       try {
         await archiveHeadlessSkill(installation.id);
-        router.push("/settings/skills");
+        router.push("/skills");
       } catch (cause) {
         setError(errorMessage(cause));
       }
@@ -1002,10 +1305,10 @@ export function SkillBundleRoute({
   };
 
   return (
-    <SettingsContent
+    <PageContent
       title={bundle.name}
       description={`Use /${installation.name} in chat.`}
-      backLink={{ href: "/settings/skills", label: "Skills" }}
+      backLink={{ href: "/skills", label: "Skills" }}
     >
       {bundle.source.type !== "workspace" ? <SkillSourceNotice source={bundle.source} /> : null}
       {installation.scope ? (
@@ -1021,7 +1324,7 @@ export function SkillBundleRoute({
                   scope,
                   expectedScope: installation.scope!,
                 });
-                if (!updated.canEdit) router.push("/settings/skills");
+                if (!updated.canEdit) router.push("/skills");
                 else router.refresh();
               } catch (cause) {
                 setError(errorMessage(cause));
@@ -1128,7 +1431,7 @@ export function SkillBundleRoute({
           }}
         />
       ) : null}
-    </SettingsContent>
+    </PageContent>
   );
 }
 
@@ -1334,22 +1637,6 @@ function EditorField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-function ItemStatusBadge({ status }: { status: "draft" | "active" }) {
-  if (status === "active") {
-    return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/10 px-1.5 py-px text-[10.5px] font-medium leading-4 text-success">
-        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-success" />
-        Active
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
-      Draft
-    </span>
-  );
-}
-
 function ImportedBadge() {
   return (
     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-muted px-1.5 py-px text-[10.5px] font-medium leading-4 text-ink-subtle">
@@ -1363,10 +1650,12 @@ export function EmptyState({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   icon: LucideIcon;
   title: string;
   description: string;
+  action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-6 py-14 text-center">
@@ -1379,6 +1668,7 @@ export function EmptyState({
           {description}
         </p>
       </div>
+      {action ? <div className="mt-1">{action}</div> : null}
     </div>
   );
 }
@@ -1388,6 +1678,8 @@ function NewItemDialog({
   namePlaceholder,
   descriptionPlaceholder,
   submitLabel,
+  initialScope,
+  scopeHint,
   create,
   onClose,
   onCreated,
@@ -1396,15 +1688,19 @@ function NewItemDialog({
   namePlaceholder: string;
   descriptionPlaceholder: string;
   submitLabel: string;
+  initialScope: SkillScope;
+  scopeHint: (scope: SkillScope) => string;
   create: (input: {
     name: string;
     description?: string;
+    scope: SkillScope;
   }) => Promise<{ ok: true; slug: string } | { ok: false; message: string }>;
   onClose: () => void;
   onCreated: (slug: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [scope, setScope] = useState<SkillScope>(initialScope);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -1427,6 +1723,7 @@ function NewItemDialog({
       try {
         const result = await create({
           name: trimmed,
+          scope,
           ...(description.trim() ? { description: description.trim() } : {}),
         });
         if (result.ok) {
@@ -1493,6 +1790,13 @@ function NewItemDialog({
               className="h-9 rounded-md border border-border bg-canvas px-2.5 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus-visible:ring-1 focus-visible:ring-ink/20"
             />
           </label>
+          <ScopeField
+            scope={scope}
+            onChange={setScope}
+            disabled={isPending}
+            hint={scopeHint}
+            managedTooltip="Only the creator or an admin can change visibility."
+          />
           {error ? <div className="text-[12px] leading-4 text-warning">{error}</div> : null}
         </div>
         <div className="mt-5 flex justify-end gap-2">
@@ -1974,54 +2278,25 @@ export function formatRelativeTime(value: Date | string) {
   return new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 }
 
-function SkillScopeBadge({ scope }: { scope: "personal" | "company" | null }) {
+function SkillScopeBadge({ scope }: { scope: SkillScope | null }) {
   return (
-    <span className="rounded bg-surface-muted px-1.5 py-0.5 text-[11px] text-ink-subtle">
+    <ScopeBadge>
       {scope === "personal" ? "Personal" : scope === "company" ? "Company" : "Plugin"}
-    </span>
+    </ScopeBadge>
   );
 }
 
-function SkillScopeField({
-  scope,
-  onChange,
-  disabled,
-  canManage = true,
-}: {
+function SkillScopeField(props: {
   scope: SkillScope;
   onChange: (scope: SkillScope) => void;
   disabled?: boolean;
   canManage?: boolean;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <span className="text-[12px] font-medium text-ink-subtle">Visibility</span>
-      {canManage ? (
-        <select
-          aria-label="Visibility"
-          value={scope}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value as SkillScope)}
-          className={cn(EDITOR_INPUT_CLASS, "w-auto")}
-        >
-          <option value="personal">Personal</option>
-          <option value="company">Company</option>
-        </select>
-      ) : (
-        <Tooltip>
-          <TooltipTrigger
-            aria-label="Visibility managed by the creator or an admin"
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-surface-muted px-2.5 text-[13px] text-ink-subtle"
-          >
-            {scope === "company" ? "Company" : "Personal"}
-            <LockKeyhole size={12} aria-hidden="true" />
-          </TooltipTrigger>
-          <TooltipContent>Only the creator or an admin can change visibility.</TooltipContent>
-        </Tooltip>
-      )}
-      <span className="text-[12px] leading-5 text-ink-subtle">
-        {scope === "personal" ? "Only you" : "Everyone can use and edit"}
-      </span>
-    </div>
+    <ScopeField
+      {...props}
+      hint={(scope) => (scope === "personal" ? "Only you" : "Everyone can use and edit")}
+      managedTooltip="Only the creator or an admin can change visibility."
+    />
   );
 }

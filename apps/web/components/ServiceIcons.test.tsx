@@ -1,4 +1,4 @@
-import { InfisicalIcon, SigNozIcon, SupabaseIcon } from "@opencompany/ui/icons";
+import { Dash0Icon, InfisicalIcon, SigNozIcon, SupabaseIcon } from "@opencompany/ui/icons";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
@@ -6,7 +6,7 @@ describe("service logos", () => {
   it("keeps gradients and filters local when the same logo appears in multiple slots", () => {
     const { container } = render(
       <>
-        {[SupabaseIcon, InfisicalIcon, SigNozIcon].map((Icon, index) => (
+        {[SupabaseIcon, InfisicalIcon, SigNozIcon, Dash0Icon].map((Icon, index) => (
           <div key={index}>
             <Icon size={14} />
             <Icon size={24} />
