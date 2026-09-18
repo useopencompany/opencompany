@@ -3,6 +3,7 @@ import {
   deriveChatTurnPhase,
   isChatConversationWorking,
   isChatTurnWorking,
+  reconcileRuntimeWithSettledRun,
   reconcileRuntimeWithTaskStatus,
 } from "./chat-turn-lifecycle";
 
@@ -113,5 +114,27 @@ describe("chat turn lifecycle", () => {
     expect(reconcileRuntimeWithTaskStatus(runtime, null)).toBe(runtime);
     const failed = { ...runtime, status: "failed" as const, activeRunId: null, hasError: true };
     expect(reconcileRuntimeWithTaskStatus(failed, "failed")).toBe(failed);
+  });
+
+  it("parks the exact Run confirmed terminal while preserving a newer active Run", () => {
+    const runtime = {
+      status: "running" as const,
+      activeRunId: "run_stopped",
+      hasError: false,
+      updatedAt: "2026-09-17T18:44:31.430Z",
+    };
+
+    expect(reconcileRuntimeWithSettledRun(runtime, "run_stopped", "canceled")).toEqual({
+      ...runtime,
+      status: "interrupted",
+      activeRunId: null,
+    });
+    expect(reconcileRuntimeWithSettledRun(runtime, "run_stopped", "completed")).toEqual({
+      ...runtime,
+      status: "idle",
+      activeRunId: null,
+    });
+    const nextRun = { ...runtime, activeRunId: "run_follow_up" };
+    expect(reconcileRuntimeWithSettledRun(nextRun, "run_stopped", "canceled")).toBe(nextRun);
   });
 });

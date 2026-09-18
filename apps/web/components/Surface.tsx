@@ -161,6 +161,7 @@ import {
   deriveChatTurnPhase,
   isChatConversationWorking,
   isChatTurnTerminal,
+  reconcileRuntimeWithSettledRun,
   reconcileRuntimeWithTaskStatus,
 } from "@/lib/chat-turn-lifecycle";
 import {
@@ -214,6 +215,7 @@ import {
   resolveEngineQuestions,
   steerHeadlessChatRun,
   updateHeadlessChatConversation,
+  waitForHeadlessChatRunSettlement,
 } from "@/lib/headless-chat-commands";
 import {
   enqueueHeadlessChatMessage,
@@ -640,6 +642,14 @@ export function Surface({
   const [backgroundTaskSubmitting, setBackgroundTaskSubmitting] = useState(false);
   const [taskCommentSubmitting, setTaskCommentSubmitting] = useState(false);
   const [stoppingTaskId, setStoppingTaskId] = useState<string | null>(null);
+  const [stoppingChatRun, setStoppingChatRun] = useState<{
+    conversationId: string;
+    runId: string | null;
+  } | null>(null);
+  const [locallySettledRunStatuses, setLocallySettledRunStatuses] = useState<
+    ReadonlyMap<string, "completed" | "failed" | "canceled">
+  >(() => new Map());
+  const chatStopConfirmationControllerRef = useRef<AbortController | null>(null);
   const [newChatCommandOpen, setNewChatCommandOpen] = useState(false);
   const [commandPaletteView, setCommandPaletteView] = useState<"search" | "compose">("search");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
@@ -659,14 +669,18 @@ export function Surface({
   const newChatProjectPrompt = newChatProjectId ? newChatProjectName?.trim() || null : null;
   const activeTaskConversation =
     taskConversation && initialChat?.id === chatSessionId ? taskConversation : null;
-  const conversationRuntime = useMemo(
-    () =>
-      reconcileRuntimeWithTaskStatus(
-        syncedConversationRuntime,
-        activeTaskConversation?.status ?? null,
-      ),
-    [activeTaskConversation?.status, syncedConversationRuntime],
-  );
+  const conversationRuntime = useMemo(() => {
+    const taskReconciled = reconcileRuntimeWithTaskStatus(
+      syncedConversationRuntime,
+      activeTaskConversation?.status ?? null,
+    );
+    const activeRunId = taskReconciled?.activeRunId ?? null;
+    return reconcileRuntimeWithSettledRun(
+      taskReconciled,
+      activeRunId,
+      activeRunId ? (locallySettledRunStatuses.get(activeRunId) ?? null) : null,
+    );
+  }, [activeTaskConversation?.status, locallySettledRunStatuses, syncedConversationRuntime]);
   const conversationRunning = isChatRuntimeActive(conversationRuntime);
   const backgroundInputDirective = parseBackgroundChatDirective(input);
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
@@ -1235,13 +1249,16 @@ export function Surface({
   const foregroundRun = foregroundTurn?.runId
     ? (liveChat.runsById.get(foregroundTurn.runId) ?? null)
     : null;
+  const locallySettledForegroundStatus = foregroundTurn?.runId
+    ? (locallySettledRunStatuses.get(foregroundTurn.runId) ?? null)
+    : null;
   const foregroundAssistantMessageId =
     foregroundTurn?.assistantMessageId ?? foregroundRun?.assistantMessageId ?? null;
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
   const chatTurnPhase = deriveChatTurnPhase({
-    runStatus: foregroundRun?.status ?? null,
+    runStatus: locallySettledForegroundStatus ?? foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
     runtimeMatchesTurn: Boolean(
@@ -1260,6 +1277,13 @@ export function Surface({
   const isForegroundTurnWorking = isChatConversationWorking(
     chatTurnPhase,
     Boolean(activeEngineChat && conversationRunning),
+  );
+  const isChatConversationStopping = Boolean(
+    stoppingChatRun &&
+      stoppingChatRun.conversationId === chatSessionId &&
+      (!stoppingChatRun.runId ||
+        stoppingChatRun.runId === foregroundTurn?.runId ||
+        stoppingChatRun.runId === syncedConversationRuntime?.activeRunId),
   );
   const isTaskConversationWorking = Boolean(
     !readOnly &&
@@ -1335,6 +1359,7 @@ export function Surface({
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      chatStopConfirmationControllerRef.current?.abort();
       releaseAllOptimisticAttachmentPreviews();
     };
   }, [releaseAllOptimisticAttachmentPreviews]);
@@ -2697,18 +2722,69 @@ export function Surface({
     }
 
     if (chatSessionId) {
+      if (isChatConversationStopping) return;
       const activeRunId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId ?? null;
+      const assistantMessageId = foregroundAssistantMessageId;
+      setStoppingChatRun({ conversationId: chatSessionId, runId: activeRunId });
       clearLocalActiveTurnState(chatSessionId);
-      const cancel = activeRunId
-        ? cancelHeadlessChatRun(activeRunId)
-        : headlessTransport.cancel(chatInstanceKey);
-      void cancel.catch(() => {
-        const label = activeEngineChat
-          ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
-          : "stop that response";
-        toast.error(`Could not ${label}.`);
-      });
+      chatStopConfirmationControllerRef.current?.abort();
+      const confirmationController = new AbortController();
+      chatStopConfirmationControllerRef.current = confirmationController;
       void stop();
+      void (async () => {
+        let accepted = false;
+        try {
+          const result = activeRunId
+            ? await cancelHeadlessChatRun(activeRunId)
+            : await headlessTransport.cancel(chatInstanceKey);
+          if (!result) throw new Error("The active Run is no longer available.");
+          accepted = true;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId
+              ? { ...current, runId: result.runId }
+              : current,
+          );
+          const settled =
+            result.status === "completed" ||
+            result.status === "failed" ||
+            result.status === "canceled"
+              ? result
+              : await waitForHeadlessChatRunSettlement(result.runId, {
+                  signal: confirmationController.signal,
+                });
+          if (!mountedRef.current || confirmationController.signal.aborted) return;
+          setLocallySettledRunStatuses((current) => {
+            const next = new Map(current);
+            next.set(result.runId, settled.status);
+            return next;
+          });
+          if (settled.status === "canceled" && assistantMessageId) {
+            setLocallyStoppedAssistantMessageIds((current) =>
+              new Set(current).add(assistantMessageId),
+            );
+          }
+          if (activeTurnRef.current?.runId === result.runId) clearActiveTurn();
+          setStoppingChatRun((current) => (current?.runId === result.runId ? null : current));
+        } catch (error) {
+          if (confirmationController.signal.aborted || !mountedRef.current || accepted) return;
+          setStoppingChatRun((current) =>
+            current?.conversationId === chatSessionId ? null : current,
+          );
+          void resumeStream();
+          const label = activeEngineChat
+            ? `interrupt ${ENGINE_REGISTRY[activeEngineChat.engine].label}`
+            : "stop that response";
+          toast.error(
+            error instanceof Error && error.message
+              ? `${error.message} The response is still running.`
+              : `Could not ${label}.`,
+          );
+        } finally {
+          if (chatStopConfirmationControllerRef.current === confirmationController) {
+            chatStopConfirmationControllerRef.current = null;
+          }
+        }
+      })();
       return;
     }
 
@@ -2730,10 +2806,14 @@ export function Surface({
     cancelChatFirstOutputMeasurement,
     clearLocalActiveTurnState,
     conversationRuntime?.activeRunId,
+    clearActiveTurn,
     foregroundTurn?.runId,
+    foregroundAssistantMessageId,
+    isChatConversationStopping,
     isTaskConversationStopping,
     headlessTransport,
     messages,
+    resumeStream,
     stop,
   ]);
 
@@ -3181,6 +3261,7 @@ export function Surface({
                         <CodingSessionStatusIndicator
                           engine={activeEngineChat.engine}
                           runtime={conversationRuntime}
+                          stopping={isChatConversationStopping}
                           optimisticStatus={
                             engineSubmitting
                               ? "starting"
@@ -3259,6 +3340,8 @@ export function Surface({
                   ))}
                   {isTaskConversationStopping ? (
                     <PendingActivityIndicator label="Stopping task…" />
+                  ) : isChatConversationStopping ? (
+                    <PendingActivityIndicator label="Stopping response…" />
                   ) : isAgentWorking && activeTurnTimerStartedAtMs !== null ? (
                     <ThinkingIndicator
                       startedAtMs={activeTurnTimerStartedAtMs}
@@ -3517,9 +3600,12 @@ export function Surface({
                         onStop={stopGeneration}
                       />
                     ) : null
-                  ) : activeEngine && isForegroundTurnWorking && !backgroundChatDirective ? (
+                  ) : activeEngine &&
+                    (isForegroundTurnWorking || isChatConversationStopping) &&
+                    !backgroundChatDirective ? (
                     <EngineStopButton
                       label={ENGINE_REGISTRY[activeEngine].label}
+                      stopping={isChatConversationStopping}
                       onStop={stopGeneration}
                     />
                   ) : null}
@@ -3550,6 +3636,7 @@ export function Surface({
                         ? false
                         : !isEngineChat && isForegroundTurnWorking
                     }
+                    stopping={isChatConversationStopping}
                     queuesMessage={composerQueuesMessage}
                     startsTask={selectedAdHocTask || Boolean(selectedWorkflowMention)}
                     onStop={stopGeneration}
@@ -6169,15 +6256,17 @@ function formatCompactTokens(value: number): string {
 function CodingSessionStatusIndicator({
   engine,
   runtime,
+  stopping,
   optimisticStatus,
   sandboxState,
 }: {
   engine: EngineChatKind;
   runtime: ConversationRuntimeView | null;
+  stopping: boolean;
   optimisticStatus: "starting" | "running" | null;
   sandboxState: EngineSandboxState;
 }) {
-  const meta = sandboxStatusPresenter(
+  let meta = sandboxStatusPresenter(
     engine,
     optimisticStatus
       ? {
@@ -6189,7 +6278,20 @@ function CodingSessionStatusIndicator({
       : runtime,
     sandboxState,
   );
-  const title = `${meta.engineLabel} sandbox is ${meta.label.toLowerCase()}.${meta.detail}`;
+  // An interrupt in flight is the one agent-side transition the pill still owns: E2B keeps
+  // reporting the sandbox as running throughout, so only the logical state shows the stop landing.
+  if (stopping) {
+    meta = {
+      ...meta,
+      kind: "working",
+      label: "Stopping",
+      dotClass: "bg-warning animate-pulse",
+      textClass: "text-ink-muted",
+    };
+  }
+  const title = stopping
+    ? `${meta.engineLabel} is stopping the current turn.`
+    : `${meta.engineLabel} sandbox is ${meta.label.toLowerCase()}.${meta.detail}`;
 
   return (
     <div
@@ -6464,12 +6566,14 @@ function findModel(id: string) {
 function SubmitButton({
   disabled,
   isGenerating,
+  stopping = false,
   queuesMessage = false,
   startsTask = false,
   onStop,
 }: {
   disabled: boolean;
   isGenerating: boolean;
+  stopping?: boolean;
   queuesMessage?: boolean;
   startsTask?: boolean;
   onStop: () => void;
@@ -6480,10 +6584,15 @@ function SubmitButton({
         type="button"
         aria-label="Stop response"
         title="Stop response"
+        disabled={stopping}
         onClick={onStop}
-        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none"
+        className="mb-px flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ink text-canvas transition-opacity duration-150 hover:opacity-90 focus:outline-none disabled:opacity-60"
       >
-        <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        {stopping ? (
+          <LoaderCircle size={12} strokeWidth={2.2} className="animate-spin" />
+        ) : (
+          <Square size={12} strokeWidth={2.2} fill="currentColor" />
+        )}
       </button>
     );
   }
