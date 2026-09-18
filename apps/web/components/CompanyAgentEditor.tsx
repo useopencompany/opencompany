@@ -31,6 +31,7 @@ import {
   type WorkflowTriggerDraft,
   workflowTriggerInput,
 } from "@/components/WorkflowEditor";
+import type { WorkflowStepPatch } from "@/components/WorkflowModelControls";
 import {
   archiveCompanyAgent,
   runCompanyAgentNow,
@@ -276,15 +277,7 @@ export function CompanyAgentEditor({
             step={agentStep(agent.id, draft)}
             canEdit={canEdit}
             skillCatalog={skillCatalog}
-            onChange={(patch) =>
-              setDraft((current) => ({
-                ...current,
-                ...(patch.instructions !== undefined ? { instructions: patch.instructions } : {}),
-                ...(patch.model !== undefined ? { model: patch.model } : {}),
-                ...("runtimeModel" in patch ? { runtimeModel: patch.runtimeModel } : {}),
-                ...("reasoningEffort" in patch ? { reasoningEffort: patch.reasoningEffort } : {}),
-              }))
-            }
+            onChange={(patch) => setDraft((current) => agentDraftWithPatch(current, patch))}
           />
 
           <TriggerSection
@@ -450,6 +443,23 @@ function AgentStatusPicker({
   );
 }
 
+// A step patch may clear the cloud-runtime fields by setting them to undefined. Under
+// `exactOptionalPropertyTypes` that has to be an explicit delete rather than a spread.
+function agentDraftWithPatch(current: AgentDraft, patch: WorkflowStepPatch): AgentDraft {
+  const next: AgentDraft = { ...current };
+  if (patch.instructions !== undefined) next.instructions = patch.instructions;
+  if (patch.model !== undefined) next.model = patch.model;
+  if ("runtimeModel" in patch) {
+    if (patch.runtimeModel === undefined) delete next.runtimeModel;
+    else next.runtimeModel = patch.runtimeModel;
+  }
+  if ("reasoningEffort" in patch) {
+    if (patch.reasoningEffort === undefined) delete next.reasoningEffort;
+    else next.reasoningEffort = patch.reasoningEffort;
+  }
+  return next;
+}
+
 function agentDraft(agent: CompanyAgentDto): AgentDraft {
   return {
     name: agent.name,
@@ -461,7 +471,7 @@ function agentDraft(agent: CompanyAgentDto): AgentDraft {
     ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
     status: agent.status,
     slackEnabled: agent.slackEnabled,
-    triggers: agent.triggers.map((trigger) =>
+    triggers: (agent.triggers as WorkflowTriggerDraft[]).map((trigger) =>
       trigger.type === "schedule"
         ? {
             id: trigger.id,

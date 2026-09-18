@@ -1,6 +1,26 @@
 "use client";
 
 import type { CompanyAgentDto, CompanyAgentRunDto } from "@opencompany/protocol";
+
+// Mirrors the protocol's CompanyAgentRun contract with concrete web-side types: the generated
+// z.infer types collapse to `any` under this app's tsconfig, which would silently drop the
+// exhaustiveness the status and trigger lookups below rely on.
+type AgentRun = {
+  id: string;
+  taskId: string | null;
+  displayId: string | null;
+  conversationId: string | null;
+  name: string;
+  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "canceled" | "blocked";
+  triggerKind: "manual" | "schedule" | "event";
+  triggerLabel: string;
+  result: string | null;
+  error: string | null;
+  awaitingInput: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 import { AlertTriangle, CalendarClock, Play, Webhook } from "lucide-react";
 import Link from "next/link";
 import { EmptyState, formatRelativeTime } from "@/components/Routes";
@@ -11,7 +31,7 @@ const TRIGGER_ICON = {
   event: Webhook,
 } as const;
 
-const STATUS_COPY: Record<CompanyAgentRunDto["status"], { label: string; className: string }> = {
+const STATUS_COPY: Record<AgentRun["status"], { label: string; className: string }> = {
   queued: { label: "Queued", className: "text-ink-subtle" },
   running: { label: "Running", className: "text-ink" },
   waiting: { label: "Waiting", className: "text-warning" },
@@ -62,7 +82,7 @@ export function CompanyAgentRuns({
             />
           ) : (
             <ul className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
-              {runs.map((run) => (
+              {(runs as AgentRun[]).map((run) => (
                 <RunRow key={run.id} run={run} />
               ))}
             </ul>
@@ -73,7 +93,7 @@ export function CompanyAgentRuns({
   );
 }
 
-function RunRow({ run }: { run: CompanyAgentRunDto }) {
+function RunRow({ run }: { run: AgentRun }) {
   const Icon = run.status === "blocked" ? AlertTriangle : TRIGGER_ICON[run.triggerKind];
   const status = STATUS_COPY[run.status];
   const summary = run.error ?? run.result;

@@ -10,6 +10,7 @@ import {
   type Actor,
   ChatApplicationService,
   type ChatRepository,
+  CompanyAgentApplicationService,
   CoreError,
   type CreateMessageCommand,
   type CreateTaskCommand,
@@ -328,6 +329,7 @@ describe("canonical Hono API", () => {
       pluginImports: fakePluginImportService(),
       brainAssets: fakeBrainAssets(),
       workflowAvatars: fakeWorkflowAvatars(),
+      agentPhotos: fakeWorkflowAvatars(),
       brainControl: fakeBrainControl(),
       wikiControl: fakeWikiControl(),
       attachments: fakeAttachments(),
@@ -3288,6 +3290,7 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload, replace }),
       workflowAvatars: fakeWorkflowAvatars(),
+      agentPhotos: fakeWorkflowAvatars(),
     });
     const file = new File(["private bytes"], "plan.pdf", { type: "application/pdf" });
     const createForm = new FormData();
@@ -3351,6 +3354,7 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ download }),
       workflowAvatars: fakeWorkflowAvatars(),
+      agentPhotos: fakeWorkflowAvatars(),
     });
 
     const response = await app.request("/v1/brain-assets/document_1");
@@ -3398,6 +3402,7 @@ describe("canonical Hono API", () => {
     const app = testApp(fakeRepository(), {
       brainAssets: brainAssetService({ upload }),
       workflowAvatars: fakeWorkflowAvatars(),
+      agentPhotos: fakeWorkflowAvatars(),
     });
     const response = await app.request("/v1/brains/brain_1/assets", {
       method: "POST",
@@ -3481,6 +3486,7 @@ describe("canonical Hono API", () => {
             reviewInboxEnabled: false,
             sidebarProjectsEnabled: false,
             subagentsEnabled: false,
+            companyAgentsEnabled: false,
             pastSessionAccessEnabled: false,
             imessageEnabled: false,
             whatsappEnabled: false,
@@ -3551,6 +3557,7 @@ describe("canonical Hono API", () => {
         reviewInboxEnabled: false,
         sidebarProjectsEnabled: false,
         subagentsEnabled: false,
+        companyAgentsEnabled: false,
         pastSessionAccessEnabled: false,
         imessageEnabled: false,
         whatsappEnabled: false,
@@ -3584,6 +3591,7 @@ describe("canonical Hono API", () => {
       reviewInboxEnabled: false,
       sidebarProjectsEnabled: false,
       subagentsEnabled: false,
+      companyAgentsEnabled: false,
       pastSessionAccessEnabled: false,
       imessageEnabled: false,
       whatsappEnabled: false,
@@ -5289,6 +5297,7 @@ function testApp(
     pluginImports: fakePluginImportService(),
     brainAssets: fakeBrainAssets(),
     workflowAvatars: fakeWorkflowAvatars(),
+    agentPhotos: fakeWorkflowAvatars(),
     brainControl: fakeBrainControl(),
     wikiControl: fakeWikiControl(),
     attachments: fakeAttachments(),
@@ -6395,8 +6404,12 @@ function fakeAutomationServices() {
       },
     },
   };
+  const workflows = new WorkflowApplicationService(workflowRepository, options);
   return {
-    workflows: new WorkflowApplicationService(workflowRepository, options),
+    workflows,
+    agents: new CompanyAgentApplicationService(
+      new WorkflowApplicationService(workflowRepository, { ...options, kind: "agent" }),
+    ),
   };
 }
 
