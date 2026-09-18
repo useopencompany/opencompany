@@ -225,7 +225,10 @@ const app = createApiApp({
   }),
   projects: createProjectService({ db: database.db }),
   userSettings: createUserSettingsService({ db: database.db }),
-  feedback: createFeedbackService({ db: database.db }),
+  feedback: createFeedbackService({
+    db: database.db,
+    resolveAttachments: (input) => attachmentRepository.resolve(input),
+  }),
   repoConfigs: createRepoConfigService({ db: database.db }),
   sessionPullRequests: (actor) => listSessionPullRequestStatuses({ userWorkosId: actor.userId }),
   integrationAccounts: createIntegrationAccountService({

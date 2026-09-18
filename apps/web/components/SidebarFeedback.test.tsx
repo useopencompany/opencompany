@@ -1,13 +1,16 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SidebarFeedback } from "./SidebarFeedback";
 
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const submitFeedbackMock = vi.hoisted(() =>
-  vi.fn(async (_previousState: unknown, _formData: FormData) => ({ ok: true as const })),
+  vi.fn<(previousState: unknown, formData: FormData) => Promise<{ ok: true }>>(async () => ({
+    ok: true,
+  })),
 );
+const uploadAttachmentMock = vi.hoisted(() => vi.fn(async () => ({ id: "attachment_screenshot" })));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock.value,
@@ -15,6 +18,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/feedback/actions", () => ({
   submitFeedback: submitFeedbackMock,
+}));
+
+vi.mock("@/lib/headless-chat-attachment-upload", () => ({
+  uploadHeadlessChatAttachment: uploadAttachmentMock,
 }));
 
 vi.mock("@opencompany/ui/components/sonner", () => ({
@@ -30,6 +37,17 @@ async function openDialog(pathname: string) {
 }
 
 describe("SidebarFeedback", () => {
+  beforeEach(() => {
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:screenshot-preview"),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     pathnameMock.value = "/";
@@ -56,5 +74,30 @@ describe("SidebarFeedback", () => {
     await openDialog("/settings/preferences");
 
     expect(screen.queryByText(/Attaching/)).not.toBeInTheDocument();
+  });
+
+  it("uploads a screenshot and includes it with the report", async () => {
+    const user = await openDialog("/chat/ses_1");
+    const screenshot = new File(["png"], "broken-modal.png", { type: "image/png" });
+
+    await user.upload(screen.getByLabelText("Choose screenshots"), screenshot);
+    await waitFor(() => expect(uploadAttachmentMock).toHaveBeenCalledTimes(1));
+    await user.type(screen.getByRole("textbox"), "The modal clips this screenshot.");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(submitFeedbackMock).toHaveBeenCalledTimes(1));
+    expect(submitFeedbackMock.mock.calls[0]?.[1].getAll("attachmentId")).toEqual([
+      "attachment_screenshot",
+    ]);
+  });
+
+  it("submits with Cmd+Enter", async () => {
+    await openDialog("/");
+    const message = screen.getByRole("textbox");
+    fireEvent.change(message, { target: { value: "Keyboard submission works." } });
+
+    fireEvent.keyDown(message, { key: "Enter", metaKey: true });
+
+    await waitFor(() => expect(submitFeedbackMock).toHaveBeenCalledTimes(1));
   });
 });
