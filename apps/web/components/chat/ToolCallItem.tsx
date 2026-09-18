@@ -839,6 +839,10 @@ function ToolCallRow({
   const showStatusText =
     tool.statusText !== "Done" && (mark !== null || tool.statusText !== "Failed");
   const hasOutput = tool.output !== undefined;
+  const automaticallyApproved =
+    isRecord(tool.output) &&
+    isRecord(tool.output.automaticApproval) &&
+    tool.output.automaticApproval.reason === "routine_action";
   const screenshotUrl = browserScreenshotUrl(tool.output);
   const browserProfileLiveView = browserProfileLiveViewFromTool(tool);
   const detailChips =
@@ -878,6 +882,9 @@ function ToolCallRow({
           <span title={tool.label} className="min-w-0 truncate font-medium text-ink/65">
             {tool.label}
           </span>
+          {automaticallyApproved ? (
+            <span className="shrink-0 text-[10.5px] text-ink-subtle">Automatically approved</span>
+          ) : null}
           {detailChips.map((detail, index) => (
             <ToolDetailChip key={`${detail}-${index}`} detail={detail} />
           ))}
@@ -894,6 +901,11 @@ function ToolCallRow({
             <HistoricalPresentationDetailStatus detail={detail} />
           ) : (
             <>
+              {automaticallyApproved ? (
+                <p className="mb-2 text-[11px] text-ink-muted">
+                  Approved as a routine action within your request.
+                </p>
+              ) : null}
               <ToolPreviewBlock label="Input" value={formatDebugValue(tool.input) || "No input"} />
               {hasOutput ? (
                 <ToolPreviewBlock

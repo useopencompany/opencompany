@@ -2259,6 +2259,13 @@ export function createApiApp(input: CreateApiAppInput) {
         approvalId: params.approvalId,
         ...c.req.valid("json"),
       });
+      if (!result.idempotentReplay)
+        await captureProductServerEvent("run_approval_resolved", actor.userId, {
+          workspace_id: actor.workspaceId,
+          run_id: result.runId,
+          approval_id: result.approvalId,
+          resolution: result.resolution,
+        });
       return c.json(
         {
           data: {

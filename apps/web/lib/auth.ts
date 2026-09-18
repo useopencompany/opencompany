@@ -24,6 +24,7 @@ export type IdentityUser = {
   timezone: string;
   botsEnabled?: boolean;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   chatCapabilitiesBetaEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
@@ -232,6 +233,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     timezone: user.timezone,
     botsEnabled: user.botsEnabled === true,
     autoModelRoutingEnabled: user.autoModelRoutingEnabled,
+    approveForMeEnabled: user.approveForMeEnabled,
     chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
     reviewInboxEnabled: user.reviewInboxEnabled,
     sidebarProjectsEnabled: user.sidebarProjectsEnabled,

@@ -165,6 +165,7 @@ export function createIdentityService(input: {
         botsEnabled: user.botsEnabled === true,
         taskSpawningEnabled: true as const,
         autoModelRoutingEnabled: user.autoModelRoutingEnabled,
+        approveForMeEnabled: user.approveForMeEnabled,
         chatCapabilitiesBetaEnabled: user.chatCapabilitiesBetaEnabled,
         reviewInboxEnabled: user.reviewInboxEnabled,
         sidebarProjectsEnabled: user.sidebarProjectsEnabled,

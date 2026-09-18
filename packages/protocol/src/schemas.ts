@@ -3924,6 +3924,7 @@ export const IdentityUserSchema = z
     /** @deprecated Tasks & Workflows is always enabled. */
     taskSpawningEnabled: z.literal(true),
     autoModelRoutingEnabled: z.boolean(),
+    approveForMeEnabled: z.boolean(),
     chatCapabilitiesBetaEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
@@ -3996,6 +3997,7 @@ export const UserPreferencesSchema = z
     taskViewMode: TaskViewModeSchema,
     taskTimeRange: TaskTimeRangeSchema,
     autoModelRoutingEnabled: z.boolean(),
+    approveForMeEnabled: z.boolean(),
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
@@ -4017,6 +4019,7 @@ export const UpdateUserPreferencesBodySchema = z
     taskViewMode: TaskViewModeSchema.optional(),
     taskTimeRange: TaskTimeRangeSchema.optional(),
     autoModelRoutingEnabled: z.boolean().optional(),
+    approveForMeEnabled: z.boolean().optional(),
     reviewInboxEnabled: z.boolean().optional(),
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),

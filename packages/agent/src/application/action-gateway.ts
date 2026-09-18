@@ -10,7 +10,7 @@ import type { CodexChatEngine } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { type ActionCatalogPolicyName, projectActionCatalog } from "../actions/policy";
 import { type ActionInvocationClaim, serveActionRequest } from "../actions/service";
-import type { CapabilityTurnState, ResolvedActionCatalog } from "../actions/types";
+import type { CapabilityTurnState, ResolvedAction, ResolvedActionCatalog } from "../actions/types";
 
 const logger = createLogger({ service: "opencompany-agent", runtime: "action-gateway" });
 
@@ -35,6 +35,7 @@ export type ActionServiceRunRef = {
 };
 
 export type ActionGatewayApprovalRecord = {
+  automaticReview?: { outcome: "auto_approved" | "requires_approval"; reason: string };
   actionId: string;
   sourceId: string;
   capabilityId: string;
@@ -83,6 +84,8 @@ export type ActionGatewayServiceDependencies = {
     deduplicationKey?: string;
   }) => Promise<ActionInvocationClaim>;
   registerApproval: (input: {
+    action?: ResolvedAction;
+    signal?: AbortSignal;
     run: ActionServiceRunRef;
     invocationId: string;
     actionId: string;
@@ -159,6 +162,7 @@ export async function executeActionHostGatewayService(input: {
     if (input.request.operation === "catalog") {
       return { ok: true, catalog: serviceCatalog };
     }
+    let automaticApproval: { reason: string } | undefined;
     if (input.request.operation === "approval") {
       const approvalRequest = input.request;
       const action = catalog.actions.find((candidate) => candidate.id === approvalRequest.action);
@@ -171,6 +175,8 @@ export async function executeActionHostGatewayService(input: {
       if (action.permissionMode === "ask") {
         const approval = await dependencies.registerApproval({
           run,
+          action,
+          signal: input.signal,
           invocationId: approvalRequest.invocationId,
           actionId: action.id,
           sourceId: action.provider,
@@ -188,6 +194,10 @@ export async function executeActionHostGatewayService(input: {
         return {
           ok: true,
           needsApproval: !denyHeadlessApproval && approval.status === "pending",
+          ...(approval.status === "approved" &&
+          approval.automaticReview?.outcome === "auto_approved"
+            ? { automaticApproval: { reason: approval.automaticReview.reason } }
+            : {}),
         };
       }
       await dependencies.recordSourceDiscovery({ run, sourceId: action.provider });
@@ -207,6 +217,8 @@ export async function executeActionHostGatewayService(input: {
       if (action?.permissionMode === "ask") {
         const approval = await dependencies.registerApproval({
           run,
+          action,
+          signal: input.signal,
           invocationId: executeRequest.invocationId,
           actionId: action.id,
           sourceId: action.provider,
@@ -221,6 +233,8 @@ export async function executeActionHostGatewayService(input: {
             "This action invocation does not match its existing approval request.",
           );
         }
+        if (approval.status === "approved" && approval.automaticReview?.outcome === "auto_approved")
+          automaticApproval = { reason: approval.automaticReview.reason };
         if (approval.status === "pending") {
           return {
             ok: false,
@@ -247,7 +261,7 @@ export async function executeActionHostGatewayService(input: {
         }
       }
     }
-    return await serveActionRequest({
+    const response = await serveActionRequest({
       request: gatewayRequest(input.request),
       catalog: serviceCatalog,
       legacyDiscovery: !supportsCompactActionDiscovery(
@@ -297,6 +311,7 @@ export async function executeActionHostGatewayService(input: {
           ...(context.engine ? { sourceEngine: context.engine } : {}),
         }),
     });
+    return automaticApproval ? { ...response, automaticApproval } : response;
   } catch (error) {
     logger.error("Action gateway service request failed", {
       event: "opencompany.action_gateway_service_request_failed",

@@ -446,7 +446,7 @@ export async function executeExternalActionWithApproval(input: {
   if (input.signal.aborted) return canceledActionError(input.request);
   if (!approval.ok || !("needsApproval" in approval)) return approval;
   if (!approval.needsApproval) {
-    input.request = originalRequest;
+    if (!approval.automaticApproval) input.request = originalRequest;
     return dispatch();
   }
 
