@@ -3308,6 +3308,7 @@ describe("Surface chat streaming UI", () => {
   it("posts an interactive Codex question answer to its durable interaction", async () => {
     const user = userEvent.setup();
     const interactionId = "goat_codex_chat_interaction_123e4567-e89b-12d3-a456-426614174000";
+    const questionRunId = "goat_codex_chat_turn_question";
 
     render(
       <Surface
@@ -3329,7 +3330,10 @@ describe("Surface chat streaming UI", () => {
             {
               id: "assistant_question",
               role: "assistant",
-              metadata: { sessionId: "goat_chat_codex_1" },
+              metadata: {
+                sessionId: "goat_chat_codex_1",
+                runId: questionRunId,
+              },
               parts: [
                 {
                   type: "dynamic-tool",
@@ -3361,7 +3365,7 @@ describe("Surface chat streaming UI", () => {
     await user.click(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() =>
       expect(headlessChatCommandMocks.resolveQuestions).toHaveBeenCalledWith(
-        "goat_codex_chat_turn_1",
+        questionRunId,
         interactionId,
         { scope: { answers: ["Foundational"] } },
       ),
