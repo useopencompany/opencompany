@@ -220,6 +220,9 @@ export function CompanyAgentEditor({
                 ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {canEdit ? (
+                  <AgentSaveIndicator state={saveState} error={saveError} onRetry={save} />
+                ) : null}
                 <AgentStatusPicker
                   value={draft.status}
                   disabled={!canEdit}
@@ -247,13 +250,6 @@ export function CompanyAgentEditor({
               </div>
             </div>
             <OwnerNotice ownerName={ownerName} ownerActive={agent.ownerActive} canEdit={canEdit} />
-            {saveState === "error" && saveError ? (
-              <p role="alert" className="text-[12.5px] leading-5 text-danger">
-                {saveError}
-              </p>
-            ) : saveState === "saving" ? (
-              <p className="text-[12.5px] leading-5 text-ink-subtle">Saving…</p>
-            ) : null}
           </header>
 
           <section className="flex flex-col gap-3">
@@ -363,6 +359,50 @@ export function CompanyAgentEditor({
         </DialogContent>
       </Dialog>
     </main>
+  );
+}
+
+function AgentSaveIndicator({
+  state,
+  error,
+  onRetry,
+}: {
+  state: SaveState;
+  error: string | null;
+  onRetry: () => Promise<void>;
+}) {
+  return (
+    <div
+      aria-live="polite"
+      aria-atomic="true"
+      className="flex w-[78px] shrink-0 items-center justify-center text-[12px] text-ink-subtle"
+    >
+      {state === "error" ? (
+        <button
+          type="button"
+          onClick={() => void onRetry()}
+          title={error ?? "This agent could not be saved."}
+          aria-label={error ? `Save failed: ${error}. Retry save.` : "Save failed. Retry save."}
+          className="rounded-md px-1.5 py-1 font-medium text-warning transition-colors hover:bg-warning-bg focus:outline-none focus-visible:ring-1 focus-visible:ring-warning/30"
+        >
+          Retry save
+        </button>
+      ) : (
+        <span className="flex items-center gap-1.5 px-1.5">
+          {state === "saving" ? (
+            <>
+              <Loader2 size={12} strokeWidth={2} className="animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Check size={12} strokeWidth={2} className="text-success" />
+              Saved
+            </>
+          )}
+        </span>
+      )}
+    </div>
   );
 }
 
