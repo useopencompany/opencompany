@@ -782,6 +782,7 @@ export const users = productSchema.table(
     avatarUrl: text("avatar_url"),
     timezone: text("timezone").notNull().default("UTC"),
     botsEnabled: boolean("bots_enabled").notNull().default(false),
+    approveForMeEnabled: boolean("approve_for_me_enabled").notNull().default(false),
     autoModelRoutingEnabled: boolean("auto_model_routing_enabled").notNull().default(false),
     chatCapabilitiesBetaEnabled: boolean("chat_capabilities_beta_enabled").notNull().default(false),
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),

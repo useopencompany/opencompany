@@ -19,6 +19,7 @@ const storedPreferences = {
   taskViewMode: "board" as const,
   taskTimeRange: "7d" as const,
   autoModelRoutingEnabled: false,
+  approveForMeEnabled: false,
 };
 
 function fakeDb(options: { selectRows?: unknown[]; updateRows?: unknown[] }) {

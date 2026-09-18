@@ -4511,6 +4511,9 @@
           "autoModelRoutingEnabled": {
             "type": "boolean"
           },
+          "approveForMeEnabled": {
+            "type": "boolean"
+          },
           "chatCapabilitiesBetaEnabled": {
             "type": "boolean"
           },
@@ -4594,6 +4597,7 @@
           "timezone",
           "taskSpawningEnabled",
           "autoModelRoutingEnabled",
+          "approveForMeEnabled",
           "chatCapabilitiesBetaEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
@@ -10685,6 +10689,9 @@
           "autoModelRoutingEnabled": {
             "type": "boolean"
           },
+          "approveForMeEnabled": {
+            "type": "boolean"
+          },
           "reviewInboxEnabled": {
             "type": "boolean"
           },
@@ -10712,6 +10719,7 @@
           "taskViewMode",
           "taskTimeRange",
           "autoModelRoutingEnabled",
+          "approveForMeEnabled",
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
@@ -10757,6 +10765,9 @@
             ]
           },
           "autoModelRoutingEnabled": {
+            "type": "boolean"
+          },
+          "approveForMeEnabled": {
             "type": "boolean"
           },
           "reviewInboxEnabled": {

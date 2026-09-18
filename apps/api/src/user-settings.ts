@@ -23,6 +23,7 @@ export type UserPreferenceSet = {
   taskViewMode: TaskViewMode;
   taskTimeRange: TaskTimeRange;
   autoModelRoutingEnabled: boolean;
+  approveForMeEnabled: boolean;
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
@@ -59,6 +60,7 @@ const PREFERENCE_COLUMNS = {
   taskViewMode: users.taskViewMode,
   taskTimeRange: users.taskTimeRange,
   autoModelRoutingEnabled: users.autoModelRoutingEnabled,
+  approveForMeEnabled: users.approveForMeEnabled,
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
@@ -84,6 +86,7 @@ export function createUserSettingsService(input: {
       for (const field of [
         "botsEnabled",
         "autoModelRoutingEnabled",
+        "approveForMeEnabled",
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
         "subagentsEnabled",
