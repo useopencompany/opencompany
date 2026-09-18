@@ -14,6 +14,7 @@ import {
 import type { PendingChatAttachment } from "@/components/chat/ChatComposerAttachments";
 import {
   CHAT_ATTACHMENT_MAX_PER_MESSAGE,
+  type ChatAttachmentKind,
   validateChatAttachmentCandidate,
 } from "@/lib/chat-attachment-formats";
 
@@ -29,6 +30,9 @@ export function useChatAttachments(opts: {
   // Cloud engines can make uploaded files available through their own filesystem even when
   // the gateway model catalog does not advertise native PDF/image message parts.
   capabilities?: { images: boolean; pdf: boolean };
+  // Some upload surfaces reuse the attachment lifecycle but intentionally accept only a
+  // subset of the chat formats (for example, feedback accepts screenshots only).
+  allowedKinds?: readonly ChatAttachmentKind[];
   // The canonical API returns an opaque attachment id.
   upload: (input: {
     file: File;
@@ -37,6 +41,7 @@ export function useChatAttachments(opts: {
   }) => Promise<{ id: string; canonical?: boolean }>;
 }) {
   const { modelName, enabled = true, upload } = opts;
+  const allowedKinds = opts.allowedKinds;
   const imagesOverride = opts.capabilities?.images;
   const pdfOverride = opts.capabilities?.pdf;
   const [attachments, setRenderedAttachments] = useState<PendingChatAttachment[]>([]);
@@ -109,6 +114,14 @@ export function useChatAttachments(opts: {
             toast.error(validation.message);
             continue;
           }
+          if (allowedKinds && !allowedKinds.includes(validation.kind)) {
+            toast.error(
+              allowedKinds.length === 1 && allowedKinds[0] === "image"
+                ? "Screenshots must be PNG, JPEG, or WebP images."
+                : "That file type is not supported here.",
+            );
+            continue;
+          }
           const capability = capabilityRef.current;
           if (validation.kind === "pdf" && !capability.pdf) {
             toast.error("The selected model can't read PDFs.");
@@ -168,7 +181,7 @@ export function useChatAttachments(opts: {
           });
       }
     },
-    [updateAttachments, upload],
+    [allowedKinds, updateAttachments, upload],
   );
 
   const removeAttachment = useCallback(

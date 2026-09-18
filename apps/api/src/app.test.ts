@@ -3740,6 +3740,7 @@ describe("canonical Hono API", () => {
         kind: "bug",
         message: "The run stalled halfway.",
         context: { kind: "task", id: "tsk_1" },
+        attachmentIds: ["attachment_1"],
       }),
     });
     expect(withContext.status).toBe(200);
@@ -3747,6 +3748,7 @@ describe("canonical Hono API", () => {
       kind: "bug",
       message: "The run stalled halfway.",
       context: { kind: "task", id: "tsk_1" },
+      attachmentIds: ["attachment_1"],
     });
 
     const tooShort = await app.request("/v1/feedback", {

@@ -2,6 +2,7 @@
 
 import { cn } from "@opencompany/ui/lib/utils";
 import { FileText, Upload, X } from "lucide-react";
+import type { ChatAttachmentKind } from "@/lib/chat-attachment-formats";
 
 export type PendingChatAttachment = {
   id: string;
@@ -16,17 +17,6 @@ export type PendingChatAttachment = {
   canonical?: boolean;
   error?: string;
 };
-
-type ChatAttachmentKind =
-  | "image"
-  | "pdf"
-  | "docx"
-  | "xlsx"
-  | "srt"
-  | "csv"
-  | "tsv"
-  | "json"
-  | "text";
 
 // "Drop files to attach" overlay shown over the composer while a file drag is
 // active. Adapted from the original composer overlay.

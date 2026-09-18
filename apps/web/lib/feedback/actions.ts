@@ -24,6 +24,10 @@ export async function submitFeedback(
 ): Promise<FeedbackActionState> {
   const rawKind = readString(formData, "kind");
   const message = readString(formData, "message");
+  const attachmentIds = formData
+    .getAll("attachmentId")
+    .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+    .map((value) => value.trim());
   const kind = isFeedbackKind(rawKind) ? rawKind : "feedback";
   // Re-derive the reference from the submitted path so the action trusts the
   // same route rules as the dialog rather than a client-supplied id.
@@ -38,7 +42,12 @@ export async function submitFeedback(
 
   try {
     const response = await (await serverApiClient()).v1.feedback.$post({
-      json: { kind, message, ...(context ? { context } : {}) },
+      json: {
+        kind,
+        message,
+        ...(context ? { context } : {}),
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+      },
     });
     if (!response.ok) {
       return {

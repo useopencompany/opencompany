@@ -1258,26 +1258,36 @@ export function Surface({
   const finalizedAssistantMessage = foregroundAssistantMessageId
     ? (persistedMessages.find((message) => message.id === foregroundAssistantMessageId) ?? null)
     : null;
+  const runtimeMatchesForegroundTurn = Boolean(
+    foregroundTurn &&
+      isChatRuntimeActive(conversationRuntime) &&
+      (!conversationRuntime?.activeRunId ||
+        !foregroundTurn.runId ||
+        conversationRuntime.activeRunId === foregroundTurn.runId),
+  );
+  const runtimeNamesForegroundTurn = Boolean(
+    conversationRuntime?.activeRunId &&
+      foregroundTurn?.runId &&
+      conversationRuntime.activeRunId === foregroundTurn.runId,
+  );
   const chatTurnPhase = deriveChatTurnPhase({
     runStatus: locallySettledForegroundStatus ?? foregroundRun?.status ?? null,
     finalizedAssistantOutcome: finalizedChatAssistantOutcome(finalizedAssistantMessage),
     runtimeStatus: conversationRuntime?.status ?? null,
-    runtimeMatchesTurn: Boolean(
-      foregroundTurn &&
-        isChatRuntimeActive(conversationRuntime) &&
-        (!conversationRuntime?.activeRunId ||
-          !foregroundTurn.runId ||
-          conversationRuntime.activeRunId === foregroundTurn.runId),
-    ),
+    runtimeMatchesTurn: runtimeMatchesForegroundTurn,
     transportStatus: status,
     submitting: engineSubmitting,
   });
-  // The runtime is the authoritative session-level signal and also drives the header badge.
-  // Keep the composer in the same state when its run-specific projection is briefly missing or
-  // stale, otherwise the page can say "Working" while hiding Interrupt and looking ready.
+  // The runtime remains authoritative when the conversation has moved to another Run. A finalized
+  // assistant message wins when both projections describe the same Run, otherwise a stale runtime
+  // leaves the composer working and the completed trace expanded indefinitely.
   const isForegroundTurnWorking = isChatConversationWorking(
     chatTurnPhase,
-    Boolean(activeEngineChat && conversationRunning),
+    Boolean(
+      activeEngineChat &&
+        conversationRunning &&
+        !(isChatTurnTerminal(chatTurnPhase) && runtimeNamesForegroundTurn),
+    ),
   );
   const isChatConversationStopping = Boolean(
     stoppingChatRun &&
@@ -1307,12 +1317,13 @@ export function Surface({
   // while work is in flight without one (task runs, transports without a run id yet), protect the
   // newest assistant message so a streaming trace never compacts mid-turn. A submitting turn has
   // no assistant row yet, so it must not re-expand the previous turn's collapsed trace.
-  const activeAssistantMessageId =
-    foregroundAssistantMessageId && !isChatTurnTerminal(chatTurnPhase)
-      ? foregroundAssistantMessageId
-      : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
-        ? latestAssistantMessageId
-        : null;
+  const activeAssistantMessageId = foregroundAssistantMessageId
+    ? isChatTurnTerminal(chatTurnPhase)
+      ? null
+      : foregroundAssistantMessageId
+    : (isAgentWorking || isTaskRunInFlight) && chatTurnPhase !== "submitting"
+      ? latestAssistantMessageId
+      : null;
   const isBackgroundSubmit = backgroundDirectiveActive || Boolean(selectedWorkflowMention);
   const activeTurnTimerStartedAtMs =
     foregroundTurn?.startedAtMs ??
