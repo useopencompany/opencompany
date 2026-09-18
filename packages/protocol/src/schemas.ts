@@ -624,6 +624,10 @@ export const RunReadModelSchema = z
 
 export const EngineSessionReadModelSchema = z
   .object({
+    // The physical runtime row id. Electric keys every change on the primary key and a partial
+    // update carries only that key plus the changed columns, so it is the one field a client can
+    // rely on to match an update to the row it already holds.
+    id: ResourceIdSchema,
     conversationId: ResourceIdSchema,
     engine: z.enum(["opencompany", "codex", "claude_code"]),
     status: z.enum(["queued", "starting", "idle", "running", "failed", "interrupted", "closed"]),

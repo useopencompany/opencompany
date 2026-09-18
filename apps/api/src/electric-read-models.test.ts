@@ -675,12 +675,57 @@ describe("Electric read models", () => {
         headers: { operation: "insert" },
         key: '"runtime_1"',
         value: {
+          id: "runtime_1",
           conversationId: "conversation_1",
           engine: "codex",
           status: "running",
           activeRunId: "run_1",
           error: null,
           updatedAt: "2026-08-13T08:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("keeps the runtime identity on partial engine session updates", async () => {
+    // Electric's default replica mode sends the primary key plus the changed columns only, so a
+    // settled turn arrives without the Conversation id. The client matches it on `id`.
+    const proxy = new ElectricReadModelProxy({
+      electricUrl: "https://electric.example.test",
+      fetch: vi.fn(async () =>
+        Response.json([
+          {
+            headers: { operation: "update" },
+            key: '"runtime_1"',
+            value: {
+              id: "runtime_1",
+              status: "idle",
+              active_turn_id: null,
+              updated_at: "2026-09-18 08:39:26.971+00",
+            },
+          },
+        ]),
+      ) as typeof fetch,
+    });
+
+    const response = await proxy.stream({
+      actor,
+      readModel: "engine-sessions-v1",
+      conversationId: "conversation_1",
+      requestUrl: new URL(
+        "https://api.example.test/v1/read-models/engine-sessions-v1?conversationId=conversation_1",
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual([
+      {
+        headers: { operation: "update" },
+        key: '"runtime_1"',
+        value: {
+          id: "runtime_1",
+          status: "idle",
+          activeRunId: null,
+          updatedAt: "2026-09-18T08:39:26.971Z",
         },
       },
     ]);
@@ -714,7 +759,7 @@ describe("Electric read models", () => {
       {
         headers: { operation: "delete" },
         key: '"runtime_retired"',
-        value: { conversationId: "conversation_retired" },
+        value: { id: "runtime_retired" },
       },
     ]);
   });
