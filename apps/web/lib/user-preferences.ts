@@ -19,6 +19,7 @@ type UserPreferences = {
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  companyAgentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
   whatsappEnabled: boolean;
@@ -84,6 +85,13 @@ export async function updateSubagentsAction(enabled: boolean) {
   revalidatePath("/");
   revalidatePath("/settings/preferences");
   return { ok: true, enabled: preferences.subagentsEnabled } as const;
+}
+
+export async function updateCompanyAgentsAction(enabled: boolean) {
+  const preferences = await patchPreferences({ companyAgentsEnabled: enabled === true });
+  revalidatePath("/");
+  revalidatePath("/settings/preferences");
+  return { ok: true, enabled: preferences.companyAgentsEnabled } as const;
 }
 
 export async function updatePastSessionAccessAction(enabled: boolean) {

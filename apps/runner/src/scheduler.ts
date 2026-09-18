@@ -20,6 +20,9 @@ type DueWorkflowScheduleRow = {
   triggerId: string;
   workspaceId: string;
   slug: string;
+  // "agent" when this schedule belongs to a Company agent, which makes the Task the agent's work
+  // rather than the owner's.
+  kind: "workflow" | "agent";
   userWorkosId: string;
   name: string;
   cron: string;
@@ -96,6 +99,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           automation_trigger.value->>'id' AS "triggerId",
           workflow.workspace_id AS "workspaceId",
           workflow.slug,
+          workflow.kind,
           automation_trigger.value->>'userWorkosId' AS "userWorkosId",
           workflow.name,
           automation_trigger.value->>'cron' AS "cron",
@@ -219,6 +223,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         initialUserMessage: taskPrompt,
       },
       workflowId: workflow.slug,
+      ...(workflow.kind === "agent" ? { agentId: workflow.id } : {}),
       scheduledFor,
       now,
     });
@@ -277,6 +282,7 @@ async function createScheduledTask(
     name: string;
     harnessSpec: HarnessSpec;
     workflowId?: string | null;
+    agentId?: string;
     scheduledFor: Date;
     now: Date;
   },
@@ -305,6 +311,7 @@ async function createScheduledTask(
     model: input.harnessSpec.model,
     source: "schedule",
     ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+    ...(input.agentId ? { agentId: input.agentId } : {}),
     scheduledFor: input.scheduledFor,
   });
   const task = created.task;

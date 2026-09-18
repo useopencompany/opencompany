@@ -11,10 +11,12 @@ import {
   type AutomationExecutionPlan,
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
+  CompanyAgentApplicationService,
   CoreError,
   TaskApplicationService,
   taskNameFromGoal,
   WorkflowApplicationService,
+  type WorkflowEventTrigger,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
@@ -73,18 +75,30 @@ export function createAutomationServices(input: AutomationServicesInput) {
     taskCreator,
     ...(input.now ? { now: input.now } : {}),
   };
+  const definitionOptions = {
+    validateDefinition: (definition: Parameters<typeof validateWorkflowFields>[0]) =>
+      validateWorkflowFields({
+        ...definition,
+        steps: definition.steps as never,
+        trigger: definition.trigger as never,
+      }),
+    validateEventSubscription: (subscription: { actor: Actor; trigger: WorkflowEventTrigger }) =>
+      validateWorkflowEventSubscription(input.execute, subscription),
+  };
+  // Two services over one table, each pinned to the automation kind it serves. A Company agent is
+  // unreachable through the Workflows API, and a workflow is unreachable through the agents API,
+  // because each repository filters on `kind` in SQL rather than trusting the caller.
   return {
     workflows: new WorkflowApplicationService(new PostgresWorkflowRepository(input.execute), {
       ...options,
-      validateDefinition: (definition) =>
-        validateWorkflowFields({
-          ...definition,
-          steps: definition.steps as never,
-          trigger: definition.trigger as never,
-        }),
-      validateEventSubscription: (subscription) =>
-        validateWorkflowEventSubscription(input.execute, subscription),
+      ...definitionOptions,
     }),
+    agents: new CompanyAgentApplicationService(
+      new WorkflowApplicationService(
+        new PostgresWorkflowRepository(input.execute, { kind: "agent" }),
+        { ...options, kind: "agent", ...definitionOptions },
+      ),
+    ),
   };
 }
 
@@ -126,6 +140,7 @@ export function createAutomationTaskCreator(
         model: command.execution.model,
         source: command.source,
         ...(command.workflowId ? { workflowId: command.workflowId } : {}),
+        ...(command.agentId ? { agentId: command.agentId } : {}),
         ...(command.attachmentIds ? { attachmentIds: command.attachmentIds } : {}),
       });
       if (

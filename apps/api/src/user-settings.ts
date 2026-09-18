@@ -27,6 +27,7 @@ export type UserPreferenceSet = {
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  companyAgentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
   whatsappEnabled: boolean;
@@ -64,6 +65,7 @@ const PREFERENCE_COLUMNS = {
   reviewInboxEnabled: users.reviewInboxEnabled,
   sidebarProjectsEnabled: users.sidebarProjectsEnabled,
   subagentsEnabled: users.subagentsEnabled,
+  companyAgentsEnabled: users.companyAgentsEnabled,
   pastSessionAccessEnabled: users.pastSessionAccessEnabled,
   imessageEnabled: users.imessageEnabled,
   whatsappEnabled: users.whatsappEnabled,
@@ -90,6 +92,7 @@ export function createUserSettingsService(input: {
         "reviewInboxEnabled",
         "sidebarProjectsEnabled",
         "subagentsEnabled",
+        "companyAgentsEnabled",
         "pastSessionAccessEnabled",
         "imessageEnabled",
         "whatsappEnabled",

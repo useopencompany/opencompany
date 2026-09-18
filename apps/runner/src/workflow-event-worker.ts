@@ -20,6 +20,11 @@ type PendingWorkflowEvent = {
   id: string;
   workspaceId: string;
   userWorkosId: string;
+  workflowId: string;
+  // "agent" when the matched row is a Company agent. `userWorkosId` is already the agent owner —
+  // the trigger stored it when the owner activated it — so the run keeps the owner's authority
+  // and this only decides who the resulting work belongs to.
+  workflowKind: "workflow" | "agent";
   workflowSlug: string;
   workflowName: string;
   goal: string;
@@ -49,6 +54,12 @@ export async function createNextWorkflowEventTask(
           event.id,
           event.workspace_id AS "workspaceId",
           event.user_workos_id AS "userWorkosId",
+          event.workflow_id AS "workflowId",
+          (
+            SELECT matched.kind
+            FROM goat.workflows AS matched
+            WHERE matched.id = event.workflow_id
+          ) AS "workflowKind",
           event.workflow_slug AS "workflowSlug",
           event.workflow_name AS "workflowName",
           event.goal,
@@ -210,6 +221,7 @@ async function createWorkflowEventTask(
     model: harnessSpec.model,
     source: "workflow",
     workflowId: event.workflowSlug,
+    ...(event.workflowKind === "agent" ? { agentId: event.workflowId } : {}),
   });
   return { taskId: created.task.id };
 }

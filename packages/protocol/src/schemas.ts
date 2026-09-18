@@ -2917,6 +2917,140 @@ export const ArchiveVersionBodySchema = z
   .strict()
   .openapi("ArchiveVersionBody");
 
+// --- Company agents -------------------------------------------------------------------------
+// An agent is one standing responsibility with one set of instructions, so it has no step list.
+// Its Slack display identity is derived from `name` and `photoUrl` rather than configured twice.
+
+export const CompanyAgentStatusSchema = z.enum(["active", "paused"]).openapi("CompanyAgentStatus");
+
+export const CompanyAgentSchema = z
+  .object({
+    id: ResourceIdSchema,
+    slug: z.string().min(1).max(80),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    instructions: z.string().max(20_000),
+    photoUrl: z.string().max(2_048),
+    model: z.string().max(256),
+    runtimeModel: z.string().max(256).optional(),
+    reasoningEffort: z.string().max(64).optional(),
+    status: CompanyAgentStatusSchema,
+    // The member whose authorized connections execute this agent's work. Null once that member
+    // leaves the workspace, which blocks runs rather than reassigning them.
+    ownerUserId: z.string().max(256).nullable(),
+    ownerActive: z.boolean(),
+    slackEnabled: z.boolean(),
+    triggers: z.array(WorkflowAutomationTriggerSchema).max(20),
+    lastRunAt: TimestampSchema.nullable(),
+    version: z.number().int().min(1),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("CompanyAgent");
+
+export const CompanyAgentPageSchema = z
+  .object({
+    data: z.array(CompanyAgentSchema),
+    nextCursor: z.string().nullable(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CompanyAgentPage");
+
+export const CompanyAgentEnvelopeSchema = z
+  .object({ data: CompanyAgentSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyAgentEnvelope");
+
+export const CreateCompanyAgentBodySchema = z
+  .object({
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024).optional(),
+  })
+  .strict()
+  .openapi("CreateCompanyAgentBody");
+
+export const UpdateCompanyAgentBodySchema = z
+  .object({
+    expectedVersion: z.number().int().min(1),
+    name: z.string().min(1).max(64),
+    description: z.string().max(1_024),
+    instructions: z.string().max(20_000),
+    photoUrl: z.string().max(2_048),
+    model: z.string().max(256),
+    runtimeModel: z.string().max(256).optional(),
+    reasoningEffort: z.string().max(64).optional(),
+    status: CompanyAgentStatusSchema,
+    slackEnabled: z.boolean(),
+    triggers: z.array(WorkflowAutomationTriggerInputSchema).max(20),
+  })
+  .strict()
+  .openapi("UpdateCompanyAgentBody");
+
+export const CompanyAgentMutationEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        agent: CompanyAgentSchema,
+        transactionId: z.string().regex(/^[0-9]+$/u),
+        replayed: z.boolean(),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CompanyAgentMutationEnvelope");
+
+export const CompanyAgentUpdateEnvelopeSchema = z
+  .object({
+    data: z
+      .object({ agent: CompanyAgentSchema, transactionId: z.string().regex(/^[0-9]+$/u) })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CompanyAgentUpdateEnvelope");
+
+export const CompanyAgentRunSchema = z
+  .object({
+    id: ResourceIdSchema,
+    // Null on a blocked run: the event matched, but no work was ever started.
+    taskId: ResourceIdSchema.nullable(),
+    displayId: z.string().max(64).nullable(),
+    conversationId: ResourceIdSchema.nullable(),
+    name: z.string().max(256),
+    status: z.enum(["queued", "running", "waiting", "succeeded", "failed", "canceled", "blocked"]),
+    triggerKind: z.enum(["manual", "schedule", "event"]),
+    triggerLabel: z.string().max(256),
+    result: z.string().nullable(),
+    error: z.string().nullable(),
+    awaitingInput: z.boolean(),
+    createdAt: TimestampSchema,
+    updatedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("CompanyAgentRun");
+
+export const CompanyAgentRunPageSchema = z
+  .object({ data: z.array(CompanyAgentRunSchema), meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyAgentRunPage");
+
+export const CompanyAgentPhotoUploadEnvelopeSchema = z
+  .object({
+    data: z
+      .object({
+        // Absolute, unauthenticated URL. Slack downloads it directly for the per-message avatar,
+        // and the editor saves it onto the agent through the normal update command.
+        photoUrl: z.string().url().max(2_048),
+      })
+      .strict(),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict()
+  .openapi("CompanyAgentPhotoUploadEnvelope");
+
 export const WorkflowMutationEnvelopeSchema = z
   .object({
     data: z
@@ -3933,6 +4067,7 @@ export const IdentityUserSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    companyAgentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
     whatsappEnabled: z.boolean(),
@@ -4005,6 +4140,7 @@ export const UserPreferencesSchema = z
     reviewInboxEnabled: z.boolean(),
     sidebarProjectsEnabled: z.boolean(),
     subagentsEnabled: z.boolean(),
+    companyAgentsEnabled: z.boolean(),
     pastSessionAccessEnabled: z.boolean(),
     imessageEnabled: z.boolean(),
     whatsappEnabled: z.boolean(),
@@ -4027,6 +4163,7 @@ export const UpdateUserPreferencesBodySchema = z
     reviewInboxEnabled: z.boolean().optional(),
     sidebarProjectsEnabled: z.boolean().optional(),
     subagentsEnabled: z.boolean().optional(),
+    companyAgentsEnabled: z.boolean().optional(),
     pastSessionAccessEnabled: z.boolean().optional(),
     imessageEnabled: z.boolean().optional(),
     whatsappEnabled: z.boolean().optional(),
@@ -5018,6 +5155,11 @@ export type PluginImportPreviewBody = z.infer<typeof PluginImportPreviewBodySche
 export type InstallPluginBody = z.infer<typeof InstallPluginBodySchema>;
 export type ApprovePluginMcpBody = z.infer<typeof ApprovePluginMcpBodySchema>;
 export type SetPluginEventEnabledBody = z.infer<typeof SetPluginEventEnabledBodySchema>;
+export type CompanyAgentDto = z.infer<typeof CompanyAgentSchema>;
+export type CompanyAgentRunDto = z.infer<typeof CompanyAgentRunSchema>;
+export type CompanyAgentStatus = z.infer<typeof CompanyAgentStatusSchema>;
+export type CreateCompanyAgentBody = z.infer<typeof CreateCompanyAgentBodySchema>;
+export type UpdateCompanyAgentBody = z.infer<typeof UpdateCompanyAgentBodySchema>;
 export type CreateWorkflowBody = z.infer<typeof CreateWorkflowBodySchema>;
 export type UpdateWorkflowBody = z.infer<typeof UpdateWorkflowBodySchema>;
 export type ArchiveVersionBody = z.infer<typeof ArchiveVersionBodySchema>;

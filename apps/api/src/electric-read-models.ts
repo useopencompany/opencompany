@@ -367,7 +367,11 @@ function readModelShape(input: {
           "created_at",
           "updated_at",
         ],
-        where: `("workspace_id" = $2 OR (` + `"workspace_id" IS NULL AND "actor_id" = $1))`,
+        // Company agent runs belong to the agent, not to any member's Task list. They are read
+        // back through the agent's own run history instead.
+        where:
+          `("workspace_id" = $2 OR ("workspace_id" IS NULL AND "actor_id" = $1))` +
+          ` AND "agent_id" IS NULL`,
         params: [input.actor.userId, input.actor.workspaceId],
       };
     case "task-activities-v1":

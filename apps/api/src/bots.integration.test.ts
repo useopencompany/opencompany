@@ -33,6 +33,7 @@ describe("persistent bot storage", () => {
         review_inbox_enabled boolean NOT NULL DEFAULT false,
         sidebar_projects_enabled boolean NOT NULL DEFAULT false,
         subagents_enabled boolean NOT NULL DEFAULT false,
+        company_agents_enabled boolean NOT NULL DEFAULT false,
         past_session_access_enabled boolean NOT NULL DEFAULT false,
         imessage_enabled boolean NOT NULL DEFAULT false,
         whatsapp_enabled boolean NOT NULL DEFAULT false,

@@ -29,6 +29,7 @@ export type IdentityUser = {
   reviewInboxEnabled: boolean;
   sidebarProjectsEnabled: boolean;
   subagentsEnabled: boolean;
+  companyAgentsEnabled: boolean;
   pastSessionAccessEnabled: boolean;
   imessageEnabled: boolean;
   whatsappEnabled: boolean;
@@ -238,6 +239,7 @@ function identityUser(user: IdentityDto["user"]): IdentityUser {
     reviewInboxEnabled: user.reviewInboxEnabled,
     sidebarProjectsEnabled: user.sidebarProjectsEnabled,
     subagentsEnabled: user.subagentsEnabled,
+    companyAgentsEnabled: user.companyAgentsEnabled,
     pastSessionAccessEnabled: user.pastSessionAccessEnabled,
     imessageEnabled: user.imessageEnabled,
     whatsappEnabled: user.whatsappEnabled,

@@ -693,6 +693,7 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
   return {
     id: "workflow_1",
     slug: "weekly-research",
+    kind: "workflow",
     name: "Weekly research",
     description: "Research changes",
     steps: [
@@ -707,6 +708,9 @@ function workflow(overrides: Partial<Workflow> = {}): Workflow {
     scope: "company",
     slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
+    ownerUserId: null,
+    ownerActive: false,
+    lastRunAt: null,
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,
@@ -826,6 +830,7 @@ function fakeWorkflowRepository(options: { workflow?: Workflow } = {}): Workflow
       value: { workflowId: stored.id, version: stored.version + 1 },
       transactionId: "44",
     })),
+    listRuns: vi.fn(async () => []),
     recordRunNow: vi.fn(async () => undefined),
     getWorkflowMemory: vi.fn(async ({ workflowId }) =>
       workflowId === stored.id || workflowId === stored.slug ? storedMemory : null,

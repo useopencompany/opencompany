@@ -53,6 +53,12 @@ import {
   ClaudeCodeAuthStatusEnvelopeSchema,
   CodexAuthStatusEnvelopeSchema,
   CodexDeviceAuthFlowEnvelopeSchema,
+  CompanyAgentEnvelopeSchema,
+  CompanyAgentMutationEnvelopeSchema,
+  CompanyAgentPageSchema,
+  CompanyAgentPhotoUploadEnvelopeSchema,
+  CompanyAgentRunPageSchema,
+  CompanyAgentUpdateEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConfirmBrainImportBodySchema,
   ConversationEnvelopeSchema,
@@ -65,6 +71,7 @@ import {
   CreateBrainDocumentBodySchema,
   CreateBrainFolderBodySchema,
   CreateBrowserProfileBodySchema,
+  CreateCompanyAgentBodySchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
   CreateProjectBodySchema,
@@ -200,6 +207,7 @@ import {
   UpdateBillingAutoRefillBodySchema,
   UpdateBrainDocumentBodySchema,
   UpdateCodexWorkspaceEngineBodySchema,
+  UpdateCompanyAgentBodySchema,
   UpdateConversationBodySchema,
   UpdateConversationEnvelopeSchema,
   UpdateMcpSetupBodySchema,
@@ -587,6 +595,161 @@ export const uploadWorkflowSlackAvatarRoute = createRoute({
     201: {
       description: "Avatar stored and addressable by an unguessable public URL.",
       content: { "application/json": { schema: WorkflowSlackAvatarUploadEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+// --- Company agents -------------------------------------------------------------------------
+// Reads are open to every workspace member; every write is owner-only and enforced in the Core.
+
+export const listCompanyAgentsRoute = createRoute({
+  method: "get",
+  path: "/v1/agents",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Company agents visible to the workspace.",
+      content: { "application/json": { schema: CompanyAgentPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const createCompanyAgentRoute = createRoute({
+  method: "post",
+  path: "/v1/agents",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: CreateCompanyAgentBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Company agent created, owned by its creator.",
+      content: { "application/json": { schema: CompanyAgentMutationEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const getCompanyAgentRoute = createRoute({
+  method: "get",
+  path: "/v1/agents/{agentId}",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: { params: z.object({ agentId: ResourceIdSchema }) },
+  responses: {
+    200: {
+      description: "A Company agent, its owner, and its triggers.",
+      content: { "application/json": { schema: CompanyAgentEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const updateCompanyAgentRoute = createRoute({
+  method: "patch",
+  path: "/v1/agents/{agentId}",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: UpdateCompanyAgentBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Company agent updated by its owner after an optimistic version check.",
+      content: { "application/json": { schema: CompanyAgentUpdateEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const archiveCompanyAgentRoute = createRoute({
+  method: "post",
+  path: "/v1/agents/{agentId}/archive",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: ResourceIdSchema }),
+    body: { required: true, content: { "application/json": { schema: ArchiveVersionBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Company agent archived by its owner after an optimistic version check.",
+      content: { "application/json": { schema: WorkflowArchiveEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const runCompanyAgentRoute = createRoute({
+  method: "post",
+  path: "/v1/agents/{agentId}/run",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: ResourceIdSchema }),
+    headers: z.object({ "idempotency-key": z.string().min(1).max(200) }),
+  },
+  responses: {
+    202: {
+      description: "Run accepted. It executes with the agent owner's authority, not the caller's.",
+      content: { "application/json": { schema: CreateTaskEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listCompanyAgentRunsRoute = createRoute({
+  method: "get",
+  path: "/v1/agents/{agentId}/runs",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: ResourceIdSchema }),
+    query: z.object({ limit: z.coerce.number().int().min(1).max(100).optional() }),
+  },
+  responses: {
+    200: {
+      description: "Run history, including events that were blocked before any work started.",
+      content: { "application/json": { schema: CompanyAgentRunPageSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const uploadCompanyAgentPhotoRoute = createRoute({
+  method: "post",
+  path: "/v1/agents/{agentId}/photo",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: ResourceIdSchema }),
+    body: {
+      required: true,
+      content: { "multipart/form-data": { schema: WorkflowSlackAvatarUploadBodySchema } },
+    },
+  },
+  responses: {
+    201: {
+      description: "Photo stored and addressable by an unguessable public URL.",
+      content: { "application/json": { schema: CompanyAgentPhotoUploadEnvelopeSchema } },
     },
     default: errorResponse,
   },
@@ -4333,6 +4496,14 @@ export type V1RouteHandlers = {
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
+  listCompanyAgents: RouteHandler<typeof listCompanyAgentsRoute>;
+  createCompanyAgent: RouteHandler<typeof createCompanyAgentRoute>;
+  getCompanyAgent: RouteHandler<typeof getCompanyAgentRoute>;
+  updateCompanyAgent: RouteHandler<typeof updateCompanyAgentRoute>;
+  archiveCompanyAgent: RouteHandler<typeof archiveCompanyAgentRoute>;
+  runCompanyAgent: RouteHandler<typeof runCompanyAgentRoute>;
+  listCompanyAgentRuns: RouteHandler<typeof listCompanyAgentRunsRoute>;
+  uploadCompanyAgentPhoto: RouteHandler<typeof uploadCompanyAgentPhotoRoute>;
   getBrainSnapshot: RouteHandler<typeof getBrainSnapshotRoute>;
   getBrainOverview: RouteHandler<typeof getBrainOverviewRoute>;
   listBrainSourceItems: RouteHandler<typeof listBrainSourceItemsRoute>;
@@ -4578,6 +4749,14 @@ export function createV1Router(
       .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
       .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
       .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
+      .openapi(listCompanyAgentsRoute, handlers.listCompanyAgents)
+      .openapi(createCompanyAgentRoute, handlers.createCompanyAgent)
+      .openapi(getCompanyAgentRoute, handlers.getCompanyAgent)
+      .openapi(updateCompanyAgentRoute, handlers.updateCompanyAgent)
+      .openapi(archiveCompanyAgentRoute, handlers.archiveCompanyAgent)
+      .openapi(runCompanyAgentRoute, handlers.runCompanyAgent)
+      .openapi(listCompanyAgentRunsRoute, handlers.listCompanyAgentRuns)
+      .openapi(uploadCompanyAgentPhotoRoute, handlers.uploadCompanyAgentPhoto)
       .openapi(getBrainSnapshotRoute, handlers.getBrainSnapshot)
       .openapi(getBrainOverviewRoute, handlers.getBrainOverview)
       .openapi(listBrainSourceItemsRoute, handlers.listBrainSourceItems)
@@ -4901,6 +5080,24 @@ const placeholderWorkflow = {
   createdAt: placeholderTime,
   updatedAt: placeholderTime,
 };
+const placeholderCompanyAgent = {
+  id: "agent_contract",
+  slug: "contract-agent",
+  name: "PR Reviewer",
+  description: "Reviews pull requests and posts findings to Slack.",
+  instructions: "Review the pull request and post what matters to the team.",
+  photoUrl: "",
+  model: "kimi-k2.6",
+  status: "active" as const,
+  ownerUserId: "user_contract",
+  ownerActive: true,
+  slackEnabled: true,
+  triggers: [],
+  lastRunAt: null,
+  version: 1,
+  createdAt: placeholderTime,
+  updatedAt: placeholderTime,
+};
 const placeholderWorkflowMemory = {
   workflowId: "workflow_contract",
   enabled: false,
@@ -5213,6 +5410,33 @@ const contractDocumentHandlers: V1RouteHandlers = {
         data: {
           avatarUrl:
             "https://my.opencompany.chat/workflow-avatars/workflow_contract/00000000-0000-4000-8000-000000000000.png",
+        },
+        meta,
+      },
+      201,
+    ),
+  listCompanyAgents: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
+  createCompanyAgent: (c) =>
+    c.json(
+      { data: { agent: placeholderCompanyAgent, transactionId: "1", replayed: false }, meta },
+      201,
+    ),
+  getCompanyAgent: (c) => c.json({ data: placeholderCompanyAgent, meta }, 200),
+  updateCompanyAgent: (c) =>
+    c.json({ data: { agent: placeholderCompanyAgent, transactionId: "1" }, meta }, 200),
+  archiveCompanyAgent: (c) =>
+    c.json(
+      { data: { workflowId: placeholderCompanyAgent.id, version: 2, transactionId: "1" }, meta },
+      200,
+    ),
+  runCompanyAgent: (c) => c.json(placeholderAutomationTaskEnvelope(), 202),
+  listCompanyAgentRuns: (c) => c.json({ data: [], meta }, 200),
+  uploadCompanyAgentPhoto: (c) =>
+    c.json(
+      {
+        data: {
+          photoUrl:
+            "https://my.opencompany.chat/workflow-avatars/agent_contract/00000000-0000-4000-8000-000000000000.png",
         },
         meta,
       },

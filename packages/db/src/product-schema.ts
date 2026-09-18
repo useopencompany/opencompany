@@ -87,6 +87,8 @@ export type TaskStatus = "queued" | "running" | "waiting" | "succeeded" | "faile
 // Workflows retain the draft/active lifecycle from their original Brain documents.
 export type WorkflowStatus = "draft" | "active";
 export type WorkflowScope = "personal" | "company";
+// Workflows and Company agents are two product surfaces over one automation row.
+export type WorkflowKind = "workflow" | "agent";
 export type WorkflowTrigger = "manual" | "slack" | "linear" | "schedule" | "event";
 export type WorkflowEventConfig = {
   provider: string;
@@ -788,6 +790,7 @@ export const users = productSchema.table(
     reviewInboxEnabled: boolean("review_inbox_enabled").notNull().default(false),
     sidebarProjectsEnabled: boolean("sidebar_projects_enabled").notNull().default(false),
     subagentsEnabled: boolean("subagents_enabled").notNull().default(false),
+    companyAgentsEnabled: boolean("company_agents_enabled").notNull().default(false),
     pastSessionAccessEnabled: boolean("past_session_access_enabled").notNull().default(false),
     // Opt-in to the iMessage personal assistant channel (Settings → Channels → iMessage).
     imessageEnabled: boolean("imessage_enabled").notNull().default(false),
@@ -3334,6 +3337,11 @@ export const workflows = productSchema.table(
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
     slug: text("slug").notNull(),
+    // Company agents share this table because they reuse every automation mechanic a workflow
+    // already has: triggers, schedules, event routing, Slack identity, and session continuation.
+    // `kind` is the hard boundary between the two product surfaces — each repository instance is
+    // pinned to one kind, so an agent can never be read or mutated through the Workflows API.
+    kind: text("kind").$type<WorkflowKind>().notNull().default("workflow"),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
     instructions: text("instructions").notNull().default(""),
@@ -3377,6 +3385,13 @@ export const workflows = productSchema.table(
     createdByWorkosId: text("created_by_workos_id").references(() => users.workosUserId, {
       onDelete: "set null",
     }),
+    // A company agent's owner: the single human whose authorized connections execute its runs and
+    // who alone may configure it. Null on every workflow row, and on an agent whose owner left the
+    // workspace — readers treat an ownerless agent as unrunnable rather than falling back to the
+    // caller's own credentials.
+    ownerWorkosId: text("owner_workos_id").references(() => users.workosUserId, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -3398,7 +3413,17 @@ export const workflows = productSchema.table(
       .where(
         sql`${table.trigger} = 'schedule' AND ${table.status} = 'active' AND ${table.archivedAt} IS NULL`,
       ),
+    workspaceKindUpdatedIdx: index("opencompany_workflows_workspace_kind_updated_idx").on(
+      table.workspaceId,
+      table.kind,
+      table.archivedAt,
+      table.updatedAt,
+    ),
     statusCheck: check("goat_workflows_status_check", sql`${table.status} IN ('draft', 'active')`),
+    kindCheck: check(
+      "opencompany_workflows_kind_check",
+      sql`${table.kind} IN ('workflow', 'agent')`,
+    ),
     // created_by_workos_id is cleared when a user row is deleted, so the owner cannot be required
     // here. Readers treat a personal row without an owner as visible to nobody.
     scopeCheck: check(
@@ -3957,6 +3982,10 @@ export const tasks = productSchema.table(
     result: text("result"),
     error: text("error"),
     workflowId: text("workflow_id"),
+    // Set when a Company agent produced this run. The run still executes with the agent owner's
+    // authority (`user_workos_id`), but the work belongs to the agent, so it stays out of every
+    // personal Task list and is read back through the agent's run history instead.
+    agentId: text("agent_id").references(() => workflows.id, { onDelete: "set null" }),
     workflowBrainRef: text("workflow_brain_ref"),
     reportedOutcome: text("reported_outcome").$type<TaskReportedOutcome>(),
     outcomeComment: text("outcome_comment"),
@@ -3995,6 +4024,9 @@ export const tasks = productSchema.table(
     ),
     leaseExpiresAtIdx: index("goat_tasks_lease_expires_at_idx").on(table.leaseExpiresAt),
     scheduleIdx: index("goat_tasks_schedule_idx").on(table.scheduleId, table.scheduledFor),
+    agentCreatedAtIdx: index("opencompany_tasks_agent_created_at_idx")
+      .on(table.agentId, table.createdAt)
+      .where(sql`${table.agentId} IS NOT NULL`),
     sessionIdx: uniqueIndex("goat_tasks_session_idx")
       .on(table.sessionId)
       .where(sql`${table.sessionId} IS NOT NULL`),
@@ -5827,6 +5859,9 @@ export const taskReadModelV1 = productSchema.table(
     engine: text("engine").$type<ChatEngine>().notNull(),
     model: text("model").notNull(),
     workflowId: text("workflow_id"),
+    // Mirrors `tasks.agent_id` so the personal Task list can exclude Company agent runs in the
+    // synced shape's WHERE clause without a join.
+    agentId: text("agent_id"),
     scheduleId: text("schedule_id"),
     scheduledFor: timestamp("scheduled_for", { withTimezone: true }),
     result: text("result"),

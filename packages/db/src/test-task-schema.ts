@@ -44,6 +44,7 @@ export const TASK_TEST_BASE_SCHEMA = `
     result text,
     error text,
     workflow_id text,
+    agent_id text,
     workflow_brain_ref text,
     reported_outcome text,
     outcome_comment text,

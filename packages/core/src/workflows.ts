@@ -15,6 +15,12 @@ export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 export const WORKFLOW_SCOPES = ["personal", "company"] as const;
 export type WorkflowScope = (typeof WORKFLOW_SCOPES)[number];
 
+// Workflows and Company agents are two product surfaces over the same automation row, so they
+// share triggers, scheduling, event routing, Slack identity, and session continuation. A
+// repository instance is pinned to one kind and never returns rows of the other.
+export const WORKFLOW_KINDS = ["workflow", "agent"] as const;
+export type WorkflowKind = (typeof WORKFLOW_KINDS)[number];
+
 // Only the creator changes a workflow's visibility; an admin can additionally claim one that
 // predates scopes and has no recorded creator. Admins deliberately cannot take someone else's
 // workflow personal: a scheduled or event-driven workflow fires as a specific user, and that
@@ -136,6 +142,7 @@ type NormalizedWorkflowTriggerInput =
 export type Workflow = {
   id: string;
   slug: string;
+  kind: WorkflowKind;
   name: string;
   description: string;
   steps: WorkflowStep[];
@@ -143,6 +150,12 @@ export type Workflow = {
   scope: WorkflowScope;
   slackChannel: WorkflowSlackChannel;
   createdByUserId: string | null;
+  // Only an agent row carries an owner. `ownerActive` is false whenever there is no owner, so a
+  // caller that requires owner authority can reject on that single flag.
+  ownerUserId: string | null;
+  ownerActive: boolean;
+  // Newest run produced by this row, read from its Tasks. Only populated on the agent surface.
+  lastRunAt: Date | null;
   trigger: WorkflowTrigger;
   triggers?: WorkflowAutomationTrigger[];
   version: number;
@@ -207,9 +220,44 @@ export interface AutomationTaskCreator {
     execution: AutomationExecutionPlan;
     source: "workflow";
     workflowId?: string;
+    // Set for a Company agent run so the Task belongs to the agent rather than to the owner whose
+    // authority `actor` carries.
+    agentId?: string;
     attachmentIds?: readonly string[];
   }): Promise<CreateTaskResult>;
 }
+
+// One execution of an automation row, as its run history shows it. A `blocked` run never became a
+// Task: the event matched, but the authorization it needed was missing or revoked. Showing it is
+// what keeps a silently dropped run from looking like no event at all.
+export const WORKFLOW_RUN_STATUSES = [
+  "queued",
+  "running",
+  "waiting",
+  "succeeded",
+  "failed",
+  "canceled",
+  "blocked",
+] as const;
+export type WorkflowRunStatus = (typeof WORKFLOW_RUN_STATUSES)[number];
+
+export type WorkflowRun = {
+  id: string;
+  taskId: string | null;
+  displayId: string | null;
+  conversationId: string | null;
+  name: string;
+  status: WorkflowRunStatus;
+  // What started the run: a person pressing Run now, a schedule, or a provider event.
+  triggerKind: "manual" | "schedule" | "event";
+  triggerLabel: string;
+  result: string | null;
+  error: string | null;
+  // The run is parked on a pending approval or a question. Approval decisions route to the owner.
+  awaitingInput: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 export type WorkflowMutationResult = {
   workflow: Workflow;
@@ -244,6 +292,8 @@ export interface WorkflowRepository {
     scope: WorkflowScope;
     initialStep: WorkflowStep;
   }): Promise<WorkflowMutationResult>;
+  // Tasks produced by one automation row, newest first. Only the Company agents surface reads it.
+  listRuns(input: { actor: Actor; workflowId: string; limit: number }): Promise<WorkflowRun[]>;
   updateWorkflow(input: {
     actor: Actor;
     workflowId: string;
@@ -296,6 +346,9 @@ export type WorkflowDefinitionValidator = (input: {
 }) => string | null;
 
 type WorkflowApplicationServiceOptions = {
+  // Which surface this service instance serves. It must match the kind its repository is pinned
+  // to; the repository is what actually enforces the boundary in SQL.
+  kind?: WorkflowKind;
   scheduleRules: ScheduleRules;
   planner: AutomationExecutionPlanner;
   taskCreator: AutomationTaskCreator;
@@ -402,6 +455,15 @@ export class WorkflowApplicationService {
       description,
       scope,
       initialStep,
+    });
+  }
+
+  listRuns(actor: Actor, workflowId: string, limit = 50): Promise<WorkflowRun[]> {
+    requirePermission(actor, WORKFLOW_READ_PERMISSION, "Workflows");
+    return this.repository.listRuns({
+      actor,
+      workflowId: resourceId(workflowId, "workflowId"),
+      limit: Math.max(1, Math.min(limit, 100)),
     });
   }
 
@@ -732,6 +794,7 @@ export class WorkflowApplicationService {
       execution,
       source: "workflow",
       workflowId: workflow.slug,
+      ...(workflow.kind === "agent" ? { agentId: workflow.id } : {}),
       ...(input.attachmentIds ? { attachmentIds: input.attachmentIds } : {}),
     });
   }
@@ -769,6 +832,7 @@ export class WorkflowApplicationService {
       execution,
       source: "workflow",
       workflowId: workflow.slug,
+      ...(workflow.kind === "agent" ? { agentId: workflow.id } : {}),
     });
     return created;
   }
