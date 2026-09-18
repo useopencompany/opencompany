@@ -504,7 +504,9 @@ function actionApprovalRecord(value: unknown): ActionApprovalRecord | null {
   };
 }
 
-function stableJson(value: unknown): string {
+// Postgres reorders jsonb object keys, so any comparison against a stored jsonb value has to be
+// key-order independent.
+export function stableJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   return `{${Object.entries(value as Record<string, unknown>)

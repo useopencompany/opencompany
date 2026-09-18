@@ -2885,6 +2885,91 @@ describe("Postgres Chat repositories", () => {
       code: "not_found",
     });
   });
+
+  it("answers a structured engine question inside a Task conversation", async () => {
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "task-engine-question",
+      content: "Plan the migration.",
+      engine: "codex",
+      model: "gpt-5-codex",
+    });
+    await database.query("UPDATE goat.chat_sessions SET kind = 'task' WHERE id = $1", [
+      created.conversationId,
+    ]);
+    await database.query(
+      `INSERT INTO goat.tasks (id, user_workos_id, workspace_id, session_id, status, stage)
+       VALUES ('task_question', 'user_1', 'workspace_1', $1, 'running', 'running')`,
+      [created.conversationId],
+    );
+    await database.query(
+      `UPDATE goat.codex_chat_turns SET status = 'running', attempts = 1,
+       lease_id = 'lease_question', lease_owner = 'worker_question' WHERE id = $1`,
+      [created.runId],
+    );
+    const interactionId = `${created.runId}_question`;
+    const request = {
+      questions: [{ id: "scope", question: "How deep should this go?", options: ["Shallow"] }],
+    };
+    await database.query(
+      `INSERT INTO goat.codex_chat_interactions (
+         id, user_workos_id, codex_chat_session_id, codex_chat_turn_id,
+         lease_id, request_id, method, status, request
+       )
+       SELECT $1, run.user_workos_id, run.codex_chat_session_id, run.id,
+              run.lease_id, 'req_1', 'elicitation/create', 'pending', $2::jsonb
+       FROM goat.codex_chat_turns AS run WHERE run.id = $3`,
+      [interactionId, JSON.stringify(request), created.runId],
+    );
+    await database.query(
+      `INSERT INTO goat.run_approvals (
+         id, run_id, tool_call_id, kind, prompt, status
+       ) VALUES ($1, $2, $1, 'engine_questions', 'The coding engine needs more information.', 'pending')`,
+      [interactionId, created.runId],
+    );
+
+    const command = {
+      runId: created.runId,
+      approvalId: interactionId,
+      resolution: "answered" as const,
+      answer: {
+        type: "engine_questions" as const,
+        schemaVersion: 1 as const,
+        answers: { scope: { answers: ["Shallow"] } },
+      },
+    };
+    await expect(
+      service.resolveApproval(actor({ userId: "user_2", workspaceId: "workspace_2" }), command),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await database.query("UPDATE goat.tasks SET archived_at = now() WHERE id = 'task_question'");
+    await expect(service.resolveApproval(actor(), command)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await database.query("UPDATE goat.tasks SET archived_at = NULL WHERE id = 'task_question'");
+
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      resolution: "answered",
+      idempotentReplay: false,
+    });
+    expect(
+      (
+        await database.query(
+          "SELECT status, response FROM goat.codex_chat_interactions WHERE id = $1",
+          [interactionId],
+        )
+      ).rows,
+    ).toEqual([{ status: "resolved", response: { answers: { scope: { answers: ["Shallow"] } } } }]);
+    // Postgres reorders jsonb keys, so the replay check has to compare the stored answer
+    // structurally: a byte comparison rejects the user's own retry.
+    await expect(service.resolveApproval(actor(), command)).resolves.toMatchObject({
+      idempotentReplay: true,
+    });
+    await expect(
+      service.resolveApproval(actor(), {
+        ...command,
+        answer: { ...command.answer, answers: { scope: { answers: ["Deep"] } } },
+      }),
+    ).rejects.toMatchObject({ code: "idempotency_conflict" });
+  });
 });
 
 async function seedTerminalTask(database: PGlite) {

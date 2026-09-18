@@ -29,6 +29,7 @@ import {
 import { newResourceId } from "@opencompany/core/resource-ids";
 import { DEFAULT_SANDBOX_SIZE } from "@opencompany/core/sandbox-sizes";
 import { type SQL, sql } from "drizzle-orm";
+import { stableJson } from "./action-governance";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { ChatMessageAttachment, CodexChatTurnSettings } from "./product-schema";
 import {
@@ -2018,10 +2019,33 @@ export class PostgresChatRepository implements ChatRepository {
       WHERE interaction.id = ${input.approvalId}
         AND run.id = ${input.runId}
         AND runtime.workspace_id = ${input.actor.workspaceId}
-        AND chat.kind = 'chat'
-        AND chat.user_workos_id = ${input.actor.userId}
-        AND run.user_workos_id = ${input.actor.userId}
+        -- A Task Run is owned by its Task, not by the viewer, so it carries the same ownership
+        -- test the action-approval path uses. Coding engines ask structured questions from both
+        -- kinds of conversation; restricting this to 'chat' left Task questions unanswerable.
+        AND (
+          (
+            chat.kind = 'chat'
+            AND chat.user_workos_id = ${input.actor.userId}
+            AND run.user_workos_id = ${input.actor.userId}
+          )
+          OR (
+            chat.kind = 'task'
+            AND EXISTS (
+              SELECT 1 FROM goat.tasks AS task
+              WHERE task.session_id = chat.id
+                AND task.user_workos_id = run.user_workos_id
+                AND (
+                  task.workspace_id = ${input.actor.workspaceId}
+                  OR (
+                    task.workspace_id IS NULL
+                    AND task.user_workos_id = ${input.actor.userId}
+                  )
+                )
+            )
+          )
+        )
         AND chat.closed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM goat.tasks AS task WHERE task.session_id = chat.id AND task.archived_at IS NOT NULL)
         AND EXISTS (
           SELECT 1 FROM goat.workspace_members AS member
           WHERE member.workspace_id = ${input.actor.workspaceId}
@@ -2034,7 +2058,7 @@ export class PostgresChatRepository implements ChatRepository {
     const canonicalAnswer = { type: "engine_questions", schemaVersion: 1, answers } as const;
     const storedAnswer = current.response?.answer;
     if (current.status === "resolved") {
-      if (JSON.stringify(storedAnswer) !== JSON.stringify(canonicalAnswer)) {
+      if (stableJson(storedAnswer) !== stableJson(canonicalAnswer)) {
         throw new CoreError(
           "idempotency_conflict",
           "The approval was already resolved differently.",
