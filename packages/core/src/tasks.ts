@@ -107,6 +107,9 @@ export type CreateTaskCommand = {
   attachmentIds?: readonly string[];
   source: TaskSource;
   workflowId?: string;
+  // Set when a Company agent produced this run, so the Task belongs to the agent rather than to
+  // the owner whose execution authority it carries.
+  agentId?: string;
   scheduledFor?: Date;
 };
 
@@ -307,6 +310,7 @@ export class TaskApplicationService {
         source: input.source,
         ...(attachmentIds.length ? { attachmentIds } : {}),
         ...(input.workflowId ? { workflowId: resourceId(input.workflowId, "workflowId") } : {}),
+        ...(input.agentId ? { agentId: resourceId(input.agentId, "agentId") } : {}),
         ...(scheduledFor ? { scheduledFor } : {}),
       },
     });

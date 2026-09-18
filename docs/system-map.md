@@ -96,6 +96,21 @@ Saving a scheduled draft clears its next run and prepared execution plan. There 
 workflow definition, so Draft also pauses future runs; it is not a separate unpublished version.
 Plugin event setup, delivery guarantees, and Wiki ingestion retirement are documented in
 [Plugin events and workflows](plugin-events.md).
+
+Company agents (internal beta, behind the per-user Preferences toggle) are a second product surface
+over the same automation row, discriminated by `workflows.kind`. Each repository instance is pinned
+to one kind, so an agent is unreachable through the Workflows API and a workflow is unreachable
+through the agents API. Reusing the row is what gives agents triggers, scheduling, event routing,
+Slack display identity, and thread/session continuation for free.
+
+What an agent adds is a split between ownership and execution authority. `workflows.owner_workos_id`
+names the one member whose authorized connections do the work; only that member can configure the
+agent, and the Core builds the run's actor from the agent row rather than from the caller, so a
+teammate pressing Run now never silently switches execution onto their own credentials. An owner who
+leaves the workspace reads back as inactive, which blocks runs instead of falling through to someone
+else. Runs carry `tasks.agent_id`: the work belongs to the agent, stays out of every personal Task
+list, and is read back under See runs, which also shows provider events that were dropped before any
+work started.
 Scheduled and event runs follow the step instructions. The editor does not author extra run
 context; the trigger prompt saved with a workflow is only the run's opening request and stays
 editable through the headless Workflow API.

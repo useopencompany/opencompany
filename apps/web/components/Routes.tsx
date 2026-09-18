@@ -118,6 +118,7 @@ import {
   updateApproveForMeAction,
   updateAutoModelRoutingAction,
   updateBotsAction,
+  updateCompanyAgentsAction,
   updateImessageAction,
   updatePastSessionAccessAction,
   updateReviewInboxAction,
@@ -375,6 +376,13 @@ export function PreferencesSettingsRoute() {
           description="Let opencompany hand wide research to helpers that work in their own context and report back, so one answer can cover several sources at once. Uses more credits per message."
           checked={featureFlags.subagents}
           update={updateSubagentsAction}
+        />
+        <BetaFeatureSwitch
+          icon={Bot}
+          label="Company agents"
+          description="Give a recurring job to a named agent instead of a workflow. It has its own name and photo, an owner whose connected accounts it works with, and a run history the whole workspace can read."
+          checked={featureFlags.companyAgents}
+          update={updateCompanyAgentsAction}
         />
         <BetaFeatureSwitch
           icon={Smartphone}

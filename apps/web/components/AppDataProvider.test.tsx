@@ -835,6 +835,7 @@ function initialData(): AppInitialData {
       reviewInbox: false,
       sidebarProjects: false,
       subagents: false,
+      companyAgents: false,
       imessage: false,
       whatsapp: false,
     },

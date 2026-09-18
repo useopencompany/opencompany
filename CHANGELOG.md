@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
+## [1.31.0] - 2026-09-18
+
+### Added
+- turn on approve for me in preferences → permissions to let routine plugin actions continue without waiting for you. it can approve searches, document edits, and requested messages that help with your task. destructive, paid, high-risk, or uncertain actions still ask when set to ask; your saved tool permissions stay the same (#1944, #1945) — @louis.
+- try the company agents beta in preferences to give recurring work to a named agent. set its instructions, triggers, and slack identity, then follow its work in a shared run history. teammates can run it and read results; only its owner can change it, and runs use the owner's connected accounts (#1951) — @louis.
+- attach or paste up to five screenshots when sending feedback. review the previews, then send with cmd/ctrl+enter (#1948) — @louis.
+- see when a reply is ready without reopening the app. the browser tab shows done when your open conversation finishes while you are in another tab (#1947) — @louis.
+
+### Changed
+- ask chat to run up to four different workflows in one message, with a separate task for each. name the workflows in your request; the composer still accepts one workflow mention at a time (#1938) — @louis.
+- dark mode now uses charcoal gray backgrounds instead of green-tinted ones (#1942) — @louis.
+
+### Fixed
+- completed coding chats now clear their working indicator, timer, and stop button without a page reload. finished tool activity also collapses so the answer is easier to read (#1946, #1949) — @louis.
+- stopping a chat now shows stopping immediately and clears the working state once the run ends (#1939) — @louis.
+- keep line breaks added with shift+enter when you continue typing in the composer (#1943) — @louis.
+- continue long chats and tasks more reliably, including after sharing screenshots. older images can now inform the conversation summary instead of causing follow-ups to fail (#1927, #1932) — @louis.
+- ask codex to read a saved workflow's instructions and settings again without the request failing (#1928) — @louis.
+- coding tasks now show the model they actually used. the sandbox badge reports whether the machine is running, asleep, or deleted, and shows unknown if its status cannot be checked (#1936, #1941) — @louis.
+
 ## [1.30.0] - 2026-09-17
 
 ### Added

@@ -3,12 +3,16 @@ import {
   type Actor,
   CoreError,
   type VersionedRepositoryResult,
+  WORKFLOW_RUN_STATUSES,
   type Workflow,
   type WorkflowAutomationTrigger,
+  type WorkflowKind,
   type WorkflowMemory,
   type WorkflowMutationResult,
   type WorkflowPage,
   type WorkflowRepository,
+  type WorkflowRun,
+  type WorkflowRunStatus,
   type WorkflowScope,
   type WorkflowStep,
   type WorkflowTrigger,
@@ -28,11 +32,15 @@ type RepositoryIds = {
 type WorkflowRepositoryOptions = {
   ids?: RepositoryIds;
   now?: () => Date;
+  // Pins every query and write to one automation surface. Workflows and Company agents share this
+  // table, and this is the boundary that keeps an agent out of the Workflows API and vice versa.
+  kind?: WorkflowKind;
 };
 
 type WorkflowRow = {
   id: string;
   slug: string;
+  kind: WorkflowKind;
   name: string;
   description: string;
   instructions: string;
@@ -44,6 +52,9 @@ type WorkflowRow = {
   slackBotDisplayName: string;
   slackBotAvatarUrl: string;
   createdByUserId: string | null;
+  ownerUserId: string | null;
+  ownerActive: boolean;
+  lastRunAt?: Date | string | null;
   trigger: "manual" | "slack" | "linear" | "schedule" | "event";
   scheduleCron: string | null;
   scheduleTimezone: string;
@@ -55,6 +66,22 @@ type WorkflowRow = {
   automationTriggers: unknown;
   version: number | string;
   archivedAt: Date | string | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+type WorkflowRunRow = {
+  id: string;
+  taskId: string | null;
+  displayId: string | null;
+  conversationId: string | null;
+  name: string;
+  status: string;
+  triggerKind: string;
+  triggerLabel: string;
+  result: string | null;
+  error: string | null;
+  awaitingInput: boolean;
   createdAt: Date | string;
   updatedAt: Date | string;
 };
@@ -83,10 +110,14 @@ const defaultIds: RepositoryIds = {
 };
 
 export class PostgresWorkflowRepository implements WorkflowRepository {
+  private readonly kind: WorkflowKind;
+
   constructor(
     private readonly execute: WorkflowSqlExecute,
     private readonly options: WorkflowRepositoryOptions = {},
-  ) {}
+  ) {
+    this.kind = options.kind ?? "workflow";
+  }
 
   async listWorkflows(input: {
     actor: Actor;
@@ -94,11 +125,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     limit: number;
   }): Promise<WorkflowPage> {
     const rows = await this.rows<WorkflowRow>(sql`
-      ${workflowSelect()}
+      ${workflowSelect(this.kind)}
       WHERE workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
-        AND ${workflowVisibility(input.actor)}
+        AND ${workflowVisibility(input.actor, this.kind)}
         AND (
           ${input.cursor ?? null}::text IS NULL
           OR EXISTS (
@@ -123,12 +154,12 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
 
   async getWorkflow(input: { actor: Actor; workflowId: string }): Promise<Workflow | null> {
     const [row] = await this.rows<WorkflowRow>(sql`
-      ${workflowSelect()}
+      ${workflowSelect(this.kind)}
       WHERE workflow.workspace_id = ${input.actor.workspaceId}
         AND (workflow.id = ${input.workflowId} OR workflow.slug = ${input.workflowId})
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
-        AND ${workflowVisibility(input.actor)}
+        AND ${workflowVisibility(input.actor, this.kind)}
       LIMIT 1
     `);
     return row ? mapWorkflow(row) : null;
@@ -206,17 +237,21 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       ),
       created AS MATERIALIZED (
         INSERT INTO goat.workflows (
-          id, workspace_id, slug, name, description, instructions, model, steps,
+          id, workspace_id, slug, kind, name, description, instructions, model, steps,
           trigger, schedule_cron, schedule_timezone, schedule_prompt,
           schedule_user_workos_id, schedule_harness_spec, schedule_enabled,
-          schedule_next_run_at, status, scope, created_by_workos_id, version,
+          schedule_next_run_at, status, scope, created_by_workos_id, owner_workos_id, version,
           created_at, updated_at
         )
         SELECT
-          winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${input.name},
-          ${input.description}, '', '', ${stringifyPostgresJson([input.initialStep])}::jsonb,
+          winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${this.kind},
+          ${input.name}, ${input.description}, '', '',
+          ${stringifyPostgresJson([input.initialStep])}::jsonb,
           'manual', NULL, 'UTC', '', NULL, NULL, false, NULL, 'draft', ${input.scope},
-          ${input.actor.userId}, 1, ${now}, ${now}
+          ${input.actor.userId},
+          -- An agent's creator is its owner. Workflows have no owner: they execute as whoever
+          -- activated the trigger that fires them.
+          ${this.kind === "agent" ? input.actor.userId : null}, 1, ${now}, ${now}
         FROM winner
         CROSS JOIN candidate
         RETURNING *
@@ -238,32 +273,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         reservation.resource_id AS "resourceId",
         reservation.transaction_id AS "transactionId",
         reservation.command_id <> ${commandId} AS replayed,
-        workflow.id,
-        workflow.slug,
-        workflow.name,
-        workflow.description,
-        workflow.instructions,
-        workflow.model,
-        workflow.steps,
-        workflow.status,
-        workflow.scope,
-        workflow.slack_channel_enabled AS "slackChannelEnabled",
-        workflow.slack_bot_display_name AS "slackBotDisplayName",
-        workflow.slack_bot_avatar_url AS "slackBotAvatarUrl",
-        workflow.created_by_workos_id AS "createdByUserId",
-        workflow.trigger,
-        workflow.schedule_cron AS "scheduleCron",
-        workflow.schedule_timezone AS "scheduleTimezone",
-        workflow.schedule_prompt AS "schedulePrompt",
-        workflow.schedule_enabled AS "scheduleEnabled",
-        workflow.schedule_last_run_at AS "scheduleLastRunAt",
-        workflow.schedule_next_run_at AS "scheduleNextRunAt",
-        workflow.event_config AS "eventConfig",
-        workflow.automation_triggers AS "automationTriggers",
-        workflow.version,
-        workflow.archived_at AS "archivedAt",
-        workflow.created_at AS "createdAt",
-        workflow.updated_at AS "updatedAt"
+        ${workflowProjection(this.kind)}
       FROM (SELECT 1) AS singleton
       LEFT JOIN reservation ON true
       LEFT JOIN selected_workflow AS workflow ON workflow.id = reservation.resource_id
@@ -384,34 +394,9 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
-        AND ${workflowVisibility(input.actor)}
+        AND ${workflowVisibility(input.actor, this.kind)}
       RETURNING
-        workflow.id,
-        workflow.slug,
-        workflow.name,
-        workflow.description,
-        workflow.instructions,
-        workflow.model,
-        workflow.steps,
-        workflow.status,
-        workflow.scope,
-        workflow.slack_channel_enabled AS "slackChannelEnabled",
-        workflow.slack_bot_display_name AS "slackBotDisplayName",
-        workflow.slack_bot_avatar_url AS "slackBotAvatarUrl",
-        workflow.created_by_workos_id AS "createdByUserId",
-        workflow.trigger,
-        workflow.schedule_cron AS "scheduleCron",
-        workflow.schedule_timezone AS "scheduleTimezone",
-        workflow.schedule_prompt AS "schedulePrompt",
-        workflow.schedule_enabled AS "scheduleEnabled",
-        workflow.schedule_last_run_at AS "scheduleLastRunAt",
-        workflow.schedule_next_run_at AS "scheduleNextRunAt",
-        workflow.event_config AS "eventConfig",
-        workflow.automation_triggers AS "automationTriggers",
-        workflow.version,
-        workflow.archived_at AS "archivedAt",
-        workflow.created_at AS "createdAt",
-        workflow.updated_at AS "updatedAt",
+        ${workflowProjection(this.kind)},
         pg_current_xact_id()::xid::text::bigint AS "transactionId"
     `);
     if (row) {
@@ -442,7 +427,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.archived_at IS NULL
         AND workflow.version = ${input.expectedVersion}
         AND ${workspaceMembership(input.actor)}
-        AND ${workflowVisibility(input.actor)}
+        AND ${workflowVisibility(input.actor, this.kind)}
       RETURNING
         workflow.id,
         workflow.version,
@@ -456,6 +441,93 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       };
     }
     return this.workflowMiss(input.actor, input.workflowId);
+  }
+
+  // Run history is the union of the Tasks an agent produced and the provider events that matched
+  // it but never became work. The second half is the point: an event dropped because the owner's
+  // connection is missing has to be visible, not silent.
+  async listRuns(input: {
+    actor: Actor;
+    workflowId: string;
+    limit: number;
+  }): Promise<WorkflowRun[]> {
+    const rows = await this.rows<WorkflowRunRow>(sql`
+      WITH agent AS MATERIALIZED (
+        SELECT workflow.id, workflow.name
+        FROM goat.workflows AS workflow
+        WHERE ${visibleWorkflow(input.actor, input.workflowId, this.kind)}
+        LIMIT 1
+      ),
+      task_runs AS (
+        SELECT
+          task.id,
+          task.id AS "taskId",
+          task.display_id AS "displayId",
+          task.session_id AS "conversationId",
+          task.name,
+          goat.canonical_task_status_v1(task.status, task.archived_at) AS status,
+          -- Both columns branch on the same conditions so the label can never describe a
+          -- different trigger than the kind. 'manual-test' is the trigger id recordRunNow stamps
+          -- on a Run now, which is a manual run that happens to land in the schedule table.
+          CASE
+            WHEN event_run.id IS NOT NULL THEN 'event'
+            WHEN schedule_run.id IS NOT NULL AND schedule_run.trigger_id <> 'manual-test'
+              THEN 'schedule'
+            ELSE 'manual'
+          END AS "triggerKind",
+          CASE
+            WHEN event_run.id IS NOT NULL
+              THEN event_run.provider || ' · ' || event_run.event_type
+            WHEN schedule_run.id IS NOT NULL AND schedule_run.trigger_id <> 'manual-test'
+              THEN 'Schedule'
+            ELSE 'Run now'
+          END AS "triggerLabel",
+          task.result,
+          task.error,
+          CASE
+            WHEN task.session_id IS NULL THEN false
+            ELSE goat.conversation_awaiting_input_v1(task.session_id)
+          END AS "awaitingInput",
+          task.created_at AS "createdAt",
+          task.updated_at AS "updatedAt"
+        FROM goat.tasks AS task
+        JOIN agent ON agent.id = task.agent_id
+        LEFT JOIN goat.workflow_event_runs AS event_run ON event_run.task_id = task.id
+        LEFT JOIN goat.workflow_schedule_runs AS schedule_run ON schedule_run.task_id = task.id
+      ),
+      blocked_runs AS (
+        SELECT
+          event_run.id,
+          NULL::text AS "taskId",
+          NULL::text AS "displayId",
+          NULL::text AS "conversationId",
+          agent.name,
+          'blocked' AS status,
+          'event' AS "triggerKind",
+          event_run.provider || ' · ' || event_run.event_type AS "triggerLabel",
+          NULL::text AS result,
+          COALESCE(
+            event_run.last_error,
+            'The owner''s ' || event_run.provider ||
+              ' connection is missing or no longer authorizes this event, so this run was skipped.'
+          ) AS error,
+          false AS "awaitingInput",
+          event_run.created_at AS "createdAt",
+          event_run.updated_at AS "updatedAt"
+        FROM goat.workflow_event_runs AS event_run
+        JOIN agent ON agent.id = event_run.workflow_id
+        WHERE event_run.task_id IS NULL
+          AND event_run.status IN ('ignored', 'failed')
+      )
+      SELECT * FROM (
+        SELECT * FROM task_runs
+        UNION ALL
+        SELECT * FROM blocked_runs
+      ) AS run
+      ORDER BY run."createdAt" DESC, run.id DESC
+      LIMIT ${input.limit}
+    `);
+    return rows.map(mapWorkflowRun);
   }
 
   async recordRunNow(input: {
@@ -479,7 +551,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${input.actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(input.actor)}
-        AND ${workflowVisibility(input.actor)}
+        AND ${workflowVisibility(input.actor, this.kind)}
       ON CONFLICT (workflow_id, trigger_id, scheduled_for) DO UPDATE
       SET task_id = EXCLUDED.task_id,
           status = 'created',
@@ -493,7 +565,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }): Promise<WorkflowMemory | null> {
     const [row] = await this.rows<WorkflowMemoryRow>(sql`
       ${workflowMemorySelect()}
-      WHERE ${visibleWorkflow(input.actor, input.workflowId)}
+      WHERE ${visibleWorkflow(input.actor, input.workflowId, this.kind)}
       LIMIT 1
     `);
     return row ? mapWorkflowMemory(row) : null;
@@ -511,7 +583,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
       INSERT INTO goat.workflow_memories (workflow_id, workspace_id, enabled, created_at, updated_at)
       SELECT workflow.id, workflow.workspace_id, ${input.enabled}, ${now}, ${now}
       FROM goat.workflows AS workflow
-      WHERE ${visibleWorkflow(input.actor, input.workflowId)}
+      WHERE ${visibleWorkflow(input.actor, input.workflowId, this.kind)}
       ON CONFLICT (workflow_id) DO UPDATE
       SET enabled = EXCLUDED.enabled,
           updated_at = EXCLUDED.updated_at
@@ -536,7 +608,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           updated_at = ${now}
       FROM goat.workflows AS workflow
       WHERE memory.workflow_id = workflow.id
-        AND ${visibleWorkflow(input.actor, input.workflowId)}
+        AND ${visibleWorkflow(input.actor, input.workflowId, this.kind)}
       RETURNING
         memory.workflow_id AS "workflowId",
         memory.enabled,
@@ -559,7 +631,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         AND workflow.workspace_id = ${actor.workspaceId}
         AND workflow.archived_at IS NULL
         AND ${workspaceMembership(actor)}
-        AND ${workflowVisibility(actor)}
+        AND ${workflowVisibility(actor, this.kind)}
       LIMIT 1
     `);
     return row ? { status: "conflict" } : { status: "not_found" };
@@ -570,11 +642,21 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   }
 }
 
-function workflowSelect() {
+function workflowSelect(kind: WorkflowKind) {
   return sql`
     SELECT
+      ${workflowProjection(kind)}
+    FROM goat.workflows AS workflow
+  `;
+}
+
+// Shared by every projection of an automation row so the list, single read, create, and update
+// paths cannot drift apart.
+function workflowProjection(kind: WorkflowKind) {
+  return sql`
       workflow.id,
       workflow.slug,
+      workflow.kind,
       workflow.name,
       workflow.description,
       workflow.instructions,
@@ -586,6 +668,9 @@ function workflowSelect() {
       workflow.slack_bot_display_name AS "slackBotDisplayName",
       workflow.slack_bot_avatar_url AS "slackBotAvatarUrl",
       workflow.created_by_workos_id AS "createdByUserId",
+      workflow.owner_workos_id AS "ownerUserId",
+      ${ownerActiveProjection()},
+      ${lastRunAtProjection(kind)},
       workflow.trigger,
       workflow.schedule_cron AS "scheduleCron",
       workflow.schedule_timezone AS "scheduleTimezone",
@@ -598,9 +683,28 @@ function workflowSelect() {
       workflow.version,
       workflow.archived_at AS "archivedAt",
       workflow.created_at AS "createdAt",
-      workflow.updated_at AS "updatedAt"
-    FROM goat.workflows AS workflow
-  `;
+      workflow.updated_at AS "updatedAt"`;
+}
+
+// An owner who left the workspace can no longer authorize anything, so the agent reads as
+// ownerless and callers refuse to run it rather than silently using someone else's connections.
+function ownerActiveProjection() {
+  return sql`EXISTS (
+      SELECT 1
+      FROM goat.workspace_members AS owner_member
+      WHERE owner_member.workspace_id = workflow.workspace_id
+        AND owner_member.user_workos_id = workflow.owner_workos_id
+    ) AS "ownerActive"`;
+}
+
+// Only the Company agents surface shows a last run, and only agent runs carry `tasks.agent_id`.
+function lastRunAtProjection(kind: WorkflowKind) {
+  if (kind !== "agent") return sql`NULL::timestamptz AS "lastRunAt"`;
+  return sql`(
+      SELECT max(run.created_at)
+      FROM goat.tasks AS run
+      WHERE run.agent_id = workflow.id
+    ) AS "lastRunAt"`;
 }
 
 // Left join so a workflow with no memory row still reads as disabled-and-empty.
@@ -627,8 +731,8 @@ function workspaceMembership(actor: Actor) {
 
 // A company workflow belongs to the workspace; a personal one only to its creator. A personal row
 // whose creator was removed matches nobody, which keeps it out of every list and mutation.
-function workflowVisibility(actor: Actor) {
-  return sql`(
+function workflowVisibility(actor: Actor, kind: WorkflowKind) {
+  return sql`workflow.kind = ${kind} AND (
     workflow.scope = 'company'
     OR workflow.created_by_workos_id = ${actor.userId}
   )`;
@@ -636,12 +740,12 @@ function workflowVisibility(actor: Actor) {
 
 // Callers address a workflow by either its id or its workspace-scoped slug, which is what the
 // editor route carries.
-function visibleWorkflow(actor: Actor, workflowId: string) {
+function visibleWorkflow(actor: Actor, workflowId: string, kind: WorkflowKind) {
   return sql`(workflow.id = ${workflowId} OR workflow.slug = ${workflowId})
     AND workflow.workspace_id = ${actor.workspaceId}
     AND workflow.archived_at IS NULL
     AND ${workspaceMembership(actor)}
-    AND ${workflowVisibility(actor)}`;
+    AND ${workflowVisibility(actor, kind)}`;
 }
 
 function mapWorkflowMemory(row: WorkflowMemoryRow): WorkflowMemory {
@@ -653,11 +757,39 @@ function mapWorkflowMemory(row: WorkflowMemoryRow): WorkflowMemory {
   };
 }
 
+function mapWorkflowRun(row: WorkflowRunRow): WorkflowRun {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    displayId: row.displayId,
+    conversationId: row.conversationId,
+    name: row.name,
+    status: workflowRunStatus(row.status),
+    triggerKind:
+      row.triggerKind === "event" || row.triggerKind === "schedule" ? row.triggerKind : "manual",
+    triggerLabel: row.triggerLabel,
+    result: row.result,
+    error: row.error,
+    awaitingInput: row.awaitingInput === true,
+    createdAt: asDate(row.createdAt),
+    updatedAt: asDate(row.updatedAt),
+  };
+}
+
+// `canonical_task_status_v1` folds an archived Task into `archived`, which is not a run outcome.
+// Anything unrecognized reads as canceled rather than inventing a state the UI cannot render.
+function workflowRunStatus(value: string): WorkflowRunStatus {
+  return (WORKFLOW_RUN_STATUSES as readonly string[]).includes(value)
+    ? (value as WorkflowRunStatus)
+    : "canceled";
+}
+
 function mapWorkflow(row: WorkflowRow): Workflow {
   const steps = workflowSteps(row);
   return {
     id: row.id,
     slug: row.slug,
+    kind: row.kind,
     name: row.name,
     description: row.description,
     steps,
@@ -669,6 +801,9 @@ function mapWorkflow(row: WorkflowRow): Workflow {
       avatarUrl: row.slackBotAvatarUrl,
     },
     createdByUserId: row.createdByUserId,
+    ownerUserId: row.ownerUserId,
+    ownerActive: row.ownerActive === true,
+    lastRunAt: nullableDate(row.lastRunAt ?? null),
     trigger: workflowTrigger(row),
     triggers: workflowAutomationTriggers(row.automationTriggers),
     version: Number(row.version),

@@ -2040,6 +2040,439 @@
         ],
         "additionalProperties": false
       },
+      "CompanyAgentPage": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyAgent"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "photoUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "runtimeModel": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "$ref": "#/components/schemas/CompanyAgentStatus"
+          },
+          "ownerUserId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256
+          },
+          "ownerActive": {
+            "type": "boolean"
+          },
+          "slackEnabled": {
+            "type": "boolean"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTrigger"
+            },
+            "maxItems": 20
+          },
+          "lastRunAt": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "description",
+          "instructions",
+          "photoUrl",
+          "model",
+          "status",
+          "ownerUserId",
+          "ownerActive",
+          "slackEnabled",
+          "triggers",
+          "lastRunAt",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "paused"
+        ]
+      },
+      "CompanyAgentMutationEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "$ref": "#/components/schemas/CompanyAgent"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              },
+              "replayed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "agent",
+              "transactionId",
+              "replayed"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CreateCompanyAgentBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompanyAgent"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentUpdateEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "agent": {
+                "$ref": "#/components/schemas/CompanyAgent"
+              },
+              "transactionId": {
+                "type": "string",
+                "pattern": "^[0-9]+$/u"
+              }
+            },
+            "required": [
+              "agent",
+              "transactionId"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateCompanyAgentBody": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "photoUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "runtimeModel": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "reasoningEffort": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "$ref": "#/components/schemas/CompanyAgentStatus"
+          },
+          "slackEnabled": {
+            "type": "boolean"
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowAutomationTriggerInput"
+            },
+            "maxItems": 20
+          }
+        },
+        "required": [
+          "expectedVersion",
+          "name",
+          "description",
+          "instructions",
+          "photoUrl",
+          "model",
+          "status",
+          "slackEnabled",
+          "triggers"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentRunPage": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyAgentRun"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "taskId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "displayId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 64
+          },
+          "conversationId": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "waiting",
+              "succeeded",
+              "failed",
+              "canceled",
+              "blocked"
+            ]
+          },
+          "triggerKind": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "schedule",
+              "event"
+            ]
+          },
+          "triggerLabel": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "result": {
+            "type": "string",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "awaitingInput": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "taskId",
+          "displayId",
+          "conversationId",
+          "name",
+          "status",
+          "triggerKind",
+          "triggerLabel",
+          "result",
+          "error",
+          "awaitingInput",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentPhotoUploadEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "photoUrl": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "photoUrl"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
       "BrainSnapshotEnvelope": {
         "type": "object",
         "properties": {
@@ -4526,6 +4959,9 @@
           "subagentsEnabled": {
             "type": "boolean"
           },
+          "companyAgentsEnabled": {
+            "type": "boolean"
+          },
           "pastSessionAccessEnabled": {
             "type": "boolean"
           },
@@ -4602,6 +5038,7 @@
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
+          "companyAgentsEnabled",
           "pastSessionAccessEnabled",
           "imessageEnabled",
           "whatsappEnabled",
@@ -10701,6 +11138,9 @@
           "subagentsEnabled": {
             "type": "boolean"
           },
+          "companyAgentsEnabled": {
+            "type": "boolean"
+          },
           "pastSessionAccessEnabled": {
             "type": "boolean"
           },
@@ -10723,6 +11163,7 @@
           "reviewInboxEnabled",
           "sidebarProjectsEnabled",
           "subagentsEnabled",
+          "companyAgentsEnabled",
           "pastSessionAccessEnabled",
           "imessageEnabled",
           "whatsappEnabled"
@@ -10777,6 +11218,9 @@
             "type": "boolean"
           },
           "subagentsEnabled": {
+            "type": "boolean"
+          },
+          "companyAgentsEnabled": {
             "type": "boolean"
           },
           "pastSessionAccessEnabled": {
@@ -16907,6 +17351,468 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkflowSlackAvatarUploadEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents": {
+      "get": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Company agents visible to the workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCompanyAgentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Company agent created, owned by its creator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}": {
+      "get": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A Company agent, its owner, and its triggers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCompanyAgentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Company agent updated by its owner after an optimistic version check.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentUpdateEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/archive": {
+      "post": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArchiveVersionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Company agent archived by its owner after an optimistic version check.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowArchiveEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/run": {
+      "post": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "required": true,
+            "name": "idempotency-key",
+            "in": "header"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Run accepted. It executes with the agent owner's authority, not the caller's.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTaskEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/runs": {
+      "get": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run history, including events that were blocked before any work started.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentRunPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/photo": {
+      "post": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "example": "run_019fed53"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowSlackAvatarUploadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Photo stored and addressable by an unguessable public URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyAgentPhotoUploadEnvelope"
                 }
               }
             }
