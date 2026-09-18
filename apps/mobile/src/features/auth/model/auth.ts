@@ -143,7 +143,10 @@ let refreshInFlight: { organizationId?: string; promise: Promise<StoredSession> 
 const refreshStoredSession = async (organizationId?: string): Promise<StoredSession> => {
   while (refreshInFlight) {
     if (refreshInFlight.organizationId === organizationId) return refreshInFlight.promise;
-    await refreshInFlight.promise;
+    // A refresh for a different organization only serializes this one; it does not decide it.
+    // Swallow its rejection so a failed selectOrganization() cannot fail an unrelated token read
+    // that is merely queued behind it.
+    await refreshInFlight.promise.catch(() => undefined);
   }
 
   const promise = (async () => {

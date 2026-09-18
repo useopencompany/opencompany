@@ -44,7 +44,7 @@
     "test": "bun --bun turbo test",
     "test:watch": "turbo test -- --watch",
     "secrets:check": "trufflehog git file://. --since-commit origin/main --branch HEAD --results=verified,unknown --fail --no-update",
-    "dependencies:audit": "bun audit",
+    "dependencies:audit": "node scripts/audit-dependencies.mjs",
     "infisical:dev": "infisical run --env=dev --path=/web --path=/runner -- bun run dev",
     "infisical:dev:web": "infisical run --env=dev --path=/web --path=/runner -- bun run dev:web",
     "infisical:dev:runner": "infisical run --env=dev --path=/runner -- bun run dev:runner",
