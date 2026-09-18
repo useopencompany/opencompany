@@ -128,6 +128,18 @@ describe("persisted automatic approval", () => {
     ).toMatchObject({ status: "denied" });
     expect(capture).not.toHaveBeenCalled();
   });
+  it("returns old-policy approvals to manual review", async () => {
+    expect(await registerReviewedApproval(input, deps())).toMatchObject({ status: "approved" });
+    await pg.exec(`UPDATE goat.action_turns SET approval_records =
+      jsonb_set(approval_records, '{call,automaticReview,policy}', '"obsolete-policy"');`);
+    const result = await registerReviewedApproval(input, deps());
+    expect(result).toMatchObject({
+      status: "pending",
+      automaticReview: { outcome: "requires_approval", reason: "policy_changed" },
+    });
+    expect(result?.resolvedAt).toBeUndefined();
+    expect(review).toHaveBeenCalledTimes(1);
+  });
   it("leaves fallback decisions pending without re-reviewing them", async () => {
     const fallback = vi.fn(async () => ({
       ...(await review()),

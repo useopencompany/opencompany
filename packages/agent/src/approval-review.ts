@@ -72,7 +72,11 @@ export async function reviewAction(
   if (!eligibleForApprovalReview(input.action, input.params)) return result("important_action");
   const state = JSON.stringify({
     userRequest: input.userRequest,
-    action: input.action,
+    action: {
+      id: input.action.id,
+      description: input.action.description,
+      effects: input.action.effects,
+    },
     arguments: input.params,
   });
   if (!input.userRequest.trim() || state.length > 24_000) return result("missing_context");

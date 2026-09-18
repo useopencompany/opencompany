@@ -8,7 +8,7 @@ For a new Ask request, the server checks an explicit list of eligible operations
 
 Eligible operations include selected Linear, Gmail, Slack, Drive, and Calendar reads, Gmail drafts, and an existing Linear issue's labels-only update. All other operations still ask, including sending, publishing, payment, deletion, access changes, production deployment, and unknown tools. Coding-engine permissions and paid-capability confirmations keep their existing behavior.
 
-Review has a four-second deadline, no retries, and a 24,000-character context ceiling. Missing context, invalid output, timeout, or provider failure means ask. There is no alternate model that can widen approval. A concurrent duplicate review also falls back to manual approval so a visible request cannot be released by a competing review. Opt-out is checked at review commit and again on execution. A user's denial wins over an in-flight review. Normal durable invocation deduplication still protects writes.
+Review has a four-second deadline, no retries, and a 24,000-character context ceiling. Missing context, invalid output, timeout, or provider failure means ask. There is no alternate model that can widen approval. A concurrent duplicate review also falls back to manual approval so a visible request cannot be released by a competing review. Opt-out is checked at review commit and again on execution. An approval from an older review policy returns to manual approval. A user's denial wins over an in-flight review. Normal durable invocation deduplication still protects writes.
 
 The activity row says “Automatically approved.” Its detail explains that the action was routine and within the request. Failed or uncertain reviews use the existing approval card.
 

@@ -332,9 +332,14 @@ export async function registerReviewedApproval(
   if (
     record.status === "approved" &&
     record.automaticReview?.outcome === "auto_approved" &&
-    !owner?.enabled
+    (!owner?.enabled || record.automaticReview.policy !== APPROVAL_REVIEW_POLICY)
   ) {
-    await revokeAutomaticApproval({ db, turn, invocationId: input.invocationId });
+    await revokeAutomaticApproval({
+      db,
+      turn,
+      invocationId: input.invocationId,
+      reason: owner?.enabled ? "policy_changed" : "preference_disabled",
+    });
     return getActionApproval({ db, turn, invocationId: input.invocationId });
   }
   if (

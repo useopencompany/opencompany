@@ -565,6 +565,7 @@ export async function finishAutomaticApprovalReview(input: {
 export async function revokeAutomaticApproval(input: {
   turn: ActionTurnRef;
   invocationId: string;
+  reason: "preference_disabled" | "policy_changed";
   db?: DbLike;
 }) {
   const db = input.db ?? getDb();
@@ -572,9 +573,9 @@ export async function revokeAutomaticApproval(input: {
     .update(actionTurns)
     .set({
       approvalRecords: sql`jsonb_set(${actionTurns.approvalRecords}, ARRAY[${input.invocationId}]::text[],
-      (${actionTurns.approvalRecords} -> ${input.invocationId}) || jsonb_build_object('status', 'pending'::text,
+      ((${actionTurns.approvalRecords} -> ${input.invocationId}) - 'resolvedAt') || jsonb_build_object('status', 'pending'::text,
         'automaticReview', (${actionTurns.approvalRecords} -> ${input.invocationId} -> 'automaticReview') ||
-          '{"outcome":"requires_approval","reason":"preference_disabled"}'::jsonb))`,
+          jsonb_build_object('outcome', 'requires_approval'::text, 'reason', ${input.reason}::text)))`,
       updatedAt: new Date(),
     })
     .where(

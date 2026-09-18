@@ -85,4 +85,17 @@ describe("automatic approval review", () => {
       "unavailable",
     );
   });
+  it("sends only review fields, not runtime connection metadata", async () => {
+    const call = evaluator();
+    const runtimeAction = {
+      ...action,
+      approvalContext: "private-connection-metadata",
+      permission: { integrationIds: ["private-id"] },
+    };
+    await reviewAction({ ...input, action: runtimeAction }, call as never);
+    const options = call.mock.calls[0] as unknown as [{ state: string }];
+    const state = JSON.parse(options[0].state);
+    expect(Object.keys(state.action).sort()).toEqual(["description", "effects", "id"]);
+    expect(options[0].state).not.toContain("private-");
+  });
 });
