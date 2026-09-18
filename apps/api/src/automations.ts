@@ -11,10 +11,12 @@ import {
   type AutomationExecutionPlan,
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
+  CompanyAgentApplicationService,
   CoreError,
   TaskApplicationService,
   taskNameFromGoal,
   WorkflowApplicationService,
+  type WorkflowApplicationServiceOptions,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
@@ -73,18 +75,35 @@ export function createAutomationServices(input: AutomationServicesInput) {
     taskCreator,
     ...(input.now ? { now: input.now } : {}),
   };
+  // Typed against the service's own option contract. Widening it to an inferred object literal
+  // drops the contextual types the validators rely on, so state it explicitly here.
+  const definitionOptions: Pick<
+    WorkflowApplicationServiceOptions,
+    "validateDefinition" | "validateEventSubscription"
+  > = {
+    validateDefinition: (definition) =>
+      validateWorkflowFields({
+        ...definition,
+        steps: definition.steps as never,
+        trigger: definition.trigger as never,
+      }),
+    validateEventSubscription: (subscription) =>
+      validateWorkflowEventSubscription(input.execute, subscription),
+  };
+  // Two services over one table, each pinned to the automation kind it serves. A Company agent is
+  // unreachable through the Workflows API, and a workflow is unreachable through the agents API,
+  // because each repository filters on `kind` in SQL rather than trusting the caller.
   return {
     workflows: new WorkflowApplicationService(new PostgresWorkflowRepository(input.execute), {
       ...options,
-      validateDefinition: (definition) =>
-        validateWorkflowFields({
-          ...definition,
-          steps: definition.steps as never,
-          trigger: definition.trigger as never,
-        }),
-      validateEventSubscription: (subscription) =>
-        validateWorkflowEventSubscription(input.execute, subscription),
+      ...definitionOptions,
     }),
+    agents: new CompanyAgentApplicationService(
+      new WorkflowApplicationService(
+        new PostgresWorkflowRepository(input.execute, { kind: "agent" }),
+        { ...options, kind: "agent", ...definitionOptions },
+      ),
+    ),
   };
 }
 
@@ -126,6 +145,7 @@ export function createAutomationTaskCreator(
         model: command.execution.model,
         source: command.source,
         ...(command.workflowId ? { workflowId: command.workflowId } : {}),
+        ...(command.agentId ? { agentId: command.agentId } : {}),
         ...(command.attachmentIds ? { attachmentIds: command.attachmentIds } : {}),
       });
       if (

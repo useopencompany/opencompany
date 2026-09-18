@@ -21,11 +21,15 @@ function fixture() {
   let stored: Workflow = {
     id: "workflow_1",
     slug: "monitor",
+    kind: "workflow",
     name: "Monitor",
     description: "Watch releases",
     steps: [{ id: "step_1", title: "Watch", model: "kimi-k2.6", instructions: "Watch releases" }],
     scope: "personal",
     createdByUserId: actor.userId,
+    ownerUserId: null,
+    ownerActive: false,
+    lastRunAt: null,
     slackChannel: { enabled: false, displayName: "Custom bot", avatarUrl: "" },
     status: "active",
     trigger: { type: "manual" },
@@ -86,6 +90,7 @@ function fixture() {
     getWorkflowMemory: vi.fn(async () => memory),
     setWorkflowMemoryEnabled: vi.fn(async ({ enabled }) => (memory = { ...memory, enabled })),
     clearWorkflowMemory: vi.fn(async () => (memory = { ...memory, content: "", updatedAt: null })),
+    listRuns: vi.fn(async () => []),
     recordRunNow: vi.fn(async () => undefined),
   };
   const planner = {

@@ -185,6 +185,15 @@ const app = createApiApp({
   customMcp: createCustomMcpService(database.db),
   brainAssets: createBrainAssetService({ db: database.db, knowledge }),
   workflowAvatars: createWorkflowAvatarService({ workflows: automations.workflows }),
+  agents: automations.agents,
+  // Agent photos reuse the workflow avatar store: same bytes, same public download route, and
+  // Slack downloads the URL the same way. Only the authorization differs — owner-only.
+  agentPhotos: createWorkflowAvatarService({
+    workflows: {
+      authorizeWorkflowWrite: (actor, agentId) =>
+        automations.agents.authorizeAgentWrite(actor, agentId),
+    },
+  }),
   chatResources: createChatResourceService({ db: database.db }),
   messagePresentations: new PostgresMessagePresentationService(execute),
   chatTitles: createChatTitleService({

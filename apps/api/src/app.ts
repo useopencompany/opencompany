@@ -43,6 +43,9 @@ import {
   type BrainSourceItem,
   CHAT_ATTACHMENT_MAX_BYTES,
   type ChatApplicationService,
+  type CompanyAgent,
+  type CompanyAgentApplicationService,
+  type CompanyAgentRun,
   CoreError,
   type KnowledgeApplicationService,
   type LegacyTask,
@@ -168,6 +171,8 @@ export type CreateApiAppInput = {
   chat: ChatApplicationService;
   tasks: TaskApplicationService;
   workflows: WorkflowApplicationService;
+  agents: CompanyAgentApplicationService;
+  agentPhotos: WorkflowAvatarService;
   knowledge: KnowledgeApplicationService;
   // Executes the `wiki` agent tool command contract for internal callers
   // (the runner over HTTP, the API-hosted MCP tool in-process).
@@ -570,6 +575,102 @@ export function createApiApp(input: CreateApiAppInput) {
         file: c.req.valid("form").file,
       });
       return c.json({ data: result, meta }, 201);
+    },
+    listCompanyAgents: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const query = c.req.valid("query");
+      const page = await input.agents.listAgents(actor, {
+        ...(query.cursor ? { cursor: query.cursor } : {}),
+        ...(query.limit ? { limit: query.limit } : {}),
+      });
+      return c.json(
+        { data: page.agents.map(companyAgentDto), nextCursor: page.nextCursor, meta },
+        200,
+      );
+    },
+    createCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const body = c.req.valid("json");
+      const result = await input.agents.createAgent(actor, {
+        idempotencyKey: c.req.valid("header")["idempotency-key"],
+        name: body.name,
+        ...(body.description !== undefined ? { description: body.description } : {}),
+      });
+      return c.json(
+        {
+          data: {
+            agent: companyAgentDto(result.agent),
+            transactionId: result.transactionId,
+            replayed: result.idempotentReplay,
+          },
+          meta,
+        },
+        201,
+      );
+    },
+    getCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const agent = await input.agents.getAgent(actor, c.req.valid("param").agentId);
+      return c.json({ data: companyAgentDto(agent), meta }, 200);
+    },
+    updateCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agents.updateAgent(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("json"),
+      );
+      return c.json(
+        {
+          data: { agent: companyAgentDto(result.agent), transactionId: result.transactionId },
+          meta,
+        },
+        200,
+      );
+    },
+    archiveCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agents.archiveAgent(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("json").expectedVersion,
+      );
+      return c.json({ data: result, meta }, 200);
+    },
+    runCompanyAgent: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "message", 30);
+      const result = await input.agents.runAgentNow(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("header")["idempotency-key"],
+      );
+      return c.json({ data: taskCreationDto(result), meta }, 202);
+    },
+    listCompanyAgentRuns: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      const runs = await input.agents.listAgentRuns(
+        actor,
+        c.req.valid("param").agentId,
+        c.req.valid("query").limit,
+      );
+      return c.json({ data: runs.map(companyAgentRunDto), meta }, 200);
+    },
+    uploadCompanyAgentPhoto: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const result = await input.agentPhotos.upload({
+        actor,
+        workflowId: c.req.valid("param").agentId,
+        file: c.req.valid("form").file,
+      });
+      return c.json({ data: { photoUrl: result.avatarUrl }, meta }, 201);
     },
     getBrainSnapshot: async (c) => {
       const actor = actorFrom(c);
@@ -3818,6 +3919,32 @@ function workflowDto(workflow: Workflow) {
     archivedAt: workflow.archivedAt?.toISOString() ?? null,
     createdAt: workflow.createdAt.toISOString(),
     updatedAt: workflow.updatedAt.toISOString(),
+  };
+}
+
+function companyAgentDto(agent: CompanyAgent) {
+  return {
+    ...agent,
+    triggers: agent.triggers.map((trigger) =>
+      trigger.type === "schedule"
+        ? {
+            ...trigger,
+            lastRunAt: trigger.lastRunAt?.toISOString() ?? null,
+            nextRunAt: trigger.nextRunAt?.toISOString() ?? null,
+          }
+        : trigger,
+    ),
+    lastRunAt: agent.lastRunAt?.toISOString() ?? null,
+    createdAt: agent.createdAt.toISOString(),
+    updatedAt: agent.updatedAt.toISOString(),
+  };
+}
+
+function companyAgentRunDto(run: CompanyAgentRun) {
+  return {
+    ...run,
+    createdAt: run.createdAt.toISOString(),
+    updatedAt: run.updatedAt.toISOString(),
   };
 }
 

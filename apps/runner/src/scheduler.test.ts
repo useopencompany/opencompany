@@ -82,6 +82,7 @@ describe("sweepDueTaskSchedules", () => {
           id text PRIMARY KEY,
           workspace_id text NOT NULL,
           slug text NOT NULL,
+          kind text NOT NULL DEFAULT 'workflow',
           schedule_user_workos_id text,
           name text NOT NULL,
           schedule_cron text,

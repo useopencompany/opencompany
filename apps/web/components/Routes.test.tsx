@@ -57,6 +57,7 @@ const userPreferencesMock = vi.hoisted(() => ({
   updateSidebarProjectsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updatePastSessionAccessAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
   updateSubagentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
+  updateCompanyAgentsAction: vi.fn(async (enabled: boolean) => ({ ok: true, enabled })),
 }));
 
 const workflowActionsMock = vi.hoisted(() => ({
@@ -190,6 +191,7 @@ vi.mock("@/lib/user-preferences", () => ({
   updateReviewInboxAction: userPreferencesMock.updateReviewInboxAction,
   updateSidebarProjectsAction: userPreferencesMock.updateSidebarProjectsAction,
   updateSubagentsAction: userPreferencesMock.updateSubagentsAction,
+  updateCompanyAgentsAction: userPreferencesMock.updateCompanyAgentsAction,
   updatePastSessionAccessAction: userPreferencesMock.updatePastSessionAccessAction,
 }));
 

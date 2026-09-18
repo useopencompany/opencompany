@@ -7,6 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Archive,
   BookOpen,
+  Bot,
   Check,
   ChevronsUpDown,
   Inbox,
@@ -172,6 +173,7 @@ export function Sidebar({
     isTaskRouteActive(pathname, taskHref(task.displayId)),
   );
   const workflowsActive = pathname === "/workflows" || pathname.startsWith("/workflows/");
+  const agentsActive = pathname === "/agents" || pathname.startsWith("/agents/");
   // `/wiki/sources` and `/wiki/import` are static routes under /wiki, not wikis, so neither marks
   // a row as current. Bare `/wiki` redirects, so it is only ever in flight.
   const activeWikiSlug = activeWikiSlugFromPathname(pathname);
@@ -249,6 +251,9 @@ export function Sidebar({
             label="Workflows"
             active={workflowsActive}
           />
+          {featureFlags.companyAgents ? (
+            <SidebarNavRow href="/agents" icon={Bot} label="Company agents" active={agentsActive} />
+          ) : null}
         </nav>
 
         {/* Brains */}
