@@ -91,6 +91,22 @@ describe("sandboxStatusPresenter", () => {
     ).toBe("Unknown");
   });
 
+  it("never calls a sandbox unstarted while its agent is working", () => {
+    const workingRuntime: ConversationRuntimeView = {
+      status: "running",
+      activeRunId: "run_1",
+      hasError: false,
+      updatedAt: "",
+    };
+
+    expect(
+      sandboxStatusPresenter("codex", workingRuntime, { kind: "resolved", status: null }).label,
+    ).toBe("Starting");
+    expect(sandboxStatusPresenter("codex", null, { kind: "resolved", status: null }).label).toBe(
+      "Not started",
+    );
+  });
+
   it("uses the logical runtime only while the first sandbox check is pending", () => {
     expect(sandboxStatusPresenter("codex", startingRuntime, { kind: "pending" }).label).toBe(
       "Starting",

@@ -269,7 +269,10 @@ export function sandboxStatusPresenter(
     };
   }
 
-  const starting = logical.kind === "queued" || logical.kind === "starting";
+  // A Conversation reports an active turn before its sandbox id is recorded, so a queued,
+  // starting, or working agent means a sandbox is coming up — never one that never started.
+  const starting =
+    logical.kind === "queued" || logical.kind === "starting" || logical.kind === "working";
   return {
     ...logical,
     kind: starting ? "starting" : "stopped",
