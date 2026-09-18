@@ -7,6 +7,7 @@ import { registerReviewedApproval } from "./persisted-action-gateway";
 
 let pg: Awaited<ReturnType<typeof createTestPGlite>>;
 let db: ReturnType<typeof drizzle>;
+const queryParameters: unknown[][] = [];
 const run = {
   sessionId: "session",
   runId: "run",
@@ -45,7 +46,7 @@ const review = vi.fn(async () => ({
   outcome: "auto_approved" as const,
   reason: "routine_action" as const,
   model: "typesafe-ai/jev",
-  policy: "routine-v1",
+  policy: "task-risk-v2",
   durationMs: 1,
 }));
 const capture = vi.fn(async () => {});
@@ -53,17 +54,18 @@ const deps = () => ({ db, review, capture });
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  queryParameters.length = 0;
   pg = await createTestPGlite();
-  db = drizzle(pg);
+  db = drizzle(pg, { logger: { logQuery: (_query, params) => queryParameters.push(params) } });
   await pg.exec(`CREATE SCHEMA goat;
 CREATE TABLE goat.users (workos_user_id text PRIMARY KEY, approve_for_me_enabled boolean);
-CREATE TABLE goat.codex_chat_turns (id text PRIMARY KEY, user_workos_id text, codex_chat_session_id text, status text, interrupt_requested_at timestamptz, prompt text);
+CREATE TABLE goat.codex_chat_turns (id text PRIMARY KEY, user_workos_id text, codex_chat_session_id text, status text, interrupt_requested_at timestamptz, prompt text, created_at timestamptz DEFAULT now());
 CREATE TABLE goat.action_turns (id text PRIMARY KEY, session_id text, turn_id text, user_workos_id text, workspace_id text, policy text,
  action_call_count integer DEFAULT 0, invocation_ids jsonb DEFAULT '[]', listed_source_ids jsonb DEFAULT '[]', quoted_total_usd_micros bigint DEFAULT 0,
  admitted_invocation_ids jsonb DEFAULT '[]', capability_quotes jsonb DEFAULT '{}', approval_records jsonb DEFAULT '{}', async_runs_started integer DEFAULT 0,
  async_invocation_ids jsonb DEFAULT '[]', expires_at timestamptz, created_at timestamptz, updated_at timestamptz, UNIQUE(session_id,turn_id));
 INSERT INTO goat.users VALUES ('user',true);
-INSERT INTO goat.codex_chat_turns VALUES ('run','user','session','running',NULL,'Summarize ENG-1');`);
+INSERT INTO goat.codex_chat_turns VALUES ('run','user','session','running',NULL,'Summarize ENG-1', now());`);
 });
 afterEach(async () => {
   await pg.close();
@@ -84,12 +86,24 @@ describe("persisted automatic approval", () => {
       expect.objectContaining({ outcome: "auto_approved", request_id: "call" }),
     );
     expect(JSON.stringify(capture.mock.calls)).not.toContain("Summarize ENG-1");
+    expect(JSON.stringify(queryParameters)).not.toContain("Summarize ENG-1");
     expect(
       await registerReviewedApproval({ ...input, params: { id: "ENG-2" } }, deps()),
     ).toBeNull();
     expect(
       await registerReviewedApproval({ ...input, approvalContext: "connection-v2" }, deps()),
     ).toBeNull();
+  });
+  it("loads only earlier requests by this actor in this session", async () => {
+    await pg.exec(`INSERT INTO goat.codex_chat_turns VALUES
+      ('earlier','user','session','completed',NULL,'Find the Roadmap project',now()-interval '1 minute'),
+      ('other-session','user','elsewhere','completed',NULL,'PRIVATE_OTHER_SESSION',now()-interval '1 minute'),
+      ('other-user','other','session','completed',NULL,'PRIVATE_OTHER_USER',now()-interval '1 minute'),
+      ('future','user','session','queued',NULL,'FUTURE_REQUEST',now()+interval '1 minute');`);
+    await registerReviewedApproval(input, deps());
+    expect(review).toHaveBeenCalledWith(
+      expect.objectContaining({ requestContext: ["Find the Roadmap project"] }),
+    );
   });
   it("never revisits requests presented before opt-in or manual denials", async () => {
     await pg.exec("UPDATE goat.users SET approve_for_me_enabled=false");
@@ -128,6 +142,34 @@ describe("persisted automatic approval", () => {
     ).toMatchObject({ status: "denied" });
     expect(capture).not.toHaveBeenCalled();
   });
+  it("invalidates automatic approval when the current request changes", async () => {
+    await registerReviewedApproval(input, deps());
+    await pg.exec(
+      "UPDATE goat.codex_chat_turns SET prompt='Stop. Wait for my approval.' WHERE id='run'",
+    );
+    expect(await registerReviewedApproval(input, deps())).toMatchObject({
+      status: "pending",
+      automaticReview: { outcome: "requires_approval" },
+    });
+    expect(review).toHaveBeenCalledTimes(1);
+  });
+  it.each(["prompt", "interrupt"])(
+    "does not commit after an in-flight %s change",
+    async (change) => {
+      const changedReview = async () => {
+        await pg.exec(
+          change === "prompt"
+            ? "UPDATE goat.codex_chat_turns SET prompt='Wait for me' WHERE id='run'"
+            : "UPDATE goat.codex_chat_turns SET interrupt_requested_at=now() WHERE id='run'",
+        );
+        return review();
+      };
+      expect(
+        await registerReviewedApproval(input, { ...deps(), review: changedReview }),
+      ).toMatchObject({ status: "pending" });
+      expect(capture).not.toHaveBeenCalled();
+    },
+  );
   it("returns old-policy approvals to manual review", async () => {
     expect(await registerReviewedApproval(input, deps())).toMatchObject({ status: "approved" });
     await pg.exec(`UPDATE goat.action_turns SET approval_records =
