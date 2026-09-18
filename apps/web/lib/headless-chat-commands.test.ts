@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitHeadlessConversationTransaction } from "./headless-chat-collections";
 import {
+  getEngineRuntimeStatus,
   updateHeadlessChatConversation,
   waitForHeadlessChatRunSettlement,
 } from "./headless-chat-commands";
@@ -65,5 +66,37 @@ describe("headless Conversation commands", () => {
       }),
     ).resolves.toMatchObject({ id: "run_1", status: "canceled" });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports a Conversation without an engine session as having no sandbox", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { error: { code: "not_found", message: "Engine session not found." } },
+        { status: 404 },
+      ),
+    );
+
+    await expect(
+      getEngineRuntimeStatus("conversation_1", {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("surfaces a failed sandbox lifecycle check instead of reporting no sandbox", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        { error: { code: "unavailable", message: "Unable to load the coding workspace status." } },
+        { status: 503 },
+      ),
+    );
+
+    await expect(
+      getEngineRuntimeStatus("conversation_1", {
+        baseUrl: "https://app.example.test",
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).rejects.toThrow("Unable to load the coding workspace status.");
   });
 });
