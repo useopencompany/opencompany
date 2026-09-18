@@ -129,7 +129,9 @@ export function executePersistedChatHostTool(input: {
               {
                 ...task,
                 source: "workflow",
-                idempotencyKey: `workflow:${input.request.turnId}`,
+                // Keyed per workflow, not per turn: a turn may start several distinct workflows,
+                // and each needs its own Task while a transport retry of the same one replays.
+                idempotencyKey: `workflow:${input.request.turnId}:${workflow.mention.id}`,
               },
               taskDependencies,
             ),

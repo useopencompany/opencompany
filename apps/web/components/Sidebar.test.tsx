@@ -1695,10 +1695,10 @@ describe("Sidebar", () => {
     return row;
   }
 
-  function statusSlotOf(title: string) {
-    const slot = rowOf(title).firstElementChild?.firstElementChild;
-    if (!(slot instanceof HTMLElement)) throw new Error(`No status slot for "${title}".`);
-    return slot;
+  /** The row's leading marker slot, or null when the session has nothing to mark. */
+  function markerSlotOf(title: string) {
+    const first = rowOf(title).firstElementChild;
+    return first instanceof HTMLElement && first.tagName === "SPAN" ? first : null;
   }
 
   describe("Pull request badge", () => {
@@ -1817,7 +1817,7 @@ describe("Sidebar", () => {
       expect(badge.parentElement?.closest("a")).toBeNull();
     });
 
-    it("reserves one compact marker slot on a plain chat when another row has a pull request", () => {
+    it("leaves a plain chat unindented when another row has a pull request", () => {
       recentChatsMock.value = [
         archivableChat("conversation_pr", "Rework onboarding copy"),
         archivableChat("conversation_plain", "YC customer meetings"),
@@ -1833,21 +1833,19 @@ describe("Sidebar", () => {
       ];
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      const plainLink = screen.getByRole("link", { name: "YC customer meetings" });
-      expect(plainLink).toHaveClass("pl-1.5");
-      expect(statusSlotOf("YC customer meetings")).toHaveClass("size-[18px]");
+      expect(screen.getByRole("link", { name: "YC customer meetings" })).toHaveClass("pl-2");
+      expect(markerSlotOf("YC customer meetings")).toBeNull();
       expect(rowOf("Rework onboarding copy").firstElementChild).toHaveClass("pl-2");
       expect(screen.getByRole("link", { name: "Rework onboarding copy" })).toHaveClass("pl-1.5");
     });
   });
 
   describe("Session status marker", () => {
-    it("puts a plain title, live spinner, unread dot, and settled pull request on one edge", () => {
+    it("puts a live spinner, unread dot, and settled pull request on one edge", () => {
       recentChatsMock.value = [
         { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
         { ...archivableChat("conversation_unread", "Review launch plan"), state: "done_unseen" },
         archivableChat("conversation_pr", "Rework onboarding copy"),
-        archivableChat("conversation_settled", "YC customer meetings"),
       ];
       sessionPullRequestsMock.value = [
         {
@@ -1860,13 +1858,8 @@ describe("Sidebar", () => {
       ];
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
-      for (const title of [
-        "Linear triage",
-        "Review launch plan",
-        "Rework onboarding copy",
-        "YC customer meetings",
-      ]) {
-        expect(statusSlotOf(title)).toHaveClass("size-[18px]");
+      for (const title of ["Linear triage", "Review launch plan", "Rework onboarding copy"]) {
+        expect(markerSlotOf(title)).toHaveClass("pl-2");
         expect(screen.getByRole("link", { name: title })).toHaveClass("pl-1.5");
       }
       expect(
@@ -1878,6 +1871,18 @@ describe("Sidebar", () => {
       expect(
         within(rowOf("Rework onboarding copy")).getByTestId("sidebar-pull-request-badge"),
       ).toBeInTheDocument();
+    });
+
+    it("starts a settled session with nothing to mark at the list's left edge", () => {
+      recentChatsMock.value = [
+        { ...archivableChat("conversation_working", "Linear triage"), state: "working" },
+        archivableChat("conversation_settled", "YC customer meetings"),
+      ];
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+
+      expect(markerSlotOf("YC customer meetings")).toBeNull();
+      expect(screen.getByRole("link", { name: "YC customer meetings" })).toHaveClass("pl-2");
+      expect(markerSlotOf("Linear triage")).toHaveClass("pl-2");
     });
 
     it("shows only the spinner while a session with a pull request is running", () => {
@@ -2011,8 +2016,9 @@ describe("Sidebar", () => {
       render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
 
       const projects = await findLoadedProjects();
-      // The row's leading status column carries the indent; the link beside it only ever carries
-      // the gap between the two.
+      // The indent lands on whatever leads the row: the status slot when the session has a marker,
+      // and the link itself when it has none. These fixtures are settled and seen, so it is the
+      // link.
       for (const name of ["chat_filed title", /task_filed name/]) {
         const row = within(projects).getByRole("link", { name }).parentElement;
         expect(row?.firstElementChild).toHaveClass(SIDEBAR_NESTED_ROW_PADDING_CLASSNAME);

@@ -162,6 +162,7 @@
       "version": "0.2.0",
       "dependencies": {
         "@fastify/rate-limit": "11.2.0",
+        "@fumari/image-size": "0.1.0",
         "@modelcontextprotocol/sdk": "1.30.0",
         "@opencompany/agent": "workspace:*",
         "@opencompany/agent-runtime": "workspace:*",

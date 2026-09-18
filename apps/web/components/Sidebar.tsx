@@ -747,6 +747,7 @@ function SidebarChatRow({
   const state = resolveSidebarChatState({ chat, localState });
   const contentPadding = useSidebarRowPadding();
   const runStateDescriptionId = useRunStateDescription(state);
+  const marked = hasSessionMarker({ state, pullRequest });
   const content = <span className="truncate tracking-[-0.005em]">{chat.title}</span>;
   return (
     <div
@@ -755,18 +756,22 @@ function SidebarChatRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <SidebarSessionStatus
-        state={state}
-        runStateDescriptionId={runStateDescriptionId}
-        pullRequest={pullRequest}
-        className={contentPadding}
-      />
+      {marked ? (
+        <SidebarSessionStatus
+          state={state}
+          runStateDescriptionId={runStateDescriptionId}
+          pullRequest={pullRequest}
+          className={contentPadding}
+        />
+      ) : null}
       {optimistic ? (
         <button
           type="button"
           aria-describedby={runStateDescriptionId}
           onClick={onRequestComposerFocus}
-          className={`flex min-w-0 flex-1 items-center rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
+          className={`flex min-w-0 flex-1 items-center rounded-md py-[5px] pr-1 text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+          }`}
         >
           {content}
         </button>
@@ -788,7 +793,9 @@ function SidebarChatRow({
           }}
           aria-current={active ? "page" : undefined}
           aria-describedby={runStateDescriptionId}
-          className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
+          className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+            marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+          }`}
         >
           {content}
         </IntentPrefetchLink>
@@ -828,6 +835,21 @@ function SidebarChatRow({
 }
 
 /**
+ * Whether a session has anything to show in its marker slot: a run that is live, waiting, or
+ * finished unseen, or — once the result is seen — the pull request it opened.
+ *
+ * A settled, seen session with no pull request has nothing to say, and the row renders no slot at
+ * all rather than an empty one. Most rows in a real Recents list are in exactly that state, so a
+ * reserved slot left the majority of the list indented behind a column of blank space.
+ */
+function hasSessionMarker(input: {
+  state: ReturnType<typeof chatSummaryState>;
+  pullRequest: SessionPullRequest | null;
+}) {
+  return input.state !== "done_seen" || Boolean(input.pullRequest);
+}
+
+/**
  * The marker at a session row's left edge follows the session lifecycle: a live run owns that
  * position, then an unread result, then its pull request after the result is seen.
  *
@@ -837,8 +859,12 @@ function SidebarChatRow({
  *
  * It sits beside the row's link rather than inside it: the badge is itself a link, to the PR on
  * GitHub, and an anchor inside an anchor is invalid HTML. The marker carries the row's left
- * padding. Its single 18px slot is always present, even when empty, so every title begins on the
- * same edge while the session moves through differently sized status glyphs.
+ * padding, and the link beside it drops to `SIDEBAR_ROW_LINK_PADDING`, the gap between them. A row
+ * with nothing to mark skips the slot and gives that padding to its link instead, so its title
+ * starts at the list's own left edge — see `hasSessionMarker`.
+ *
+ * The slot is a fixed 18px whatever it holds, so a session moving between differently sized status
+ * glyphs never shifts its own title.
  */
 function SidebarSessionStatus({
   state,
@@ -854,12 +880,8 @@ function SidebarSessionStatus({
 }) {
   return (
     <span className={`flex shrink-0 items-center ${className ?? ""}`}>
-      {state === "done_seen" ? (
-        pullRequest ? (
-          <PullRequestBadge pullRequest={pullRequest} />
-        ) : (
-          <span aria-hidden="true" className="size-[18px]" />
-        )
+      {state === "done_seen" && pullRequest ? (
+        <PullRequestBadge pullRequest={pullRequest} />
       ) : (
         <span className="flex size-[18px] shrink-0 items-center justify-center">
           <ChatStateIndicator state={state} surface="sidebar" id={runStateDescriptionId} />
@@ -870,8 +892,9 @@ function SidebarSessionStatus({
 }
 
 /**
- * The marker before the row link carries the row's own padding. The link only needs the compact
- * gap from that fixed-width slot to the title.
+ * The gap between a marker slot and the title beside it. Only a row that renders a marker uses it:
+ * the slot carries the row's own padding, so the link after it needs nothing more. A row with no
+ * marker takes that padding itself.
  */
 const SIDEBAR_ROW_LINK_PADDING = "pl-1.5";
 
@@ -931,6 +954,7 @@ function SidebarTaskRow({
   const archivable = isSettledTaskStatus(task.status);
   const contentPadding = useSidebarRowPadding();
   const runStateDescriptionId = useRunStateDescription(state);
+  const marked = hasSessionMarker({ state, pullRequest });
   return (
     <div
       {...dragProps}
@@ -938,20 +962,24 @@ function SidebarTaskRow({
         active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
-      <SidebarSessionStatus
-        state={state}
-        runStateDescriptionId={runStateDescriptionId}
-        pullRequest={pullRequest}
-        // A Task row is two lines tall. Centred across both, the column would sit at a different
-        // height from the row's own text and from every one-line chat row above it.
-        className={`mt-[6px] self-start ${contentPadding}`}
-      />
+      {marked ? (
+        <SidebarSessionStatus
+          state={state}
+          runStateDescriptionId={runStateDescriptionId}
+          pullRequest={pullRequest}
+          // A Task row is two lines tall. Centred across both, the column would sit at a different
+          // height from the row's own text and from every one-line chat row above it.
+          className={`mt-[6px] self-start ${contentPadding}`}
+        />
+      ) : null}
       <Link
         href={href}
         prefetch
         aria-current={active ? "page" : undefined}
         aria-describedby={runStateDescriptionId}
-        className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${SIDEBAR_ROW_LINK_PADDING}`}
+        className={`flex min-w-0 flex-1 items-center rounded-l-md py-[5px] text-left focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 ${
+          marked ? SIDEBAR_ROW_LINK_PADDING : contentPadding
+        }`}
       >
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate tracking-[-0.005em]">{task.name}</span>
