@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { stringifyPostgresJson } from "./postgres-json";
-import { actionTurns, users } from "./product-schema";
+import { actionTurns, codexChatTurns, users } from "./product-schema";
 
 type DbLike = any;
 
@@ -531,6 +531,7 @@ function isAutomaticReview(
 // cannot be re-reviewed. The preference is checked in the same statement as the approval write.
 export async function finishAutomaticApprovalReview(input: {
   turn: ActionTurnRef;
+  requestPrompt: string;
   invocationId: string;
   reviewToken: string;
   inputHash: string;
@@ -557,6 +558,13 @@ export async function finishAutomaticApprovalReview(input: {
         sql`${actionTurns.approvalRecords} -> ${input.invocationId} ->> 'inputHash' = ${input.inputHash}`,
         sql`NOT (${actionTurns.approvalRecords} -> ${input.invocationId} ? 'automaticReview')`,
         sql`EXISTS (SELECT 1 FROM ${users} WHERE ${users.workosUserId} = ${input.turn.userWorkosId} AND ${users.approveForMeEnabled} = true)`,
+        sql`EXISTS (SELECT 1 FROM ${codexChatTurns}
+          WHERE ${codexChatTurns.id} = ${input.turn.turnId}
+            AND ${codexChatTurns.userWorkosId} = ${input.turn.userWorkosId}
+            AND ${codexChatTurns.codexChatSessionId} = ${input.turn.sessionId}
+            AND ${codexChatTurns.status} = 'running'
+            AND ${codexChatTurns.interruptRequestedAt} IS NULL
+            AND ${codexChatTurns.prompt} = ${input.requestPrompt})`,
       ),
     )
     .returning({ approvalRecords: actionTurns.approvalRecords });

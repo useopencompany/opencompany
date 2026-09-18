@@ -317,7 +317,7 @@ export function PreferencesSettingsRoute() {
         <BetaFeatureSwitch
           icon={ShieldCheck}
           label="Approve for me"
-          description="Let AI approve routine plugin actions in your chats and tasks. Important or uncertain actions still ask you."
+          description="Let AI approve low-risk plugin actions that help complete your chats and tasks. High-risk actions still ask you."
           checked={featureFlags.approveForMe === true}
           update={updateApproveForMeAction}
         />

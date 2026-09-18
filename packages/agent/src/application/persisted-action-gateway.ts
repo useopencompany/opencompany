@@ -29,7 +29,7 @@ import {
   users,
   workspaceMembers,
 } from "@opencompany/db/product-schema";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { isChatActionsKilled, resolveActionCatalog } from "../actions/catalog";
 import { executeAction } from "../actions/execute";
 import type { CapabilityQuote, CapabilityTurnState } from "../actions/types";
@@ -307,22 +307,13 @@ export async function registerReviewedApproval(
 ) {
   const { db } = dependencies;
   const turn = actionTurnRef(run);
-  const actionContext = action
-    ? actionApprovalInputHash(
-        {
-          id: action.id,
-          description: action.description,
-          effects: action.effects,
-          schema: action.params,
-          integrationIds: action.permission?.integrationIds ?? [],
-          provider: action.permission?.provider ?? null,
-        },
-        input.approvalContext,
-      )
-    : undefined;
   // Read intent from the authenticated turn, never from the action's model-supplied rationale.
   const [owner] = await db
-    .select({ enabled: users.approveForMeEnabled, prompt: codexChatTurns.prompt })
+    .select({
+      enabled: users.approveForMeEnabled,
+      prompt: codexChatTurns.prompt,
+      createdAt: codexChatTurns.createdAt,
+    })
     .from(codexChatTurns)
     .innerJoin(users, eq(users.workosUserId, codexChatTurns.userWorkosId))
     .where(
@@ -335,6 +326,20 @@ export async function registerReviewedApproval(
       ),
     )
     .limit(1);
+  const actionContext = action
+    ? actionApprovalInputHash(
+        {
+          userRequest: owner?.prompt ?? null,
+          id: action.id,
+          description: action.description,
+          effects: action.effects,
+          schema: action.params,
+          integrationIds: action.permission?.integrationIds ?? [],
+          provider: action.permission?.provider ?? null,
+        },
+        input.approvalContext,
+      )
+    : undefined;
   const token = owner?.enabled && action && input.decision !== "denied" ? randomUUID() : undefined;
   const record = await registerActionApproval({
     db,
@@ -371,6 +376,21 @@ export async function registerReviewedApproval(
     !owner
   )
     return record;
+  const previousRequests =
+    record.reviewToken === token
+      ? await db
+          .select({ prompt: codexChatTurns.prompt })
+          .from(codexChatTurns)
+          .where(
+            and(
+              eq(codexChatTurns.userWorkosId, run.actorId),
+              eq(codexChatTurns.codexChatSessionId, run.sessionId),
+              lt(codexChatTurns.createdAt, owner.createdAt),
+            ),
+          )
+          .orderBy(desc(codexChatTurns.createdAt))
+          .limit(4)
+      : [];
   // A parallel check must not present a request that a competing review can later release.
   // Resolve competing checks to manual approval; only the winning completion emits an event.
   const review =
@@ -386,6 +406,7 @@ export async function registerReviewedApproval(
           action,
           params: input.params,
           userRequest: owner.prompt,
+          requestContext: previousRequests.reverse().map((row: { prompt: string }) => row.prompt),
           apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY,
           ...(signal ? { signal } : {}),
         });
@@ -393,6 +414,7 @@ export async function registerReviewedApproval(
   const resolved = await finishAutomaticApprovalReview({
     db,
     turn,
+    requestPrompt: owner.prompt,
     invocationId: input.invocationId,
     reviewToken: record.reviewToken,
     inputHash: record.inputHash,
