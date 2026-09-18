@@ -152,9 +152,14 @@ export function readWorkflowMentionRef(
 
 // `userId` is the reader: company workflows belong to the workspace, personal ones only to their
 // creator. Callers that cannot name a reader have no business seeing personal workflows.
+//
+// Company agents live in this table too, and every one of these readers ultimately runs a row as
+// the caller. An agent must run as its owner instead, so the kind filter keeps agents out of the
+// chat catalog, the `#` mention resolver, and every other workflow-run path.
 export function visibleWorkflows(workspaceId: string, userId: string) {
   return and(
     eq(workflows.workspaceId, workspaceId),
+    eq(workflows.kind, "workflow"),
     or(eq(workflows.scope, "company"), eq(workflows.createdByWorkosId, userId)),
   );
 }

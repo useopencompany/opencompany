@@ -345,7 +345,7 @@ export type WorkflowDefinitionValidator = (input: {
   trigger: WorkflowTriggerInput;
 }) => string | null;
 
-type WorkflowApplicationServiceOptions = {
+export type WorkflowApplicationServiceOptions = {
   // Which surface this service instance serves. It must match the kind its repository is pinned
   // to; the repository is what actually enforces the boundary in SQL.
   kind?: WorkflowKind;

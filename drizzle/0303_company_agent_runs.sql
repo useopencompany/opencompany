@@ -67,9 +67,8 @@ BEGIN
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at;
 END
-$$;--> statement-breakpoint
+$$;
 
--- Backfill the new projection column for Tasks that already exist.
-SELECT goat.refresh_task_read_model_v1(task.id)
-FROM goat.tasks AS task
-WHERE task.session_id IS NOT NULL;
+-- No backfill: `tasks.agent_id` is new, so it is NULL on every existing row and the projection
+-- column already matches. Re-projecting every Task would only churn logical replication and force
+-- each client's tasks-v1 shape to resync for no change in value.

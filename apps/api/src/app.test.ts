@@ -6362,6 +6362,7 @@ function fakeAutomationServices() {
     },
     updateWorkflow: async () => ({ status: "not_found" }),
     archiveWorkflow: async () => ({ status: "not_found" }),
+    listRuns: async () => [],
     recordRunNow: async () => undefined,
     getWorkflowMemory: async () => null,
     setWorkflowMemoryEnabled: async () => null,
@@ -6403,6 +6404,7 @@ function populatedAutomationServices() {
   let workflow: Workflow = {
     id: "workflow_1",
     slug: "weekly-research",
+    kind: "workflow",
     name: "Weekly research",
     description: "Track changes",
     steps: [
@@ -6417,6 +6419,9 @@ function populatedAutomationServices() {
     scope: "company",
     slackChannel: { enabled: true, displayName: "", avatarUrl: "" },
     createdByUserId: "user_1",
+    ownerUserId: null,
+    ownerActive: false,
+    lastRunAt: null,
     trigger: { type: "manual" },
     version: 1,
     archivedAt: null,
@@ -6472,6 +6477,7 @@ function populatedAutomationServices() {
       value: { workflowId: workflow.id, version: workflow.version + 1 },
       transactionId: "53",
     }),
+    listRuns: async () => [],
     recordRunNow: async () => undefined,
     getWorkflowMemory: async ({ workflowId }) =>
       workflowId === workflow.id || workflowId === workflow.slug ? memory : null,

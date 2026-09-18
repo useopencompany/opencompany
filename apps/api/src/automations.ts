@@ -16,7 +16,7 @@ import {
   TaskApplicationService,
   taskNameFromGoal,
   WorkflowApplicationService,
-  type WorkflowEventTrigger,
+  type WorkflowApplicationServiceOptions,
 } from "@opencompany/core";
 import type { ResolvedChatAttachments } from "@opencompany/db/chat-repository";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
@@ -75,14 +75,19 @@ export function createAutomationServices(input: AutomationServicesInput) {
     taskCreator,
     ...(input.now ? { now: input.now } : {}),
   };
-  const definitionOptions = {
-    validateDefinition: (definition: Parameters<typeof validateWorkflowFields>[0]) =>
+  // Typed against the service's own option contract. Widening it to an inferred object literal
+  // drops the contextual types the validators rely on, so state it explicitly here.
+  const definitionOptions: Pick<
+    WorkflowApplicationServiceOptions,
+    "validateDefinition" | "validateEventSubscription"
+  > = {
+    validateDefinition: (definition) =>
       validateWorkflowFields({
         ...definition,
         steps: definition.steps as never,
         trigger: definition.trigger as never,
       }),
-    validateEventSubscription: (subscription: { actor: Actor; trigger: WorkflowEventTrigger }) =>
+    validateEventSubscription: (subscription) =>
       validateWorkflowEventSubscription(input.execute, subscription),
   };
   // Two services over one table, each pinned to the automation kind it serves. A Company agent is

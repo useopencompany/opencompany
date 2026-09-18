@@ -88,12 +88,13 @@ export function CompanyAgentEditor({
   const draftRef = useRef(draft);
   const versionRef = useRef(agent.version);
   const savedRef = useRef(JSON.stringify(draft));
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
 
-  const save = useCallback(async () => {
+  const saveLatest = useCallback(async () => {
     const snapshot = draftRef.current;
     const value = JSON.stringify(snapshot);
     if (value === savedRef.current) return;
@@ -121,6 +122,16 @@ export function CompanyAgentEditor({
       setSaveError(error instanceof Error ? error.message : "This agent could not be saved.");
     }
   }, [agent.id]);
+
+  // Saves are serialized. Each one sends the version the previous one returned, so two overlapping
+  // autosaves cannot race a stale `expectedVersion` into a conflict — or, worse, land out of order
+  // and leave the cached version pointing at the older write. Awaiting this also lets Run now wait
+  // for the editor to be fully persisted before it compiles the agent.
+  const save = useCallback(() => {
+    const next = saveQueueRef.current.then(saveLatest);
+    saveQueueRef.current = next.catch(() => undefined);
+    return next;
+  }, [saveLatest]);
 
   useEffect(() => {
     if (!canEdit) return;
@@ -309,7 +320,9 @@ export function CompanyAgentEditor({
               <SectionLabel>Danger zone</SectionLabel>
               <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-3.5 py-3">
                 <p className="text-[12.5px] leading-5 text-ink-subtle">
-                  Deleting removes the agent and stops its triggers. Past runs stay readable.
+                  Deleting stops this agent’s triggers and removes it from the list. Its finished
+                  runs stay in the workspace, but this run history goes with it. Pause instead if
+                  you only want it to stop working.
                 </p>
                 <Button
                   size="sm"
@@ -336,7 +349,8 @@ export function CompanyAgentEditor({
           <DialogHeader>
             <DialogTitle className="text-[15px]">Delete agent?</DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              “{agent.name}” will stop running and leave the list. Its past runs stay readable.
+              “{agent.name}” will stop running and leave the list. Its finished runs stay in the
+              workspace and keep their own links, but this run history goes with the agent.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
