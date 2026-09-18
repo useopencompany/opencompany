@@ -91,8 +91,11 @@ function createEngineSession(conversationId: string) {
         params: { conversationId },
         onError: keepStreamRetrying("Engine session sync failed; retrying.", conversationId),
       },
-      // goat_codex_chat_sessions_chat_session_idx guarantees one engine session per Conversation.
-      getKey: (row) => row.conversationId,
+      // Key on the physical runtime id, not the Conversation: a partial Electric update carries
+      // the primary key plus the changed columns only, so keying on any other column left every
+      // status change unmatched and the row frozen at its first snapshot.
+      // goat_codex_chat_sessions_chat_session_idx still guarantees one row per Conversation.
+      getKey: (row) => row.id,
     }),
   );
 }
