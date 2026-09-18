@@ -2595,7 +2595,10 @@ export function Surface({
 
   const handleCodexToolAction = async (action: CodexToolAction) => {
     if (action.type === "answer-question") {
-      const runId = foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
+      // The interaction belongs to the Run that emitted its question card. A locally retained
+      // foreground turn can lag behind the runtime after a Task is resumed, so using it here can
+      // post the answer to an already-completed Run and leave the real interaction waiting.
+      const runId = action.runId ?? foregroundTurn?.runId ?? conversationRuntime?.activeRunId;
       if (!runId) throw new Error("The active coding Run is no longer available.");
       await resolveEngineQuestions(runId, action.interactionId, action.answers);
       return;

@@ -60,6 +60,7 @@ export type CodexToolAction =
   | { type: "continue-plan" }
   | {
       type: "answer-question";
+      runId?: string;
       interactionId: string;
       answers: Record<string, { answers: string[] }>;
     };
@@ -75,6 +76,7 @@ export type ActionApprovalRequest = {
 
 export function ToolCallItem({
   tool,
+  runId,
   onCodexAction,
   allowCodexPlanActions = false,
   onActionApproval,
@@ -83,6 +85,7 @@ export function ToolCallItem({
   detail,
 }: {
   tool: ToolCallView;
+  runId?: string | undefined;
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
@@ -180,7 +183,14 @@ export function ToolCallItem({
     );
   }
   if (tool.name === CODEX_QUESTION_TOOL_NAME && codexQuestionInput(tool.input)) {
-    return <CodexQuestionRow tool={tool} onAction={onCodexAction} disclosure={disclosure} />;
+    return (
+      <CodexQuestionRow
+        tool={tool}
+        runId={runId}
+        onAction={onCodexAction}
+        disclosure={disclosure}
+      />
+    );
   }
   if (tool.name === USE_ACTION_TOOL_NAME && capabilityApprovalFromTool(tool)) {
     return <LegacyCapabilityApprovalRow tool={tool} />;
@@ -607,10 +617,12 @@ function PendingCodexQuestionCard({ detail }: { detail: HistoricalPresentationDe
 
 function CodexQuestionRow({
   tool,
+  runId,
   disclosure,
   onAction,
 }: {
   tool: ToolCallView;
+  runId?: string | undefined;
   disclosure: ToolCallDisclosure;
   onAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
 }) {
@@ -663,6 +675,7 @@ function CodexQuestionRow({
     setSubmitting(true);
     void onAction({
       type: "answer-question",
+      ...(runId ? { runId } : {}),
       interactionId: input.interactionId,
       answers,
     })
