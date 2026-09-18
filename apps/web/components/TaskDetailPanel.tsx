@@ -11,7 +11,7 @@ import {
   type HeadlessChatRunReadModel,
 } from "@/lib/headless-chat-collections";
 import { legacyHarnessRunToChatMessages } from "@/lib/legacy-task-chat-messages";
-import { normalizeModel } from "@/lib/model-options";
+import { normalizeConversationModel } from "@/lib/model-options";
 import { selectActiveTaskRun } from "@/lib/task-conversation-activity";
 import type { HarnessRunViewModel } from "@/lib/task-harness-run";
 
@@ -105,7 +105,7 @@ function CanonicalTaskDetailView({
     () => ({
       id: conversationId,
       title: liveTask?.name.trim() || taskDetailTitle(run),
-      model: normalizeModel(run.task.model),
+      model: normalizeConversationModel(run.task.engine, run.task.model),
       engine: run.task.engine,
       messages: run.chat?.messages ?? [],
     }),
@@ -151,7 +151,7 @@ function LegacyTaskDetailPanel({
   const initialChat: ChatSessionView = {
     id: initialRun.task.id,
     title,
-    model: normalizeModel(initialRun.task.model),
+    model: normalizeConversationModel("opencompany", initialRun.task.model),
     engine: "opencompany",
     messages: legacyHarnessRunToChatMessages(initialRun),
   };
