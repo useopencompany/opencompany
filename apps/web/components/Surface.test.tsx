@@ -5839,7 +5839,7 @@ describe("Surface chat streaming UI", () => {
     expect(within(indicator).getByText(/^\d+\.\ds$/)).toBeInTheDocument();
   });
 
-  it("does not show a live timer for a finalized turn when stream and runtime state are stale", () => {
+  it("settles a finalized turn when stream and runtime state are stale", () => {
     chatMock.status = "streaming";
 
     render(
@@ -5850,7 +5850,7 @@ describe("Surface chat streaming UI", () => {
           id: "chat_completed_1",
           title: "Completed chat",
           model: DEFAULT_MODEL,
-          engine: "opencompany",
+          engine: "codex",
           runtime: {
             status: "running",
             activeRunId: "run_completed_1",
@@ -5868,17 +5868,32 @@ describe("Surface chat streaming UI", () => {
                 runId: "run_completed_1",
                 timing: { durationMs: 40_795 },
               },
-              parts: [{ type: "text", text: "Finished answer" }],
+              parts: [
+                { type: "text", text: "I’ll inspect the implementation." },
+                {
+                  type: "dynamic-tool",
+                  toolCallId: "tool_completed_1",
+                  toolName: "use_action",
+                  state: "output-available",
+                  input: { action: "plugin:linear:linear.get_issue" },
+                  output: { status: "completed" },
+                },
+                { type: "text", text: "Finished answer" },
+              ],
             },
           ],
         }}
+        codexConnected
       />,
     );
 
     expect(screen.getByLabelText("Turn completed in 40.8s")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("status", { name: "opencompany is working" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "1 tool call, 1 message" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(screen.queryByText("I’ll inspect the implementation.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Codex is working" })).not.toBeInTheDocument();
   });
 
   it("renders assistant text from UI message parts", () => {
