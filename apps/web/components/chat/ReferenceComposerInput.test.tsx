@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Editor } from "@tiptap/core";
 import { createRef, useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -95,5 +96,17 @@ describe("real reference composer", () => {
     });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(screen.getByTestId("saved").textContent).toBe(`Review ${link}\nthen report\n`);
+  });
+  it("keeps typing after a Shift+Enter newline on the next line", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    const input = await screen.findByRole("textbox");
+
+    input.focus();
+    await user.type(input, "First line", { skipClick: true });
+    await user.keyboard("{Shift>}{Enter}{/Shift}");
+    await user.type(input, "Second line", { skipClick: true });
+
+    expect(screen.getByTestId("saved").textContent).toBe("First line\nSecond line");
   });
 });
