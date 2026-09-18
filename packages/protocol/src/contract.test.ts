@@ -70,6 +70,7 @@ describe("v1 protocol contract", () => {
 
   it("bounds the public engine-session error contract", () => {
     const session = {
+      id: "runtime_1",
       conversationId: "conversation_1",
       engine: "codex",
       status: "failed",
