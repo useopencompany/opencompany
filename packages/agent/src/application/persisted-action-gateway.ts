@@ -396,7 +396,7 @@ export async function registerReviewedApproval(
     invocationId: input.invocationId,
     reviewToken: record.reviewToken,
     inputHash: record.inputHash,
-    review: { ...review, actionContext },
+    review: { ...review, ...(actionContext ? { actionContext } : {}) },
   });
   if (resolved)
     await dependencies.capture("action_approval_reviewed", run.actorId, {
