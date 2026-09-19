@@ -1,10 +1,6 @@
 "use client";
 
-import type {
-  CompanyAgentDto,
-  SkillCatalogItemDto,
-  SlackBotWorkspaceSettingsDto,
-} from "@opencompany/protocol";
+import type { CompanyAgentDto, SkillCatalogItemDto } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import {
   Dialog,
@@ -77,7 +73,6 @@ export function CompanyAgentEditor({
   ownerName: string;
   skillCatalog: SkillCatalogItemDto[];
   eventProviders: WorkflowEventProviderOption[];
-  slackBotSettings: SlackBotWorkspaceSettingsDto;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<AgentDraft>(() => agentDraft(agent));
