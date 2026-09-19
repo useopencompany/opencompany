@@ -2189,7 +2189,7 @@ export const ArchiveVersionBodySchema = z
 
 // --- Company agents -------------------------------------------------------------------------
 // An agent is one standing responsibility with one set of instructions, so it has no step list.
-// Its Slack display identity is derived from `name` and `photoUrl` rather than configured twice.
+// Shared-bot display overrides use `name` and `photoUrl`; dedicated profiles are managed in Slack.
 
 export const CompanyAgentSlackSchema = z
   .object({

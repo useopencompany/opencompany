@@ -2040,58 +2040,6 @@
         ],
         "additionalProperties": false
       },
-      "CompanyAgentSlack": {
-        "type": "object",
-        "properties": {
-          "installed": {
-            "type": "boolean"
-          },
-          "ready": {
-            "type": "boolean"
-          },
-          "status": {
-            "type": "string"
-          },
-          "statusReason": {
-            "type": "string",
-            "nullable": true
-          },
-          "teamName": {
-            "type": "string",
-            "nullable": true
-          },
-          "appUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "openUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "eventsUrl": {
-            "type": "string"
-          },
-          "createUrl": {
-            "type": "string"
-          },
-          "manifest": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "installed",
-          "ready",
-          "status",
-          "statusReason",
-          "teamName",
-          "appUrl",
-          "openUrl",
-          "eventsUrl",
-          "createUrl",
-          "manifest"
-        ],
-        "additionalProperties": false
-      },
       "CompanyAgentPage": {
         "type": "object",
         "properties": {
@@ -2522,6 +2470,58 @@
         "required": [
           "data",
           "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyAgentSlack": {
+        "type": "object",
+        "properties": {
+          "installed": {
+            "type": "boolean"
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "teamName": {
+            "type": "string",
+            "nullable": true
+          },
+          "appUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "openUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "eventsUrl": {
+            "type": "string"
+          },
+          "createUrl": {
+            "type": "string"
+          },
+          "manifest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "installed",
+          "ready",
+          "status",
+          "statusReason",
+          "teamName",
+          "appUrl",
+          "openUrl",
+          "eventsUrl",
+          "createUrl",
+          "manifest"
         ],
         "additionalProperties": false
       },
@@ -14920,191 +14920,6 @@
         }
       }
     },
-    "/v1/agents/{agentId}/slack": {
-      "get": {
-        "tags": [
-          "Company agents"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "agentId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Agent Slack setup and connection status.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/CompanyAgentSlack"
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/ProtocolMetadata"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Company agents"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "agentId",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "botToken": {
-                    "type": "string",
-                    "maxLength": 500,
-                    "pattern": "^xoxb-[A-Za-z0-9-]+$"
-                  },
-                  "signingSecret": {
-                    "type": "string",
-                    "pattern": "^[a-fA-F0-9]{32}$"
-                  }
-                },
-                "required": [
-                  "botToken",
-                  "signingSecret"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Dedicated Slack bot verified and connected.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "$ref": "#/components/schemas/CompanyAgentSlack"
-                    },
-                    "meta": {
-                      "$ref": "#/components/schemas/ProtocolMetadata"
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "meta"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Company agents"
-        ],
-        "security": [
-          {
-            "bearerAuth": []
-          },
-          {
-            "sessionCookie": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            },
-            "required": true,
-            "name": "agentId",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Agent Slack connection disabled."
-          },
-          "default": {
-            "description": "A structured protocol error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/agents": {
       "get": {
         "tags": [
@@ -15553,6 +15368,191 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agents/{agentId}/slack": {
+      "get": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent Slack setup and connection status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyAgentSlack"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "botToken": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "pattern": "^xoxb-[A-Za-z0-9-]+$"
+                  },
+                  "signingSecret": {
+                    "type": "string",
+                    "pattern": "^[a-fA-F0-9]{32}$"
+                  }
+                },
+                "required": [
+                  "botToken",
+                  "signingSecret"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Dedicated Slack bot verified and connected.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyAgentSlack"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ProtocolMetadata"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Company agents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Agent Slack connection disabled."
           },
           "default": {
             "description": "A structured protocol error.",

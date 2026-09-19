@@ -26,9 +26,10 @@ export function CompanyAgentSlack({
   const [signingSecret, setSigningSecret] = useState("");
   const [copied, setCopied] = useState(false);
   const refresh = useCallback(async () => {
-    setError("");
     try {
-      setConnection(await getCompanyAgentSlack(agentId));
+      const updated = await getCompanyAgentSlack(agentId);
+      setConnection(updated);
+      setError("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load Slack setup.");
     }
@@ -112,8 +113,8 @@ export function CompanyAgentSlack({
               <div className="mt-3 flex flex-col gap-4">
                 <p className="text-ink-subtle">
                   Your Slack workspace may require an admin to approve the app. Members need an
-                  opencompany account with their Slack email. The agent uses its owner's connected
-                  tools.
+                  opencompany account with their Slack email. The agent uses its owner&apos;s
+                  connected tools.
                 </p>
                 {!connection.installed && (
                   <div>
@@ -181,8 +182,8 @@ export function CompanyAgentSlack({
                       >
                         Slack app settings
                       </a>{" "}
-                      and save it. Slack will verify the connection. Set the app's icon in Basic
-                      Information.
+                      and save it. Slack will verify the connection. Set the app&apos;s icon in
+                      Basic Information.
                     </p>
                     <Button variant="outline" size="sm" onClick={copyManifest}>
                       {copied ? "Copied" : "Copy Slack configuration"}
@@ -210,8 +211,8 @@ export function CompanyAgentSlack({
                       Disconnect agent from Slack
                     </Button>
                     <p className="mt-1 text-ink-subtle">
-                      Stops this agent's Slack conversations. You can remove the app itself in Slack
-                      settings.
+                      Stops this agent&apos;s Slack conversations. You can remove the app itself in
+                      Slack settings.
                     </p>
                   </div>
                 )}
