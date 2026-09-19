@@ -1,5 +1,102 @@
 import { describe, expect, it } from "vitest";
-import { type AgentDraft, agentDraftWithPatch } from "@/components/CompanyAgentEditor";
+import "@testing-library/jest-dom/vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { PropsWithChildren } from "react";
+import { afterEach, beforeEach, vi } from "vitest";
+import {
+  type AgentDraft,
+  agentDraftWithPatch,
+  CompanyAgentEditor,
+} from "@/components/CompanyAgentEditor";
+
+const routerMock = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const agentActionsMock = vi.hoisted(() => ({
+  update: vi.fn(async () => ({ version: 8 })),
+  archive: vi.fn(async () => ({ workflowId: "agent_1", version: 8 })),
+  runNow: vi.fn(async () => ({ task: { displayId: "TASK-42" } })),
+  uploadPhoto: vi.fn(async () => "https://app.test/agents/photo.png"),
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
+vi.mock("@/lib/company-agent-commands", () => ({
+  updateCompanyAgent: agentActionsMock.update,
+  archiveCompanyAgent: agentActionsMock.archive,
+  runCompanyAgentNow: agentActionsMock.runNow,
+  uploadCompanyAgentPhoto: agentActionsMock.uploadPhoto,
+}));
+vi.mock("@/components/WorkflowEditor", () => ({
+  SectionLabel: ({ children }: PropsWithChildren) => <div>{children}</div>,
+  SlackAvatarField: () => <div />,
+  StepCard: () => <div />,
+  TriggerSection: () => <div />,
+  workflowTriggerInput: (trigger: unknown) => trigger,
+}));
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  routerMock.push.mockReset();
+  routerMock.refresh.mockReset();
+  agentActionsMock.update.mockClear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("CompanyAgentEditor", () => {
+  it("refreshes the route cache after an autosave", async () => {
+    render(
+      <CompanyAgentEditor
+        agent={{
+          id: "agent_1",
+          slug: "pr-reviewer",
+          name: "PR Reviewer",
+          description: "Reviews pull requests.",
+          instructions: "Review the diff.",
+          photoUrl: "",
+          model: "kimi-k2.6",
+          status: "active",
+          ownerUserId: "user_1",
+          ownerActive: true,
+          slackEnabled: false,
+          triggers: [],
+          lastRunAt: null,
+          version: 7,
+          createdAt: "2026-09-18T10:00:00.000Z",
+          updatedAt: "2026-09-18T10:00:00.000Z",
+        }}
+        canEdit
+        ownerName="Louis"
+        skillCatalog={[]}
+        eventProviders={[]}
+        slackBotSettings={{
+          isAdmin: true,
+          configured: true,
+          installed: true,
+          status: "connected",
+          needsScopeUpgrade: false,
+          canCustomizeIdentity: true,
+          teamName: "Acme",
+          statusReason: null,
+        }}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Agent name"), {
+      target: { value: "Staff PR Reviewer" },
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_200);
+    });
+
+    expect(agentActionsMock.update).toHaveBeenCalledWith(
+      "agent_1",
+      expect.objectContaining({ expectedVersion: 7, name: "Staff PR Reviewer" }),
+    );
+    expect(routerMock.refresh).toHaveBeenCalledOnce();
+  });
+});
 
 // Coding agents need a connected engine, so this branch is not reachable from the editor in a
 // sandbox. It is also the branch that matters: leaving a stale `runtimeModel` behind after a
