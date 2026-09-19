@@ -1,12 +1,18 @@
 import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { SLACK_AGENT_SCOPES } from "@opencompany/agent/integrations/slack-agent";
+import {
+  processNextSlackProvisioning,
+  SlackProvisioningError,
+  sealSlackSecret,
+} from "@opencompany/agent/integrations/slack-provisioning";
 import type { Actor, CompanyAgentApplicationService } from "@opencompany/core";
 import type { PooledDb } from "@opencompany/db/pool";
 import { createTestPGlite } from "@opencompany/db/test-pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCompanyAgentSlackService } from "./company-agent-slack";
+import { createSlackProvisioningService } from "./slack-provisioning";
 
 let pg: Awaited<ReturnType<typeof createTestPGlite>>;
 let service: ReturnType<typeof createCompanyAgentSlackService>;
@@ -22,10 +28,17 @@ let selectedApp = "A1";
 let fetcher: ReturnType<typeof vi.fn>;
 beforeEach(async () => {
   vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+  vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://app.example.com");
   selectedApp = "A1";
   pg = await createTestPGlite();
   await pg.exec(`CREATE SCHEMA goat;
-    CREATE TABLE goat.workflows(id text PRIMARY KEY, workspace_id text, kind text DEFAULT 'agent', status text DEFAULT 'active', archived_at timestamptz, slack_channel_enabled boolean DEFAULT true);
+    CREATE TABLE goat.users(workos_user_id text PRIMARY KEY);
+    INSERT INTO goat.users VALUES ('owner');
+    CREATE TABLE goat.workspaces(id text PRIMARY KEY);
+    INSERT INTO goat.workspaces VALUES ('workspace');
+    CREATE TABLE goat.workspace_members(workspace_id text, user_workos_id text, role text DEFAULT 'admin');
+    INSERT INTO goat.workspace_members(workspace_id, user_workos_id) VALUES ('workspace', 'owner');
+    CREATE TABLE goat.workflows(id text PRIMARY KEY, workspace_id text, kind text DEFAULT 'agent', status text DEFAULT 'active', archived_at timestamptz, slack_channel_enabled boolean DEFAULT true, name text DEFAULT 'Support', owner_workos_id text DEFAULT 'owner', slack_bot_avatar_url text DEFAULT '');
     INSERT INTO goat.workflows(id, workspace_id) VALUES ('agent1', 'workspace'), ('agent2', 'workspace');
     CREATE TABLE goat.integrations(id text PRIMARY KEY, user_workos_id text NOT NULL, workspace_id text,
       shared_with_workspace boolean DEFAULT false, provider text NOT NULL, external_id text NOT NULL,
@@ -46,6 +59,13 @@ beforeEach(async () => {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../../../drizzle/0306_slack_agent_provisioning.sql", import.meta.url),
+      "utf8",
+    ),
+  );
+  await pg.exec("UPDATE goat.workflows SET slack_channel_enabled = true");
   fetcher = vi.fn(
     async () =>
       new Response(
@@ -69,7 +89,7 @@ beforeEach(async () => {
     agents: {
       getAgent: vi.fn(async (a: Actor, id: string) => {
         if (a.workspaceId !== "workspace") throw new Error("not found");
-        return { id, name: "Support", ownerUserId: "owner", ownerActive: true };
+        return { id, name: "Support", ownerUserId: "owner", ownerActive: true, slackEnabled: true };
       }),
     } as unknown as CompanyAgentApplicationService,
   });
@@ -206,5 +226,207 @@ describe("company agent Slack setup and ingress", () => {
     ]);
     expect((await pg.query("SELECT * FROM goat.integration_credentials")).rows).toHaveLength(0);
     expect((await service.webhook("agent1", signed(envelope(mention)))).status).toBe(404);
+  });
+});
+
+describe("automatic Slack identities", () => {
+  async function authorize() {
+    const encrypted = sealSlackSecret("workspace", "connection", { token: "service-test" });
+    await pg.query(
+      `INSERT INTO goat.slack_provisioning_connections(workspace_id, team_id, team_name, authorized_by, slack_user_id, encrypted_payload) VALUES ('workspace', 'T1', 'Test Slack', 'owner', 'U1', $1)`,
+      [JSON.stringify(encrypted)],
+    );
+    await pg.exec("UPDATE goat.workflows SET slack_channel_enabled = false WHERE id = 'agent2'");
+  }
+  function worker(request: any) {
+    return processNextSlackProvisioning({
+      db: drizzle(pg) as unknown as PooledDb,
+      apiOrigin: "https://api.example.com",
+      request,
+      bind: async ({ agent, credentials }) => {
+        await service.connect(actor, agent.id, credentials);
+      },
+    });
+  }
+  const requests = () =>
+    vi.fn(async (method: string) => {
+      if (method === "apps.manifest.create")
+        return { ok: true, app_id: "A1", team_id: "T1", credentials: { signing_secret: secret } };
+      if (method === "apps.developerInstall")
+        return { ok: true, app_id: "A1", team_id: "T1", api_access_tokens: { bot: "xoxb-test" } };
+      return { ok: true };
+    });
+  it("does nothing while Slack is off, then creates one native identity and resumes each persisted stage", async () => {
+    await authorize();
+    await pg.exec("UPDATE goat.workflows SET slack_channel_enabled = false");
+    const request = requests();
+    expect(await worker(request)).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    await pg.exec("UPDATE goat.workflows SET slack_channel_enabled = true WHERE id = 'agent1'");
+    expect(await worker(request)).toBe(true);
+    expect(await worker(request)).toBe(true);
+    expect(await worker(request)).toBe(true);
+    expect(await worker(request)).toBe(false);
+    expect(request.mock.calls.map((c) => c[0])).toEqual([
+      "apps.manifest.create",
+      "apps.developerInstall",
+      "apps.manifest.update",
+      "apps.icon.set",
+    ]);
+    const result = await service.get(actor, "agent1");
+    expect(result).toMatchObject({
+      installed: true,
+      ready: false,
+      provisioning: { configured: true, state: "ready" },
+    });
+    expect((await pg.query("SELECT company_agent_id FROM goat.integrations")).rows).toEqual([
+      { company_agent_id: "agent1" },
+    ]);
+    await pg.exec("UPDATE goat.workflows SET name = 'Renamed' WHERE id = 'agent1'");
+    expect(await worker(request)).toBe(true);
+    expect(request.mock.calls.filter((c) => c[0] === "apps.manifest.create")).toHaveLength(1);
+    expect(await worker(request)).toBe(false);
+  });
+  it("never recreates an app after an ambiguous create or a crashed create lease", async () => {
+    await authorize();
+    const request = vi.fn(async () => {
+      throw new SlackProvisioningError("request_unconfirmed");
+    });
+    await worker(request);
+    await service.configure(actor, "agent1", {});
+    expect(await worker(request)).toBe(false);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect((await service.get(actor, "agent1")).provisioning.state).toBe("uncertain");
+    await pg.exec(
+      "UPDATE goat.slack_agent_provisioning SET state = 'creating', lease_until = now() - interval '1 minute'",
+    );
+    expect(await worker(request)).toBe(false);
+    expect((await service.get(actor, "agent1")).provisioning.state).toBe("uncertain");
+  });
+  it("retries installation on the saved app after approval without creating another app", async () => {
+    await authorize();
+    const request = requests();
+    await worker(request);
+    const denied = vi.fn(async () => {
+      throw new SlackProvisioningError("app_approval_request_pending");
+    });
+    await worker(denied);
+    expect((await service.get(actor, "agent1")).provisioning.state).toBe("failed");
+    await service.configure(actor, "agent1", {});
+    await worker(request);
+    expect(request.mock.calls.map((c) => c[0])).toEqual([
+      "apps.manifest.create",
+      "apps.developerInstall",
+    ]);
+  });
+  it("serializes concurrent workers before the remote app creation", async () => {
+    await authorize();
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const normal = requests();
+    const request = vi.fn(async (method: string) => {
+      started();
+      await blocked;
+      return normal(method);
+    });
+    const first = worker(request);
+    await entered;
+    expect(await worker(request)).toBe(false);
+    release();
+    await first;
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  it("stops provisioning when the authorizing admin loses their role", async () => {
+    await authorize();
+    await pg.exec("UPDATE goat.workspace_members SET role = 'member'");
+    const request = requests();
+    expect(await worker(request)).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+    expect((await service.get(actor, "agent1")).provisioning.configured).toBe(false);
+  });
+  it("keeps installed bot credentials when disconnecting identity setup", async () => {
+    await authorize();
+    const request = requests();
+    await worker(request);
+    await worker(request);
+    const setup = createSlackProvisioningService({ db: drizzle(pg) as unknown as PooledDb });
+    await setup.disconnect(actor);
+    expect(await worker(request)).toBe(false);
+    expect((await service.get(actor, "agent1")).installed).toBe(true);
+    expect((await pg.query("SELECT id FROM goat.integration_credentials")).rows).toHaveLength(1);
+  });
+  it("requires confirming the same workspace and preserves the previous grant on mismatch", async () => {
+    await authorize();
+    const setup = createSlackProvisioningService({
+      db: drizzle(pg) as unknown as PooledDb,
+      request: async (method) =>
+        method.endsWith("generateAuthTicket")
+          ? { ticket: "test-ticket" }
+          : {
+              token: "different-service-token",
+              team_id: "T2",
+              team_name: "Other Slack",
+              user_id: "U2",
+            },
+    });
+    const attempt = await setup.start(actor);
+    await setup.complete(actor, attempt.attemptId, "code");
+    await expect(setup.confirm(actor, attempt.attemptId)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(await setup.get(actor)).toMatchObject({ configured: true, teamName: "Test Slack" });
+  });
+  it("authorizes admins with a single-use, workspace- and user-bound attempt and keeps credentials out of responses", async () => {
+    const request = vi.fn(async (method: string) =>
+      method.endsWith("generateAuthTicket")
+        ? { ticket: "test-ticket" }
+        : { token: "service-test", team_id: "T1", team_name: "Test Slack", user_id: "U1" },
+    );
+    const setup = createSlackProvisioningService({
+      db: drizzle(pg) as unknown as PooledDb,
+      request,
+    });
+    await expect(setup.start({ ...actor, role: "member" })).rejects.toMatchObject({
+      code: "forbidden",
+    });
+    const expired = await setup.start(actor);
+    await pg.query(
+      "UPDATE goat.slack_provisioning_attempts SET expires_at = now() - interval '1 minute' WHERE id = $1",
+      [expired.attemptId],
+    );
+    await expect(setup.complete(actor, expired.attemptId, "code")).rejects.toThrow("expired");
+    const attempt = await setup.start(actor);
+    await expect(
+      setup.complete({ ...actor, userId: "another-admin" }, attempt.attemptId, "code"),
+    ).rejects.toThrow("expired");
+    await expect(
+      setup.complete({ ...actor, workspaceId: "other" }, attempt.attemptId, "code"),
+    ).rejects.toThrow("expired");
+    await expect(setup.complete(actor, attempt.attemptId, "code")).resolves.toEqual({
+      configured: false,
+      status: "awaiting_confirmation",
+      teamName: "Test Slack",
+    });
+    expect(await setup.get(actor)).toMatchObject({ configured: false });
+    await expect(setup.confirm(actor, attempt.attemptId)).resolves.toEqual({
+      configured: true,
+      status: "connected",
+      teamName: "Test Slack",
+    });
+    await expect(setup.confirm(actor, attempt.attemptId)).rejects.toThrow("expired");
+    await expect(setup.complete(actor, attempt.attemptId, "code")).rejects.toThrow("expired");
+    expect(
+      JSON.stringify(
+        await pg.query("SELECT encrypted_payload FROM goat.slack_provisioning_connections"),
+      ),
+    ).not.toContain("service-test");
+    await setup.disconnect(actor);
+    expect(await setup.get(actor)).toMatchObject({ configured: false, status: "disconnected" });
   });
 });

@@ -133,8 +133,7 @@ export async function postWorkflowSlackMessage(
           JOIN goat.session_subscriptions origin ON origin.id = inbound.subscription_id
           WHERE inbound.run_id = run.id AND inbound.status IN ('running', 'delivering') LIMIT 1)
         OR (NOT EXISTS (SELECT 1 FROM goat.subscription_events inbound WHERE inbound.run_id = run.id AND inbound.status IN ('running', 'delivering'))
-          AND (integration.company_agent_id = task.agent_id OR (integration.company_agent_id IS NULL AND NOT EXISTS (
-            SELECT 1 FROM goat.integrations dedicated WHERE dedicated.company_agent_id = task.agent_id)))))
+          AND (integration.company_agent_id = task.agent_id OR (integration.company_agent_id IS NULL AND task.agent_id IS NULL))))
     LEFT JOIN goat.subscription_events event ON event.run_id = run.id AND event.status IN ('running', 'delivering')
     LEFT JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
       AND subscription.integration_id = integration.id AND subscription.source = 'slack_thread'

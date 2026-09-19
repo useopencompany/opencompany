@@ -2,235 +2,156 @@
 
 import type { CompanyAgentSlackDto } from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
-import { Input } from "@opencompany/ui/components/input";
-import { useCallback, useEffect, useState } from "react";
-import {
-  connectCompanyAgentSlack,
-  disconnectCompanyAgentSlack,
-  getCompanyAgentSlack,
-} from "@/lib/company-agent-commands";
+import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { connectCompanyAgentSlack, getCompanyAgentSlack } from "@/lib/company-agent-commands";
 
 export function CompanyAgentSlack({
   agentId,
   canEdit,
   enabled,
+  active,
 }: {
   agentId: string;
   canEdit: boolean;
   enabled: boolean;
+  active: boolean;
 }) {
-  const [connection, setConnection] = useState<CompanyAgentSlackDto | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [botToken, setBotToken] = useState("");
-  const [signingSecret, setSigningSecret] = useState("");
-  const [copied, setCopied] = useState(false);
-  const refresh = useCallback(async () => {
-    try {
-      const updated = await getCompanyAgentSlack(agentId);
-      setConnection(updated);
-      setError("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not load Slack setup.");
-    }
-  }, [agentId]);
+  const [data, setData] = useState<CompanyAgentSlackDto | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   useEffect(() => {
-    let active = true;
-    getCompanyAgentSlack(agentId).then(
-      (updated) => {
-        if (active) setConnection(updated);
-      },
-      (cause) => {
-        if (active)
-          setError(cause instanceof Error ? cause.message : "Could not load Slack setup.");
-      },
-    );
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const next = await getCompanyAgentSlack(agentId);
+        if (!disposed) {
+          setData(next);
+          setError(null);
+        }
+      } catch (e) {
+        if (!disposed)
+          setError(e instanceof Error ? e.message : "Slack status could not be loaded.");
+      }
+      if (!disposed) timer = setTimeout(refresh, 4000);
+    }
+    void refresh();
     return () => {
-      active = false;
+      disposed = true;
+      clearTimeout(timer);
     };
-  }, [agentId]);
-
-  async function connect() {
-    setBusy(true);
-    setError("");
-    try {
-      setConnection(await connectCompanyAgentSlack(agentId, { botToken, signingSecret }));
-      setBotToken("");
-      setSigningSecret("");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not connect Slack.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function disconnect() {
-    setBusy(true);
-    setError("");
-    try {
-      await disconnectCompanyAgentSlack(agentId);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not disconnect Slack.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function copyManifest() {
-    if (!connection) return;
-    try {
-      await navigator.clipboard.writeText(connection.manifest);
-      setCopied(true);
-    } catch {
-      setError("Copying failed. Select and copy the configuration below.");
-    }
-  }
-
+  }, [agentId, enabled]);
+  const provisioning = data?.provisioning;
+  const needsReconnect = data?.installed && data.status !== "connected";
+  const available =
+    data?.ready ||
+    (data?.installed && data.status === "connected" && provisioning?.state === "ready");
+  const failed = provisioning?.state === "failed" || provisioning?.state === "uncertain";
+  const pending =
+    enabled &&
+    provisioning?.configured &&
+    !failed &&
+    (!available || ["queued", "creating", "created", "installed"].includes(provisioning.state));
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-3.5 text-[13px]">
-      <div>
-        <p className="font-medium text-ink">This agent in Slack</p>
-        <p className="mt-1 text-ink-subtle">
-          Give this agent its own profile so teammates can mention it and send it direct messages.
-        </p>
-      </div>
-      {error && (
+    <div className="mt-3 rounded-lg border border-border p-4 text-[13px] leading-5">
+      {error ? (
         <p role="alert" className="text-red-600">
           {error}
         </p>
-      )}
-      {!connection && (
-        <Button variant="outline" size="sm" onClick={refresh}>
-          {error ? "Retry" : "Loading Slack setup…"}
-        </Button>
-      )}
-      {connection && (
+      ) : null}
+      {!data ? (
+        <p className="text-ink-subtle">Loading Slack status…</p>
+      ) : !enabled ? (
         <>
-          <p role="status" className="text-ink-subtle">
-            {connection.ready
-              ? `Connected to ${connection.teamName ?? "Slack"}.${enabled ? " Invite the agent to a public channel and mention it to start work." : " Turn on Slack above to let it respond."}`
-              : connection.installed
-                ? (connection.statusReason ?? "Finish setup in Slack.")
-                : "Beta setup requires a separate Slack app for each agent."}
+          <p className="font-medium">Slack is off</p>
+          <p className="mt-1 text-ink-subtle">
+            {data.installed
+              ? "This agent keeps its Slack identity, but won't respond until you turn Slack back on."
+              : "Turn on Slack to give this agent its own profile for mentions and direct messages."}
           </p>
-          {connection.ready && connection.openUrl && (
-            <a className="text-ink underline" href={connection.openUrl}>
+        </>
+      ) : failed || needsReconnect ? (
+        <>
+          <p className="font-medium">Slack needs attention</p>
+          <p className="mt-1 text-ink-subtle">
+            {provisioning?.reason ??
+              data?.statusReason ??
+              "This Slack app needs to be reconnected."}
+          </p>
+          {data.appUrl ? (
+            <a
+              href={data.appUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 block underline underline-offset-4"
+            >
+              View app in Slack
+            </a>
+          ) : null}
+          {canEdit &&
+          (provisioning?.state === "failed" ||
+            (needsReconnect && provisioning?.state === "ready")) ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-3"
+              disabled={retrying}
+              onClick={async () => {
+                setRetrying(true);
+                try {
+                  setData(await connectCompanyAgentSlack(agentId));
+                  setError(null);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Retry failed.");
+                } finally {
+                  setRetrying(false);
+                }
+              }}
+            >
+              {retrying ? "Retrying…" : "Retry setup"}
+            </Button>
+          ) : null}
+        </>
+      ) : available ? (
+        <>
+          <p className="font-medium">
+            {data.ready ? `Available in ${data.teamName ?? "Slack"}` : "Ready to test in Slack"}
+          </p>
+          <p className="mt-1 text-ink-subtle">
+            {active
+              ? "Invite this agent to a channel and @mention it, or send it a direct message."
+              : "This agent is paused. Activate it to respond to mentions and direct messages."}
+          </p>
+          {data.openUrl ? (
+            <a href={data.openUrl} className="mt-2 inline-block underline underline-offset-4">
               Open in Slack
             </a>
-          )}
-          {canEdit && (
-            <details open={connection.installed && !connection.ready}>
-              <summary className="cursor-pointer font-medium text-ink">
-                {connection.installed ? "Connection settings" : "Set up in Slack"}
-              </summary>
-              <div className="mt-3 flex flex-col gap-4">
-                <p className="text-ink-subtle">
-                  Your Slack workspace may require an admin to approve the app. Members need an
-                  opencompany account with their Slack email. The agent uses its owner&apos;s
-                  connected tools.
-                </p>
-                {!connection.installed && (
-                  <div>
-                    <p className="mb-1 font-medium">1. Create and install the app</p>
-                    <a
-                      href={connection.appUrl ?? connection.createUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline"
-                    >
-                      {connection.appUrl
-                        ? "Open this agent's existing Slack app"
-                        : "Create Slack app with this agent's configuration"}
-                    </a>
-                    <p className="mt-1 text-ink-subtle">
-                      {connection.appUrl
-                        ? "Reconnect the original app: select Install to Workspace under OAuth & Permissions."
-                        : "Choose your workspace, create the app, then select Install to Workspace under OAuth & Permissions."}
-                    </p>
-                  </div>
-                )}
-                {(!connection.ready || connection.status !== "connected") && (
-                  <div className="flex flex-col gap-2">
-                    <p className="font-medium">2. Connect the installed bot</p>
-                    <label htmlFor={`slack-token-${agentId}`}>
-                      Bot User OAuth Token · OAuth &amp; Permissions
-                    </label>
-                    <Input
-                      id={`slack-token-${agentId}`}
-                      type="password"
-                      autoComplete="off"
-                      value={botToken}
-                      onChange={(event) => setBotToken(event.target.value)}
-                      placeholder="xoxb-…"
-                    />
-                    <label htmlFor={`slack-signing-${agentId}`}>
-                      Signing Secret · Basic Information → App Credentials
-                    </label>
-                    <Input
-                      id={`slack-signing-${agentId}`}
-                      type="password"
-                      autoComplete="off"
-                      value={signingSecret}
-                      onChange={(event) => setSigningSecret(event.target.value)}
-                    />
-                    <Button
-                      size="sm"
-                      disabled={busy || !botToken || !signingSecret}
-                      onClick={connect}
-                    >
-                      {busy ? "Connecting…" : "Connect bot"}
-                    </Button>
-                  </div>
-                )}
-                {connection.installed && (
-                  <div className="flex flex-col gap-2">
-                    <p className="font-medium">3. Enable conversations</p>
-                    <p className="text-ink-subtle">
-                      Copy the configuration below into App Manifest in your{" "}
-                      <a
-                        href={connection.appUrl ?? undefined}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline"
-                      >
-                        Slack app settings
-                      </a>{" "}
-                      and save it. Slack will verify the connection. Set the app&apos;s icon in
-                      Basic Information.
-                    </p>
-                    <Button variant="outline" size="sm" onClick={copyManifest}>
-                      {copied ? "Copied" : "Copy Slack configuration"}
-                    </Button>
-                    <details>
-                      <summary className="cursor-pointer text-ink-subtle">
-                        View configuration
-                      </summary>
-                      <pre className="mt-2 max-h-60 overflow-auto rounded bg-canvas p-2 text-[11px]">
-                        {connection.manifest}
-                      </pre>
-                    </details>
-                    <Button variant="outline" size="sm" onClick={refresh}>
-                      Check connection
-                    </Button>
-                    <p className="text-ink-subtle">
-                      Names and photos on a dedicated Slack profile are managed in Slack during this
-                      beta. Public channels and direct messages are supported.
-                    </p>
-                  </div>
-                )}
-                {connection.installed && (
-                  <div>
-                    <Button variant="outline" size="sm" disabled={busy} onClick={disconnect}>
-                      Disconnect agent from Slack
-                    </Button>
-                    <p className="mt-1 text-ink-subtle">
-                      Stops this agent&apos;s Slack conversations. You can remove the app itself in
-                      Slack settings.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </details>
-          )}
+          ) : null}
+        </>
+      ) : pending ? (
+        <>
+          <p className="flex items-center gap-2 font-medium">
+            <Loader2 className="size-3.5 animate-spin" /> Setting up Slack identity…
+          </p>
+          <p className="mt-1 text-ink-subtle">
+            This usually takes a moment. You can leave this page while setup finishes.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="font-medium">Workspace setup needed</p>
+          <p className="mt-1 text-ink-subtle">
+            Ask a workspace admin to authorize Slack identities once. This agent will then connect
+            automatically.
+          </p>
+          <Link
+            href="/settings/workspace/slack"
+            className="mt-2 inline-block underline underline-offset-4"
+          >
+            Slack settings
+          </Link>
         </>
       )}
     </div>

@@ -1,15 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
-import {
-  SLACK_AGENT_SCOPES,
-  slackAgentManifest,
-  slackAgentMessage,
-} from "@opencompany/agent/integrations/slack-agent";
+import { slackAgentManifest, slackAgentMessage } from "@opencompany/agent/integrations/slack-agent";
+import { bindSlackAgent } from "@opencompany/agent/integrations/slack-agent-binding";
 import { verifySlackEventSignature } from "@opencompany/agent/integrations/slack-signature";
 import { type Actor, type CompanyAgentApplicationService, CoreError } from "@opencompany/core";
-import { loadIntegrationCredential, saveIntegrationCredential } from "@opencompany/db/integrations";
+import { loadIntegrationCredential } from "@opencompany/db/integrations";
 import type { PooledDb } from "@opencompany/db/pool";
 import { integrations } from "@opencompany/db/product-schema";
+import { subscriptionRows as rows } from "@opencompany/db/session-subscriptions";
 import { and, eq, sql } from "drizzle-orm";
 
 const WAITING = "Waiting for Slack event verification.";
@@ -50,6 +47,16 @@ export function createCompanyAgentSlackService(input: {
       const agent = await input.agents.getAgent(actor, agentId);
       const row = await installation(agent.id);
       const installed = Boolean(row && row.status !== "disconnected");
+      const [connection] = rows<{ status: string }>(
+        await input.db.execute(
+          sql`SELECT status FROM goat.slack_provisioning_connections WHERE workspace_id = ${actor.workspaceId}`,
+        ),
+      );
+      const [job] = rows<{ state: string; reason: string | null; appId: string | null }>(
+        await input.db.execute(
+          sql`SELECT state, reason, app_id AS "appId" FROM goat.slack_agent_provisioning WHERE agent_id = ${agent.id}`,
+        ),
+      );
       const manifest = slackAgentManifest({
         name: agent.name,
         ...(installed ? { eventsUrl: eventsUrl(agent.id) } : {}),
@@ -61,12 +68,20 @@ export function createCompanyAgentSlackService(input: {
         JSON.stringify(slackAgentManifest({ name: agent.name })),
       );
       return {
+        provisioning: {
+          configured: connection?.status === "connected",
+          state: job?.state ?? "not_started",
+          reason: job?.reason ?? null,
+        },
         installed,
         ready: installed && row?.status === "connected" && row.statusReason !== WAITING,
         status: installed ? row!.status : "not_connected",
         statusReason: installed ? row!.statusReason : null,
         teamName: installed ? row!.accountName : null,
-        appUrl: row ? `https://api.slack.com/apps/${row.slackAppId}` : null,
+        appUrl:
+          row?.slackAppId || job?.appId
+            ? `https://api.slack.com/apps/${row?.slackAppId ?? job?.appId}`
+            : null,
         openUrl: installed
           ? `slack://app?team=${encodeURIComponent(row!.externalId)}&id=${encodeURIComponent(row!.slackAppId!)}`
           : null,
@@ -75,147 +90,36 @@ export function createCompanyAgentSlackService(input: {
         manifest: JSON.stringify(manifest, null, 2),
       };
     },
+    async configure(
+      actor: Actor,
+      agentId: string,
+      body: {} | { botToken: string; signingSecret: string },
+    ) {
+      if ("botToken" in body) return this.connect(actor, agentId, body);
+      const agent = await owner(actor, agentId);
+      if (!agent.slackEnabled)
+        throw new CoreError("invalid_argument", "Turn on Slack for this agent first.");
+      const [connection] = rows<{ teamId: string }>(
+        await input.db.execute(
+          sql`SELECT team_id AS "teamId" FROM goat.slack_provisioning_connections WHERE workspace_id = ${actor.workspaceId} AND status = 'connected'`,
+        ),
+      );
+      if (!connection)
+        throw new CoreError(
+          "invalid_argument",
+          "Ask an admin to set up Slack identities in Settings → Channels → Slack.",
+        );
+      await input.db.execute(sql`UPDATE goat.slack_agent_provisioning SET state = CASE WHEN app_id IS NULL THEN 'queued' ELSE 'created' END, reason = NULL, lease_until = NULL, updated_at = now()
+        WHERE agent_id = ${agent.id} AND (state = 'failed' OR (state = 'ready' AND EXISTS (SELECT 1 FROM goat.integrations WHERE company_agent_id = ${agent.id} AND status IN ('needs_reauth', 'disconnected')))) AND (lease_until IS NULL OR lease_until < now())`);
+      return this.get(actor, agent.id);
+    },
     async connect(
       actor: Actor,
       agentId: string,
       credentials: { botToken: string; signingSecret: string },
     ) {
       const agent = await owner(actor, agentId);
-      // auth.test proves the token is installed; its response headers expose the
-      // actual grants rather than trusting a client-provided scope list.
-      const response = await fetcher("https://slack.com/api/auth.test", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${credentials.botToken}` },
-        signal: AbortSignal.timeout(10000),
-      });
-      const auth = (await response.json().catch(() => null)) as {
-        ok?: unknown;
-        team_id?: unknown;
-        user_id?: unknown;
-        bot_id?: unknown;
-        team?: unknown;
-      } | null;
-      if (
-        !response.ok ||
-        !auth ||
-        auth.ok !== true ||
-        typeof auth.team_id !== "string" ||
-        !/^T[A-Z0-9]+$/.test(auth.team_id) ||
-        typeof auth.user_id !== "string" ||
-        !/^[UW][A-Z0-9]+$/.test(auth.user_id) ||
-        typeof auth.bot_id !== "string" ||
-        !/^B[A-Z0-9]+$/.test(auth.bot_id)
-      )
-        throw new CoreError(
-          "invalid_argument",
-          "Slack could not verify this bot token. Install the app in Slack and copy its Bot User OAuth Token.",
-        );
-      const teamId = auth.team_id;
-      const botUserId = auth.user_id;
-      const scopes = (response.headers.get("x-oauth-scopes") ?? "").split(",").map((s) => s.trim());
-      if (!SLACK_AGENT_SCOPES.every((scope) => scopes.includes(scope)))
-        throw new CoreError(
-          "invalid_argument",
-          "The Slack app is missing required permissions. Apply the supplied manifest and reinstall the app.",
-        );
-      const bot = await request<{ bot?: { app_id?: string; user_id?: string } }>({
-        token: credentials.botToken,
-        method: "bots.info",
-        form: { bot: auth.bot_id },
-        signal: AbortSignal.timeout(10000),
-      });
-      const appId = bot.bot?.app_id;
-      if (
-        typeof appId !== "string" ||
-        !/^A[A-Z0-9]+$/.test(appId) ||
-        bot.bot?.user_id !== auth.user_id
-      )
-        throw new CoreError("invalid_argument", "Slack could not verify this app's bot identity.");
-      // Reusing the shared app would only rename one bot. Reject that setup.
-      const shared = await input.db
-        .select()
-        .from(integrations)
-        .where(
-          and(
-            eq(integrations.provider, "slack_bot"),
-            eq(integrations.externalId, teamId),
-            sql`${integrations.companyAgentId} IS NULL`,
-          ),
-        );
-      for (const row of shared) {
-        const saved = await loadIntegrationCredential({
-          integrationId: row.id,
-          userWorkosId: row.userWorkosId,
-          provider: "slack_bot",
-          kind: "oauth_token",
-          db: input.db,
-        });
-        if (saved?.payload.bot_user_id === auth.user_id)
-          throw new CoreError(
-            "invalid_argument",
-            "Create a dedicated Slack app for this agent. The shared workspace bot cannot be used as a second identity.",
-          );
-      }
-
-      await input.db.transaction(async (tx) => {
-        // Serialize connect/reconnect per agent and preserve credential AAD attribution.
-        await tx.execute(sql`SELECT id FROM goat.workflows WHERE id = ${agent.id} FOR UPDATE`);
-        const [existing] = await tx
-          .select()
-          .from(integrations)
-          .where(eq(integrations.companyAgentId, agent.id));
-        const other = await tx
-          .select({ id: integrations.id })
-          .from(integrations)
-          .where(and(eq(integrations.externalId, teamId), eq(integrations.slackAppId, appId)));
-        if (other.some((row) => row.id !== existing?.id))
-          throw new CoreError(
-            "conflict",
-            "This Slack app is already connected to another company agent.",
-          );
-        if (existing && (existing.externalId !== auth.team_id || existing.slackAppId !== appId))
-          throw new CoreError(
-            "conflict",
-            "Reconnect this agent's original Slack app. Create another agent to use a different app.",
-          );
-        const id = existing?.id ?? `integration_${randomUUID()}`;
-        const userWorkosId = existing?.userWorkosId ?? actor.userId;
-        await tx
-          .insert(integrations)
-          .values({
-            id,
-            userWorkosId,
-            workspaceId: actor.workspaceId,
-            companyAgentId: agent.id,
-            slackAppId: appId,
-            provider: "slack_bot",
-            externalId: teamId,
-            connectionLabel: agent.name,
-            accountName: typeof auth.team === "string" ? auth.team : "Slack",
-            accountType: "slack_bot",
-            scopes,
-            status: "connected",
-            statusReason: WAITING,
-          })
-          .onConflictDoUpdate({
-            target: integrations.id,
-            set: { scopes, status: "connected", statusReason: WAITING, updatedAt: new Date() },
-          });
-        await saveIntegrationCredential({
-          integrationId: id,
-          userWorkosId,
-          provider: "slack_bot",
-          kind: "oauth_token",
-          db: tx,
-          payload: {
-            access_token: credentials.botToken,
-            signing_secret: credentials.signingSecret,
-            bot_user_id: botUserId,
-            team_id: teamId,
-            app_id: appId,
-          },
-        });
-      });
+      await bindSlackAgent({ db: input.db, actor, agent, credentials, fetch: fetcher, request });
       return this.get(actor, agent.id);
     },
     async disconnect(actor: Actor, agentId: string) {

@@ -258,7 +258,7 @@ export function CompanyAgentEditor({
                   uploadCompanyAgentPhoto({ agentId: workflowId, file })
                 }
                 onChange={(photoUrl) => setDraft({ ...draft, photoUrl })}
-                hint="Used in the app and as this agent's photo on its Slack posts. PNG, JPEG, or WebP up to 1 MB."
+                hint="Used in the app and on this agent's Slack profile. PNG, JPEG, or WebP up to 1 MB."
               />
             </div>
           </section>
@@ -291,15 +291,19 @@ export function CompanyAgentEditor({
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <p className="text-[13px] font-medium text-ink">Enable Slack</p>
                 <p className="text-[12px] leading-5 text-ink-subtle">
-                  Allow this agent to post and respond in Slack. Connect its own Slack profile below
-                  to enable mentions and direct messages. Agents without their own profile use the
-                  workspace bot for posts.
+                  Give this agent its own Slack profile for mentions and direct messages. Turning
+                  Slack off keeps its identity and stops its replies.
                 </p>
               </div>
             </div>
           </section>
 
-          <CompanyAgentSlack agentId={agent.id} canEdit={canEdit} enabled={draft.slackEnabled} />
+          <CompanyAgentSlack
+            agentId={agent.id}
+            canEdit={canEdit}
+            enabled={draft.slackEnabled}
+            active={draft.status === "active"}
+          />
 
           {canEdit ? (
             <section className="flex flex-col gap-3">

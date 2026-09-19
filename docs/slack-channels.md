@@ -1,6 +1,6 @@
 # Slack Channels and durable workflow threads
 
-For the proposed automatic provisioning of native company-agent identities, see
+For automatic provisioning of native company-agent identities, see
 [the Slack agent provisioning research](./future-concepts/slack-agent-provisioning.md).
 Its workspace onboarding is not yet shipped; the contracts below describe the runtime.
 
@@ -160,8 +160,7 @@ session is opened for them. Do not drop it while direct messages are pending.
 
 ## Company agents with their own Slack identity (beta)
 
-A company agent can connect a dedicated Slack app from **Agents → agent → Channels → This
-agent in Slack**. A separate app supplies the real bot user that Slack can mention and DM.
+A company agent can connect a dedicated Slack app from **Agents → agent → Enable Slack**. A separate app supplies the real bot user that Slack can mention and DM.
 The existing workflow display-name override remains cosmetic; it does not create another user.
 The workspace bot in Settings continues to serve existing workflows and personal DM tasks.
 
@@ -169,30 +168,47 @@ The beta uses Slack's standard app manifests and installed bot tokens. It does n
 new server environment variable or access to Slack's manager-app program. Slack now documents
 [manager-app enrollment](https://docs.slack.dev/reference/methods/apps.manifest.create/) as a
 prerequisite for managed provisioning; that enrollment is not assumed here. Dedicated app
-provisioning can be automated later while retaining the same installation and event routing.
+provisioning now uses the customer-authorized developer tooling route described below, while
+retaining the same installation and event routing.
 
 ### Try an agent
 
-1. Deploy migration `0305_company_agent_slack` and the matching API, runner, and web builds.
-   `OPENCOMPANY_API_ORIGIN` must be a public HTTPS API origin reachable by Slack. For local
-   testing, use a public API tunnel and restart the API with that origin; localhost cannot
-   receive Slack's verification requests. The runner's existing Slack Channel worker must run.
-2. Enable Company agents in beta preferences, create an agent, add its instructions, and enable
-   Slack. The agent's owner opens **Set up in Slack** and follows the generated create-app link.
-3. Choose a Slack workspace, create the app, and install it under **OAuth & Permissions**.
-   Slack workspace policy may require admin approval. Copy the Bot User OAuth Token and the
-   Signing Secret from **Basic Information → App Credentials** into the masked setup fields.
-   The API checks the installed bot, app identity, and granted scopes before encrypting them.
-4. Copy the configuration shown after connecting into Slack's **App Manifest** and save.
-   This second step enables signed events after the server has the signing secret. Check the
-   connection in opencompany: it is ready after Slack completes URL verification or delivers
-   a signed event matching the installation's app and workspace. Manifest provisioning may
-   start delivering events without a new URL challenge. If neither arrives, reverify the
-   Request URL under **Event Subscriptions**.
-5. Set its photo in Slack's Basic Information. Invite it to a public, unshared channel and send
-   `@AgentName help with this`, or DM it. A mention within an existing thread starts the agent
-   there; subsequent thread replies continue its task. Names/photos are managed in Slack during
-   beta. Reconnecting uses the original app and workspace.
+1. Apply migrations `0305_company_agent_slack` and `0306_slack_agent_provisioning`, then deploy
+   API, runner, and web together. The runner's existing Slack Channel worker starts a separate
+   provisioning poller. `OPENCOMPANY_API_ORIGIN` must be public HTTPS; the existing public web
+   origin must serve agent images. No new environment secret or CLI binary is required.
+2. An opencompany admin opens **Settings → Channels → Slack → Set up identities**. They review
+   the developer-access grant, paste the generated command into Slack, authorize it there, and
+   paste the returned verification code into opencompany. A final screen shows the actual Slack
+   workspace before **Connect workspace** stores the grant. Attempts expire after ten minutes,
+   are single-use, and are bound to the admin user and opencompany workspace.
+3. Create or open an agent. Slack is **off by default**, for both new and existing agents.
+   The owner turns on **Enable Slack**. The saved toggle triggers app creation and installation
+   in the authorized Slack workspace; there is no per-agent token form or install prompt.
+   Workspace app-approval policy can still block installation and surfaces as a retryable error.
+4. The worker verifies the bot identity/scopes, encrypts credentials, and configures signed
+   events plus the name/avatar. Uploaded agent photos are normalized to 512px PNG. A neutral
+   agent icon is used when no photo is supplied; removing a photo restores that icon. Renaming
+   an enabled agent updates the same app. Slack-off agents sync changes when re-enabled.
+5. **Ready to test in Slack** means configuration succeeded. **Available in Slack** means a
+   valid signed event or URL verification was received. Invite the agent to a public, unshared
+   channel and mention it, or open a DM. Activate a paused agent before expecting replies.
+
+The opencompany bot retains its own OAuth connection, app, and credentials. Agent posts require
+that agent's dedicated installation and never fall back to the workspace bot. The legacy manual
+credential endpoint remains available for installations created during the earlier beta.
+
+Migration `0306` adds separate encrypted authorization, setup-attempt, and provisioning-job tables.
+It turns off the legacy Slack default on agents without a connected native installation; it does
+not disable already-connected identities. This backfill is not automatically reversible: do not
+restore every old flag to true on rollback. Existing workflows retain their previous defaults.
+
+Disconnecting **identity setup** removes the stored developer credential and blocks future
+provisioning/profile updates. Existing bot installations are kept. Turning Slack off or pausing
+an agent blocks its responses. Disconnecting an individual installation through the API erases
+its bot credentials; uninstalling/revoking in Slack is separate. Interrupted or ambiguous app
+creation stops for operator investigation rather than risking another app. Do not reset such a
+job to queued until reconciling the app in Slack and its saved installation state.
 
 For an end-to-end smoke test, install two agents in the same Slack workspace. Mention each in
 the same channel thread and confirm different Slack profiles and different agent-owned tasks;

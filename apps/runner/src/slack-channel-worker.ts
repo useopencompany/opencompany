@@ -11,6 +11,7 @@ import {
   markChannelError,
   resolvePublicChannel,
 } from "@opencompany/agent/integrations/slack-channel";
+import { processNextSlackProvisioning } from "@opencompany/agent/integrations/slack-provisioning";
 import { TASK_WRITE_PERMISSION } from "@opencompany/core";
 import {
   completeChannelDelivery,
@@ -641,7 +642,16 @@ export async function reconcileChannelDelivery(
 }
 
 export function startSlackChannelWorker(onRunQueued: () => void) {
-  return createPollingWorker({
+  const provisioning = createPollingWorker({
+    pollIntervalMs: 3_000,
+    onError: () => logger.error("Slack identity provisioning deferred"),
+    poll: async () =>
+      processNextSlackProvisioning({
+        db: getDb(),
+        apiOrigin: process.env.OPENCOMPANY_API_ORIGIN || "http://localhost:3001",
+      }),
+  });
+  const channel = createPollingWorker({
     pollIntervalMs: 2_000,
     poll: async () => {
       const deps = defaults();
@@ -677,4 +687,14 @@ export function startSlackChannelWorker(onRunQueued: () => void) {
         error_message: error instanceof Error ? error.message : "Unknown error",
       }),
   });
+  return {
+    notify: () => {
+      channel.notify();
+      provisioning.notify();
+    },
+    activeCount: () => channel.activeCount() + provisioning.activeCount(),
+    stop: async (options?: Parameters<typeof channel.stop>[0]) => {
+      await Promise.all([channel.stop(options), provisioning.stop(options)]);
+    },
+  };
 }

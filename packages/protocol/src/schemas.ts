@@ -2203,25 +2203,31 @@ export const CompanyAgentSlackSchema = z
     eventsUrl: z.string(),
     createUrl: z.string(),
     manifest: z.string(),
+    provisioning: z
+      .object({ configured: z.boolean(), state: z.string(), reason: z.string().nullable() })
+      .optional(),
   })
   .strict()
   .openapi("CompanyAgentSlack");
 export const CompanyAgentSlackEnvelopeSchema = z
   .object({ data: CompanyAgentSlackSchema, meta: ProtocolMetadataSchema })
   .strict();
-export const ConnectCompanyAgentSlackBodySchema = z
-  .object({
-    botToken: z
-      .string()
-      .trim()
-      .regex(/^xoxb-[A-Za-z0-9-]+$/)
-      .max(500),
-    signingSecret: z
-      .string()
-      .trim()
-      .regex(/^[a-fA-F0-9]{32}$/),
-  })
-  .strict();
+export const ConnectCompanyAgentSlackBodySchema = z.union([
+  z.object({}).strict(),
+  z
+    .object({
+      botToken: z
+        .string()
+        .trim()
+        .regex(/^xoxb-[A-Za-z0-9-]+$/)
+        .max(500),
+      signingSecret: z
+        .string()
+        .trim()
+        .regex(/^[a-fA-F0-9]{32}$/),
+    })
+    .strict(),
+]);
 export type CompanyAgentSlackDto = z.infer<typeof CompanyAgentSlackSchema>;
 
 export const CompanyAgentStatusSchema = z.enum(["active", "paused"]).openapi("CompanyAgentStatus");
@@ -4539,3 +4545,27 @@ export const ProjectConversationBodySchema = z
 export type ProjectDto = z.infer<typeof ProjectSchema>;
 export type IntegrationResourceOptionsBody = z.infer<typeof IntegrationResourceOptionsBodySchema>;
 export type IntegrationResourceOptionsDto = z.infer<typeof IntegrationResourceOptionsSchema>;
+
+export const SlackProvisioningSchema = z
+  .object({ configured: z.boolean(), status: z.string(), teamName: z.string().nullable() })
+  .strict();
+export const SlackProvisioningEnvelopeSchema = z
+  .object({ data: SlackProvisioningSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const SlackProvisioningStartEnvelopeSchema = z
+  .object({
+    data: z.object({ attemptId: z.string(), command: z.string(), expiresAt: z.string() }),
+    meta: ProtocolMetadataSchema,
+  })
+  .strict();
+export const SlackProvisioningCompleteBodySchema = z
+  .object({
+    attemptId: z.string().uuid(),
+    challenge: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[a-zA-Z0-9_-]+$/),
+  })
+  .strict();

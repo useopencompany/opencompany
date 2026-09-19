@@ -6409,3 +6409,54 @@ export const whatsappIngressReceipts = productSchema.table("whatsapp_ingress_rec
   id: text("id").primaryKey(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Developer authorization is deliberately separate from tool-accessible integrations.
+export const slackProvisioningConnections = productSchema.table("slack_provisioning_connections", {
+  workspaceId: text("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  teamId: text("team_id").notNull().unique(),
+  teamName: text("team_name").notNull(),
+  authorizedBy: text("authorized_by")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  encryptedPayload: jsonb("encrypted_payload")
+    .$type<IntegrationCredentialEncryptedPayload>()
+    .notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  status: text("status").notNull().default("connected"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export const slackProvisioningAttempts = productSchema.table("slack_provisioning_attempts", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  encryptedPayload: jsonb("encrypted_payload")
+    .$type<IntegrationCredentialEncryptedPayload>()
+    .notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+export const slackAgentProvisioning = productSchema.table("slack_agent_provisioning", {
+  agentId: text("agent_id")
+    .primaryKey()
+    .references(() => workflows.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  teamId: text("team_id").notNull(),
+  appId: text("app_id"),
+  state: text("state").notNull().default("queued"),
+  reason: text("reason"),
+  encryptedPayload: jsonb("encrypted_payload").$type<IntegrationCredentialEncryptedPayload>(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  profileHash: text("profile_hash"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});

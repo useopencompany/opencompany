@@ -8,6 +8,7 @@ import {
   type WorkflowAvatarMediaType,
 } from "@opencompany/core";
 import { BlobNotFoundError, get, put } from "@vercel/blob";
+import sharp from "sharp";
 import { ApiError } from "./errors";
 
 // Slack downloads `icon_url` itself, so an uploaded avatar has to be reachable without a session.
@@ -73,18 +74,36 @@ export type WorkflowAvatarService = {
 export function createWorkflowAvatarService(input: {
   workflows: Pick<WorkflowApplicationService, "authorizeWorkflowWrite">;
   storage?: WorkflowAvatarStorage;
+  slackAppIcon?: boolean;
 }): WorkflowAvatarService {
   const storage = input.storage ?? vercelBlobStorage();
   return {
     async upload({ actor, workflowId, file }) {
       const authorizedWorkflowId = await input.workflows.authorizeWorkflowWrite(actor, workflowId);
       const origin = publicOrigin();
-      const mediaType = await validatedImage(file);
+      const detected = await validatedImage(file);
+      let bytes = Buffer.from(await file.arrayBuffer());
+      if (input.slackAppIcon) {
+        try {
+          bytes = await sharp(bytes, { limitInputPixels: 16_000_000 })
+            .rotate()
+            .resize(512, 512, { fit: "cover" })
+            .png()
+            .toBuffer();
+        } catch {
+          throw new ApiError(
+            400,
+            "invalid_argument",
+            "This image could not be processed. Choose another PNG, JPEG, or WebP image.",
+          );
+        }
+      }
+      const mediaType = input.slackAppIcon ? "image/png" : detected;
       const assetId = `${randomUUID()}.${EXTENSIONS[mediaType]}`;
       const pathname = avatarPathname(authorizedWorkflowId, assetId);
       await storage.put({
         pathname,
-        bytes: Buffer.from(await file.arrayBuffer()),
+        bytes,
         mediaType,
       });
       return {
