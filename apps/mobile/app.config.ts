@@ -1,4 +1,6 @@
 const IS_DEV = process.env.APP_VARIANT === "development";
+const CAMERA_USAGE_DESCRIPTION =
+  "Allow opencompany to use your camera to attach photos to messages.";
 
 export default {
   name: IS_DEV ? "opencompany dev" : "opencompany",
@@ -15,6 +17,7 @@ export default {
     bundleIdentifier: IS_DEV ? "cloud.opencompany.mobile-dev" : "cloud.opencompany.mobile",
     infoPlist: {
       CADisableMinimumFrameDurationOnPhone: true,
+      NSCameraUsageDescription: CAMERA_USAGE_DESCRIPTION,
       NSPhotoLibraryAddUsageDescription:
         "opencompany needs permission to save images from chat messages to your photo library.",
     },
@@ -28,14 +31,14 @@ export default {
       "expo-image-picker",
       {
         photosPermission: "Allow opencompany to access photos you choose to attach to messages.",
-        cameraPermission: false,
+        cameraPermission: CAMERA_USAGE_DESCRIPTION,
         microphonePermission: false,
       },
     ],
     [
       "expo-camera",
       {
-        cameraPermission: "Allow opencompany to use your camera to attach photos to messages.",
+        cameraPermission: CAMERA_USAGE_DESCRIPTION,
         microphonePermission: false,
         recordAudioAndroid: false,
         barcodeScannerEnabled: false,
