@@ -35,8 +35,20 @@ export function CompanyAgentSlack({
     }
   }, [agentId]);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let active = true;
+    getCompanyAgentSlack(agentId).then(
+      (updated) => {
+        if (active) setConnection(updated);
+      },
+      (cause) => {
+        if (active)
+          setError(cause instanceof Error ? cause.message : "Could not load Slack setup.");
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [agentId]);
 
   async function connect() {
     setBusy(true);
