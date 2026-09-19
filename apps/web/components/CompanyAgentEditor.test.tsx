@@ -77,7 +77,7 @@ describe("CompanyAgentEditor", () => {
           status: "connected",
           needsScopeUpgrade: false,
           canCustomizeIdentity: true,
-          teamName: "OpenCompany",
+          teamName: "Acme",
           statusReason: null,
         }}
       />,
