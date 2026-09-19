@@ -104,11 +104,11 @@ export async function getCompanyAgentSlack(agentId: string) {
 
 export async function connectCompanyAgentSlack(
   agentId: string,
-  credentials: {} | { botToken: string; signingSecret: string } = {},
+  credentials?: { botToken: string; signingSecret: string },
 ) {
   const response = await agentClient({}).v1.agents[":agentId"].slack.$post({
     param: { agentId },
-    json: credentials,
+    json: credentials ?? {},
   });
   if (!response.ok) throw await agentResponseError(response, "Slack connection failed");
   return (await response.json()).data;

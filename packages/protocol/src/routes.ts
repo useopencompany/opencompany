@@ -752,7 +752,7 @@ export const connectCompanyAgentSlackRoute = createRoute({
   },
   responses: {
     200: {
-      description: "Dedicated Slack bot verified and connected.",
+      description: "Agent Slack setup resumed or a dedicated bot verified and connected.",
       content: { "application/json": { schema: CompanyAgentSlackEnvelopeSchema } },
     },
     default: errorResponse,

@@ -319,6 +319,18 @@ describe("automatic Slack identities", () => {
       "apps.developerInstall",
     ]);
   });
+  it("can retry a local configuration failure without claiming Slack created an app", async () => {
+    await authorize();
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "not a URL");
+    const request = requests();
+    await worker(request);
+    expect(request).not.toHaveBeenCalled();
+    expect((await service.get(actor, "agent1")).provisioning.state).toBe("failed");
+    vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "https://app.example.com");
+    await service.configure(actor, "agent1", {});
+    await worker(request);
+    expect(request.mock.calls.map((c) => c[0])).toEqual(["apps.manifest.create"]);
+  });
   it("serializes concurrent workers before the remote app creation", async () => {
     await authorize();
     let release!: () => void;

@@ -152,6 +152,7 @@ export async function processNextSlackProvisioning(input: {
     return selected;
   });
   if (!job) return false;
+  let createRequested = false;
   try {
     if (
       new URL(input.apiOrigin).protocol !== "https:" ||
@@ -166,6 +167,7 @@ export async function processNextSlackProvisioning(input: {
       ? openSlackSecret(job.workspaceId, job.agentId, job.secret, job.keyVersion)
       : {};
     if (job.state === "queued") {
+      createRequested = true;
       const result = await request(
         "apps.manifest.create",
         { manifest: slackAgentManifest({ name: job.name }) },
@@ -232,7 +234,7 @@ export async function processNextSlackProvisioning(input: {
   } catch (error) {
     const code = error instanceof SlackProvisioningError ? error.code : "setup_failed";
     const uncertain =
-      job.state === "queued" &&
+      createRequested &&
       [
         "request_unconfirmed",
         "invalid_response",
