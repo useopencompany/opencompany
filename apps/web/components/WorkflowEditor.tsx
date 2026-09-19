@@ -76,6 +76,7 @@ import {
   WORKFLOW_MODEL_OPTIONS,
 } from "@/lib/workflow-model-options";
 import {
+  DEFAULT_WORKFLOW_EVENT_PROMPT,
   DEFAULT_WORKFLOW_SCHEDULE_CRON,
   DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
@@ -629,10 +630,13 @@ function WorkflowTriggerRow({
     trigger.type === "event"
       ? provider?.events.find((candidate) => candidate.id === trigger.event)
       : null;
-  const summary =
+  const base =
     trigger.type === "schedule"
       ? scheduleSummary({ cron: trigger.cron, timezone: trigger.timezone })
       : `${provider?.label ?? trigger.provider} · ${event?.label ?? trigger.event}`;
+  // Schedule rows start collapsed, so say on the summary line when this trigger carries its own
+  // instructions rather than leaving that only discoverable by opening every row.
+  const summary = triggerInstructions(trigger.prompt) ? `${base} · Own instructions` : base;
 
   return (
     <div>
@@ -688,10 +692,66 @@ function WorkflowTriggerRow({
               onChange={onChange}
             />
           )}
+          <TriggerInstructionsField
+            trigger={trigger}
+            canEdit={canEdit}
+            onChange={(prompt) => onChange({ ...trigger, prompt })}
+          />
         </div>
       ) : null}
     </div>
   );
+}
+
+// A trigger's own instructions. They become the request that opens that run, while the standing
+// instructions stay in every run's system prompt — so a trigger narrows the job for one occasion
+// instead of redefining it. Empty means the standing instructions run unchanged.
+function TriggerInstructionsField({
+  trigger,
+  canEdit,
+  onChange,
+}: {
+  trigger: WorkflowTriggerDraft;
+  canEdit: boolean;
+  onChange: (prompt: string) => void;
+}) {
+  const instructions = triggerInstructions(trigger.prompt);
+  const hint =
+    trigger.type === "schedule"
+      ? "Sent as the request that opens each run on this schedule."
+      : "Sent as the request that opens each run, ahead of the event's own details.";
+
+  return (
+    <div className="mt-3 flex flex-col gap-1.5">
+      <span className="text-[12px] font-medium text-ink-subtle">Instructions for this trigger</span>
+      {canEdit ? (
+        <textarea
+          value={instructions}
+          onChange={(changed) => onChange(changed.target.value)}
+          placeholder="Check our production environment and report anything unusual."
+          aria-label="Instructions for this trigger"
+          rows={3}
+          className="w-full resize-y rounded-lg border border-border bg-canvas px-3 py-2 text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+        />
+      ) : (
+        <p className="rounded-lg border border-border bg-canvas px-3 py-2 text-[12.5px] leading-5 text-ink-subtle">
+          {instructions || "No instructions of its own."}
+        </p>
+      )}
+      <p className="text-[12px] leading-5 text-ink-subtle">
+        {hint} The instructions above always apply — leave this empty to run them unchanged.
+      </p>
+    </div>
+  );
+}
+
+// A trigger always stores a prompt, so an author who wrote none gets a placeholder. The editor
+// shows that as the empty field it really is.
+function triggerInstructions(prompt: string) {
+  const written = prompt.trim();
+  return written === DEFAULT_WORKFLOW_SCHEDULE_PROMPT || written === DEFAULT_WORKFLOW_EVENT_PROMPT
+    ? ""
+    : prompt;
 }
 
 function AddTriggerMenu({
@@ -762,7 +822,7 @@ function AddTriggerMenu({
                   event: eventId,
                   integrationId,
                   filters: {},
-                  prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+                  prompt: "",
                 });
                 close();
               }}
@@ -777,7 +837,7 @@ function AddTriggerMenu({
                   type: "schedule",
                   cron: DEFAULT_WORKFLOW_SCHEDULE_CRON,
                   timezone: DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
-                  prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+                  prompt: "",
                   enabled: true,
                 });
                 close();
@@ -1029,9 +1089,6 @@ function EventTriggerEditor({
           />
         ))}
       </div>
-      <p className="text-[12px] leading-5 text-ink-subtle">
-        Each run follows the instructions in your steps.
-      </p>
     </div>
   );
 }

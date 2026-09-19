@@ -405,10 +405,8 @@ describe("WorkflowEditor", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Linear/ }));
     fireEvent.click(screen.getByRole("button", { name: /Issue created/ }));
-    expect(screen.queryByText("Additional run context (optional)")).not.toBeInTheDocument();
-    expect(
-      screen.getByText("Each run follows the instructions in your steps."),
-    ).toBeInTheDocument();
+    // A new trigger starts with no instructions of its own, so the run uses the workflow's steps.
+    expect(screen.getByLabelText("Instructions for this trigger")).toHaveValue("");
     await advanceAutosave();
 
     expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
@@ -420,10 +418,101 @@ describe("WorkflowEditor", () => {
             provider: "linear",
             event: "issue.created",
             integrationId: "gint_1",
+            prompt: "",
           }),
         ],
       }),
     );
+  });
+
+  it("writes instructions for one schedule trigger without touching the other", async () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          triggers: [
+            {
+              id: "trigger_hourly",
+              type: "schedule",
+              cron: "0 * * * *",
+              timezone: "UTC",
+              // The placeholder a trigger carries when its author wrote no instructions.
+              prompt: "Run this workflow.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: null,
+            },
+            {
+              id: "trigger_weekly",
+              type: "schedule",
+              cron: "0 9 * * 1",
+              timezone: "UTC",
+              prompt: "Post the weekly summary.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: null,
+            },
+          ],
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /On a schedule/ })[0]!);
+    const field = screen.getByLabelText("Instructions for this trigger");
+    expect(field).toHaveValue("");
+    fireEvent.change(field, { target: { value: "Check production and report anything unusual." } });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update).toHaveBeenLastCalledWith(
+      "workflow_1",
+      expect.objectContaining({
+        triggers: [
+          expect.objectContaining({
+            id: "trigger_hourly",
+            prompt: "Check production and report anything unusual.",
+          }),
+          expect.objectContaining({ id: "trigger_weekly", prompt: "Post the weekly summary." }),
+        ],
+      }),
+    );
+  });
+
+  it("flags a trigger that carries its own instructions on its summary line", () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          triggers: [
+            {
+              id: "trigger_plain",
+              type: "schedule",
+              cron: "0 9 * * 1",
+              timezone: "UTC",
+              prompt: "Run this workflow.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: null,
+            },
+            {
+              id: "trigger_briefed",
+              type: "schedule",
+              cron: "0 * * * *",
+              timezone: "UTC",
+              prompt: "Check production.",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: null,
+            },
+          ],
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    expect(screen.getAllByText(/Own instructions/)).toHaveLength(1);
   });
 
   it("keeps an existing event trigger prompt when the editor saves", async () => {
@@ -448,9 +537,10 @@ describe("WorkflowEditor", () => {
         eventProviders={[linearEventProvider()]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Issue created/ }));
-    expect(screen.queryByText("Additional run context (optional)")).not.toBeInTheDocument();
-    expect(screen.queryByText("Run context")).not.toBeInTheDocument();
+    // An event trigger row opens by default, so its instructions are visible without a click.
+    expect(screen.getByLabelText("Instructions for this trigger")).toHaveValue(
+      "Only handle billing issues.",
+    );
     fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
       target: { value: "Collect the week's updates and post them." },
     });

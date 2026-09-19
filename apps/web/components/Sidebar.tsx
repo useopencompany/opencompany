@@ -251,7 +251,7 @@ export function Sidebar({
             active={workflowsActive}
           />
           {featureFlags.companyAgents ? (
-            <SidebarNavRow href="/agents" icon={Bot} label="Company agents" active={agentsActive} />
+            <SidebarNavRow href="/agents" icon={Bot} label="Company Agents" active={agentsActive} />
           ) : null}
         </nav>
 
