@@ -307,6 +307,20 @@ export function createCompanyAgentSlackService(input: {
           .where(eq(integrations.id, row.id));
         return Response.json({ ok: true });
       }
+      // Manifest provisioning can deliver events without a new URL challenge.
+      // A signed event for this installation also proves the endpoint is reachable.
+      if (row.status === "connected" && row.statusReason === WAITING) {
+        await input.db
+          .update(integrations)
+          .set({ statusReason: null, updatedAt: new Date() })
+          .where(
+            and(
+              eq(integrations.id, row.id),
+              eq(integrations.status, "connected"),
+              eq(integrations.statusReason, WAITING),
+            ),
+          );
+      }
       const message = slackAgentMessage(body.event, String(credential?.payload.bot_user_id));
       if (!message || row.status !== "connected") return Response.json({ ok: true, ignored: true });
       await input.db.execute(sql`

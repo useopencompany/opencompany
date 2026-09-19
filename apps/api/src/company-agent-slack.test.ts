@@ -151,6 +151,27 @@ describe("company agent Slack setup and ingress", () => {
     await service.webhook("agent1", signed(envelope(mention, "A2")));
     await service.webhook("agent1", signed({ ...envelope(mention), team_id: "T2" }));
     expect((await pg.query("SELECT * FROM goat.slack_agent_messages")).rows).toHaveLength(0);
+    expect(await service.get(actor, "agent1")).toMatchObject({ ready: false });
+  });
+  it("recognizes signed event delivery when manifest setup did not send a URL challenge", async () => {
+    await connect();
+    selectedApp = "A2";
+    await connect("agent2");
+    await service.webhook("agent1", signed(envelope(mention)));
+    expect(await service.get(actor, "agent1")).toMatchObject({ ready: true, statusReason: null });
+    expect(await service.get(actor, "agent2")).toMatchObject({ ready: false });
+    expect((await pg.query("SELECT * FROM goat.slack_agent_messages")).rows).toHaveLength(1);
+  });
+  it("does not mark a revoked installation ready on subsequent signed events", async () => {
+    await connect();
+    await service.webhook("agent1", signed(envelope({ type: "tokens_revoked" })));
+    await service.webhook("agent1", signed(envelope(mention)));
+    expect(await service.get(actor, "agent1")).toMatchObject({
+      ready: false,
+      status: "needs_reauth",
+      statusReason: "Reconnect this agent's Slack app.",
+    });
+    expect((await pg.query("SELECT * FROM goat.slack_agent_messages")).rows).toHaveLength(0);
   });
   it("deduplicates retries and captures a first mention in an existing thread", async () => {
     await connect();

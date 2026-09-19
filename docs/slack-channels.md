@@ -181,8 +181,10 @@ provisioning can be automated later while retaining the same installation and ev
    The API checks the installed bot, app identity, and granted scopes before encrypting them.
 4. Copy the configuration shown after connecting into Slack's **App Manifest** and save.
    This second step enables signed events after the server has the signing secret. Check the
-   connection in opencompany: it is ready only after Slack completes URL verification. If
-   reconnecting an existing app, reverify the Request URL under **Event Subscriptions**.
+   connection in opencompany: it is ready after Slack completes URL verification or delivers
+   a signed event matching the installation's app and workspace. Manifest provisioning may
+   start delivering events without a new URL challenge. If neither arrives, reverify the
+   Request URL under **Event Subscriptions**.
 5. Set its photo in Slack's Basic Information. Invite it to a public, unshared channel and send
    `@AgentName help with this`, or DM it. A mention within an existing thread starts the agent
    there; subsequent thread replies continue its task. Names/photos are managed in Slack during
