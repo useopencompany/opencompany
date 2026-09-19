@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { PageContent } from "@/components/PageContent";
+import { SlackIdentitySettings } from "@/components/SlackIdentitySettings";
 import { disconnectSlackBotAction } from "@/lib/slack-bot-actions";
 
 export type SlackBotSettingsData = {
@@ -36,7 +37,7 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
   return (
     <PageContent
       title="Slack"
-      description="Message the bot to start a session, and share workflow results in Slack."
+      description="Connect opencompany and give company agents their own Slack identities."
     >
       <p className="mb-5 text-[13px] leading-5 text-ink-subtle">
         This workspace connection is separate from your personal Slack plugin.
@@ -55,13 +56,16 @@ export function SlackBotSettings({ data }: { data: SlackBotSettingsData }) {
           Only workspace admins can manage the Slack bot.
         </p>
       ) : !data.configured ? (
-        <p className="text-[13px] leading-5 text-ink-subtle">
-          Slack Channels aren&apos;t available on this workspace yet. Contact your workspace
-          administrator for help.
-        </p>
+        <section className="rounded-xl border border-border p-5">
+          <h2 className="text-sm font-medium">opencompany bot</h2>
+          <p className="mt-1 text-[13px] leading-5 text-ink-subtle">
+            The opencompany bot connection isn’t configured for this deployment yet.
+          </p>
+        </section>
       ) : (
         <SlackBotPanel data={data} />
       )}
+      {data.isAdmin ? <SlackIdentitySettings /> : null}
     </PageContent>
   );
 }
@@ -107,9 +111,7 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
         <div className="flex items-start gap-3 rounded-lg border border-ink/10 p-4">
           <MessageSquare size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-ink-subtle" />
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-[14px] font-medium leading-tight text-ink">
-              Add opencompany to your Slack workspace
-            </span>
+            <span className="text-[14px] font-medium leading-tight text-ink">opencompany bot</span>
             <p className="text-[13px] leading-5 text-ink-subtle">
               Members can message @opencompany to start a session on their own account, and
               workflows can post results to a channel. Every answer opens a thread that continues
@@ -134,7 +136,7 @@ function SlackBotPanel({ data }: { data: SlackBotSettingsData }) {
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <div className="min-w-0">
             <span className="block truncate text-[14px] font-medium leading-tight text-ink">
-              {data.teamName ?? "Slack workspace"}
+              opencompany · {data.teamName ?? "Slack workspace"}
             </span>
             {data.status !== "connected" && data.statusReason ? (
               <span className="block truncate text-[12px] leading-4 text-ink-subtle">

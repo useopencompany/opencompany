@@ -1,10 +1,6 @@
 "use client";
 
-import type {
-  CompanyAgentDto,
-  SkillCatalogItemDto,
-  SlackBotWorkspaceSettingsDto,
-} from "@opencompany/protocol";
+import type { CompanyAgentDto, SkillCatalogItemDto } from "@opencompany/protocol";
 import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import {
   Dialog,
@@ -21,6 +17,7 @@ import { Check, ChevronDown, History, Loader2, Play, Trash2 } from "lucide-react
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { CompanyAgentSlack } from "@/components/CompanyAgentSlack";
 import { StatusDot } from "@/components/StatusDot";
 import {
   SectionLabel,
@@ -70,14 +67,12 @@ export function CompanyAgentEditor({
   ownerName,
   skillCatalog,
   eventProviders,
-  slackBotSettings,
 }: {
   agent: CompanyAgentDto;
   canEdit: boolean;
   ownerName: string;
   skillCatalog: SkillCatalogItemDto[];
   eventProviders: WorkflowEventProviderOption[];
-  slackBotSettings: SlackBotWorkspaceSettingsDto;
 }) {
   const router = useRouter();
   const [draft, setDraft] = useState<AgentDraft>(() => agentDraft(agent));
@@ -264,7 +259,7 @@ export function CompanyAgentEditor({
                   uploadCompanyAgentPhoto({ agentId: workflowId, file })
                 }
                 onChange={(photoUrl) => setDraft({ ...draft, photoUrl })}
-                hint="Used in the app and as this agent's photo on its Slack posts. PNG, JPEG, or WebP up to 1 MB."
+                hint="Used in the app and on this agent's Slack profile. PNG, JPEG, or WebP up to 1 MB."
               />
             </div>
           </section>
@@ -291,19 +286,25 @@ export function CompanyAgentEditor({
               <Switch
                 checked={draft.slackEnabled}
                 disabled={!canEdit}
-                aria-label="Post to Slack"
+                aria-label="Enable Slack"
                 onCheckedChange={(slackEnabled) => setDraft({ ...draft, slackEnabled })}
               />
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <p className="text-[13px] font-medium text-ink">Post to Slack</p>
+                <p className="text-[13px] font-medium text-ink">Enable Slack</p>
                 <p className="text-[12px] leading-5 text-ink-subtle">
-                  {slackBotSettings.connected
-                    ? `Posts go out through the workspace bot as “${draft.name.trim() || "Untitled agent"}” with this agent's photo. Say in the instructions which channel to post in and whom to notify. A reply in the thread continues that run.`
-                    : "Connect the Slack bot in workspace settings before this agent can post."}
+                  Give this agent its own Slack profile for mentions and direct messages. Turning
+                  Slack off keeps its identity and stops its replies.
                 </p>
               </div>
             </div>
           </section>
+
+          <CompanyAgentSlack
+            agentId={agent.id}
+            canEdit={canEdit}
+            enabled={draft.slackEnabled}
+            active={draft.status === "active"}
+          />
 
           {canEdit ? (
             <section className="flex flex-col gap-3">

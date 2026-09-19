@@ -37,8 +37,10 @@ import {
   CompanyAgentPageSchema,
   CompanyAgentPhotoUploadEnvelopeSchema,
   CompanyAgentRunPageSchema,
+  CompanyAgentSlackEnvelopeSchema,
   CompanyAgentUpdateEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
+  ConnectCompanyAgentSlackBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
@@ -161,6 +163,9 @@ import {
   SkillListEnvelopeSchema,
   SlackBotMutationEnvelopeSchema,
   SlackBotWorkspaceSettingsEnvelopeSchema,
+  SlackProvisioningCompleteBodySchema,
+  SlackProvisioningEnvelopeSchema,
+  SlackProvisioningStartEnvelopeSchema,
   StartInfisicalAuthBodySchema,
   SteerRunEnvelopeSchema,
   StripeAccountDeleteEnvelopeSchema,
@@ -718,6 +723,48 @@ export const uploadCompanyAgentPhotoRoute = createRoute({
     },
     default: errorResponse,
   },
+});
+export const getCompanyAgentSlackRoute = createRoute({
+  method: "get",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: { params: z.object({ agentId: z.string().min(1) }) },
+  responses: {
+    200: {
+      description: "Agent Slack setup and connection status.",
+      content: { "application/json": { schema: CompanyAgentSlackEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const connectCompanyAgentSlackRoute = createRoute({
+  method: "post",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: z.string().min(1) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConnectCompanyAgentSlackBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Agent Slack setup resumed or a dedicated bot verified and connected.",
+      content: { "application/json": { schema: CompanyAgentSlackEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const disconnectCompanyAgentSlackRoute = createRoute({
+  method: "delete",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: { params: z.object({ agentId: z.string().min(1) }) },
+  responses: { 204: { description: "Agent Slack connection disabled." }, default: errorResponse },
 });
 export const listWikisRoute = createRoute({
   method: "get",
@@ -3258,6 +3305,86 @@ export const listIntegrationAccountsRoute = createRoute({
   },
 });
 
+export const getSlackProvisioningRoute = createRoute({
+  method: "get",
+  path: "/v1/workspace/slack-provisioning",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Slack identity setup.",
+      content: { "application/json": { schema: SlackProvisioningEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const startSlackProvisioningRoute = createRoute({
+  method: "post",
+  path: "/v1/workspace/slack-provisioning/start",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Slack identity setup.",
+      content: { "application/json": { schema: SlackProvisioningStartEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const completeSlackProvisioningRoute = createRoute({
+  method: "post",
+  path: "/v1/workspace/slack-provisioning/complete",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: SlackProvisioningCompleteBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Workspace Slack identity setup.",
+      content: { "application/json": { schema: SlackProvisioningEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const confirmSlackProvisioningRoute = createRoute({
+  method: "post",
+  path: "/v1/workspace/slack-provisioning/confirm",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: {
+        "application/json": { schema: z.object({ attemptId: z.string().uuid() }).strict() },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Confirm the authorized Slack workspace.",
+      content: { "application/json": { schema: SlackProvisioningEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const disconnectSlackProvisioningRoute = createRoute({
+  method: "delete",
+  path: "/v1/workspace/slack-provisioning",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Workspace Slack identity setup.",
+      content: { "application/json": { schema: SlackProvisioningEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getSlackBotWorkspaceSettingsRoute = createRoute({
   method: "get",
   path: "/v1/workspace/slack-bot",
@@ -3830,6 +3957,9 @@ export type V1RouteHandlers = {
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
+  getCompanyAgentSlack: RouteHandler<typeof getCompanyAgentSlackRoute>;
+  connectCompanyAgentSlack: RouteHandler<typeof connectCompanyAgentSlackRoute>;
+  disconnectCompanyAgentSlack: RouteHandler<typeof disconnectCompanyAgentSlackRoute>;
   listCompanyAgents: RouteHandler<typeof listCompanyAgentsRoute>;
   createCompanyAgent: RouteHandler<typeof createCompanyAgentRoute>;
   getCompanyAgent: RouteHandler<typeof getCompanyAgentRoute>;
@@ -3987,6 +4117,11 @@ export type V1RouteHandlers = {
   connectStripeAccount: RouteHandler<typeof connectStripeAccountRoute>;
   disconnectStripeAccount: RouteHandler<typeof disconnectStripeAccountRoute>;
   listIntegrationAccounts: RouteHandler<typeof listIntegrationAccountsRoute>;
+  getSlackProvisioning: RouteHandler<typeof getSlackProvisioningRoute>;
+  startSlackProvisioning: RouteHandler<typeof startSlackProvisioningRoute>;
+  completeSlackProvisioning: RouteHandler<typeof completeSlackProvisioningRoute>;
+  confirmSlackProvisioning: RouteHandler<typeof confirmSlackProvisioningRoute>;
+  disconnectSlackProvisioning: RouteHandler<typeof disconnectSlackProvisioningRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
   listIntegrationResourceOptions: RouteHandler<typeof listIntegrationResourceOptionsRoute>;
@@ -4060,6 +4195,9 @@ export function createV1Router(
       .openapi(runCompanyAgentRoute, handlers.runCompanyAgent)
       .openapi(listCompanyAgentRunsRoute, handlers.listCompanyAgentRuns)
       .openapi(uploadCompanyAgentPhotoRoute, handlers.uploadCompanyAgentPhoto)
+      .openapi(getCompanyAgentSlackRoute, handlers.getCompanyAgentSlack)
+      .openapi(connectCompanyAgentSlackRoute, handlers.connectCompanyAgentSlack)
+      .openapi(disconnectCompanyAgentSlackRoute, handlers.disconnectCompanyAgentSlack)
 
       .openapi(listBrowserProfilesRoute, handlers.listBrowserProfiles)
       .openapi(createBrowserProfileRoute, handlers.createBrowserProfile)
@@ -4193,6 +4331,11 @@ export function createV1Router(
       .openapi(connectStripeAccountRoute, handlers.connectStripeAccount)
       .openapi(disconnectStripeAccountRoute, handlers.disconnectStripeAccount)
       .openapi(listIntegrationAccountsRoute, handlers.listIntegrationAccounts)
+      .openapi(getSlackProvisioningRoute, handlers.getSlackProvisioning)
+      .openapi(startSlackProvisioningRoute, handlers.startSlackProvisioning)
+      .openapi(completeSlackProvisioningRoute, handlers.completeSlackProvisioning)
+      .openapi(confirmSlackProvisioningRoute, handlers.confirmSlackProvisioning)
+      .openapi(disconnectSlackProvisioningRoute, handlers.disconnectSlackProvisioning)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
       .openapi(listIntegrationResourceOptionsRoute, handlers.listIntegrationResourceOptions)
@@ -4663,6 +4806,45 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  getCompanyAgentSlack: (c) =>
+    c.json(
+      {
+        data: {
+          installed: false,
+          ready: false,
+          status: "not_connected",
+          statusReason: null,
+          teamName: null,
+          appUrl: null,
+          openUrl: null,
+          eventsUrl: "",
+          createUrl: "",
+          manifest: "{}",
+        },
+        meta,
+      },
+      200,
+    ),
+  connectCompanyAgentSlack: (c) =>
+    c.json(
+      {
+        data: {
+          installed: true,
+          ready: false,
+          status: "connected",
+          statusReason: null,
+          teamName: null,
+          appUrl: null,
+          openUrl: null,
+          eventsUrl: "",
+          createUrl: "",
+          manifest: "{}",
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectCompanyAgentSlack: (c) => c.body(null, 204),
   listCompanyAgents: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   createCompanyAgent: (c) =>
     c.json(
@@ -5537,6 +5719,29 @@ const contractDocumentHandlers: V1RouteHandlers = {
     ),
   disconnectStripeAccount: (c) => c.json({ data: { deleted: true as const }, meta }, 200),
   listIntegrationAccounts: (c) => c.json({ data: [], meta }, 200),
+  getSlackProvisioning: (c) =>
+    c.json({ data: { configured: false, status: "not_connected", teamName: null }, meta }, 200),
+  startSlackProvisioning: (c) =>
+    c.json(
+      {
+        data: {
+          attemptId: "00000000-0000-4000-8000-000000000000",
+          command: "/slackauthticket example",
+          expiresAt: "2026-01-01T00:00:00.000Z",
+        },
+        meta,
+      },
+      200,
+    ),
+  completeSlackProvisioning: (c) =>
+    c.json({ data: { configured: false, status: "not_connected", teamName: null }, meta }, 200),
+  confirmSlackProvisioning: (c) =>
+    c.json(
+      { data: { configured: true, status: "connected", teamName: "Example workspace" }, meta },
+      200,
+    ),
+  disconnectSlackProvisioning: (c) =>
+    c.json({ data: { configured: false, status: "not_connected", teamName: null }, meta }, 200),
   getSlackBotWorkspaceSettings: (c) =>
     c.json(
       {

@@ -30,7 +30,9 @@
     "hono": "4.13.5",
     "jose": "^6.2.11",
     "pg": "^8.23.0",
-    "stripe": "22.1.1"
+    "stripe": "22.1.1",
+    "sharp": "0.35.4",
+    "@opencompany/crypto": "workspace:*"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

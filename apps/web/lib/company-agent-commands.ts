@@ -95,3 +95,61 @@ async function agentResponseError(response: Response, fallback: string) {
     `${message ?? `${fallback} with HTTP ${response.status}.`}${requestId ? ` (request ${requestId})` : ""}`,
   );
 }
+
+export async function getCompanyAgentSlack(agentId: string) {
+  const response = await agentClient({}).v1.agents[":agentId"].slack.$get({ param: { agentId } });
+  if (!response.ok) throw await agentResponseError(response, "Slack setup could not be loaded");
+  return (await response.json()).data;
+}
+
+export async function connectCompanyAgentSlack(
+  agentId: string,
+  credentials?: { botToken: string; signingSecret: string },
+) {
+  const response = await agentClient({}).v1.agents[":agentId"].slack.$post({
+    param: { agentId },
+    json: credentials ?? {},
+  });
+  if (!response.ok) throw await agentResponseError(response, "Slack connection failed");
+  return (await response.json()).data;
+}
+
+export async function disconnectCompanyAgentSlack(agentId: string) {
+  const response = await agentClient({}).v1.agents[":agentId"].slack.$delete({
+    param: { agentId },
+  });
+  if (!response.ok) throw await agentResponseError(response, "Slack disconnect failed");
+}
+
+export async function getSlackProvisioning() {
+  const response = await agentClient({}).v1.workspace["slack-provisioning"].$get();
+  if (!response.ok) throw await agentResponseError(response, "Slack setup could not be loaded");
+  return (await response.json()).data;
+}
+export async function startSlackProvisioning() {
+  const response = await agentClient({}).v1.workspace["slack-provisioning"].start.$post();
+  if (!response.ok) throw await agentResponseError(response, "Slack setup could not start");
+  return (await response.json()).data;
+}
+export async function completeSlackProvisioning(attemptId: string, challenge: string) {
+  const response = await agentClient({}).v1.workspace["slack-provisioning"].complete.$post({
+    json: { attemptId, challenge },
+  });
+  if (!response.ok) throw await agentResponseError(response, "Slack authorization failed");
+  return (await response.json()).data;
+}
+export async function disconnectSlackProvisioning() {
+  const response = await agentClient({}).v1.workspace["slack-provisioning"].$delete();
+  if (!response.ok)
+    throw await agentResponseError(response, "Slack authorization could not be removed");
+  return (await response.json()).data;
+}
+
+export async function confirmSlackProvisioning(attemptId: string) {
+  const response = await agentClient({}).v1.workspace["slack-provisioning"].confirm.$post({
+    json: { attemptId },
+  });
+  if (!response.ok)
+    throw await agentResponseError(response, "Slack workspace could not be connected");
+  return (await response.json()).data;
+}

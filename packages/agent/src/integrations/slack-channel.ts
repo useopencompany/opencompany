@@ -52,6 +52,7 @@ export type ChannelInstallation = {
   workspaceId: string;
   teamId: string;
   scopes: string[];
+  companyAgentId?: string | null;
 };
 
 export async function channelBotCredential(installation: ChannelInstallation) {
@@ -117,7 +118,7 @@ export async function postWorkflowSlackMessage(
   >(
     await execute(sql`
     SELECT integration.id, integration.user_workos_id AS "userWorkosId", integration.workspace_id AS "workspaceId",
-      integration.external_id AS "teamId", integration.scopes, task.session_id AS "sessionId", run.lease_id AS "leaseId",
+      integration.external_id AS "teamId", integration.scopes, integration.company_agent_id AS "companyAgentId", task.session_id AS "sessionId", run.lease_id AS "leaseId",
       COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
       COALESCE(workflow.slack_bot_avatar_url, '') AS "botAvatarUrl",
       event.id AS "subscriptionEventId", subscription.source_key->>'channelId' AS "followUpChannelId",
@@ -128,6 +129,11 @@ export async function postWorkflowSlackMessage(
       AND workflow.created_at <= task.created_at
     JOIN goat.chat_sessions conversation ON conversation.id = task.session_id
     JOIN goat.integrations integration ON integration.workspace_id = task.workspace_id AND integration.provider = 'slack_bot'
+      AND (integration.id = (SELECT origin.integration_id FROM goat.subscription_events inbound
+          JOIN goat.session_subscriptions origin ON origin.id = inbound.subscription_id
+          WHERE inbound.run_id = run.id AND inbound.status IN ('running', 'delivering') LIMIT 1)
+        OR (NOT EXISTS (SELECT 1 FROM goat.subscription_events inbound WHERE inbound.run_id = run.id AND inbound.status IN ('running', 'delivering'))
+          AND (integration.company_agent_id = task.agent_id OR (integration.company_agent_id IS NULL AND task.agent_id IS NULL))))
     LEFT JOIN goat.subscription_events event ON event.run_id = run.id AND event.status IN ('running', 'delivering')
     LEFT JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
       AND subscription.integration_id = integration.id AND subscription.source = 'slack_thread'

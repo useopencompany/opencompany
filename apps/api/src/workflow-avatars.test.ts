@@ -1,4 +1,5 @@
 import type { Actor } from "@opencompany/core";
+import sharp from "sharp";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./errors";
 import { createWorkflowAvatarService, type WorkflowAvatarStorage } from "./workflow-avatars";
@@ -41,6 +42,32 @@ describe("WorkflowAvatarService", () => {
       /^https:\/\/my\.opencompany\.test\/workflow-avatars\/workflow_1\/[0-9a-f-]{36}\.png$/u,
     );
     expect(new URL(result.avatarUrl).pathname.split("/").pop()).toMatch(UUID_ASSET);
+  });
+
+  it("normalizes agent photos to a real 512px PNG accepted by native Slack profiles", async () => {
+    const storage = fakeStorage();
+    const service = createWorkflowAvatarService({
+      workflows: { authorizeWorkflowWrite: async (_actor, id) => id },
+      storage,
+      slackAppIcon: true,
+    });
+    const original = await sharp({
+      create: { width: 80, height: 120, channels: 3, background: "#228877" },
+    })
+      .jpeg()
+      .toBuffer();
+    await service.upload({
+      actor,
+      workflowId: "agent",
+      file: new File([new Uint8Array(original)], "photo.jpg", { type: "image/jpeg" }),
+    });
+    const stored = [...storage.blobs.values()][0]!;
+    expect(stored.mediaType).toBe("image/png");
+    expect(await sharp(stored.bytes).metadata()).toMatchObject({
+      width: 512,
+      height: 512,
+      format: "png",
+    });
   });
 
   it("never writes bytes for a workflow the actor cannot edit", async () => {
@@ -163,7 +190,9 @@ function pngFile() {
   return new File([new Uint8Array([...PNG_HEADER, 0x00])], "avatar.png", { type: "image/png" });
 }
 
-function fakeStorage(): WorkflowAvatarStorage & { blobs: Map<string, { mediaType: string }> } {
+function fakeStorage(): WorkflowAvatarStorage & {
+  blobs: Map<string, { mediaType: string; bytes: Buffer }>;
+} {
   const blobs = new Map<string, { mediaType: string; bytes: Buffer }>();
   return {
     blobs,

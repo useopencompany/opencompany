@@ -1076,6 +1076,10 @@ export const integrations = productSchema.table(
     sharedWithWorkspace: boolean("shared_with_workspace").notNull().default(false),
     provider: text("provider").$type<IntegrationProvider>().notNull(),
     externalId: text("external_id").notNull(),
+    companyAgentId: text("company_agent_id").references(() => workflows.id, {
+      onDelete: "cascade",
+    }),
+    slackAppId: text("slack_app_id"),
     connectionLabel: text("connection_label"),
     accountName: text("account_name"),
     accountEmail: text("account_email"),
@@ -1124,13 +1128,26 @@ export const integrations = productSchema.table(
     // admin connected it.
     workspaceProviderExternalIdx: uniqueIndex("goat_integrations_workspace_provider_external_idx")
       .on(table.workspaceId, table.provider, table.externalId)
-      .where(sql`${table.workspaceId} IS NOT NULL`),
+      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.companyAgentId} IS NULL`),
     // The answer bot is a single workspace-level destination. Reinstalling it
     // for another Slack team updates the existing row so its routes stay
     // manageable instead of leaving a hidden installation active.
     slackBotWorkspaceIdx: uniqueIndex("goat_integrations_slack_bot_workspace_idx")
       .on(table.workspaceId, table.provider)
-      .where(sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot'`),
+      .where(
+        sql`${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot' AND ${table.companyAgentId} IS NULL`,
+      ),
+    companyAgentIdx: uniqueIndex("integrations_company_agent_idx").on(table.companyAgentId),
+    slackAgentAppIdx: uniqueIndex("integrations_slack_agent_app_idx")
+      .on(table.externalId, table.slackAppId)
+      .where(sql`${table.companyAgentId} IS NOT NULL`),
+    companyAgentCheck: check(
+      "integrations_company_agent_check",
+      sql`
+      (${table.companyAgentId} IS NULL AND ${table.slackAppId} IS NULL) OR
+      (${table.companyAgentId} IS NOT NULL AND ${table.slackAppId} IS NOT NULL
+        AND ${table.workspaceId} IS NOT NULL AND ${table.provider} = 'slack_bot')`,
+    ),
     // Stripe credentials represent the workspace's single reporting account.
     // Rotating a key or switching accounts updates that row instead of leaving
     // another financial connection silently active.
@@ -6112,6 +6129,40 @@ export type WorkspacePluginData = typeof workspacePluginData.$inferSelect;
 export type RepoConfig = typeof repoConfigs.$inferSelect;
 
 // External sources wake a stable Conversation; Runs remain the existing fenced execution unit.
+export const slackAgentMessages = productSchema.table(
+  "slack_agent_messages",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    channelId: text("channel_id").notNull(),
+    threadTs: text("thread_ts").notNull(),
+    messageTs: text("message_ts").notNull(),
+    slackUserId: text("slack_user_id").notNull(),
+    text: text("text").notNull(),
+    status: text("status").notNull().default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("slack_agent_messages_message_idx").on(
+      table.integrationId,
+      table.channelId,
+      table.messageTs,
+    ),
+    index("slack_agent_messages_pending_idx")
+      .on(table.nextAttemptAt, table.id)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "slack_agent_messages_status_check",
+      sql`${table.status} IN ('pending', 'done', 'ignored')`,
+    ),
+  ],
+);
+
 export const sessionSubscriptions = productSchema.table(
   "session_subscriptions",
   {
@@ -6357,4 +6408,55 @@ export const whatsappSendAttempts = productSchema.table(
 export const whatsappIngressReceipts = productSchema.table("whatsapp_ingress_receipts", {
   id: text("id").primaryKey(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Developer authorization is deliberately separate from tool-accessible integrations.
+export const slackProvisioningConnections = productSchema.table("slack_provisioning_connections", {
+  workspaceId: text("workspace_id")
+    .primaryKey()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  teamId: text("team_id").notNull().unique(),
+  teamName: text("team_name").notNull(),
+  authorizedBy: text("authorized_by")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  slackUserId: text("slack_user_id").notNull(),
+  encryptedPayload: jsonb("encrypted_payload")
+    .$type<IntegrationCredentialEncryptedPayload>()
+    .notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  status: text("status").notNull().default("connected"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+export const slackProvisioningAttempts = productSchema.table("slack_provisioning_attempts", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.workosUserId, { onDelete: "cascade" }),
+  encryptedPayload: jsonb("encrypted_payload")
+    .$type<IntegrationCredentialEncryptedPayload>()
+    .notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+});
+export const slackAgentProvisioning = productSchema.table("slack_agent_provisioning", {
+  agentId: text("agent_id")
+    .primaryKey()
+    .references(() => workflows.id, { onDelete: "cascade" }),
+  workspaceId: text("workspace_id")
+    .notNull()
+    .references(() => workspaces.id, { onDelete: "cascade" }),
+  teamId: text("team_id").notNull(),
+  appId: text("app_id"),
+  state: text("state").notNull().default("queued"),
+  reason: text("reason"),
+  encryptedPayload: jsonb("encrypted_payload").$type<IntegrationCredentialEncryptedPayload>(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull().default(1),
+  profileHash: text("profile_hash"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

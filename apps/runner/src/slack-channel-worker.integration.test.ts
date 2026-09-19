@@ -12,6 +12,10 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  processNextSlackAgentMessage,
+  type SlackAgentWorkerDependencies,
+} from "./slack-agent-worker";
+import {
   processNextChannelDelivery,
   processNextSubscriptionEvent,
   type SlackChannelWorkerDependencies,
@@ -77,14 +81,30 @@ beforeAll(async () => {
     await db.exec(`ALTER TABLE goat.users ADD COLUMN email text;
       CREATE TABLE goat.plugins (id text PRIMARY KEY, workspace_id text, owner_user_id text, status text);
       CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb);
+      CREATE UNIQUE INDEX goat_integrations_workspace_provider_external_idx ON goat.integrations(workspace_id, provider, external_id) WHERE workspace_id IS NOT NULL;
+      CREATE UNIQUE INDEX goat_integrations_slack_bot_workspace_idx ON goat.integrations(workspace_id, provider) WHERE workspace_id IS NOT NULL AND provider = 'slack_bot';
       CREATE TABLE goat.workflows (
         id text PRIMARY KEY,
         workspace_id text,
         slug text,
+        kind text NOT NULL DEFAULT 'workflow',
+        status text NOT NULL DEFAULT 'active',
+        name text DEFAULT 'Agent', description text DEFAULT '', instructions text DEFAULT 'Help',
+        model text DEFAULT 'test/model', steps jsonb DEFAULT '[{"id":"step","title":"","model":"test/model","instructions":"Help"}]',
+        scope text DEFAULT 'company', created_by_workos_id text DEFAULT 'owner', owner_workos_id text DEFAULT 'owner',
+        trigger text DEFAULT 'manual', schedule_cron text, schedule_timezone text, schedule_prompt text,
+        schedule_enabled boolean DEFAULT false, schedule_last_run_at timestamptz, schedule_next_run_at timestamptz,
+        event_config jsonb, automation_triggers jsonb DEFAULT '[]', version integer DEFAULT 1, updated_at timestamptz DEFAULT now(),
         created_at timestamptz NOT NULL DEFAULT now(),
         archived_at timestamptz
       );
     `);
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0305_company_agent_slack.sql", import.meta.url),
+        "utf8",
+      ),
+    );
     await db.exec(
       await readFile(
         new URL("../../../drizzle/0291_workflow_slack_channel.sql", import.meta.url),
@@ -177,6 +197,133 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await pg.close();
+});
+
+describe("dedicated company agent conversations", () => {
+  async function setupAgents() {
+    await pg.exec(`
+      INSERT INTO goat.workflows(id, workspace_id, slug, kind) VALUES ('agent1', 'workspace', 'agent-one', 'agent'), ('agent2', 'workspace', 'agent-two', 'agent');
+      INSERT INTO goat.integrations(id, workspace_id, user_workos_id, provider, external_id, status, scopes, company_agent_id, slack_app_id)
+      VALUES ('agent-install1', 'workspace', 'owner', 'slack_bot', 'T1', 'connected', '["chat:write","channels:read","channels:history","users:read"]', 'agent1', 'A1'),
+        ('agent-install2', 'workspace', 'owner', 'slack_bot', 'T1', 'connected', '["chat:write","channels:read","channels:history","users:read"]', 'agent2', 'A2');
+      INSERT INTO goat.slack_agent_messages(integration_id,event_id,channel_id,thread_ts,message_ts,slack_user_id,text)
+        VALUES ('agent-install1','EvA1','C1','99.001','101.001','U1','Help with support'), ('agent-install2','EvA2','C1','99.001','102.001','U1','Help with sales');
+    `);
+    const agentDeps: SlackAgentWorkerDependencies = {
+      ...deps,
+      prepare: vi.fn(async (input) => ({
+        harnessSpec: {
+          schemaVersion: "goat.harness.v1",
+          engine: "codex",
+          model: "openai/gpt-6-astra",
+          systemPrompt: "Agent instructions",
+          initialUserMessage: input.description,
+          tools: [],
+          skills: [],
+          maxModelSteps: 16,
+          resultMode: "assistant_final",
+        },
+      })) as never,
+    };
+    return agentDeps;
+  }
+
+  it("starts independent agent-owned tasks in one Slack thread and routes each reply to its own bot", async () => {
+    const agentDeps = await setupAgents();
+    const originalRequest = agentDeps.request;
+    agentDeps.request = vi.fn(async (input) => ({
+      ...(await originalRequest(input)),
+      ...(input.method === "conversations.replies"
+        ? { response_metadata: { next_cursor: "more" } }
+        : {}),
+    })) as typeof agentDeps.request;
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(true);
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(true);
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(false);
+    const history = vi
+      .mocked(agentDeps.request)
+      .mock.calls.filter(([input]) => input.method === "conversations.replies");
+    expect(history).toHaveLength(2);
+    expect(history.every(([input]) => input.form?.limit === "15" && !input.form?.cursor)).toBe(
+      true,
+    );
+    expect(vi.mocked(agentDeps.prepare).mock.calls[0]?.[0].description).toContain(
+      "Additional Slack thread context was omitted",
+    );
+    const tasks = (
+      await pg.query<{ id: string; session_id: string; agent_id: string; user_workos_id: string }>(
+        "SELECT id, session_id, agent_id, user_workos_id FROM goat.tasks WHERE agent_id IS NOT NULL ORDER BY agent_id",
+      )
+    ).rows;
+    expect(tasks.map((t) => [t.agent_id, t.user_workos_id])).toEqual([
+      ["agent1", "owner"],
+      ["agent2", "owner"],
+    ]);
+    const subs = (
+      await pg.query(
+        "SELECT integration_id, source_key FROM goat.session_subscriptions WHERE integration_id LIKE 'agent-install%' ORDER BY integration_id",
+      )
+    ).rows;
+    expect(subs).toMatchObject([
+      {
+        integration_id: "agent-install1",
+        source_key: { channelId: "C1", threadTs: "99.001", integrationId: "agent-install1" },
+      },
+      {
+        integration_id: "agent-install2",
+        source_key: { channelId: "C1", threadTs: "99.001", integrationId: "agent-install2" },
+      },
+    ]);
+    const [turn] = (
+      await pg.query<{ id: string }>(
+        "SELECT id FROM goat.codex_chat_turns WHERE chat_session_id = $1",
+        [tasks[0]!.session_id],
+      )
+    ).rows;
+    await pg.query(
+      "UPDATE goat.codex_chat_turns SET status = 'running', lease_id = 'agent-lease', lease_expires_at = now() + interval '1 minute' WHERE id = $1",
+      [turn!.id],
+    );
+    await postWorkflowSlackMessage(
+      { runId: turn!.id, actorId: "owner", post: { text: "Support answer", messageKey: "answer" } },
+      execute,
+    );
+    expect(
+      (
+        await pg.query(
+          "SELECT integration_id, channel_id, thread_ts FROM goat.channel_deliveries WHERE text = 'Support answer'",
+        )
+      ).rows,
+    ).toEqual([{ integration_id: "agent-install1", channel_id: "C1", thread_ts: "99.001" }]);
+    await pg.exec(`INSERT INTO goat.slack_agent_messages(integration_id,event_id,channel_id,thread_ts,message_ts,slack_user_id,text)
+      VALUES ('agent-install1','EvFollow','C1','99.001','103.001','U1','A follow-up');`);
+    await processNextSlackAgentMessage(agentDeps);
+    expect(
+      (await pg.query("SELECT * FROM goat.tasks WHERE agent_id IS NOT NULL")).rows,
+    ).toHaveLength(2);
+    expect(
+      (
+        await pg.query(
+          "SELECT event.sequence FROM goat.subscription_events event JOIN goat.session_subscriptions sub ON sub.id = event.subscription_id WHERE sub.integration_id = 'agent-install1' ORDER BY sequence",
+        )
+      ).rows,
+    ).toEqual([{ sequence: 0 }, { sequence: 1 }]);
+  });
+
+  it("does not create an owner-authorized run for an unmatched sender or an inactive owner", async () => {
+    const agentDeps = await setupAgents();
+    await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
+    await processNextSlackAgentMessage(agentDeps);
+    expect(
+      (await pg.query("SELECT * FROM goat.tasks WHERE agent_id IS NOT NULL")).rows,
+    ).toHaveLength(0);
+    expect(agentDeps.prepare).not.toHaveBeenCalled();
+    await pg.exec(
+      "INSERT INTO goat.workspace_members VALUES ('m1', 'workspace', 'member', 'member'); DELETE FROM goat.workspace_members WHERE user_workos_id = 'owner'",
+    );
+    await processNextSlackAgentMessage(agentDeps);
+    expect(agentDeps.prepare).not.toHaveBeenCalled();
+  });
 });
 
 describe("durable Slack subscriptions", () => {

@@ -69,6 +69,7 @@ export async function listSlackBotIntegrationsForTeam(
     .where(
       and(
         eq(integrations.provider, "slack_bot"),
+        isNull(integrations.companyAgentId),
         eq(integrations.externalId, teamId),
         isNotNull(integrations.workspaceId),
       ),
@@ -93,7 +94,13 @@ export async function getSlackBotIntegrationForWorkspace(
       updatedAt: integrations.updatedAt,
     })
     .from(integrations)
-    .where(and(eq(integrations.provider, "slack_bot"), eq(integrations.workspaceId, workspaceId)))
+    .where(
+      and(
+        eq(integrations.provider, "slack_bot"),
+        isNull(integrations.companyAgentId),
+        eq(integrations.workspaceId, workspaceId),
+      ),
+    )
     .orderBy(desc(integrations.updatedAt))
     .limit(1);
   return (row as SlackBotIntegrationForWorkspace | undefined) ?? null;
@@ -118,6 +125,7 @@ export async function markSlackBotIntegrationStatusForTeam(
     .where(
       and(
         eq(integrations.provider, "slack_bot"),
+        isNull(integrations.companyAgentId),
         eq(integrations.externalId, input.teamId),
         isNotNull(integrations.workspaceId),
       ),

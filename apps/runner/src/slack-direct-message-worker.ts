@@ -79,7 +79,7 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
             'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id,
             'scopes', integration.scopes) AS installation
         FROM goat.slack_direct_messages message
-        JOIN goat.integrations integration ON integration.provider = 'slack_bot'
+        JOIN goat.integrations integration ON integration.provider = 'slack_bot' AND integration.company_agent_id IS NULL
           AND integration.external_id = message.team_id AND integration.status = 'connected'
         WHERE message.status = 'pending' AND message.next_attempt_at <= now()
         ORDER BY message.id FOR UPDATE OF message SKIP LOCKED LIMIT 1

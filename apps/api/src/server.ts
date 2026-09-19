@@ -60,6 +60,7 @@ import { createBotService } from "./bots";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
+import { createCompanyAgentSlackService } from "./company-agent-slack";
 import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
@@ -88,6 +89,7 @@ import { listSessionPullRequestStatuses } from "./session-pull-requests";
 import { createSlackBotIngress } from "./slack-bot-ingress";
 import { createSlackBotSettingsService } from "./slack-bot-settings";
 import { createSlackIngress } from "./slack-ingress";
+import { createSlackProvisioningService } from "./slack-provisioning";
 import { createStripeIngress } from "./stripe-ingress";
 import { createUserSettingsService } from "./user-settings";
 import { createWhatsappIngress } from "./whatsapp-ingress";
@@ -179,6 +181,7 @@ const app = createApiApp({
   // Agent photos reuse the workflow avatar store: same bytes, same public download route, and
   // Slack downloads the URL the same way. Only the authorization differs — owner-only.
   agentPhotos: createWorkflowAvatarService({
+    slackAppIcon: true,
     workflows: {
       authorizeWorkflowWrite: (actor, agentId) =>
         automations.agents.authorizeAgentWrite(actor, agentId),
@@ -248,7 +251,13 @@ const app = createApiApp({
         connectionProvider: "render",
       }),
   }),
+  slackProvisioning: createSlackProvisioningService({ db: database.db }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  companyAgentSlack: createCompanyAgentSlackService({
+    db: database.db,
+    agents: automations.agents,
+    apiOrigin: process.env.OPENCOMPANY_API_ORIGIN || "http://localhost:3001",
+  }),
   imessageSettings: createImessageSettingsService({
     db: database.db,
     lineHandle: () => imessageConfig()?.lineHandle ?? null,

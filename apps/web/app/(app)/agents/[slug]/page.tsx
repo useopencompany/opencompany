@@ -5,7 +5,6 @@ import { currentUser } from "@/lib/auth";
 import { getCompanyAgent } from "@/lib/company-agents-server";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
-import { getSlackBotWorkspaceSettingsAction } from "@/lib/slack-bot-actions";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
 import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
@@ -18,12 +17,11 @@ export default async function CompanyAgentPage({ params }: { params: Promise<{ s
   const agent = await getCompanyAgent(slug);
   if (!agent) notFound();
 
-  const [skillCatalog, personalAccounts, plugins, members, slackBotSettings] = await Promise.all([
+  const [skillCatalog, personalAccounts, plugins, members] = await Promise.all([
     listHeadlessSkillCatalog(),
     getPersonalAccounts(),
     listHeadlessPlugins(),
     listWorkspaceMembersAction(),
-    getSlackBotWorkspaceSettingsAction(),
   ]);
 
   const isOwner = agent.ownerUserId === context.user.workosUserId;
@@ -40,7 +38,6 @@ export default async function CompanyAgentPage({ params }: { params: Promise<{ s
       // Event triggers bind to the viewer's own connections while editing, and only the owner can
       // edit, so the provider list is exactly the owner's.
       eventProviders={workflowEventProviderOptions({ plugins, personalAccounts })}
-      slackBotSettings={slackBotSettings}
     />
   );
 }

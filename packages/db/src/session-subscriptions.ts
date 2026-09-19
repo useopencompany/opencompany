@@ -13,6 +13,7 @@ export type SlackThreadReply = {
   messageTs: string;
   slackUserId: string;
   text: string;
+  integrationId?: string;
 };
 
 // Ingress does no provider calls. Persist first; authorize the sender again at consumption.
@@ -32,8 +33,10 @@ export async function enqueueSlackThreadReply(
       SELECT subscription.id FROM goat.session_subscriptions subscription
       JOIN goat.integrations integration ON integration.id = subscription.integration_id
       JOIN goat.chat_sessions conversation ON conversation.id = subscription.session_id
-      WHERE subscription.source = 'slack_thread' AND subscription.source_key = ${sourceKey}::jsonb
+      WHERE subscription.source = 'slack_thread' AND subscription.source_key @> ${sourceKey}::jsonb
         AND integration.provider = 'slack_bot' AND integration.external_id = ${event.teamId}
+        AND (${event.integrationId ?? null}::text IS NOT NULL AND integration.id = ${event.integrationId ?? null}
+          OR ${event.integrationId ?? null}::text IS NULL AND integration.company_agent_id IS NULL)
         AND integration.workspace_id = subscription.workspace_id AND integration.status = 'connected'
       ORDER BY conversation.id, subscription.id FOR UPDATE OF conversation, subscription
     ), sequenced AS (
@@ -62,7 +65,7 @@ export async function completeChannelDelivery(
 ) {
   await execute(sql`
     WITH installation AS MATERIALIZED (
-      SELECT id, status FROM goat.integrations WHERE external_id = ${input.teamId} AND provider = 'slack_bot'
+      SELECT id, status, company_agent_id FROM goat.integrations WHERE external_id = ${input.teamId} AND provider = 'slack_bot'
       FOR SHARE
     ), delivered AS (
       UPDATE goat.channel_deliveries delivery SET status = 'sent', message_ts = ${input.messageTs},
@@ -73,12 +76,13 @@ export async function completeChannelDelivery(
         AND delivery.channel_id = ${input.channelId}
         AND delivery.thread_ts IS NOT DISTINCT FROM ${input.threadTs}::text
         AND delivery.status IN ('sending', 'uncertain', 'sent')
-      RETURNING delivery.*, integration.status AS installation_status
+      RETURNING delivery.*, integration.status AS installation_status, integration.company_agent_id
     )
     INSERT INTO goat.session_subscriptions
       (id, workspace_id, session_id, integration_id, source, source_key, expires_at, status)
     SELECT id, workspace_id, session_id, integration_id, 'slack_thread',
-      jsonb_build_object('teamId', ${input.teamId}::text, 'channelId', channel_id, 'threadTs', message_ts),
+      jsonb_build_object('teamId', ${input.teamId}::text, 'channelId', channel_id, 'threadTs', message_ts)
+        || CASE WHEN company_agent_id IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('integrationId', integration_id) END,
       created_at + interval '30 days', CASE WHEN installation_status = 'connected' AND created_at > now() - interval '30 days'
         AND NOT EXISTS (SELECT 1 FROM goat.tasks task WHERE task.session_id = delivered.session_id AND task.archived_at IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions conversation WHERE conversation.id = delivered.session_id AND conversation.closed_at IS NOT NULL)
@@ -110,7 +114,7 @@ export async function enqueueSlackDirectMessage(
       ${message.slackUserId}, ${message.text}
     WHERE EXISTS (
       SELECT 1 FROM goat.integrations
-      WHERE provider = 'slack_bot' AND external_id = ${message.teamId} AND status = 'connected'
+      WHERE provider = 'slack_bot' AND company_agent_id IS NULL AND external_id = ${message.teamId} AND status = 'connected'
     )
     ON CONFLICT (team_id, event_id) DO NOTHING RETURNING id
   `),

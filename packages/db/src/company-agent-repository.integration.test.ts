@@ -48,6 +48,8 @@ describe("Company agent rows in the shared automation table", () => {
 
     expect(workflow.workflow.kind).toBe("workflow");
     expect(agent.workflow.kind).toBe("agent");
+    expect(agent.workflow.slackChannel.enabled).toBe(false);
+    expect(workflow.workflow.slackChannel.enabled).toBe(true);
 
     // Lists never cross over.
     await expect(

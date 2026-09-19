@@ -241,7 +241,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           trigger, schedule_cron, schedule_timezone, schedule_prompt,
           schedule_user_workos_id, schedule_harness_spec, schedule_enabled,
           schedule_next_run_at, status, scope, created_by_workos_id, owner_workos_id, version,
-          created_at, updated_at
+          created_at, updated_at, slack_channel_enabled
         )
         SELECT
           winner.resource_id, ${input.actor.workspaceId}, candidate.slug, ${this.kind},
@@ -251,7 +251,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
           ${input.actor.userId},
           -- An agent's creator is its owner. Workflows have no owner: they execute as whoever
           -- activated the trigger that fires them.
-          ${this.kind === "agent" ? input.actor.userId : null}, 1, ${now}, ${now}
+          ${this.kind === "agent" ? input.actor.userId : null}, 1, ${now}, ${now}, ${this.kind !== "agent"}
         FROM winner
         CROSS JOIN candidate
         RETURNING *
