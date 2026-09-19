@@ -1,5 +1,9 @@
 # Slack Channels and durable workflow threads
 
+For the proposed automatic provisioning of native company-agent identities, see
+[the Slack agent provisioning research](./future-concepts/slack-agent-provisioning.md).
+Its workspace onboarding is not yet shipped; the contracts below describe the runtime.
+
 Workspace admins install the workspace bot in **Settings → Channels → Slack**. This is separate
 from every member's personal Slack plugin. Invite the bot to a public, unshared channel, then put
 the destination in normal workflow instructions: “Post the investigation summary in #product with

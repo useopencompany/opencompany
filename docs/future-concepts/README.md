@@ -6,6 +6,9 @@ enduring decisions into an ADR when it is implemented.
 
 ## Current research
 
+- [Native Slack identities for company agents](./slack-agent-provisioning.md) — verified customer-owned
+  provisioning, one-time developer authorization, CLI/API boundaries, and the proposed web journey.
+
 - [Coding-session preview browser](./codex-preview-browser.md) — repository-owned preview profiles,
   stable sandbox ingress, browser control, artifacts, and human authentication takeover.
 - [Product and agent evaluations](./evaluations.md) — a native regression harness for Chat,
