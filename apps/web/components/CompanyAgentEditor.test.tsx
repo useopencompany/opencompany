@@ -24,6 +24,7 @@ vi.mock("@/lib/company-agent-commands", () => ({
   runCompanyAgentNow: agentActionsMock.runNow,
   uploadCompanyAgentPhoto: agentActionsMock.uploadPhoto,
 }));
+vi.mock("@/components/CompanyAgentSlack", () => ({ CompanyAgentSlack: () => <div /> }));
 vi.mock("@/components/WorkflowEditor", () => ({
   SectionLabel: ({ children }: PropsWithChildren) => <div>{children}</div>,
   SlackAvatarField: () => <div />,
@@ -70,16 +71,6 @@ describe("CompanyAgentEditor", () => {
         ownerName="Louis"
         skillCatalog={[]}
         eventProviders={[]}
-        slackBotSettings={{
-          isAdmin: true,
-          configured: true,
-          installed: true,
-          status: "connected",
-          needsScopeUpgrade: false,
-          canCustomizeIdentity: true,
-          teamName: "Acme",
-          statusReason: null,
-        }}
       />,
     );
 
