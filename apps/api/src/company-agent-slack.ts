@@ -110,7 +110,7 @@ export function createCompanyAgentSlackService(input: {
           "Ask an admin to set up Slack identities in Settings → Channels → Slack.",
         );
       await input.db.execute(sql`UPDATE goat.slack_agent_provisioning SET state = CASE WHEN app_id IS NULL THEN 'queued' ELSE 'created' END, reason = NULL, lease_until = NULL, updated_at = now()
-        WHERE agent_id = ${agent.id} AND (state = 'failed' OR (state = 'ready' AND EXISTS (SELECT 1 FROM goat.integrations WHERE company_agent_id = ${agent.id} AND status IN ('needs_reauth', 'disconnected')))) AND (lease_until IS NULL OR lease_until < now())`);
+        WHERE agent_id = ${agent.id} AND (state = 'failed' OR (state = 'ready' AND EXISTS (SELECT 1 FROM goat.integrations WHERE company_agent_id = ${agent.id} AND status IN ('needs_reauth', 'sync_failed', 'disconnected')))) AND (lease_until IS NULL OR lease_until < now())`);
       return this.get(actor, agent.id);
     },
     async connect(

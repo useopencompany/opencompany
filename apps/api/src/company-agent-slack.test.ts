@@ -319,6 +319,29 @@ describe("automatic Slack identities", () => {
       "apps.developerInstall",
     ]);
   });
+  it("reinstalls a ready app after message processing marks its integration failed", async () => {
+    await authorize();
+    const request = requests();
+    await worker(request);
+    await worker(request);
+    await worker(request);
+    await pg.exec(
+      "UPDATE goat.integrations SET status = 'sync_failed', status_reason = 'Slack could not start this conversation.'",
+    );
+
+    await service.configure(actor, "agent1", {});
+
+    expect((await service.get(actor, "agent1")).provisioning.state).toBe("created");
+    await worker(request);
+    expect(await service.get(actor, "agent1")).toMatchObject({
+      status: "connected",
+      provisioning: { state: "installed" },
+    });
+    expect(request.mock.calls.filter((call) => call[0] === "apps.manifest.create")).toHaveLength(1);
+    expect(request.mock.calls.filter((call) => call[0] === "apps.developerInstall")).toHaveLength(
+      2,
+    );
+  });
   it("can retry a local configuration failure without claiming Slack created an app", async () => {
     await authorize();
     vi.stubEnv("OPENCOMPANY_NEXT_PUBLIC_APP_URL", "not a URL");
