@@ -479,6 +479,34 @@ describe("WorkflowEditor", () => {
     );
   });
 
+  it("treats whitespace-only trigger instructions as none at all", () => {
+    render(
+      <WorkflowEditor
+        workflow={{
+          ...workflow,
+          triggers: [
+            {
+              id: "trigger_blank",
+              type: "schedule",
+              cron: "0 9 * * 1",
+              timezone: "UTC",
+              prompt: "   \n  ",
+              enabled: true,
+              lastRunAt: null,
+              nextRunAt: null,
+            },
+          ],
+        }}
+        canEdit
+        skillCatalog={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: /On a schedule/ })[0]!);
+    expect(screen.getByLabelText("Instructions for this trigger")).toHaveValue("");
+    expect(screen.queryByText(/Own instructions/)).not.toBeInTheDocument();
+  });
+
   it("flags a trigger that carries its own instructions on its summary line", () => {
     render(
       <WorkflowEditor

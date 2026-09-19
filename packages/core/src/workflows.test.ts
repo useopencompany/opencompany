@@ -645,6 +645,23 @@ describe("WorkflowApplicationService", () => {
     );
   });
 
+  it("runs instructions longer than an authored prompt is allowed to be", async () => {
+    // Step instructions may be 20,000 characters; an authored prompt may only be 10,000. Run-now
+    // sends the instructions themselves, so the shorter cap must not reject a valid agent.
+    const long = "Audit production. ".repeat(700);
+    const scheduled = workflow({
+      steps: [{ id: "step_1", title: "Audit", model: "provider/model", instructions: long }],
+    });
+    const taskCreator = fakeTaskCreator();
+    const service = workflowService(fakeWorkflowRepository({ workflow: scheduled }), {
+      taskCreator,
+    });
+
+    await service.runWorkflowNow(actor(), scheduled.id, "run-now-long-instructions");
+
+    expect(taskCreator.create).toHaveBeenCalledWith(expect.objectContaining({ goal: long.trim() }));
+  });
+
   it("uses step instructions as the request when run-now has no extra context", async () => {
     const scheduled = workflow({
       trigger: {

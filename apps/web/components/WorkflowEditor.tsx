@@ -739,17 +739,19 @@ function TriggerInstructionsField({
         </p>
       )}
       <p className="text-[12px] leading-5 text-ink-subtle">
-        {hint} The instructions above always apply — leave this empty to run them unchanged.
+        {hint} Leave it empty to open the run with the agent instructions instead.
       </p>
     </div>
   );
 }
 
 // A trigger always stores a prompt, so an author who wrote none gets a placeholder. The editor
-// shows that as the empty field it really is.
+// shows a placeholder — and whitespace the server will discard — as the empty field it really is.
 function triggerInstructions(prompt: string) {
   const written = prompt.trim();
-  return written === DEFAULT_WORKFLOW_SCHEDULE_PROMPT || written === DEFAULT_WORKFLOW_EVENT_PROMPT
+  return !written ||
+    written === DEFAULT_WORKFLOW_SCHEDULE_PROMPT ||
+    written === DEFAULT_WORKFLOW_EVENT_PROMPT
     ? ""
     : prompt;
 }

@@ -817,8 +817,10 @@ export class WorkflowApplicationService {
     }
     // A manual run belongs to no trigger. Each trigger now carries its own run instructions, so
     // borrowing the first one's would make "Run now" mean whichever trigger happens to be listed
-    // first. The standing instructions are what this automation is, so that is what runs.
-    const goal = prompt(workflow.steps[0]!.instructions, "A Workflow prompt is required.");
+    // first. The standing instructions are what this automation is, so that is what runs. They are
+    // not run through `prompt`: the check above already rejects empty ones, and step instructions
+    // are allowed to be twice as long as an authored prompt.
+    const goal = workflow.steps[0]!.instructions.trim();
     const execution = validatedExecution(
       await this.options.planner.prepareWorkflow({ actor, workflow, prompt: goal }),
     );
