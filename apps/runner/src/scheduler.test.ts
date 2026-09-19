@@ -253,6 +253,9 @@ describe("sweepDueTaskSchedules", () => {
         const compiled = new PgDialect().sqlToQuery(query);
         expect(compiled.params).toContain(firstStepInstructions);
         expect(compiled.params).not.toContain("Task: Weekly update\n\nRun this workflow.");
+        expect(compiled.params).toContain(
+          "workflow:weekly-update:trigger:trigger_weekday:2026-06-03T09:00:00.000Z",
+        );
         return canonicalTaskCreateRow(query, {
           name: "Weekly update",
           goal: firstStepInstructions,
