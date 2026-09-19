@@ -129,6 +129,7 @@ it.each([
         workspaceId: "workspace_1",
         workspaceName: "Test",
         workspaceSlug: null,
+        projectWikiId: null,
         conversationId: "chat_1",
         sandboxId: "sandbox_1",
         engine: "codex" as const,

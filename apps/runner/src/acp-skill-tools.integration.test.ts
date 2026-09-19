@@ -105,6 +105,7 @@ describe("external engine Skill persistence through the MCP route", () => {
           actorId: actor.userId,
           workspaceName: "Test workspace",
           workspaceSlug: "test-workspace",
+          projectWikiId: null,
           skillToolsEnabled: true,
           slackChannelEnabled: false,
           conversationId: "conversation_1",

@@ -24,6 +24,7 @@ export type ExternalEngineToolAuthorityState = {
   workspaceId: string | null;
   workspaceName: string;
   workspaceSlug: string | null;
+  projectWikiId: string | null;
   actorId: string;
   conversationId: string;
   sandboxId: string | null;
@@ -47,6 +48,7 @@ export type ExternalEngineToolAuthorizedContext = {
   workspaceId: string;
   workspaceName: string;
   workspaceSlug: string | null;
+  projectWikiId: string | null;
   conversationId: string;
   sandboxId: string;
   engine: "codex" | "claude_code";
@@ -98,6 +100,7 @@ export function authorizeExternalEngineToolCapability(input: {
     workspaceId: state.workspaceId,
     workspaceName: state.workspaceName,
     workspaceSlug: state.workspaceSlug,
+    projectWikiId: state.projectWikiId,
     conversationId: state.conversationId,
     sandboxId: state.sandboxId,
     engine: state.engine,

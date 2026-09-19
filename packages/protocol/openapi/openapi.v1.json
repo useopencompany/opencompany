@@ -5792,6 +5792,10 @@
           "name": {
             "type": "string"
           },
+          "wikiSlug": {
+            "type": "string",
+            "nullable": true
+          },
           "conversationIds": {
             "type": "array",
             "items": {
@@ -5809,6 +5813,7 @@
         "required": [
           "id",
           "name",
+          "wikiSlug",
           "conversationIds",
           "createdAt"
         ],

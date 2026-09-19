@@ -3,6 +3,7 @@ import {
   chatSessions,
   codexChatSessions,
   codexChatTurns,
+  projects,
   runAttempts,
   tasks,
   workflows,
@@ -53,6 +54,7 @@ async function loadPersistedAuthorityState(
       workspaceId: codexChatSessions.workspaceId,
       workspaceName: workspaces.name,
       workspaceSlug: workspaces.slug,
+      projectWikiId: projects.wikiId,
       actorId: codexChatSessions.userWorkosId,
       conversationId: codexChatSessions.chatSessionId,
       sandboxId: codexChatSessions.sandboxId,
@@ -88,6 +90,14 @@ async function loadPersistedAuthorityState(
       ),
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
+    .leftJoin(
+      projects,
+      and(
+        eq(projects.id, chatSessions.projectId),
+        eq(projects.userWorkosId, codexChatSessions.userWorkosId),
+        eq(projects.workspaceId, codexChatSessions.workspaceId),
+      ),
+    )
     // Tasks store the workflow slug. The live-row and creation-time fences keep a historical Task
     // from receiving capabilities from a later workflow that reused that slug.
     .leftJoin(tasks, eq(tasks.sessionId, codexChatSessions.chatSessionId))

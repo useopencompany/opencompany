@@ -101,6 +101,7 @@ const projectsApiMock = vi.hoisted(() => ({
       [] as Array<{
         id: string;
         name: string;
+        wikiSlug: string | null;
         conversationIds: string[];
         createdAt: string;
       }>,
@@ -1904,6 +1905,7 @@ describe("Sidebar", () => {
     const project = (id: string, name: string, conversationIds: string[] = []) => ({
       id,
       name,
+      wikiSlug: name.toLowerCase().replaceAll(" ", "-"),
       conversationIds,
       createdAt: "2026-07-01T09:00:00.000Z",
     });
@@ -2198,6 +2200,22 @@ describe("Sidebar", () => {
       );
       expect(within(projects).getByRole("button", { name: "Launch" }).parentElement).toHaveClass(
         "bg-surface-active",
+      );
+    });
+
+    it("opens the Project wiki from the project menu", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      projectsApiMock.listProjects.mockResolvedValue([project("project_1", "Launch")]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await findLoadedProjects();
+      await userEvent.click(
+        within(projects).getByRole("button", { name: "Project options for Launch" }),
+      );
+
+      expect(screen.getByRole("link", { name: "Project wiki" })).toHaveAttribute(
+        "href",
+        "/wiki/launch",
       );
     });
 

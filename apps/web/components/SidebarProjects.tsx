@@ -3,7 +3,16 @@
 import type { ProjectDto } from "@opencompany/protocol";
 import { Popover, PopoverContent, PopoverTrigger } from "@opencompany/ui/components/popover";
 import { toast } from "@opencompany/ui/components/sonner";
-import { Folder, FolderOpen, MoreHorizontal, PenLine, Plus, SquarePen, Trash2 } from "lucide-react";
+import {
+  BookOpenText,
+  Folder,
+  FolderOpen,
+  MoreHorizontal,
+  PenLine,
+  Plus,
+  SquarePen,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
 import {
   createContext,
@@ -37,6 +46,7 @@ import {
   subscribeLocalProjectAssignments,
 } from "@/lib/projects";
 import type { SidebarWorkItem } from "@/lib/sidebar-items";
+import { wikiHref } from "@/lib/wiki-routes";
 
 /**
  * The dragged row's conversation id. A custom type (rather than text/plain) so the sidebar only
@@ -531,6 +541,16 @@ function ProjectFolder({
               <MoreHorizontal size={13} strokeWidth={1.75} />
             </PopoverTrigger>
             <PopoverContent align="start" sideOffset={4} className="w-[176px] bg-surface p-1">
+              {project.wikiSlug ? (
+                <Link
+                  href={wikiHref(project.wikiSlug)}
+                  onClick={() => setMenuOpen(false)}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <BookOpenText size={13} strokeWidth={1.75} className="shrink-0 text-ink/60" />
+                  Project wiki
+                </Link>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -555,7 +575,7 @@ function ProjectFolder({
                 Delete project
               </button>
               <p className="px-2 pb-1 pt-1 text-[11px] leading-4 text-ink-faint">
-                Deleting keeps its chats. They move back to Recents.
+                Chats move back to Recents. Its wiki stays in Wikis.
               </p>
             </PopoverContent>
           </Popover>

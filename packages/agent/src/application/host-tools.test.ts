@@ -12,6 +12,7 @@ const context: ChatHostContext = {
   actorId: "user_1",
   workspaceId: "workspace_1",
   workspaceName: "Analytical Engines",
+  projectWikiId: null,
   conversationId: "conversation_1",
   messageId: "message_1",
   email: "ada@example.test",
@@ -546,6 +547,27 @@ describe("opencompany Chat Task host tools", () => {
       toolInput: { command: "tree" },
       idempotencyKey: "agent-wiki:turn_7:call_named",
     });
+  });
+
+  it("defaults wiki commands to the conversation's Project wiki", async () => {
+    const runWikiTool = vi.fn(async () => ({ ok: true, result: {} }));
+    const dependencies = testDependencies({
+      loadContext: vi.fn(async () => ({ ...context, projectWikiId: "wiki_project_1" })),
+      runWikiTool,
+    });
+    await executeChatHostToolService({
+      command: {
+        operation: "wiki",
+        sessionId: "runtime_1",
+        runId: "turn_7",
+        toolCallId: "call_project",
+        input: { command: "tree" },
+      },
+      dependencies,
+    });
+    expect(runWikiTool).toHaveBeenCalledWith(
+      expect.objectContaining({ wikiId: "wiki_project_1", toolInput: { command: "tree" } }),
+    );
   });
 
   it("preserves an explicit invalid wiki reference for service-level disambiguation", async () => {

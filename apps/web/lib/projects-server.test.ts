@@ -9,6 +9,7 @@ const meta = { apiVersion: "v1", protocolVersion: "1.0.0" };
 const project = {
   id: "project_1",
   name: "product",
+  wikiSlug: "product",
   conversationIds: [],
   createdAt: "2026-09-01T10:00:00.000Z",
 };
