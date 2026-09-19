@@ -59,10 +59,12 @@ export function TurnDuration({ durationMs }: { durationMs: number }) {
 }
 
 function useElapsedDurationMs(startedAtMs: number) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(startedAtMs);
 
   useEffect(() => {
-    const interval = window.setInterval(() => setNowMs(Date.now()), TIMER_TICK_MS);
+    const tick = () => setNowMs(Date.now());
+    tick();
+    const interval = window.setInterval(tick, TIMER_TICK_MS);
     return () => window.clearInterval(interval);
   }, [startedAtMs]);
 
