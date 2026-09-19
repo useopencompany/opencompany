@@ -479,7 +479,7 @@ describe("WorkflowEditor", () => {
     );
   });
 
-  it("treats whitespace-only trigger instructions as none at all", () => {
+  it("keeps what the author types but does not call whitespace instructions of its own", () => {
     render(
       <WorkflowEditor
         workflow={{
@@ -490,7 +490,7 @@ describe("WorkflowEditor", () => {
               type: "schedule",
               cron: "0 9 * * 1",
               timezone: "UTC",
-              prompt: "   \n  ",
+              prompt: "Run this workflow.",
               enabled: true,
               lastRunAt: null,
               nextRunAt: null,
@@ -503,8 +503,16 @@ describe("WorkflowEditor", () => {
     );
 
     fireEvent.click(screen.getAllByRole("button", { name: /On a schedule/ })[0]!);
-    expect(screen.getByLabelText("Instructions for this trigger")).toHaveValue("");
+    const field = screen.getByLabelText("Instructions for this trigger");
+    expect(field).toHaveValue("");
+
+    // A controlled field must not swallow the space that starts a sentence.
+    fireEvent.change(field, { target: { value: "  " } });
+    expect(screen.getByLabelText("Instructions for this trigger")).toHaveValue("  ");
     expect(screen.queryByText(/Own instructions/)).not.toBeInTheDocument();
+
+    fireEvent.change(field, { target: { value: "  Check production." } });
+    expect(screen.getByText(/Own instructions/)).toBeInTheDocument();
   });
 
   it("flags a trigger that carries its own instructions on its summary line", () => {
