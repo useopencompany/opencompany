@@ -52,10 +52,12 @@ export type WorkflowStep = {
   instructions: string;
 };
 
-// The prompt a schedule trigger carries when the author never wrote extra run context. It is a
-// placeholder, not an instruction, so every run path substitutes the first step's instructions for
-// it. Defined here because `@opencompany/agent` re-exports it and depends on core, not the reverse.
+// The prompt a trigger carries when the author wrote no instructions of their own for it. These
+// are placeholders, not instructions: a schedule run substitutes the first step's instructions for
+// its placeholder, and an event run leans on the event context it appends to the goal. Defined
+// here because `@opencompany/agent` re-exports them and depends on core, not the reverse.
 export const DEFAULT_WORKFLOW_SCHEDULE_PROMPT = "Run this workflow.";
+export const DEFAULT_WORKFLOW_EVENT_PROMPT = "Handle this event.";
 
 export function workflowActivationDisabledReason(steps: Pick<WorkflowStep, "instructions">[]) {
   if (steps.length === 0) return "Add a step with instructions before activating this workflow.";
@@ -370,7 +372,9 @@ const MAX_STEP_ID_LENGTH = 200;
 const MAX_STEP_TITLE_LENGTH = 120;
 const MAX_STEP_MODEL_LENGTH = 256;
 const MAX_STEP_INSTRUCTIONS_LENGTH = 20_000;
-const MAX_PROMPT_LENGTH = 10_000;
+// The longest prompt a workflow run can carry. Exported so the editor's trigger-instruction cap
+// cannot drift from validation.
+export const MAX_WORKFLOW_PROMPT_LENGTH = 10_000;
 const MAX_SCHEDULE_NAME_LENGTH = 80;
 const MAX_SOURCE_DESCRIPTION_LENGTH = 1_024;
 const MAX_WORKFLOW_SKILLS = 16;
@@ -522,7 +526,7 @@ export class WorkflowApplicationService {
           if (trigger.type === "event") {
             const publicTrigger: WorkflowAutomationTrigger = {
               ...trigger,
-              prompt: trigger.prompt?.trim() || "Run this workflow.",
+              prompt: trigger.prompt?.trim() || DEFAULT_WORKFLOW_EVENT_PROMPT,
             };
             const subscriptionError = await this.options.validateEventSubscription?.({
               actor,
@@ -564,7 +568,7 @@ export class WorkflowApplicationService {
             type: "schedule",
             cron: definition.cron,
             timezone: definition.timezone,
-            prompt: trigger.prompt?.trim() || "Run this workflow.",
+            prompt: trigger.prompt?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
             enabled: trigger.enabled !== false,
             lastRunAt: previous?.type === "schedule" ? previous.lastRunAt : null,
             nextRunAt: trigger.enabled === false ? null : definition.nextRunAt,
@@ -653,7 +657,7 @@ export class WorkflowApplicationService {
             type: "schedule",
             cron: definition.cron,
             timezone: definition.timezone,
-            prompt: normalized.trigger.prompt?.trim() || "Run this workflow.",
+            prompt: normalized.trigger.prompt?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
             enabled: true,
             lastRunAt: current.trigger.type === "schedule" ? current.trigger.lastRunAt : null,
             nextRunAt: definition.nextRunAt,
@@ -813,14 +817,15 @@ export class WorkflowApplicationService {
     if (workflow.steps.length === 0 || workflow.steps.some((step) => !step.instructions.trim())) {
       throw new CoreError("invalid_argument", "Workflow is unavailable or incomplete.");
     }
-    const trigger = workflow.triggers?.[0] ?? workflow.trigger;
-    const triggerPrompt = trigger.type === "manual" ? "" : trigger.prompt.trim();
-    const goal = prompt(
-      !triggerPrompt || triggerPrompt === DEFAULT_WORKFLOW_SCHEDULE_PROMPT
-        ? workflow.steps[0]!.instructions
-        : triggerPrompt,
-      "A Workflow prompt is required.",
-    );
+    // A manual run belongs to no trigger. Each trigger now carries its own run instructions, so
+    // borrowing the first one's would make "Run now" mean whichever trigger happens to be listed
+    // first. The standing instructions are what this automation is, so that is what runs.
+    //
+    // Step instructions may be longer than a run's goal is allowed to be. `prompt` rejects that
+    // here rather than after the planner has compiled a harness; a Task goal is capped at the same
+    // length, so a scheduled run of the same automation fails too. Raising that ceiling is its own
+    // change.
+    const goal = prompt(workflow.steps[0]!.instructions, "A Workflow prompt is required.");
     const execution = validatedExecution(
       await this.options.planner.prepareWorkflow({ actor, workflow, prompt: goal }),
     );
@@ -1039,10 +1044,10 @@ function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTrigg
       filters: workflowEventFilters(trigger.filters),
       prompt:
         boundedOptional(
-          trigger.prompt ?? "Handle this event.",
-          MAX_PROMPT_LENGTH,
+          trigger.prompt ?? DEFAULT_WORKFLOW_EVENT_PROMPT,
+          MAX_WORKFLOW_PROMPT_LENGTH,
           "Workflow event prompt",
-        ) || "Review and triage this Linear issue.",
+        ) || DEFAULT_WORKFLOW_EVENT_PROMPT,
     };
   }
   return {
@@ -1052,10 +1057,10 @@ function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTrigg
       boundedOptional(trigger.timezone ?? "UTC", 128, "Workflow schedule timezone") || "UTC",
     prompt:
       boundedOptional(
-        trigger.prompt ?? "Run this workflow.",
-        MAX_PROMPT_LENGTH,
+        trigger.prompt ?? DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+        MAX_WORKFLOW_PROMPT_LENGTH,
         "Workflow schedule prompt",
-      ) || "Run this workflow.",
+      ) || DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
     enabled: trigger.enabled ?? true,
   };
 }
@@ -1175,7 +1180,7 @@ function sourceDescription(value: string) {
 function prompt(value: string, emptyMessage: string) {
   const normalized = value.trim();
   if (!normalized) throw new CoreError("invalid_argument", emptyMessage);
-  if (normalized.length > MAX_PROMPT_LENGTH) {
+  if (normalized.length > MAX_WORKFLOW_PROMPT_LENGTH) {
     throw new CoreError("invalid_argument", "Prompts cannot exceed 10,000 characters.");
   }
   return normalized;

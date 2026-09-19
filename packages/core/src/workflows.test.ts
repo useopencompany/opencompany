@@ -5,6 +5,8 @@ import type { CreateTaskResult } from "./tasks";
 import {
   type AutomationExecutionPlanner,
   type AutomationTaskCreator,
+  DEFAULT_WORKFLOW_EVENT_PROMPT,
+  DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   type ScheduleRules,
   type Workflow,
   WorkflowApplicationService,
@@ -431,6 +433,77 @@ describe("WorkflowApplicationService", () => {
     );
   });
 
+  it("keeps each trigger's own instructions and gives an author who wrote none a placeholder", async () => {
+    const repository = fakeWorkflowRepository();
+    const planner = fakePlanner();
+    const service = workflowService(repository, { planner });
+
+    await service.updateWorkflow(actor(), "workflow_1", {
+      expectedVersion: 1,
+      name: "Production watch",
+      description: "",
+      steps: [workflow().steps[0]!],
+      status: "active",
+      trigger: { type: "manual" },
+      triggers: [
+        {
+          id: "trigger_hourly",
+          type: "schedule",
+          cron: "0 * * * *",
+          timezone: "UTC",
+          prompt: "  Investigate the production environment.  ",
+          enabled: true,
+        },
+        {
+          id: "trigger_nightly",
+          type: "schedule",
+          cron: "0 3 * * *",
+          timezone: "UTC",
+          prompt: "",
+          enabled: true,
+        },
+        {
+          id: "trigger_event",
+          type: "event",
+          provider: "linear",
+          event: "issue.created",
+          integrationId: "gint_linear_1",
+          filters: {},
+          prompt: "",
+        },
+      ],
+    });
+
+    expect(repository.updateWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        automationTriggers: [
+          expect.objectContaining({
+            trigger: expect.objectContaining({
+              id: "trigger_hourly",
+              prompt: "Investigate the production environment.",
+            }),
+          }),
+          expect.objectContaining({
+            trigger: expect.objectContaining({
+              id: "trigger_nightly",
+              prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+            }),
+          }),
+          expect.objectContaining({
+            trigger: expect.objectContaining({
+              id: "trigger_event",
+              prompt: DEFAULT_WORKFLOW_EVENT_PROMPT,
+            }),
+          }),
+        ],
+      }),
+    );
+    // Each trigger is planned with its own request, not with whatever the first one carries.
+    expect(planner.prepareWorkflow).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: "Investigate the production environment." }),
+    );
+  });
+
   it("preserves additional triggers when a legacy client omits the trigger collection", async () => {
     const triggers = [
       {
@@ -530,12 +603,46 @@ describe("WorkflowApplicationService", () => {
       actor: actor(),
       idempotencyKey: "run-now-1",
       name: "Weekly research",
-      goal: "Review the market.",
+      goal: "Find material updates.",
       execution: executionPlan(),
       source: "workflow",
       workflowId: "weekly-research",
     });
     expect(repository.recordRunNow).not.toHaveBeenCalled();
+  });
+
+  it("runs the standing instructions on run-now rather than a trigger's own instructions", async () => {
+    const scheduled = workflow({
+      triggers: [
+        {
+          id: "trigger_hourly",
+          type: "schedule",
+          cron: "0 * * * *",
+          timezone: "UTC",
+          prompt: "Investigate the production environment.",
+          enabled: true,
+          lastRunAt: null,
+          nextRunAt,
+        },
+      ],
+    });
+    const taskCreator = fakeTaskCreator();
+    const planner = fakePlanner();
+    const service = workflowService(fakeWorkflowRepository({ workflow: scheduled }), {
+      planner,
+      taskCreator,
+    });
+
+    await service.runWorkflowNow(actor(), scheduled.id, "run-now-trigger-instructions");
+
+    expect(planner.prepareWorkflow).toHaveBeenCalledWith({
+      actor: actor(),
+      workflow: scheduled,
+      prompt: "Find material updates.",
+    });
+    expect(taskCreator.create).toHaveBeenCalledWith(
+      expect.objectContaining({ goal: "Find material updates." }),
+    );
   });
 
   it("uses step instructions as the request when run-now has no extra context", async () => {
