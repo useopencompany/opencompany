@@ -47,7 +47,7 @@ jobs:
       - name: Setup EAS
         uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
         with:
-          eas-version: 21.x.x
+          eas-version: 24.x.x
           packager: bun
 
       - name: Fetch mobile build secrets from Infisical
@@ -122,6 +122,7 @@ jobs:
         working-directory: apps/mobile
         env:
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+          EXPO_NO_CAPABILITY_SYNC: "1"
         run: eas build --platform ios --profile production --non-interactive --wait
 
       - name: Remove temporary build files
