@@ -118,11 +118,12 @@ export function CompanyAgentEditor({
       versionRef.current = saved.version;
       savedRef.current = value;
       setSaveState("saved");
+      router.refresh();
     } catch (error) {
       setSaveState("error");
       setSaveError(error instanceof Error ? error.message : "This agent could not be saved.");
     }
-  }, [agent.id]);
+  }, [agent.id, router]);
 
   // Saves are serialized. Each one sends the version the previous one returned, so two overlapping
   // autosaves cannot race a stale `expectedVersion` into a conflict — or, worse, land out of order
