@@ -223,6 +223,7 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
         initialUserMessage: taskPrompt,
       },
       workflowId: workflow.slug,
+      triggerId: workflow.triggerId,
       ...(workflow.kind === "agent" ? { agentId: workflow.id } : {}),
       scheduledFor,
       now,
@@ -282,6 +283,7 @@ async function createScheduledTask(
     name: string;
     harnessSpec: HarnessSpec;
     workflowId?: string | null;
+    triggerId: string;
     agentId?: string;
     scheduledFor: Date;
     now: Date;
@@ -304,7 +306,7 @@ async function createScheduledTask(
     },
   });
   const created = await new TaskApplicationService(repository).createTask(actor, {
-    idempotencyKey: `workflow:${input.workflowId}:${input.scheduledFor.toISOString()}`,
+    idempotencyKey: `workflow:${input.workflowId}:trigger:${input.triggerId}:${input.scheduledFor.toISOString()}`,
     name: input.name,
     goal: input.prompt,
     engine: input.harnessSpec.engine,
