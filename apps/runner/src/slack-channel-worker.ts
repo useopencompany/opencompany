@@ -23,6 +23,7 @@ import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
+import { processNextSlackAgentMessage } from "./slack-agent-worker";
 import { processNextSlackDirectMessage } from "./slack-direct-message-worker";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
@@ -109,12 +110,12 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
           -- would get the generic "needs attention" notice instead of a closed thread. A Task
           -- opened from a Slack direct message has no workflow, so there is nothing to retire.
           OR (task.workflow_id IS NOT NULL
-            AND (workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE))) AS closed,
+            AND (workflow.id IS NULL OR workflow.slack_channel_enabled IS FALSE OR (workflow.kind = 'agent' AND workflow.status <> 'active')))) AS closed,
         run.status AS "runStatus",
         COALESCE(workflow.slack_bot_display_name, '') AS "botDisplayName",
         COALESCE(workflow.slack_bot_avatar_url, '') AS "botAvatarUrl",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
-          'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
+          'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes, 'companyAgentId', integration.company_agent_id) AS installation
       FROM goat.subscription_events event
       JOIN goat.session_subscriptions subscription ON subscription.id = event.subscription_id
       JOIN goat.tasks task ON task.session_id = subscription.session_id AND task.workspace_id = subscription.workspace_id
@@ -201,11 +202,25 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         await ignoreEvent(tx.execute.bind(tx), event.id);
         return true;
       }
+      if (event.installation.companyAgentId) {
+        const email = user.user.profile?.email?.trim().toLowerCase() ?? "";
+        const member = subscriptionRows(
+          await tx.execute(sql`
+          SELECT 1 FROM goat.workspace_members member JOIN goat.users account ON account.workos_user_id = member.user_workos_id
+          WHERE member.workspace_id = ${event.workspaceId} AND lower(account.email) = ${email} AND ${email} <> ''
+        `),
+        );
+        if (user.user.team_id !== event.installation.teamId || member.length === 0) {
+          await ignoreEvent(tx.execute.bind(tx), event.id);
+          return true;
+        }
+      }
       const thread = await readSlackThread({
         token,
         channelId: event.payload.channelId,
         threadTs: event.payload.threadTs,
         request: deps.request,
+        singlePage: Boolean(event.installation.companyAgentId),
       });
       // Publishing the workflow thread lets its Slack participants continue the owner's work.
       // The sender is attributed in the prompt; execution keeps the owner's existing authority.
@@ -343,15 +358,16 @@ async function validateDeliverableChannel(
   await deps.validateChannel(token, channelId);
 }
 
-async function readSlackThread(input: {
+export async function readSlackThread(input: {
   token: string;
   channelId: string;
   threadTs: string;
   request: typeof slackApiRequest;
+  singlePage?: boolean;
 }) {
   const messages: SlackThreadMessage[] = [];
   let cursor: string | undefined;
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < (input.singlePage ? 1 : 5); page++) {
     const response = await input.request<{
       messages?: SlackThreadMessage[];
       response_metadata?: { next_cursor?: string };
@@ -361,7 +377,7 @@ async function readSlackThread(input: {
       form: {
         channel: input.channelId,
         ts: input.threadTs,
-        limit: "200",
+        limit: input.singlePage ? "15" : "200",
         ...(cursor ? { cursor } : {}),
       },
       signal: AbortSignal.timeout(10_000),
@@ -481,7 +497,7 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
         delivery.bot_display_name AS "botDisplayName", delivery.bot_avatar_url AS "botAvatarUrl",
         delivery.status, delivery.created_at AS "createdAt",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
-          'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes) AS installation
+          'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes, 'companyAgentId', integration.company_agent_id) AS installation
       FROM goat.channel_deliveries delivery JOIN goat.integrations integration ON integration.id = delivery.integration_id AND integration.external_id = delivery.team_id
       LEFT JOIN goat.channel_deliveries parent ON parent.id = delivery.thread_parent_id
       -- A reply is queued before Slack has timestamped its root message. Leaving it unclaimed until
@@ -505,7 +521,9 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
   let postAttempted = delivery.status !== "pending";
   try {
     const { token, botUserId } = await deps.credential(delivery.installation);
-    const canCustomizeIdentity = slackBotCanCustomizeIdentity(delivery.installation.scopes);
+    const canCustomizeIdentity =
+      !delivery.installation.companyAgentId &&
+      slackBotCanCustomizeIdentity(delivery.installation.scopes);
     await validateDeliverableChannel(deps, token, delivery.channelId);
     let messageTs: string | null = null;
     if (delivery.status === "pending") {
@@ -630,6 +648,13 @@ export function startSlackChannelWorker(onRunQueued: () => void) {
       await deps.db.execute(
         sql`UPDATE goat.session_subscriptions SET status = 'closed' WHERE status = 'waiting' AND expires_at <= now()`,
       );
+      const agentMessage = await processNextSlackAgentMessage().catch((error) => {
+        logger.warn("Slack agent message deferred", {
+          error_message: error instanceof Error ? error.message : "Unknown error",
+        });
+        return false;
+      });
+      if (agentMessage) onRunQueued();
       const directMessage = await processNextSlackDirectMessage().catch((error) => {
         logger.warn("Slack direct message deferred", {
           error_message: error instanceof Error ? error.message : "Unknown error",
@@ -645,7 +670,7 @@ export function startSlackChannelWorker(onRunQueued: () => void) {
       });
       if (event) onRunQueued();
       const delivery = await processNextChannelDelivery(deps);
-      return directMessage || event || delivery;
+      return agentMessage || directMessage || event || delivery;
     },
     onError: (error) =>
       logger.error("Slack Channel worker failed", {

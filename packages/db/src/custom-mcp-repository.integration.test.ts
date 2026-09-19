@@ -49,6 +49,7 @@ describe("personal custom MCP account persistence", () => {
       INSERT INTO goat.users VALUES ('user_1'), ('user_2');
       INSERT INTO goat.workspaces VALUES ('workspace_1'), ('workspace_2');
       CREATE TABLE goat.integrations (
+        company_agent_id text, slack_app_id text,
         id text PRIMARY KEY, user_workos_id text NOT NULL REFERENCES goat.users, workspace_id text REFERENCES goat.workspaces,
         shared_with_workspace boolean NOT NULL DEFAULT false, provider text NOT NULL, external_id text NOT NULL,
         connection_label text, account_name text, account_email text, account_type text, status text NOT NULL DEFAULT 'connected', status_reason text,

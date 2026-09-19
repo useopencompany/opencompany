@@ -93,6 +93,7 @@ import type { BillingReconcileService } from "./billing-reconcile";
 import type { BotService } from "./bots";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
+import type { CompanyAgentSlackService } from "./company-agent-slack";
 import type { ConvexIngressService } from "./convex-ingress";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
@@ -247,6 +248,7 @@ export type CreateApiAppInput = {
   mcpOAuthIngress?: McpOAuthIngressService;
   xAccountIngress?: XAccountIngressService;
   slackBotIngress?: SlackBotIngressService;
+  companyAgentSlack?: CompanyAgentSlackService;
   imessageIngress?: ImessageIngressService;
   whatsappIngress?: WhatsappIngressService;
   stripeIngress?: StripeIngressService;
@@ -561,6 +563,41 @@ export function createApiApp(input: CreateApiAppInput) {
         file: c.req.valid("form").file,
       });
       return c.json({ data: result, meta }, 201);
+    },
+    getCompanyAgentSlack: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      if (!input.companyAgentSlack)
+        throw new CoreError("unavailable", "Agent Slack setup is unavailable.");
+      return c.json(
+        { data: await input.companyAgentSlack.get(actor, c.req.valid("param").agentId), meta },
+        200,
+      );
+    },
+    connectCompanyAgentSlack: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      if (!input.companyAgentSlack)
+        throw new CoreError("unavailable", "Agent Slack setup is unavailable.");
+      return c.json(
+        {
+          data: await input.companyAgentSlack.connect(
+            actor,
+            c.req.valid("param").agentId,
+            c.req.valid("json"),
+          ),
+          meta,
+        },
+        200,
+      );
+    },
+    disconnectCompanyAgentSlack: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 10);
+      if (!input.companyAgentSlack)
+        throw new CoreError("unavailable", "Agent Slack setup is unavailable.");
+      await input.companyAgentSlack.disconnect(actor, c.req.valid("param").agentId);
+      return c.body(null, 204);
     },
     listCompanyAgents: async (c) => {
       const actor = actorFrom(c);
@@ -3032,6 +3069,13 @@ export function createApiApp(input: CreateApiAppInput) {
     const ingress = input.xAccountIngress;
     app.get("/integrations/x-account/start", (c) => ingress.start(c.req.raw));
     app.get("/integrations/x-account/callback", (c) => ingress.callback(c.req.raw));
+  }
+  if (input.companyAgentSlack) {
+    const service = input.companyAgentSlack;
+    app.use("/webhooks/slack-agents/:agentId/events", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/slack-agents/:agentId/events", (c) =>
+      service.webhook(c.req.param("agentId"), c.req.raw),
+    );
   }
   if (input.slackBotIngress) {
     const ingress = input.slackBotIngress;

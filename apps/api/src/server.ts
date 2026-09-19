@@ -60,6 +60,7 @@ import { createBotService } from "./bots";
 import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
+import { createCompanyAgentSlackService } from "./company-agent-slack";
 import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
@@ -249,6 +250,11 @@ const app = createApiApp({
       }),
   }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  companyAgentSlack: createCompanyAgentSlackService({
+    db: database.db,
+    agents: automations.agents,
+    apiOrigin: process.env.OPENCOMPANY_API_ORIGIN || "http://localhost:3001",
+  }),
   imessageSettings: createImessageSettingsService({
     db: database.db,
     lineHandle: () => imessageConfig()?.lineHandle ?? null,

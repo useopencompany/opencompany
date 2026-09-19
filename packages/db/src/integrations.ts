@@ -412,7 +412,11 @@ export async function connectSlackBotIntegration(input: {
     .select({ id: integrations.id, userWorkosId: integrations.userWorkosId })
     .from(integrations)
     .where(
-      and(eq(integrations.workspaceId, input.workspaceId), eq(integrations.provider, "slack_bot")),
+      and(
+        eq(integrations.workspaceId, input.workspaceId),
+        eq(integrations.provider, "slack_bot"),
+        isNull(integrations.companyAgentId),
+      ),
     )
     .limit(1);
   const integrationId = existing?.id ?? newIntegrationId();
@@ -458,7 +462,7 @@ export async function connectSlackBotIntegration(input: {
   } as const;
   const integrationConflict = {
     target: [integrations.workspaceId, integrations.provider],
-    targetWhere: sql`${integrations.workspaceId} IS NOT NULL AND ${integrations.provider} = 'slack_bot'`,
+    targetWhere: sql`${integrations.workspaceId} IS NOT NULL AND ${integrations.provider} = 'slack_bot' AND ${integrations.companyAgentId} IS NULL`,
     // On reconnect (possibly by a different admin) user_workos_id stays as
     // the original connector: the credential AAD uses it.
     set: {

@@ -2136,6 +2136,13 @@
       "when": 1790100400025,
       "tag": "0304_retire_legacy_brain",
       "breakpoints": true
+    },
+    {
+      "idx": 305,
+      "version": "7",
+      "when": 1790100400026,
+      "tag": "0305_company_agent_slack",
+      "breakpoints": true
     }
   ]
 }

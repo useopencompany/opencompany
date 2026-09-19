@@ -2191,6 +2191,39 @@ export const ArchiveVersionBodySchema = z
 // An agent is one standing responsibility with one set of instructions, so it has no step list.
 // Its Slack display identity is derived from `name` and `photoUrl` rather than configured twice.
 
+export const CompanyAgentSlackSchema = z
+  .object({
+    installed: z.boolean(),
+    ready: z.boolean(),
+    status: z.string(),
+    statusReason: z.string().nullable(),
+    teamName: z.string().nullable(),
+    appUrl: z.string().nullable(),
+    openUrl: z.string().nullable(),
+    eventsUrl: z.string(),
+    createUrl: z.string(),
+    manifest: z.string(),
+  })
+  .strict()
+  .openapi("CompanyAgentSlack");
+export const CompanyAgentSlackEnvelopeSchema = z
+  .object({ data: CompanyAgentSlackSchema, meta: ProtocolMetadataSchema })
+  .strict();
+export const ConnectCompanyAgentSlackBodySchema = z
+  .object({
+    botToken: z
+      .string()
+      .trim()
+      .regex(/^xoxb-[A-Za-z0-9-]+$/)
+      .max(500),
+    signingSecret: z
+      .string()
+      .trim()
+      .regex(/^[a-fA-F0-9]{32}$/),
+  })
+  .strict();
+export type CompanyAgentSlackDto = z.infer<typeof CompanyAgentSlackSchema>;
+
 export const CompanyAgentStatusSchema = z.enum(["active", "paused"]).openapi("CompanyAgentStatus");
 
 export const CompanyAgentSchema = z

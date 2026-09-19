@@ -37,8 +37,10 @@ import {
   CompanyAgentPageSchema,
   CompanyAgentPhotoUploadEnvelopeSchema,
   CompanyAgentRunPageSchema,
+  CompanyAgentSlackEnvelopeSchema,
   CompanyAgentUpdateEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
+  ConnectCompanyAgentSlackBodySchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
@@ -718,6 +720,48 @@ export const uploadCompanyAgentPhotoRoute = createRoute({
     },
     default: errorResponse,
   },
+});
+export const getCompanyAgentSlackRoute = createRoute({
+  method: "get",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: { params: z.object({ agentId: z.string().min(1) }) },
+  responses: {
+    200: {
+      description: "Agent Slack setup and connection status.",
+      content: { "application/json": { schema: CompanyAgentSlackEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const connectCompanyAgentSlackRoute = createRoute({
+  method: "post",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: {
+    params: z.object({ agentId: z.string().min(1) }),
+    body: {
+      required: true,
+      content: { "application/json": { schema: ConnectCompanyAgentSlackBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "Dedicated Slack bot verified and connected.",
+      content: { "application/json": { schema: CompanyAgentSlackEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+export const disconnectCompanyAgentSlackRoute = createRoute({
+  method: "delete",
+  path: "/v1/agents/{agentId}/slack",
+  tags: ["Company agents"],
+  security: actorSecurity,
+  request: { params: z.object({ agentId: z.string().min(1) }) },
+  responses: { 204: { description: "Agent Slack connection disabled." }, default: errorResponse },
 });
 export const listWikisRoute = createRoute({
   method: "get",
@@ -3830,6 +3874,9 @@ export type V1RouteHandlers = {
   updateWorkflowMemory: RouteHandler<typeof updateWorkflowMemoryRoute>;
   clearWorkflowMemory: RouteHandler<typeof clearWorkflowMemoryRoute>;
   uploadWorkflowSlackAvatar: RouteHandler<typeof uploadWorkflowSlackAvatarRoute>;
+  getCompanyAgentSlack: RouteHandler<typeof getCompanyAgentSlackRoute>;
+  connectCompanyAgentSlack: RouteHandler<typeof connectCompanyAgentSlackRoute>;
+  disconnectCompanyAgentSlack: RouteHandler<typeof disconnectCompanyAgentSlackRoute>;
   listCompanyAgents: RouteHandler<typeof listCompanyAgentsRoute>;
   createCompanyAgent: RouteHandler<typeof createCompanyAgentRoute>;
   getCompanyAgent: RouteHandler<typeof getCompanyAgentRoute>;
@@ -4052,6 +4099,9 @@ export function createV1Router(
       .openapi(updateWorkflowMemoryRoute, handlers.updateWorkflowMemory)
       .openapi(clearWorkflowMemoryRoute, handlers.clearWorkflowMemory)
       .openapi(uploadWorkflowSlackAvatarRoute, handlers.uploadWorkflowSlackAvatar)
+      .openapi(getCompanyAgentSlackRoute, handlers.getCompanyAgentSlack)
+      .openapi(connectCompanyAgentSlackRoute, handlers.connectCompanyAgentSlack)
+      .openapi(disconnectCompanyAgentSlackRoute, handlers.disconnectCompanyAgentSlack)
       .openapi(listCompanyAgentsRoute, handlers.listCompanyAgents)
       .openapi(createCompanyAgentRoute, handlers.createCompanyAgent)
       .openapi(getCompanyAgentRoute, handlers.getCompanyAgent)
@@ -4663,6 +4713,45 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       201,
     ),
+  getCompanyAgentSlack: (c) =>
+    c.json(
+      {
+        data: {
+          installed: false,
+          ready: false,
+          status: "not_connected",
+          statusReason: null,
+          teamName: null,
+          appUrl: null,
+          openUrl: null,
+          eventsUrl: "",
+          createUrl: "",
+          manifest: "{}",
+        },
+        meta,
+      },
+      200,
+    ),
+  connectCompanyAgentSlack: (c) =>
+    c.json(
+      {
+        data: {
+          installed: true,
+          ready: false,
+          status: "connected",
+          statusReason: null,
+          teamName: null,
+          appUrl: null,
+          openUrl: null,
+          eventsUrl: "",
+          createUrl: "",
+          manifest: "{}",
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectCompanyAgentSlack: (c) => c.body(null, 204),
   listCompanyAgents: (c) => c.json({ data: [], nextCursor: null, meta }, 200),
   createCompanyAgent: (c) =>
     c.json(

@@ -153,3 +153,69 @@ ignored; a new reply is needed to resume those threads.
 Migration `0297_slack_direct_message_sessions` is additive: it adds the `slack_direct_messages`
 inbox. An application rollback can leave the table deployed; queued rows stop being claimed and no
 session is opened for them. Do not drop it while direct messages are pending.
+
+## Company agents with their own Slack identity (beta)
+
+A company agent can connect a dedicated Slack app from **Agents → agent → Channels → This
+agent in Slack**. A separate app supplies the real bot user that Slack can mention and DM.
+The existing workflow display-name override remains cosmetic; it does not create another user.
+The workspace bot in Settings continues to serve existing workflows and personal DM tasks.
+
+The beta uses Slack's standard app manifests and installed bot tokens. It does not require a
+new server environment variable or access to Slack's manager-app program. Slack now documents
+[manager-app enrollment](https://docs.slack.dev/reference/methods/apps.manifest.create/) as a
+prerequisite for managed provisioning; that enrollment is not assumed here. Dedicated app
+provisioning can be automated later while retaining the same installation and event routing.
+
+### Try an agent
+
+1. Deploy migration `0305_company_agent_slack` and the matching API, runner, and web builds.
+   `OPENCOMPANY_API_ORIGIN` must be a public HTTPS API origin reachable by Slack. For local
+   testing, use a public API tunnel and restart the API with that origin; localhost cannot
+   receive Slack's verification requests. The runner's existing Slack Channel worker must run.
+2. Enable Company agents in beta preferences, create an agent, add its instructions, and enable
+   Slack. The agent's owner opens **Set up in Slack** and follows the generated create-app link.
+3. Choose a Slack workspace, create the app, and install it under **OAuth & Permissions**.
+   Slack workspace policy may require admin approval. Copy the Bot User OAuth Token and the
+   Signing Secret from **Basic Information → App Credentials** into the masked setup fields.
+   The API checks the installed bot, app identity, and granted scopes before encrypting them.
+4. Copy the configuration shown after connecting into Slack's **App Manifest** and save.
+   This second step enables signed events after the server has the signing secret. Check the
+   connection in opencompany: it is ready only after Slack completes URL verification. If
+   reconnecting an existing app, reverify the Request URL under **Event Subscriptions**.
+5. Set its photo in Slack's Basic Information. Invite it to a public, unshared channel and send
+   `@AgentName help with this`, or DM it. A mention within an existing thread starts the agent
+   there; subsequent thread replies continue its task. Names/photos are managed in Slack during
+   beta. Reconnecting uses the original app and workspace.
+
+For an end-to-end smoke test, install two agents in the same Slack workspace. Mention each in
+the same channel thread and confirm different Slack profiles and different agent-owned tasks;
+then reply in the thread and confirm each existing task continues. Also test a DM, duplicate
+Slack event delivery, an unmatched sender, pausing the agent, and disconnecting its installation.
+Automated tests substitute Slack responses; they do not replace this live installation test.
+
+### Boundaries and lifecycle
+
+- The sender must be an active human Slack user in the installed team with an email matching
+  an opencompany workspace member. The task runs as the agent's active owner using that
+  owner's tools. Connecting is restricted to that owner. Private/shared channels, group DMs,
+  files, edited messages, and bot-to-bot conversations are outside this beta.
+- Ingress verifies the per-app signing secret, team, and app. A durable inbox deduplicates the
+  same Slack message across `app_mention` and `message.channels`. Subscriptions include the
+  installation ID, so two agents in one Slack thread retain independent tasks and credentials.
+- Dedicated agents fetch at most one 15-message page of thread context per incoming turn and
+  label omitted context. This avoids immediate pagination failures under Slack's stricter
+  [commercial app history limits](https://docs.slack.dev/reference/methods/conversations.replies/).
+  Rate-limited starts retry after one minute; repeated failures surface as connection health.
+- Pausing the agent, disabling Slack, or removing its owner prevents new starts. Disconnecting
+  deletes stored credentials, closes subscriptions, and cancels pending messages/deliveries.
+  A send already in flight may finish. Remove the app itself in Slack to revoke the installation.
+  A disconnected dedicated identity never silently switches to the shared workspace bot.
+
+Migration `0305` adds columns and an inbox, and replaces two shared-bot unique indexes with
+partial indexes excluding dedicated installations. Existing rows retain their identity. Deploy
+API and runner together after migration: old shared-bot reconnect code cannot use the new
+conflict target. An application rollback requires first disabling dedicated ingress/workers and
+removing dedicated installations (including their dependent data), then restoring the old index
+predicates. Do not restore those unique indexes while multiple agents share a Slack workspace.
+Prefer a forward fix to this destructive rollback. No production migration is part of local tests.

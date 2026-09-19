@@ -21,6 +21,7 @@ import { Check, ChevronDown, History, Loader2, Play, Trash2 } from "lucide-react
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { CompanyAgentSlack } from "@/components/CompanyAgentSlack";
 import { StatusDot } from "@/components/StatusDot";
 import {
   SectionLabel,
@@ -70,7 +71,6 @@ export function CompanyAgentEditor({
   ownerName,
   skillCatalog,
   eventProviders,
-  slackBotSettings,
 }: {
   agent: CompanyAgentDto;
   canEdit: boolean;
@@ -290,19 +290,21 @@ export function CompanyAgentEditor({
               <Switch
                 checked={draft.slackEnabled}
                 disabled={!canEdit}
-                aria-label="Post to Slack"
+                aria-label="Enable Slack"
                 onCheckedChange={(slackEnabled) => setDraft({ ...draft, slackEnabled })}
               />
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <p className="text-[13px] font-medium text-ink">Post to Slack</p>
+                <p className="text-[13px] font-medium text-ink">Enable Slack</p>
                 <p className="text-[12px] leading-5 text-ink-subtle">
-                  {slackBotSettings.connected
-                    ? `Posts go out through the workspace bot as “${draft.name.trim() || "Untitled agent"}” with this agent's photo. Say in the instructions which channel to post in and whom to notify. A reply in the thread continues that run.`
-                    : "Connect the Slack bot in workspace settings before this agent can post."}
+                  Allow this agent to post and respond in Slack. Connect its own Slack profile below
+                  to enable mentions and direct messages. Agents without their own profile use the
+                  workspace bot for posts.
                 </p>
               </div>
             </div>
           </section>
+
+          <CompanyAgentSlack agentId={agent.id} canEdit={canEdit} enabled={draft.slackEnabled} />
 
           {canEdit ? (
             <section className="flex flex-col gap-3">
