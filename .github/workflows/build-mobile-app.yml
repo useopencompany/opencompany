@@ -104,8 +104,35 @@ jobs:
             printf 'EXPO_PUBLIC_WORKOS_CLIENT_ID=%s\n' "$EXPO_PUBLIC_WORKOS_CLIENT_ID"
           } > "$GITHUB_WORKSPACE/apps/mobile/.env"
 
-          cp "$GITHUB_WORKSPACE/apps/mobile/.gitignore" "$GITHUB_WORKSPACE/apps/mobile/.easignore"
-          printf '\n!.env\n' >> "$GITHUB_WORKSPACE/apps/mobile/.easignore"
+          scope_ignore_rules() {
+            local prefix="$1"
+            local ignore_file="$2"
+            awk -v prefix="$prefix" '
+              /^[[:space:]]*#/ || /^[[:space:]]*$/ { print; next }
+              {
+                negated = substr($0, 1, 1) == "!"
+                rule = negated ? substr($0, 2) : $0
+                anchored = substr(rule, 1, 1) == "/"
+                if (anchored) rule = substr(rule, 2)
+                if (!anchored && index(rule, "/") == 0) rule = "**/" rule
+                printf "%s%s/%s\n", negated ? "!" : "", prefix, rule
+              }
+            ' "$ignore_file"
+          }
+
+          {
+            cat "$GITHUB_WORKSPACE/.gitignore"
+            scope_ignore_rules "apps/mobile" "$GITHUB_WORKSPACE/apps/mobile/.gitignore"
+            scope_ignore_rules "apps/desktop" "$GITHUB_WORKSPACE/apps/desktop/.gitignore"
+            printf '\n!apps/mobile/.env\n'
+          } > "$GITHUB_WORKSPACE/.easignore"
+
+      - name: Inspect EAS upload archive
+        working-directory: apps/mobile
+        run: eas build:inspect --platform ios --profile production --stage archive --output "$RUNNER_TEMP/mobile-eas-archive"
+
+      - name: Check EAS upload archive
+        run: node scripts/check-mobile-build-archive.mjs "$RUNNER_TEMP/mobile-eas-archive"
 
       - name: Write ASC API key
         shell: bash
@@ -127,8 +154,9 @@ jobs:
 
       - name: Remove temporary build files
         if: ${{ always() }}
-        run: >-
-          rm -f
-          "$RUNNER_TEMP/asc-api-key.p8"
-          "$GITHUB_WORKSPACE/apps/mobile/.easignore"
-          "$GITHUB_WORKSPACE/apps/mobile/.env"
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/asc-api-key.p8" \
+            "$GITHUB_WORKSPACE/.easignore" \
+            "$GITHUB_WORKSPACE/apps/mobile/.env"
+          rm -rf "$RUNNER_TEMP/mobile-eas-archive"
