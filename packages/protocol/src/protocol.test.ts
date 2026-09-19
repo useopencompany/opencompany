@@ -100,6 +100,7 @@ describe("headless protocol", () => {
       "/v1/agents/{agentId}/run",
       "/v1/agents/{agentId}/runs",
       "/v1/agents/{agentId}/photo",
+      "/v1/agents/{agentId}/slack",
       "/v1/browser-profiles",
       "/v1/browser-profiles/{profileId}",
       "/v1/browser-profiles/{profileId}/login-sessions",
