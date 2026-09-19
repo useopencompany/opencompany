@@ -3200,6 +3200,11 @@ export const projects = productSchema.table(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspaces.id, { onDelete: "cascade" }),
+    // Each Project is attached to a restricted wiki that becomes the default knowledge scope for
+    // conversations filed under it. Nullable keeps project creation retry-safe: the service first
+    // claims the client-generated Project id, then creates and attaches a deterministically named
+    // wiki that a later request can repair if either write is interrupted.
+    wikiId: text("wiki_id").references(() => wikis.id, { onDelete: "set null" }),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -3210,6 +3215,7 @@ export const projects = productSchema.table(
       table.workspaceId,
       table.createdAt,
     ),
+    wikiIdx: uniqueIndex("opencompany_projects_wiki_idx").on(table.wikiId),
     nameCheck: check(
       "opencompany_projects_name_check",
       sql`length(btrim(${table.name})) BETWEEN 1 AND 80`,

@@ -4529,6 +4529,9 @@ export const ProjectSchema = z
   .object({
     id: ResourceIdSchema,
     name: z.string(),
+    // The private wiki attached to this Project. Older or partially repaired rows may temporarily
+    // have no wiki, so clients degrade by hiding the wiki link rather than hiding the Project.
+    wikiSlug: z.string().nullable(),
     // The chats and Tasks filed under this project, newest first. Both kinds are Conversations,
     // so one list covers the sidebar rows for either.
     conversationIds: z.array(ResourceIdSchema),

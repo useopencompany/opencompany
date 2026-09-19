@@ -4429,6 +4429,7 @@ const placeholderConversation = {
 const placeholderProject = {
   id: "project_contract",
   name: "Contract placeholder",
+  wikiSlug: "contract-placeholder",
   conversationIds: ["conversation_contract"],
   createdAt: placeholderTime,
 };

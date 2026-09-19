@@ -172,6 +172,7 @@ export async function requireIngestionWikiId(
 
 export async function createWiki(
   input: {
+    id?: string;
     workspaceId: string;
     name: string;
     access: WikiAccessLevel;
@@ -185,10 +186,11 @@ export async function createWiki(
   const name = input.name.trim().slice(0, WIKI_NAME_MAX_LENGTH);
   if (!name) throw new WikiAccessError("A wiki name is required.");
   const slug = await allocateWikiSlug(db, input.workspaceId, name);
+  const id = input.id ?? newWikiId();
   const rows: Wiki[] = await db
     .insert(wikis)
     .values({
-      id: newWikiId(),
+      id,
       workspaceId: input.workspaceId,
       name,
       slug,
@@ -197,8 +199,23 @@ export async function createWiki(
       isDefault: input.isDefault ?? false,
       createdByWorkosId: input.createdByWorkosId,
     })
+    .onConflictDoNothing({ target: wikis.id })
     .returning();
-  const wiki = rows[0];
+  let wiki = rows[0];
+  if (!wiki && input.id) {
+    const existing: Wiki[] = await db
+      .select()
+      .from(wikis)
+      .where(and(eq(wikis.id, id), eq(wikis.workspaceId, input.workspaceId)))
+      .limit(1);
+    wiki = existing[0];
+    if (
+      wiki &&
+      (wiki.access !== input.access || wiki.createdByWorkosId !== input.createdByWorkosId)
+    ) {
+      throw new WikiAccessError("The requested wiki id is already in use.");
+    }
+  }
   if (!wiki) throw new WikiAccessError("Failed to create the wiki.");
   if (wiki.access === "restricted") {
     // The creator is always a member, so a restricted wiki is never orphaned.
