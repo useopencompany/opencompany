@@ -89,7 +89,6 @@ export type CreditDebitInput = {
   costBasis: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   chatSessionId?: string | null;
-  ingestJobId?: string | null;
   reservationId?: string | null;
   db?: DbLike;
 };
@@ -113,7 +112,6 @@ export async function recordCreditDebit(input: CreditDebitInput) {
         source,
         idempotency_key,
         chat_session_id,
-        ingest_job_id,
         reservation_id,
         provider_cost_usd_micros,
         platform_fee_usd_micros,
@@ -128,7 +126,6 @@ export async function recordCreditDebit(input: CreditDebitInput) {
         ${input.source},
         ${input.idempotencyKey},
         ${input.chatSessionId ?? null},
-        ${input.ingestJobId ?? null},
         ${input.reservationId ?? null},
         ${input.providerCostUsdMicros},
         ${input.platformFeeUsdMicros},

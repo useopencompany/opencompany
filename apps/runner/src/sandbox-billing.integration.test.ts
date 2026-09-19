@@ -52,7 +52,7 @@ describe("E2B workspace billing", () => {
         id serial PRIMARY KEY, workspace_id text NOT NULL, user_workos_id text,
         amount_cents integer NOT NULL, amount_usd_micros bigint NOT NULL,
         source text NOT NULL, idempotency_key text UNIQUE NOT NULL,
-        chat_session_id text, ingest_job_id text, reservation_id text,
+        chat_session_id text, reservation_id text,
         provider_cost_usd_micros bigint NOT NULL DEFAULT 0,
         platform_fee_usd_micros bigint NOT NULL DEFAULT 0,
         cost_basis jsonb NOT NULL DEFAULT '{}', metadata jsonb NOT NULL DEFAULT '{}',
