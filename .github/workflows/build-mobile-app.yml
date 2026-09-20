@@ -72,6 +72,7 @@ jobs:
             EXPO_APPLE_TEAM_ID
             EXPO_APPLE_TEAM_TYPE
             EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN
+            EXPO_PUBLIC_POSTHOG_API_KEY
             EXPO_PUBLIC_WORKOS_CLIENT_ID
           )
           missing=()
@@ -101,6 +102,7 @@ jobs:
           {
             printf 'APP_VARIANT=%s\n' "$APP_VARIANT"
             printf 'EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN=%s\n' "$EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN"
+            printf 'EXPO_PUBLIC_POSTHOG_API_KEY=%s\n' "$EXPO_PUBLIC_POSTHOG_API_KEY"
             printf 'EXPO_PUBLIC_WORKOS_CLIENT_ID=%s\n' "$EXPO_PUBLIC_WORKOS_CLIENT_ID"
           } > "$GITHUB_WORKSPACE/apps/mobile/.env"
 

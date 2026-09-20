@@ -9,6 +9,7 @@ import { parse as parseDotenv } from "dotenv";
 export const MOBILE_BUILD_ENV_KEYS = [
   "APP_VARIANT",
   "EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN",
+  "EXPO_PUBLIC_POSTHOG_API_KEY",
   "EXPO_PUBLIC_WORKOS_CLIENT_ID",
 ];
 
