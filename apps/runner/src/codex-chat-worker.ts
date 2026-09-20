@@ -464,10 +464,13 @@ export async function runClaimedTurn(
   const heartbeatAbortPromise = new Promise<never>((_, reject) => {
     rejectHeartbeatAbort = reject;
   });
-  const markHeartbeatLost = (error: unknown) => {
+  const markHeartbeatLost = (error?: unknown) => {
     if (heartbeatAbort) return;
     heartbeatAbort = new CodexChatLeaseLostError();
     rejectHeartbeatAbort?.(heartbeatAbort);
+    // A false heartbeat result means another worker owns the turn now. That is an expected
+    // coordination outcome, not a production exception. Query failures still need reporting.
+    if (error === undefined) return;
     captureException(error, {
       event: "opencompany.goat_codex_chat_heartbeat_failed",
       turn_id: turn.id,
@@ -488,7 +491,7 @@ export async function runClaimedTurn(
         cancellationRecovery: Boolean(turn.interruptRequestedAt),
       })
         .then((owned) => {
-          if (!owned) markHeartbeatLost(new CodexChatLeaseLostError());
+          if (!owned) markHeartbeatLost();
         })
         .catch(markHeartbeatLost);
     },

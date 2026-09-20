@@ -62,10 +62,21 @@ const telemetry = vi.hoisted(() => ({
   recordCounter: vi.fn(),
   recordHistogram: vi.fn(),
 }));
+const observability = vi.hoisted(() => ({
+  captureException: vi.fn(),
+}));
 const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeoutById: vi.fn(),
 }));
+
+vi.mock("@opencompany/observability", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@opencompany/observability")>();
+  return {
+    ...actual,
+    captureException: observability.captureException,
+  };
+});
 
 vi.mock("@opencompany/telemetry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@opencompany/telemetry")>();
@@ -725,6 +736,42 @@ describe("runClaimedTurn", () => {
       const outcome = running.catch((error) => error);
       await vi.advanceTimersByTimeAsync(5_020);
       await expect(outcome).resolves.toBeInstanceOf(CodexChatLeaseLostError);
+      expect(observability.captureException).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports heartbeat query failures while aborting the active stream", async () => {
+    vi.useFakeTimers();
+    sessionRows.length = 0;
+    sessionRows.push(session({ engine: "opencompany", model: "anthropic/claude-sonnet-5" }));
+    const heartbeatFailure = new Error("heartbeat query failed");
+    dbMock.execute.mockImplementation(async (query) => {
+      if (sqlText(query).includes("WITH heartbeat AS")) throw heartbeatFailure;
+      return { rows: [{ id: "updated", previous_infrastructure_failures: 0 }] };
+    });
+    chatMocks.runProductChatTurn.mockImplementationOnce(
+      (input) =>
+        new Promise<"settled">((_resolve, reject) => {
+          const timer = setInterval(() => {
+            const error = input.shouldAbort();
+            if (!error) return;
+            clearInterval(timer);
+            reject(error);
+          }, 10);
+        }),
+    );
+
+    try {
+      const running = runClaimedTurn(turn(), env({ jobLeaseTtlMs: 15_000 }));
+      const outcome = running.catch((error) => error);
+      await vi.advanceTimersByTimeAsync(5_020);
+      await expect(outcome).resolves.toBeInstanceOf(CodexChatLeaseLostError);
+      expect(observability.captureException).toHaveBeenCalledWith(heartbeatFailure, {
+        event: "opencompany.goat_codex_chat_heartbeat_failed",
+        turn_id: turn().id,
+      });
     } finally {
       vi.useRealTimers();
     }
