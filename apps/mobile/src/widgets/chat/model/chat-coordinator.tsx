@@ -3,7 +3,9 @@ import * as Network from "expo-network";
 import { router } from "expo-router";
 import { createContext, type ReactNode, use, useEffect, useState } from "react";
 import { AppState } from "react-native";
+import { until } from "until-async";
 import { useAuth } from "@/features/auth";
+import { analytics, captureError } from "@/shared/lib/analytics";
 import { queryClient } from "@/shared/lib/query-client";
 import { useToast } from "@/shared/ui/toast";
 import type { ConnectivityState } from "./chat";
@@ -107,7 +109,12 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
 
   const sendDraft = async (id: string): Promise<string> => {
     if (!partition) throw new Error("Choose a workspace before sending a message.");
-    const queued = await queueMessageFromDraft(partition, id);
+    const [queueError, queued] = await until(() => queueMessageFromDraft(partition, id));
+    if (queueError) {
+      captureError("message_send_failed", queueError, { is_new_chat: id === "new" });
+      throw queueError;
+    }
+    analytics.capture("message_sent", { is_new_chat: id === "new" });
     await invalidateConversation(partition, queued.conversationId);
     await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
     if (id !== queued.conversationId)
@@ -118,6 +125,7 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   const stopRun = async (id: string, runId: string): Promise<void> => {
     if (!partition) return;
     await queueStopCommand(partition, id, runId);
+    analytics.capture("run_stopped");
     await invalidateConversation(partition, id);
     session?.drain();
   };
@@ -129,6 +137,7 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   ): Promise<void> => {
     if (!partition) return;
     await queueApprovalCommand(partition, id, runId, approvalId, body);
+    analytics.capture("approval_resolved", { resolution: body.resolution });
     await invalidateConversation(partition, id);
     session?.drain();
   };
@@ -143,6 +152,7 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
         resolveApproval,
         refreshConversations: async () => {
           await session?.refreshConversations();
+          analytics.capture("conversation_list_refreshed");
         },
       }}
     >

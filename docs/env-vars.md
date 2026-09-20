@@ -84,6 +84,10 @@ origin for the canonical API. Local Expo builds normally use `http://localhost:3
 use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
 query parameters, or a fragment.
 
+Mobile builds use `EXPO_PUBLIC_POSTHOG_API_KEY` to send explicit product analytics events to
+PostHog. Store the project token in Infisical `prod` `/mobile`. It is embedded in the app bundle and
+must be a public PostHog project token, never a personal or server API key.
+
 `OPENCOMPANY_AGENT_USER_EMAIL` and `OPENCOMPANY_AGENT_USER_PASSWORD` identify the shared agent dev
 user in the non-production WorkOS environment. They live in Infisical `dev` `/web` only and are
 pulled by `bun run setup` so agents and headless environments can mint a real sealed session for

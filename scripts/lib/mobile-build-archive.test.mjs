@@ -12,6 +12,7 @@ import {
 const ciEnvironment = {
   APP_VARIANT: "production",
   EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN: "https://api.example.com/",
+  EXPO_PUBLIC_POSTHOG_API_KEY: "phc_public_project_token",
   EXPO_PUBLIC_WORKOS_CLIENT_ID: "client_production",
 };
 

@@ -7,6 +7,7 @@ import { Alert, Linking, Text, View } from "react-native";
 import { useSharedValue } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
+import { analytics } from "@/shared/lib/analytics";
 import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
 import { StyledKeyboardStickyView } from "@/shared/ui/styled-keyboard-sticky-view";
 import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
@@ -121,7 +122,13 @@ export function StreamingChat({ chatId }: { chatId: string }) {
     }
     Alert.alert("Open Link?", url, [
       { text: "Cancel", style: "cancel" },
-      { text: "Open", onPress: () => void Linking.openURL(url) },
+      {
+        text: "Open",
+        onPress: () => {
+          analytics.capture("chat_link_opened", { protocol: parsedUrl.protocol });
+          void Linking.openURL(url);
+        },
+      },
     ]);
   };
 

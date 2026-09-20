@@ -112,6 +112,7 @@ project:
 - `EXPO_APPLE_TEAM_ID`
 - `EXPO_APPLE_TEAM_TYPE`, set to `IN_HOUSE`, `COMPANY_OR_ORGANIZATION`, or `INDIVIDUAL`
 - `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`
+- `EXPO_PUBLIC_POSTHOG_API_KEY`
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
 
 The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
@@ -121,7 +122,8 @@ shared with the release workflow. The existing OIDC machine identity must have r
 The Infisical action exports every value into the GitHub job environment. `EXPO_TOKEN` and the App
 Store Connect values configure the local EAS CLI invocation. EAS does not copy the caller's complete
 environment to its cloud worker. The workflow writes only `APP_VARIANT`,
-`EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, and `EXPO_PUBLIC_WORKOS_CLIENT_ID` to a temporary
+`EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, `EXPO_PUBLIC_POSTHOG_API_KEY`, and
+`EXPO_PUBLIC_WORKOS_CLIENT_ID` to a temporary
 `apps/mobile/.env`. Build credentials stay outside that file.
 
 EAS resolves the ignore file from the Git repository root for this monorepo. The workflow creates a
@@ -129,7 +131,7 @@ temporary root `.easignore` from the root `.gitignore`, adds the mobile and desk
 with their paths scoped to those directories, and ends with `!apps/mobile/.env`. It then runs
 `eas build:inspect --platform ios --profile production --stage archive` into
 `$RUNNER_TEMP/mobile-eas-archive`, outside the checkout. `scripts/check-mobile-build-archive.mjs`
-reads `apps/mobile/.env` from that extracted archive with `dotenv`. It requires exactly the three
+reads `apps/mobile/.env` from that extracted archive with `dotenv`. It requires exactly the four
 expected keys, checks the production variant and API origin, and compares the archived values with
 the CI values before `eas build` starts. A missing archived `.env` fails the job even when the
 runner still has the expected environment variables.

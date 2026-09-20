@@ -7,6 +7,7 @@ import { ActivityIndicator, Alert, Pressable, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { until } from "until-async";
 
+import { analytics, captureError } from "@/shared/lib/analytics";
 import { StyledCameraView } from "@/shared/ui/styled-camera-view";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { validateComposerAttachments } from "../model/attachment-validation";
@@ -35,6 +36,7 @@ export default function CameraScreen() {
     hasRequestedPermissionRef.current = true;
     void until(requestPermission).then(([permissionError]) => {
       if (permissionError) {
+        captureError("camera_permission_failed", permissionError);
         Alert.alert("Camera Unavailable", "opencompany could not request camera access.");
       }
     });
@@ -47,9 +49,10 @@ export default function CameraScreen() {
     }
 
     setIsTakingPhoto(true);
-    const [captureError, photo] = await until(() => camera.takePictureAsync({ quality: 0.9 }));
+    const [photoError, photo] = await until(() => camera.takePictureAsync({ quality: 0.9 }));
 
-    if (captureError) {
+    if (photoError) {
+      captureError("camera_capture_failed", photoError);
       setIsTakingPhoto(false);
       Alert.alert("Unable to Take Photo", "opencompany could not capture this photo.");
       return;
@@ -69,16 +72,19 @@ export default function CameraScreen() {
       },
     ]);
     if (validation.error) {
+      analytics.capture("attachment_add_rejected", { reason: "validation", source: "camera" });
       setIsTakingPhoto(false);
       Alert.alert("Photo Not Added", validation.error);
       return;
     }
     const [saveError] = await until(() => addAttachments(validation.valid));
     if (saveError) {
+      captureError("attachment_add_failed", saveError, { source: "camera" });
       setIsTakingPhoto(false);
       Alert.alert("Photo Not Added", "opencompany could not save this photo on the device.");
       return;
     }
+    analytics.capture("attachment_added", { count: 1, kinds: ["image"], source: "camera" });
     router.back();
   };
 
@@ -111,7 +117,10 @@ export default function CameraScreen() {
           <Pressable
             accessibilityRole="button"
             className="rounded-full bg-white px-5 py-3 active:opacity-65"
-            onPress={() => void requestPermission()}
+            onPress={() => {
+              analytics.capture("camera_permission_requested");
+              void requestPermission();
+            }}
           >
             <Text className="font-semibold text-[16px] text-black">Allow Camera</Text>
           </Pressable>
@@ -160,9 +169,10 @@ export default function CameraScreen() {
           accessibilityLabel="Switch camera"
           accessibilityRole="button"
           className="h-11 w-11 items-center justify-center rounded-full bg-black/45 active:opacity-65"
-          onPress={() =>
-            setFacing((currentFacing) => (currentFacing === "back" ? "front" : "back"))
-          }
+          onPress={() => {
+            analytics.capture("camera_facing_changed");
+            setFacing((currentFacing) => (currentFacing === "back" ? "front" : "back"));
+          }}
         >
           <StyledSymbolView
             name="arrow.triangle.2.circlepath.camera"

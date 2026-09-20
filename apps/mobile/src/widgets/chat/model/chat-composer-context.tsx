@@ -13,6 +13,7 @@ import qwenLight from "@/assets/images/model-qwen-light.png";
 import zaiDark from "@/assets/images/model-zai-dark.png";
 import zaiLight from "@/assets/images/model-zai-light.png";
 import { throwIfAborted } from "@/shared/lib/abort";
+import { analytics } from "@/shared/lib/analytics";
 import { queryClient } from "@/shared/lib/query-client";
 import { useToast } from "@/shared/ui/toast";
 import { chatQueryKeys, useChatCoordinator } from "./chat-coordinator";
@@ -168,6 +169,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
   const removeAttachment = async (id: string): Promise<void> => {
     if (!partition) return;
     await removeStoredAttachment(partition, id);
+    analytics.capture("attachment_removed");
     await queryClient.invalidateQueries({ queryKey, exact: true });
   };
   const flushDraft = async (): Promise<void> => {
@@ -191,7 +193,10 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         removeAttachment,
         flushDraft,
         clearAfterSend,
-        selectModel: (modelId) => editDraft({ modelId }),
+        selectModel: (modelId) => {
+          editDraft({ modelId });
+          analytics.capture("chat_model_selected", { model_id: modelId });
+        },
         setValue: (text) => editDraft({ text }),
       }}
     >

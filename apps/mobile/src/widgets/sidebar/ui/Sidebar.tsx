@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
+import { analytics } from "@/shared/lib/analytics";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { useToast } from "@/shared/ui/toast";
@@ -148,6 +149,7 @@ export function Sidebar() {
                     ? "rounded-xl border-continuous bg-secondary px-3 py-2.5"
                     : "rounded-xl border-continuous px-3 py-2.5 active:bg-secondary"
                 }
+                onPress={() => analytics.capture("conversation_opened")}
               >
                 <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
                   {conversation.title}
@@ -177,7 +179,12 @@ export function Sidebar() {
           </View>
         }
         onHeightChange={setHeaderHeight}
-        onSearchActiveChange={setIsSearchActive}
+        onSearchActiveChange={(active) => {
+          setIsSearchActive(active);
+          analytics.capture(active ? "conversation_search_started" : "conversation_search_closed", {
+            had_query: Boolean(searchValue.trim()),
+          });
+        }}
         onSearchValueChange={setSearchValue}
         scrollViewTestID={SIDEBAR_SCROLL_VIEW_TEST_ID}
         topInset={insets.top}
@@ -186,7 +193,10 @@ export function Sidebar() {
         <Host matchContents={{ vertical: true }}>
           <HStack>
             <Button
-              onPress={() => router.navigate("/")}
+              onPress={() => {
+                analytics.capture("new_chat_started");
+                router.navigate("/");
+              }}
               modifiers={[
                 buttonStyle("glassProminent"),
                 controlSize("large"),
@@ -215,7 +225,10 @@ export function Sidebar() {
                 buttonBorderShape("circle"),
                 scaleEffect(SIDEBAR_ACTION_CONTROL_SCALE),
               ]}
-              onPress={() => router.navigate("/settings-sheet")}
+              onPress={() => {
+                analytics.capture("settings_opened");
+                router.navigate("/settings-sheet");
+              }}
             >
               <Label
                 title="Settings"

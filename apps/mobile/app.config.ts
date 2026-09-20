@@ -27,6 +27,7 @@ export default {
   },
   plugins: [
     "expo-router",
+    "expo-localization",
     [
       "expo-image-picker",
       {

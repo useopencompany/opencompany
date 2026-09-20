@@ -11,6 +11,7 @@ import {
   createAuthenticatedApi,
   isUnauthorizedApiError,
 } from "@/shared/api/opencompany-api";
+import { analytics, captureError } from "@/shared/lib/analytics";
 import { queryClient } from "@/shared/lib/query-client";
 import { abortChatActivity, resumeChatActivity } from "@/widgets/chat/model/chat-lifecycle";
 import {
@@ -99,6 +100,7 @@ const requireCachedUser = (): User => {
 };
 
 const clearAuthentication = async (): Promise<void> => {
+  analytics.reset();
   abortChatActivity();
   await queryClient.cancelQueries();
   const [purgeError] = await until(purgeAllChatData);
@@ -311,28 +313,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retry: false,
     staleTime: Infinity,
   });
+  const identity = identityQuery.data;
+  const profile = identity?.user ?? null;
+  const workspaces = identity?.workspaces ?? [];
 
   const authMutation = useMutation({
     scope: { id: "auth" },
+    onMutate: (action) => {
+      if (action.type === "sign-in") analytics.capture("sign_in_started");
+      if (action.type === "refresh-identity") analytics.capture("identity_refresh_started");
+      if (action.type === "select-workspace") analytics.capture("workspace_selection_started");
+    },
     mutationFn: async (action: AuthAction): Promise<void> => {
       const [error] = await until(() => runAuthAction(action));
       if (error) throw normalizeAuthError(error);
+    },
+    onSuccess: (_, action) => {
+      if (action.type === "sign-in" || action.type === "callback")
+        analytics.capture("sign_in_succeeded");
+      if (action.type === "refresh-identity") analytics.capture("identity_refresh_succeeded");
+      if (action.type === "select-workspace") analytics.capture("workspace_selected");
+    },
+    onError: (error, action) => {
+      if (error instanceof AuthCancellationError) return;
+      captureError(`${action.type.replaceAll("-", "_")}_failed`, error);
     },
   });
   const { mutate: dispatchAuth, mutateAsync: dispatchAuthAsync } = authMutation;
 
   const signOutMutation = useMutation({
     mutationFn: async (): Promise<void> => {
+      analytics.capture("sign_out_started");
       const [error] = await until(async () => {
         const sessionId = await getSessionId();
         if (!sessionId) throw new Error("No active session found");
         const logoutUrl = getLogoutUrl(sessionId);
+        analytics.capture("sign_out_succeeded");
         await clearAuthentication();
         await WebBrowser.openBrowserAsync(logoutUrl);
       });
-      if (error) throw normalizeAuthError(error);
+      if (error) {
+        captureError("sign_out_failed", error);
+        await clearAuthentication();
+        throw normalizeAuthError(error);
+      }
     },
   });
+
+  useEffect(() => {
+    if (!user) return;
+    analytics.identify(user.id, {
+      ...(profile?.email ? { email: profile.email } : {}),
+      ...(profile?.firstName ? { first_name: profile.firstName } : {}),
+      ...(profile?.lastName ? { last_name: profile.lastName } : {}),
+    });
+    if (identity?.activeWorkspaceId) {
+      analytics.register({ workspace_id: identity.activeWorkspaceId });
+    }
+  }, [
+    user?.id,
+    profile?.email,
+    profile?.firstName,
+    profile?.lastName,
+    identity?.activeWorkspaceId,
+  ]);
 
   // WorkOS can hand its redirect to the OS rather than to `openAuthSessionAsync` — on a cold start,
   // or when the sign-out browser returns — so the app has to listen for the deep link as well.
@@ -350,8 +394,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => subscription.remove();
   }, [dispatchAuth]);
 
-  const identity = identityQuery.data;
-  const workspaces = identity?.workspaces ?? [];
   const pendingAction = authMutation.isPending ? authMutation.variables : null;
   const isSigningIn = pendingAction?.type === "sign-in" || pendingAction?.type === "callback";
 
@@ -360,7 +402,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         api,
-        profile: identity?.user ?? null,
+        profile,
         workspaces,
         workspace:
           identity?.activeWorkspaceId && identity.user.onboardedAt
