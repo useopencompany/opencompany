@@ -150,7 +150,7 @@ jobs:
         env:
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
           EXPO_NO_CAPABILITY_SYNC: "1"
-        run: eas build --platform ios --profile production --non-interactive --wait
+        run: eas build --platform ios --profile production --non-interactive --wait --auto-submit
 
       - name: Remove temporary build files
         if: ${{ always() }}
