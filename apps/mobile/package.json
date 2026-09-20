@@ -5,19 +5,21 @@
   "dependencies": {
     "@expo/ui": "~57.0.9",
     "@legendapp/list": "3.3.3",
+    "@opencompany/core": "workspace:*",
     "@opencompany/protocol": "workspace:*",
     "@tanstack/react-query": "^5.102.8",
     "@workos-inc/node": "^10.10.0",
     "expo": "~57.0.11",
     "expo-auth-session": "~57.0.7",
     "expo-build-properties": "~57.0.9",
-    "expo-camera": "~57.0.4",
+    "expo-clipboard": "~57.0.2",
     "expo-constants": "~57.0.9",
     "expo-dev-client": "~57.0.10",
     "expo-device": "~57.0.1",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.6",
     "expo-font": "~57.0.1",
+    "expo-glass-effect": "~57.0.3",
     "expo-image": "~57.0.2",
     "expo-image-picker": "~57.0.12",
     "expo-linear-gradient": "~57.0.1",
@@ -35,7 +37,7 @@
     "react-native": "0.86.2",
     "react-native-enriched-markdown": "0.7.4",
     "react-native-gesture-handler": "~2.32.0",
-    "react-native-keyboard-controller": "1.22.3",
+    "react-native-keyboard-controller": "1.22.5",
     "react-native-quick-crypto": "^1.1.7",
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "~5.7.0",
@@ -47,8 +49,7 @@
     "tailwindcss": "^4.3.3",
     "uniwind": "^1.10.1",
     "until-async": "^3.0.2",
-    "zod": "^4.4.3",
-    "@opencompany/core": "workspace:*"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@babel/preset-typescript": "^7.28.5",
@@ -64,8 +65,8 @@
     "prebuild:ios": "expo prebuild -p ios",
     "typecheck": "tsc --noEmit",
     "expo:doctor": "bunx expo-doctor@latest",
-    "env:pull:development": "infisical export --output-file=./.env --env=development",
-    "build:ios:simulator": "infisical run --env=development -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz"
+    "env:pull:development": "umask 077 && infisical export --output-file=./.env --env=dev --path=/mobile && chmod 600 ./.env",
+    "build:ios:simulator": "infisical run --env=dev --path=/mobile -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz"
   },
   "private": true
 }
