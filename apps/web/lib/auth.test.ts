@@ -194,4 +194,23 @@ describe("request-cached identity adapter", () => {
     await currentIdentity();
     expect(redirectMock).toHaveBeenCalledWith("/signin");
   });
+
+  it("redirects to sign in when the canonical API rejects an expired session", async () => {
+    serverApiClientMock.mockResolvedValue({
+      v1: {
+        identity: {
+          $get: vi.fn(async () =>
+            Response.json(
+              { error: { code: "authentication_required", message: "Authentication required." } },
+              { status: 401 },
+            ),
+          ),
+        },
+      },
+    } as never);
+
+    await currentIdentity();
+
+    expect(redirectMock).toHaveBeenCalledWith("/signin");
+  });
 });
