@@ -1,4 +1,5 @@
 import type { IdentityUserDto, IdentityWorkspaceDto } from "@opencompany/protocol/schemas";
+import * as Sentry from "@sentry/react-native";
 import { hashKey, useMutation, useQuery } from "@tanstack/react-query";
 import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
@@ -101,6 +102,8 @@ const requireCachedUser = (): User => {
 
 const clearAuthentication = async (): Promise<void> => {
   analytics.reset();
+  Sentry.setUser(null);
+  Sentry.setTag("workspace_id", undefined);
   abortChatActivity();
   await queryClient.cancelQueries();
   const [purgeError] = await until(purgeAllChatData);
@@ -370,6 +373,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (identity?.activeWorkspaceId) {
       analytics.register({ workspace_id: identity.activeWorkspaceId });
     }
+    // Sentry keeps the id only: the DSN is shipped in the app bundle, so events stay free of PII.
+    Sentry.setUser({ id: user.id });
+    Sentry.setTag("workspace_id", identity?.activeWorkspaceId ?? undefined);
   }, [
     user?.id,
     profile?.email,
