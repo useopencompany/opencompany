@@ -31,6 +31,14 @@ export const ACP_TOOLS_MCP_SERVER_NAME = "opencompany";
 // Upper bound on the MCP tool result echoed into the assistant part. Matches the command output
 // preview budget so a large tool result cannot bloat the persisted message row.
 const MCP_TOOL_RESULT_LIMIT = 4_000;
+const WORKFLOW_MUTATION_COMMANDS = new Set([
+  "create",
+  "update",
+  "activate",
+  "pause",
+  "archive",
+  "clear_memory",
+]);
 
 type AcpToolKind = "command" | "file_change" | "web_search" | "subagent" | "tool";
 
@@ -501,6 +509,13 @@ function toolCompletedEvent(
         status === "completed" && toolCall.tool === PUBLISH_ARTIFACT_TOOL_NAME
           ? publishedArtifact(update.rawOutput, outputText)
           : null;
+      const workflowOutput =
+        status === "completed" &&
+        toolCall.server === ACP_TOOLS_MCP_SERVER_NAME &&
+        toolCall.tool === "workflows" &&
+        WORKFLOW_MUTATION_COMMANDS.has(readString(toolCall.rawInput?.command) ?? "")
+          ? workflowCardOutput(update.rawOutput, outputText)
+          : null;
       return normalized("mcp_tool.completed", raw, {
         ...common,
         ...toolSemantics,
@@ -517,6 +532,7 @@ function toolCompletedEvent(
             : undefined,
         error: status === "failed" ? (truncate(outputText, 600) ?? "Tool failed.") : undefined,
         artifact: artifact ?? undefined,
+        workflowOutput: workflowOutput ?? undefined,
       });
     }
   }
@@ -747,6 +763,96 @@ function publishedArtifact(rawOutput: unknown, outputText: string) {
     if (artifact) return artifact;
   }
   return null;
+}
+
+function workflowCardOutput(rawOutput: unknown, outputText: string) {
+  const candidates: unknown[] = [rawOutput, readRecord(rawOutput)?.result];
+  if (outputText) {
+    try {
+      candidates.push(JSON.parse(outputText));
+    } catch {
+      // The visible result can be plain text; only structured workflow responses qualify.
+    }
+  }
+  for (const candidate of candidates) {
+    const output = workflowOutputFromMcpEnvelope(candidate);
+    if (output) return output;
+  }
+  return null;
+}
+
+function workflowOutputFromMcpEnvelope(value: unknown): Record<string, unknown> | null {
+  const record = readRecord(value);
+  if (!record) return null;
+  const direct = compactWorkflowOutput(record);
+  if (direct) return direct;
+
+  const structured = compactWorkflowOutput(readRecord(record.structuredContent));
+  if (structured) return structured;
+
+  for (const item of Array.isArray(record.content) ? record.content : []) {
+    const content = readRecord(item);
+    if (content?.type !== "text") continue;
+    const text = readString(content.text);
+    if (!text) continue;
+    try {
+      const output = compactWorkflowOutput(readRecord(JSON.parse(text)));
+      if (output) return output;
+    } catch {
+      // A non-JSON text item is not a workflow response.
+    }
+  }
+  return null;
+}
+
+function compactWorkflowOutput(value: Record<string, unknown> | null) {
+  const workflow = readRecord(value?.workflow);
+  const name = readString(workflow?.name);
+  const slug = readString(workflow?.slug);
+  if (!value || !workflow || !name || !slug) return null;
+
+  const memory = readRecord(workflow.memory);
+  const trigger = compactWorkflowTrigger(workflow.trigger);
+  const triggers = (Array.isArray(workflow.triggers) ? workflow.triggers : [])
+    .map(compactWorkflowTrigger)
+    .filter((item) => item !== null);
+  const activationBlockers = (
+    Array.isArray(workflow.activationBlockers) ? workflow.activationBlockers : []
+  ).filter((item): item is string => typeof item === "string");
+
+  return {
+    ...(typeof value.ok === "boolean" ? { ok: value.ok } : {}),
+    ...(readString(value.operation) ? { operation: value.operation } : {}),
+    ...(readString(value.error) ? { error: value.error } : {}),
+    workflow: {
+      name,
+      slug,
+      ...(readString(workflow.status) ? { status: workflow.status } : {}),
+      ...(readString(workflow.scope) ? { scope: workflow.scope } : {}),
+      ...(typeof workflow.archived === "boolean" ? { archived: workflow.archived } : {}),
+      ...(memory && typeof memory.enabled === "boolean"
+        ? { memory: { enabled: memory.enabled } }
+        : {}),
+      ...(trigger ? { trigger } : {}),
+      ...(triggers.length ? { triggers } : {}),
+      ...(activationBlockers.length ? { activationBlockers } : {}),
+    },
+  };
+}
+
+function compactWorkflowTrigger(value: unknown) {
+  const trigger = readRecord(value);
+  if (!trigger) return null;
+  const type = readString(trigger.type);
+  const cron = readString(trigger.cron);
+  if (type !== "schedule" || !cron) return null;
+  return {
+    type,
+    cron,
+    ...(readString(trigger.timezone) ? { timezone: trigger.timezone } : {}),
+    ...(readString(trigger.nextRunAt) ? { nextRunAt: trigger.nextRunAt } : {}),
+    ...(typeof trigger.enabled === "boolean" ? { enabled: trigger.enabled } : {}),
+  };
 }
 
 function claudeMeta(update: Record<string, unknown>) {

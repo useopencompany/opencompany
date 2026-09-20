@@ -1778,6 +1778,63 @@ describe("MessageBubble Codex interactions", () => {
     expect(screen.queryByText("Write launch plan")).not.toBeInTheDocument();
   });
 
+  it("keeps a workflow created through Codex visible while its execution trace compacts", () => {
+    const workflowOutput = {
+      ok: true,
+      operation: "created",
+      workflow: {
+        slug: "weekly-recruiting-heatmap",
+        name: "Weekly recruiting heatmap",
+        status: "active",
+        scope: "personal",
+        memory: { enabled: true },
+        triggers: [
+          {
+            type: "schedule",
+            cron: "0 9 * * 0",
+            timezone: "Europe/Berlin",
+            enabled: true,
+            nextRunAt: "2026-09-27T07:00:00.000Z",
+          },
+        ],
+      },
+    };
+    const message: ChatUiMessage = {
+      id: "assistant_workflow_trace",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "I’ll set up the weekly report now." },
+        {
+          type: "dynamic-tool",
+          toolName: CODEX_MCP_TOOL_NAME,
+          toolCallId: "workflow_create",
+          state: "output-available",
+          input: {
+            server: ACP_TOOLS_MCP_SERVER_NAME,
+            tool: "workflows",
+            arguments: { command: "create" },
+          },
+          output: {
+            status: "completed",
+            result: '{"content":[{"text":"truncated…',
+            workflowOutput,
+          },
+        } as unknown as ChatUiMessage["parts"][number],
+        {
+          type: "text",
+          text: "Your [Weekly recruiting heatmap](/workflows/weekly-recruiting-heatmap) is active.",
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+    expect(screen.getByRole("button", { name: "1 message" })).toBeVisible();
+    expect(screen.getAllByRole("link", { name: "Weekly recruiting heatmap" })).toHaveLength(2);
+    expect(screen.getByText("Sunday at 09:00 · Europe/Berlin")).toBeVisible();
+    expect(screen.queryByText("I’ll set up the weekly report now.")).not.toBeInTheDocument();
+  });
+
   it("compacts trailing tool calls that follow the final assistant message", () => {
     const message: ChatUiMessage = {
       id: "assistant_trailing_tools",

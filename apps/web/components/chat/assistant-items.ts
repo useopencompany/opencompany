@@ -37,6 +37,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { codingToolPresentation } from "@/lib/coding-tool-presentation";
+import { type WorkflowCardOutput, workflowCardOutputFromTool } from "./workflow-tool-output";
 
 // Recurring Tasks were removed, but their tool calls are still in saved transcripts. These names
 // are spelled out because the constants no longer exist; they only ever match historical parts.
@@ -50,6 +51,7 @@ export type AssistantRenderItem =
   | { type: "steering"; key: string; text: string }
   | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "artifact"; key: string; artifact: PublishedChatArtifact }
+  | { type: "workflow"; key: string; output: WorkflowCardOutput }
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
@@ -222,6 +224,15 @@ function collectRenderItems(
         type: "task",
         key: `${keyPrefix}task-${index}`,
         task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
+      });
+      continue;
+    }
+    const workflowOutput = workflowCardOutputFromTool(tool);
+    if (workflowOutput) {
+      items.push({
+        type: "workflow",
+        key: `${keyPrefix}workflow-${index}`,
+        output: workflowOutput,
       });
       continue;
     }

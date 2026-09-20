@@ -25,6 +25,7 @@ import {
 } from "./ToolCallItem";
 import { TurnErrorNotice } from "./TurnErrorNotice";
 import { UserMessageBubble } from "./UserMessageBubble";
+import { WorkflowToolCard } from "./WorkflowToolCard";
 
 export function MessageBubble({
   message,
@@ -203,6 +204,9 @@ function AssistantTurn({
     if (item.type === "task") {
       return <TaskCard key={item.key} task={item.task} readOnly={readOnly} />;
     }
+    if (item.type === "workflow") {
+      return <WorkflowToolCard key={item.key} output={item.output} />;
+    }
     if (item.type === "subagent") {
       return (
         <SubagentRow
@@ -301,6 +305,7 @@ function compactAssistantTrace(items: AssistantRenderItem[]): CompactedAssistant
       index === finalMessageIndex ||
       item.type === "artifact" ||
       item.type === "task" ||
+      item.type === "workflow" ||
       item.type === "steering"
     ) {
       visibleItems.push(item);
