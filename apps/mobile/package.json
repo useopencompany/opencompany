@@ -7,6 +7,7 @@
     "@legendapp/list": "3.3.3",
     "@opencompany/core": "workspace:*",
     "@opencompany/protocol": "workspace:*",
+    "@sentry/react-native": "~8.27.0",
     "@tanstack/react-query": "^5.102.8",
     "@workos-inc/node": "^10.10.0",
     "expo": "~57.0.11",

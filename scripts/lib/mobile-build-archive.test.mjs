@@ -6,6 +6,7 @@ import test from "node:test";
 
 import {
   MOBILE_BUILD_ENV_KEYS,
+  SENTRY_BUILD_PLUGIN_ENV_KEYS,
   validateMobileBuildArchive,
 } from "../check-mobile-build-archive.mjs";
 
@@ -14,6 +15,7 @@ const ciEnvironment = {
   EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN: "https://api.example.com/",
   EXPO_PUBLIC_POSTHOG_API_KEY: "phc_public_project_token",
   EXPO_PUBLIC_WORKOS_CLIENT_ID: "client_production",
+  SENTRY_AUTH_TOKEN: "sntrys_fixture_token",
 };
 
 test("accepts an archive with the exact production mobile environment", () => {
@@ -33,6 +35,30 @@ test("fails when the archived mobile environment is missing, even if CI has its 
     );
   });
 });
+
+test("fails when the archived Sentry build environment is missing", () => {
+  withArchive((archiveDirectory) => {
+    writeMobileEnv(archiveDirectory, ciEnvironment);
+    unlinkSentryBuildEnv(archiveDirectory);
+    assert.throws(
+      () => validateMobileBuildArchive(archiveDirectory, ciEnvironment),
+      /\.env\.sentry-build-plugin/u,
+    );
+  });
+});
+
+for (const key of SENTRY_BUILD_PLUGIN_ENV_KEYS) {
+  test(`fails when ${key} is blank in the archived Sentry build environment`, () => {
+    withArchive((archiveDirectory) => {
+      writeMobileEnv(archiveDirectory, ciEnvironment);
+      writeSentryBuildEnv(archiveDirectory, { [key]: "" });
+      assert.throws(
+        () => validateMobileBuildArchive(archiveDirectory, ciEnvironment),
+        new RegExp(key),
+      );
+    });
+  });
+}
 
 for (const key of MOBILE_BUILD_ENV_KEYS) {
   test(`fails when ${key} is missing from the archived environment`, () => {
@@ -100,7 +126,7 @@ test("fails for an API value that violates the app URL restrictions", () => {
 
 test("fails when the archived environment contains an unexpected key", () => {
   withArchive((archiveDirectory) => {
-    writeMobileEnv(archiveDirectory, { ...ciEnvironment, EXPO_TOKEN: "unexpected" });
+    writeMobileEnv(archiveDirectory, ciEnvironment, { EXPO_TOKEN: "unexpected" });
     assert.throws(
       () => validateMobileBuildArchive(archiveDirectory, ciEnvironment),
       /unexpected EXPO_TOKEN/u,
@@ -134,9 +160,24 @@ function withArchive(callback) {
   }
 }
 
-function writeMobileEnv(archiveDirectory, values) {
+function writeMobileEnv(archiveDirectory, values, extraValues = {}) {
   const mobileDirectory = path.join(archiveDirectory, "apps", "mobile");
   mkdirSync(mobileDirectory, { recursive: true });
-  const lines = Object.entries(values).map(([key, value]) => `${key}=${value}`);
+  const lines = [
+    ...MOBILE_BUILD_ENV_KEYS.map((key) => `${key}=${values[key] ?? ""}`),
+    ...Object.entries(extraValues).map(([key, value]) => `${key}=${value}`),
+  ];
   writeFileSync(path.join(mobileDirectory, ".env"), `${lines.join("\n")}\n`);
+  writeSentryBuildEnv(archiveDirectory, values);
+}
+
+function writeSentryBuildEnv(archiveDirectory, values) {
+  const mobileDirectory = path.join(archiveDirectory, "apps", "mobile");
+  mkdirSync(mobileDirectory, { recursive: true });
+  const lines = SENTRY_BUILD_PLUGIN_ENV_KEYS.map((key) => `${key}=${values[key] ?? ""}`);
+  writeFileSync(path.join(mobileDirectory, ".env.sentry-build-plugin"), `${lines.join("\n")}\n`);
+}
+
+function unlinkSentryBuildEnv(archiveDirectory) {
+  rmSync(path.join(archiveDirectory, "apps", "mobile", ".env.sentry-build-plugin"));
 }

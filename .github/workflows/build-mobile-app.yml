@@ -74,6 +74,7 @@ jobs:
             EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN
             EXPO_PUBLIC_POSTHOG_API_KEY
             EXPO_PUBLIC_WORKOS_CLIENT_ID
+            SENTRY_AUTH_TOKEN
           )
           missing=()
           for variable_name in "${required[@]}"; do
@@ -105,6 +106,7 @@ jobs:
             printf 'EXPO_PUBLIC_POSTHOG_API_KEY=%s\n' "$EXPO_PUBLIC_POSTHOG_API_KEY"
             printf 'EXPO_PUBLIC_WORKOS_CLIENT_ID=%s\n' "$EXPO_PUBLIC_WORKOS_CLIENT_ID"
           } > "$GITHUB_WORKSPACE/apps/mobile/.env"
+          printf 'SENTRY_AUTH_TOKEN=%s\n' "$SENTRY_AUTH_TOKEN" > "$GITHUB_WORKSPACE/apps/mobile/.env.sentry-build-plugin"
 
           scope_ignore_rules() {
             local prefix="$1"
@@ -127,6 +129,7 @@ jobs:
             scope_ignore_rules "apps/mobile" "$GITHUB_WORKSPACE/apps/mobile/.gitignore"
             scope_ignore_rules "apps/desktop" "$GITHUB_WORKSPACE/apps/desktop/.gitignore"
             printf '\n!apps/mobile/.env\n'
+            printf '!apps/mobile/.env.sentry-build-plugin\n'
           } > "$GITHUB_WORKSPACE/.easignore"
 
       - name: Inspect EAS upload archive
@@ -160,5 +163,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/asc-api-key.p8" \
             "$GITHUB_WORKSPACE/.easignore" \
-            "$GITHUB_WORKSPACE/apps/mobile/.env"
+            "$GITHUB_WORKSPACE/apps/mobile/.env" \
+            "$GITHUB_WORKSPACE/apps/mobile/.env.sentry-build-plugin"
           rm -rf "$RUNNER_TEMP/mobile-eas-archive"
