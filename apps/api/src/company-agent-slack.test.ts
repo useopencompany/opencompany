@@ -319,6 +319,31 @@ describe("automatic Slack identities", () => {
       "apps.developerInstall",
     ]);
   });
+  it("explains Slack's app installation limit and retries the saved app", async () => {
+    await authorize();
+    const request = requests();
+    await worker(request);
+    const limited = vi.fn(async () => {
+      throw new SlackProvisioningError("service_limits_exceeded");
+    });
+
+    await worker(limited);
+
+    expect(await service.get(actor, "agent1")).toMatchObject({
+      installed: false,
+      provisioning: {
+        state: "failed",
+        reason:
+          "Slack's free plan allows up to 10 third-party or custom apps, and this workspace has reached that limit. Remove an unused app or upgrade Slack, then retry.",
+      },
+    });
+    await service.configure(actor, "agent1", {});
+    await worker(request);
+    expect(request.mock.calls.map((c) => c[0])).toEqual([
+      "apps.manifest.create",
+      "apps.developerInstall",
+    ]);
+  });
   it("reinstalls a ready app after message processing marks its integration failed", async () => {
     await authorize();
     const request = requests();

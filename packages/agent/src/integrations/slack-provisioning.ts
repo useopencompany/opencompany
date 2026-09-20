@@ -7,10 +7,13 @@ import {
 } from "@opencompany/crypto";
 import type { PooledDb } from "@opencompany/db/pool";
 import { subscriptionRows as rows } from "@opencompany/db/session-subscriptions";
+import { createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
 import { SLACK_AGENT_SCOPES, slackAgentManifest } from "./slack-agent";
 import { bindSlackAgent } from "./slack-agent-binding";
+
+const logger = createLogger({ service: "opencompany-agent", runtime: "slack-provisioning" });
 
 export function sealSlackSecret(workspaceId: string, id: string, payload: Record<string, unknown>) {
   return encryptJson(payload, {
@@ -80,6 +83,8 @@ export function requiredSlackString(value: unknown, pattern?: RegExp): string {
     throw new SlackProvisioningError("invalid_response");
   return value;
 }
+type ProvisioningStage = "create" | "install" | "configure";
+
 export function provisioningReason(code: string) {
   if (["invalid_auth", "token_revoked", "token_expired", "account_inactive"].includes(code))
     return "Slack authorization expired or was revoked. Ask an admin to reconnect in Settings → Channels → Slack.";
@@ -87,6 +92,8 @@ export function provisioningReason(code: string) {
     return "Slack needs a public HTTPS connection to this deployment. Ask your administrator to check its API and app URLs, then retry.";
   if (code.startsWith("app_approval"))
     return "Your Slack workspace requires app approval. Open the app in Slack to request approval, then retry.";
+  if (code === "service_limits_exceeded")
+    return "Slack's free plan allows up to 10 third-party or custom apps, and this workspace has reached that limit. Remove an unused app or upgrade Slack, then retry.";
   if (["request_unconfirmed", "invalid_response"].includes(code))
     return "Slack did not confirm the request. Check the app in Slack before trying again.";
   return `Slack could not finish setup (${code}). Retry after resolving this in Slack.`;
@@ -152,6 +159,8 @@ export async function processNextSlackProvisioning(input: {
     return selected;
   });
   if (!job) return false;
+  const stage: ProvisioningStage =
+    job.state === "queued" ? "create" : job.state === "created" ? "install" : "configure";
   let createRequested = false;
   try {
     if (
@@ -243,6 +252,15 @@ export async function processNextSlackProvisioning(input: {
         "internal_error",
         "fatal_error",
       ].includes(code);
+    logger.warn("Slack identity provisioning failed", {
+      agent_id: job.agentId,
+      workspace_id: job.workspaceId,
+      slack_team_id: job.teamId,
+      slack_app_id: job.appId,
+      provisioning_stage: stage,
+      provider_error_code: code,
+      outcome: uncertain ? "uncertain" : "failed",
+    });
     await db.execute(
       sql`UPDATE goat.slack_agent_provisioning SET state = ${uncertain ? "uncertain" : "failed"}, reason = ${provisioningReason(code)}, lease_until = NULL, updated_at = now() WHERE agent_id = ${job.agentId}`,
     );
