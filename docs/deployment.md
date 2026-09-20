@@ -114,6 +114,7 @@ project:
 - `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`
 - `EXPO_PUBLIC_POSTHOG_API_KEY`
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
+- `SENTRY_AUTH_TOKEN`, used only by the native Sentry artifact upload hooks
 
 The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
 shared with the release workflow. The existing OIDC machine identity must have read access to
@@ -136,10 +137,17 @@ expected keys, checks the production variant and API origin, and compares the ar
 the CI values before `eas build` starts. A missing archived `.env` fails the job even when the
 runner still has the expected environment variables.
 
-The workflow removes the root `.easignore`, mobile `.env`, signing key, and inspected archive after
-both successful and failed runs. `APP_VARIANT` selects the production app config, and Expo inlines
+The workflow removes the root `.easignore`, mobile `.env`, Sentry build-plugin env file, signing key,
+and inspected archive after both successful and failed runs. `APP_VARIANT` selects the production app config, and Expo inlines
 the public values into the application bundle on the EAS worker. No Expo-hosted environment
 variables are required.
+
+The mobile app's Sentry Expo plugin uploads JavaScript source maps and iOS debug symbols during
+native release builds. The workflow writes `SENTRY_AUTH_TOKEN` from Infisical `prod` `/mobile` to a
+temporary `apps/mobile/.env.sentry-build-plugin` file in the EAS upload archive. The native build
+uses that file for Sentry uploads, but the workflow never writes the token to `apps/mobile/.env` or
+the application bundle. The cleanup step removes the file after the build, including failed runs.
+No EAS environment variable is required.
 
 ## Migrations
 
