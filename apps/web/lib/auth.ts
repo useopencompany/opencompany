@@ -115,6 +115,10 @@ const resolveSession = cache(
     const session = await withAuth();
     if (!session.user) return null;
     const response = await (await serverApiClient()).v1.identity.$get();
+    // AuthKit can still decode a browser session while the canonical API has already
+    // rejected it during expiry or refresh. Treat that race as signed out so the
+    // existing page boundary sends the browser through the normal sign-in flow.
+    if (response.status === 401) return null;
     if (!response.ok) throw await serverApiError(response, "Could not load your workspace.");
     const data = (await response.json()).data as IdentityDto;
     return {
