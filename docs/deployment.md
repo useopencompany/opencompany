@@ -93,10 +93,13 @@ image-backed and stateful, so routine application releases do not restart it.
 
 `.github/workflows/build-mobile-app.yml` starts an EAS iOS build with the `production` profile when
 someone runs the workflow manually. The job does not repeat the repository lint, typecheck, test,
-or web build jobs. It passes `--wait` so the GitHub job reports the final EAS build result.
+or web build jobs. A successful build is submitted to TestFlight with the matching EAS submission
+profile. The profile pins the App Store Connect app ID, and `--wait` makes the GitHub job report the
+final build and submission result.
 
 Concurrency cancels an older GitHub run for the same branch. If that run already submitted its job
-to EAS, the remote build may continue in Expo after GitHub stops waiting for it.
+to EAS, the remote build and its configured submission may continue in Expo after GitHub stops
+waiting for it.
 
 The protected `production` job reads these values from Infisical `prod` `/mobile` in the shared
 project:
