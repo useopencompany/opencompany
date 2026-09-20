@@ -9,6 +9,7 @@ import {
   generateText,
   jsonSchema,
   type LanguageModelUsage,
+  StreamProviderError,
   streamText,
   type ToolApprovalRequestOutput,
   type ToolSet,
@@ -695,6 +696,14 @@ describe("opencompany chat infrastructure recovery", () => {
       cause: new TypeError("terminated"),
     });
 
+  const retryableStreamProviderFailure = () =>
+    new StreamProviderError({
+      message: "Our servers are currently overloaded. Please try again later.",
+      type: "overloaded_error",
+      statusCode: 529,
+      isRetryable: true,
+    });
+
   it("retries a successful HTTP response that terminates while tool input is streaming", async () => {
     const failure = interruptedSuccessResponse();
     let latestProjection: ProductChatProjection = { parts: [] };
@@ -741,6 +750,41 @@ describe("opencompany chat infrastructure recovery", () => {
       ).toBe(false);
     },
   );
+
+  it("retries a retryable provider error reported after streaming starts", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(retryableStreamProviderFailure(), {
+        parts: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("does not replay a stream provider error after a tool crossed the execution boundary", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(retryableStreamProviderFailure(), {
+        parts: [
+          {
+            type: "tool-use_action",
+            toolCallId: "call_1",
+            state: "output-available",
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not retry a non-retryable stream provider error", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(
+        new StreamProviderError({
+          message: "The request was rejected.",
+          statusCode: 400,
+          isRetryable: false,
+        }),
+        { parts: [] },
+      ),
+    ).toBe(false);
+  });
 
   // runProductChatTurn classifies the failure only after finalizing streaming text and reasoning.
   // Tool parts must survive that step as `input-streaming`, or the replay path silently dies.

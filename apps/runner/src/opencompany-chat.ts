@@ -69,6 +69,7 @@ import {
   convertToModelMessages,
   type LanguageModelUsage,
   parsePartialJson,
+  StreamProviderError,
   stepCountIs,
 } from "ai";
 import { asc, eq, sql } from "drizzle-orm";
@@ -1682,14 +1683,14 @@ export function errorMessage(error: unknown) {
 export function isReplaySafeProductChatInfrastructureFailure(
   error: unknown,
   projection: ProductChatProjection,
-): error is APICallError {
-  if (!APICallError.isInstance(error)) return false;
-  const retryableProviderFailure =
-    error.isRetryable ||
-    (error.statusCode !== undefined &&
-      error.statusCode >= 200 &&
-      error.statusCode < 300 &&
-      error.message === "Failed to process successful response");
+): error is APICallError | StreamProviderError {
+  const retryableProviderFailure = APICallError.isInstance(error)
+    ? error.isRetryable ||
+      (error.statusCode !== undefined &&
+        error.statusCode >= 200 &&
+        error.statusCode < 300 &&
+        error.message === "Failed to process successful response")
+    : StreamProviderError.isInstance(error) && error.isRetryable;
   if (!retryableProviderFailure) return false;
 
   // A completed tool call may already have crossed an external side-effect boundary. Restarting
@@ -1701,7 +1702,9 @@ export function isReplaySafeProductChatInfrastructureFailure(
   );
 }
 
-export function productChatInfrastructureFailureDiagnostic(error: APICallError) {
+export function productChatInfrastructureFailureDiagnostic(
+  error: APICallError | StreamProviderError,
+) {
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);
   const cause =
     error.cause instanceof Error
