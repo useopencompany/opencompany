@@ -38,7 +38,6 @@ import {
   HistoricalPresentationDetailStatus,
   useHistoricalPresentationDetail,
 } from "./HistoricalPresentationDetail";
-import { WorkflowToolCard } from "./WorkflowToolCard";
 
 // Recurring Tasks were removed; saved transcripts still contain their tool calls, so the icon
 // treatment stays keyed off the retired names.
@@ -114,16 +113,6 @@ export function ToolCallItem({
     },
   };
 
-  if (
-    tool.name === "workflows" &&
-    tool.state === "output-available" &&
-    isRecord(tool.output) &&
-    isRecord(tool.output.workflow) &&
-    typeof tool.output.workflow.name === "string" &&
-    typeof tool.output.workflow.slug === "string"
-  ) {
-    return <WorkflowToolCard output={tool.output} />;
-  }
   if (pendingApproval && onActionApproval) {
     if (tool.name === USE_ACTION_TOOL_NAME && managedCapabilityActionFromTool(tool)) {
       return (

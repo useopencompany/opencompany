@@ -828,6 +828,9 @@ function mcpToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayl
   if (event.type === "mcp_tool.started") return { state: "input-available", input };
   const error = readString(event.payload.error);
   const result = readString(event.payload.result);
+  const workflowOutput = isRecord(event.payload.workflowOutput)
+    ? event.payload.workflowOutput
+    : null;
   return {
     state: "output-available",
     input,
@@ -835,6 +838,7 @@ function mcpToolStatusPart(event: HarnessNormalizedEvent): CodexUiStatusPartPayl
       status: readString(event.payload.status) ?? "completed",
       ...(result ? { result } : {}),
       ...(error ? { error } : {}),
+      ...(workflowOutput ? { workflowOutput } : {}),
     },
   };
 }

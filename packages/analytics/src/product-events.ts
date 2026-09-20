@@ -94,7 +94,15 @@ export type ProductAnalyticsEventPropertiesByName = {
       | "deleted"
       | "unknown";
     send_source: "composer" | "plan_implementation";
-    output_kind: "text" | "reasoning" | "tool" | "subagent" | "task" | "artifact" | "error";
+    output_kind:
+      | "text"
+      | "reasoning"
+      | "tool"
+      | "subagent"
+      | "task"
+      | "artifact"
+      | "workflow"
+      | "error";
     time_to_first_output_ms: number;
   };
   llm_usage_recorded: {
@@ -293,7 +301,7 @@ export const productAnalyticsEvents = {
   chat_first_output_rendered: {
     name: "chat_first_output_rendered",
     description:
-      "The first assistant text, reasoning, tool, subagent, task, artifact, or error committed to the browser after a foreground send.",
+      "The first assistant text, reasoning, tool, subagent, task, artifact, workflow, or error committed to the browser after a foreground send.",
     safeProperties: [
       "workspace_id",
       "session_id",
