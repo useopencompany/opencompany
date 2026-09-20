@@ -51,7 +51,7 @@ export function workflowCardOutputFromTool(tool: WorkflowToolCall): WorkflowCard
   if (tool.name !== CODEX_MCP_TOOL_NAME && tool.name !== CODEX_DYNAMIC_TOOL_NAME) {
     return null;
   }
-  if (!isOpencompanyWorkflowCall(tool.input)) return null;
+  if (!isWorkflowHostCall(tool.input)) return null;
 
   const output = isRecord(tool.output) ? tool.output : null;
   const projected = workflowCardOutput(output?.workflowOutput, command);
@@ -93,7 +93,7 @@ function workflowCommand(value: unknown) {
   return typeof args.command === "string" ? args.command : null;
 }
 
-function isOpencompanyWorkflowCall(value: unknown) {
+function isWorkflowHostCall(value: unknown) {
   if (!isRecord(value)) return false;
   if (value.server === ACP_TOOLS_MCP_SERVER_NAME && value.tool === "workflows") return true;
   for (const identity of [value.toolName, value.title]) {
