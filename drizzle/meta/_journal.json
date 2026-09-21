@@ -2157,6 +2157,13 @@
       "when": 1790100400028,
       "tag": "0307_project_wikis",
       "breakpoints": true
+    },
+    {
+      "idx": 308,
+      "version": "7",
+      "when": 1790100400029,
+      "tag": "0308_remove_project_wikis",
+      "breakpoints": true
     }
   ]
 }

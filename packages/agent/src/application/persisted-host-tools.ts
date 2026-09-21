@@ -9,7 +9,6 @@ import {
   chatSessions,
   codexChatSessions,
   codexChatTurns,
-  projects,
   tasks,
   users,
   workflows,
@@ -243,7 +242,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       harness: codexChatSessions.harness,
       userWorkosId: codexChatSessions.userWorkosId,
       workspaceId: codexChatSessions.workspaceId,
-      projectWikiId: projects.wikiId,
       chatSessionId: codexChatSessions.chatSessionId,
       userMessageId: codexChatTurns.userMessageId,
       email: users.email,
@@ -283,14 +281,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       ),
     )
     .innerJoin(workspaces, eq(workspaces.id, codexChatSessions.workspaceId))
-    .leftJoin(
-      projects,
-      and(
-        eq(projects.id, chatSessions.projectId),
-        eq(projects.userWorkosId, codexChatSessions.userWorkosId),
-        eq(projects.workspaceId, codexChatSessions.workspaceId),
-      ),
-    )
     // Only a workflow run can post to Slack, and only while its Channels section keeps Slack on.
     // Tasks store the workflow slug, so the creation-time fence keeps an old Task from inheriting
     // a later workflow that reused the same slug after archival.
@@ -319,7 +309,6 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     actorId: row.userWorkosId,
     workspaceId: row.workspaceId,
     workspaceName: row.workspaceName,
-    projectWikiId: row.projectWikiId,
     conversationId: row.chatSessionId,
     messageId: row.userMessageId,
     email: row.email,
