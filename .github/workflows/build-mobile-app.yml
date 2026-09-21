@@ -10,8 +10,20 @@ concurrency:
 permissions: {}
 
 jobs:
+  context:
+    name: Validate production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require production builds to run from main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Production mobile builds must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
   build:
     name: Build iOS (production)
+    needs: context
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: production
