@@ -1,3 +1,4 @@
+const fs = require("fs");
 const path = require("path");
 const { withSentryConfig } = require("@sentry/react-native/metro");
 const { getDefaultConfig } = require("expo/metro-config");
@@ -7,7 +8,9 @@ const { withUniwindConfig } = require("uniwind/metro");
 /** @type {import('expo/metro-config').MetroConfig} */
 let config = getDefaultConfig(__dirname);
 
-config.watchFolders.push(path.resolve(__dirname, "node_modules/react-native-worklets/.worklets"));
+config.watchFolders.push(
+  fs.realpathSync(path.resolve(__dirname, "node_modules/react-native-worklets/.worklets")),
+);
 
 config = withUniwindConfig(config, {
   cssEntryFile: "./src/global.css",

@@ -2,63 +2,75 @@ import { Host } from "@expo/ui";
 import { RNHostView } from "@expo/ui/swift-ui";
 import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { useEffect, useRef } from "react";
-import { useWindowDimensions, View } from "react-native";
+import type { Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { type LayoutChangeEvent, View } from "react-native";
 import { useCSSVariable } from "uniwind";
 import { until } from "until-async";
 import { analytics } from "@/shared/lib/analytics";
 import { useToast } from "@/shared/ui/toast";
 import { NativeChatComposerView } from "../../../../modules/native-chat-composer";
 import { useChatComposer } from "../model/chat-composer-context";
+import { type ComposerInputHandle, useChatInputController } from "../model/chat-input-controller";
 import { ComposerAttachments } from "./composer-attachments";
 
-const COMPOSER_EXPANDED_VERTICAL_PADDING = 10;
-const COMPOSER_INPUT_LINE_HEIGHT = 22;
-const COMPOSER_MAXIMUM_LINE_COUNT = 5;
-const COMPOSER_EXPANDED_ACTION_GAP = 12;
-const COMPOSER_CONTROL_SIZE = 36;
-const COMPOSER_OUTER_VERTICAL_PADDING = 16;
-const COMPOSER_OPEN_HORIZONTAL_INSET = 12;
-const COMPOSER_CONTENT_HORIZONTAL_PADDING = 10;
-const COMPOSER_ATTACHMENTS_CANVAS_HEIGHT = 128;
-const COMPOSER_PILL_HEIGHT_SETTLE_DELAY = 60;
-const COMPOSER_CANVAS_PILL_HEIGHT =
-  COMPOSER_EXPANDED_VERTICAL_PADDING * 2 +
-  COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_MAXIMUM_LINE_COUNT +
-  COMPOSER_EXPANDED_ACTION_GAP +
-  COMPOSER_CONTROL_SIZE;
+export interface ChatComposerHandle extends ComposerInputHandle {}
+
+export interface SentMessageIdentity {
+  conversationId: string;
+  userMessageId: string;
+}
 
 export function ChatComposer({
   autoFocus,
   bottomInset,
   conversationId,
+  containerRef,
   disabled,
   isGenerating,
   isStopping,
-  onComposerHeightChange,
-  onPillHeightChange,
+  onLayout,
   onSend,
   onStop,
+  ref,
 }: {
   autoFocus: boolean;
   bottomInset: number;
   conversationId: string;
+  containerRef: Ref<View>;
   disabled: boolean;
   isGenerating: boolean;
   isStopping: boolean;
-  onComposerHeightChange: (height: number) => void;
-  onPillHeightChange: (height: number) => void;
-  onSend: () => Promise<void>;
+  onLayout: (event: LayoutChangeEvent) => void;
+  onSend: () => Promise<SentMessageIdentity>;
   onStop: () => Promise<void>;
+  ref?: Ref<ChatComposerHandle>;
 }) {
-  const { width } = useWindowDimensions();
+  const { showErrorToast } = useToast();
+  const composer = useChatComposer();
+  const input = useChatInputController();
   const [accent, accentForeground] = useCSSVariable([
     "--color-accent",
     "--color-accent-foreground",
   ]) as [string, string];
-  const { showErrorToast } = useToast();
-  const pillHeightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const composer = useChatComposer();
+  const [blurRequest, setBlurRequest] = useState(0);
+  const [focusRequest, setFocusRequest] = useState(0);
+  const focusedRef = useRef(false);
+  const didHandleInitialFocusRef = useRef(false);
+  const isActiveConversation = composer.conversationId === conversationId;
+  const attachments = isActiveConversation ? composer.attachments : [];
+  const value = isActiveConversation ? composer.value : "";
+
+  const focusHandle = () => setFocusRequest((request) => request + 1);
+  const blurHandle = () => setBlurRequest((request) => request + 1);
+  const createHandle = (): ChatComposerHandle => ({
+    blur: blurHandle,
+    focus: focusHandle,
+    isFocused: () => focusedRef.current,
+  });
+  useImperativeHandle(ref, createHandle);
+  useImperativeHandle(input.composerInputRef, createHandle);
+
   const sendMutation = useMutation({
     mutationFn: async () => {
       analytics.capture("message_send_started", {
@@ -68,7 +80,7 @@ export function ChatComposer({
         model_id: composer.selectedModelId,
       });
       await composer.flushDraft();
-      await onSend();
+      return onSend();
     },
     onSuccess: () => composer.clearAfterSend(),
     onError: (error) =>
@@ -78,64 +90,49 @@ export function ChatComposer({
         "chat.message.send",
       ),
   });
-  const isActiveConversation = composer.conversationId === conversationId;
-  const attachments = isActiveConversation ? composer.attachments : [];
-  const value = isActiveConversation ? composer.value : "";
-  const canvasHeight =
-    COMPOSER_CANVAS_PILL_HEIGHT +
-    COMPOSER_ATTACHMENTS_CANVAS_HEIGHT +
-    COMPOSER_OUTER_VERTICAL_PADDING +
-    bottomInset;
-  const attachmentContentWidth = Math.max(
-    0,
-    width - 2 * (COMPOSER_OPEN_HORIZONTAL_INSET + COMPOSER_CONTENT_HORIZONTAL_PADDING),
-  );
 
-  useEffect(
-    () => () => {
-      if (pillHeightTimeoutRef.current !== null) {
-        clearTimeout(pillHeightTimeoutRef.current);
-      }
-    },
-    [],
-  );
+  useLayoutEffect(() => {
+    if (!isActiveConversation || !composer.isReady || input.drawerOpen) return;
+    const shouldHandleInitialFocus = autoFocus && !didHandleInitialFocusRef.current;
+    const shouldHandleRequestedFocus = input.consumeComposerFocusRequest(input.focusRequestId);
+    if (!shouldHandleInitialFocus && !shouldHandleRequestedFocus) return;
+    if (shouldHandleInitialFocus) didHandleInitialFocusRef.current = true;
+    focusHandle();
+  }, [autoFocus, composer.isReady, input.drawerOpen, input.focusRequestId, isActiveConversation]);
 
-  const handleComposerHeightChange = (pillHeight: number) => {
-    onComposerHeightChange(pillHeight + COMPOSER_OUTER_VERTICAL_PADDING + bottomInset);
-
-    if (pillHeightTimeoutRef.current !== null) {
-      clearTimeout(pillHeightTimeoutRef.current);
-    }
-
-    pillHeightTimeoutRef.current = setTimeout(() => {
-      pillHeightTimeoutRef.current = null;
-      onPillHeightChange(pillHeight);
-    }, COMPOSER_PILL_HEIGHT_SETTLE_DELAY);
-  };
+  useEffect(() => {
+    if (!isActiveConversation && focusedRef.current) blurHandle();
+  }, [isActiveConversation]);
 
   return (
-    <View pointerEvents="box-none" style={{ height: canvasHeight }}>
+    <View onLayout={onLayout} pointerEvents="box-none" ref={containerRef}>
       <Host
         ignoreSafeArea="all"
+        matchContents={{ horizontal: false, vertical: true }}
         pointerEvents="box-none"
-        style={{ height: canvasHeight, width: "100%" }}
+        style={{ width: "100%" }}
       >
         <NativeChatComposerView
           accentColor={accent}
           accentForegroundColor={accentForeground}
-          autoFocus={autoFocus}
+          blurRequest={blurRequest}
           bottomInset={bottomInset}
           disabled={disabled || sendMutation.isPending || !isActiveConversation}
+          focusRequest={focusRequest}
           hasAttachments={attachments.length > 0}
           isGenerating={isGenerating}
           isStopping={isStopping}
           nativeID="chat-composer"
           onAttachmentPress={() => {
+            blurHandle();
             analytics.capture("attachment_picker_opened");
             router.push("/attachment-sheet");
           }}
-          onComposerHeightChange={(event) => handleComposerHeightChange(event.nativeEvent.height)}
           onChangeText={(event) => composer.setValue(event.nativeEvent.value)}
+          onFocusChange={(event) => {
+            focusedRef.current = event.nativeEvent.focused;
+            if (event.nativeEvent.focused) input.setKeyboardOwner("composer");
+          }}
           onSend={() => {
             if (!sendMutation.isPending) sendMutation.mutate();
           }}
@@ -145,16 +142,14 @@ export function ChatComposer({
                 showErrorToast("The stop request could not be saved.", error, "chat.run.stop");
             });
           }}
-          style={{ height: "100%", width: "100%" }}
+          style={{ width: "100%" }}
           value={value}
         >
-          <RNHostView matchContents>
-            <ComposerAttachments
-              attachments={attachments}
-              contentWidth={attachmentContentWidth}
-              onRemove={composer.removeAttachment}
-            />
-          </RNHostView>
+          {attachments.length > 0 ? (
+            <RNHostView matchContents>
+              <ComposerAttachments attachments={attachments} onRemove={composer.removeAttachment} />
+            </RNHostView>
+          ) : undefined}
         </NativeChatComposerView>
       </Host>
     </View>

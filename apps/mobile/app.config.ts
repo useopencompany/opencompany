@@ -37,15 +37,6 @@ export default {
       },
     ],
     [
-      "expo-camera",
-      {
-        cameraPermission: CAMERA_USAGE_DESCRIPTION,
-        microphonePermission: false,
-        recordAudioAndroid: false,
-        barcodeScannerEnabled: false,
-      },
-    ],
-    [
       "expo-build-properties",
       {
         ios: {

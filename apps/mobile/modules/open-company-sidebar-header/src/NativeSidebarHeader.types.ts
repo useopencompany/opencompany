@@ -13,6 +13,7 @@ interface SearchValueEvent {
 }
 
 export interface NativeSidebarHeaderViewProps extends ViewProps {
+  dismissSearchRequest: number;
   onHeaderHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
   onSearchActiveChange?: (event: NativeSyntheticEvent<SearchActiveEvent>) => void;
   onSearchPress?: () => void;
@@ -20,4 +21,8 @@ export interface NativeSidebarHeaderViewProps extends ViewProps {
   scrollViewTestID: string;
   searchAccessibilityLabel: string;
   topInset: number;
+}
+
+export interface NativeSidebarHeaderNativeRef {
+  dismissSearch: () => Promise<void>;
 }

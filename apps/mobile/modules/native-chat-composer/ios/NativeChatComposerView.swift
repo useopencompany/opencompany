@@ -18,7 +18,7 @@ private enum ComposerMetrics {
   static let lineHeightEpsilon: CGFloat = 1
   static let outerTopPadding: CGFloat = 8
   static let outerBottomPadding: CGFloat = 8
-  static let keyboardWidthAnimationDuration = 0.25
+  static let widthAnimationDuration = 0.25
 }
 
 final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
@@ -26,49 +26,60 @@ final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
   @Field var isGenerating = false
   @Field var isStopping = false
   @Field var value = ""
-  @Field var autoFocus = false
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
   @Field var accentForegroundColor: Color = .white
   @Field var hasAttachments = false
+  @Field var focusRequest = 0
+  @Field var blurRequest = 0
 
   let onSend = EventDispatcher()
   let onStop = EventDispatcher()
   let onChangeText = EventDispatcher()
   let onAttachmentPress = EventDispatcher()
   let onComposerHeightChange = EventDispatcher()
+  let onFocusChange = EventDispatcher()
 }
 
 struct NativeChatComposerView: ExpoSwiftUI.View {
   @ObservedObject var props: NativeChatComposerViewProps
   @FocusState private var isInputFocused: Bool
   @State private var isExpanded = false
+  @State private var lastBlurRequest = 0
+  @State private var lastFocusRequest = 0
   @State private var lastReportedHeight: CGFloat?
   @State private var singleLineHeight: CGFloat?
   @State private var measuredCollapsedContentHeight: CGFloat?
   @State private var measuredExpandedContentHeight: CGFloat?
-  @State private var attachmentContentHeight: CGFloat = 0
 
   var body: some View {
     composer
       .padding(.horizontal, horizontalInset)
       .animation(
-        .spring(
-          duration: ComposerMetrics.keyboardWidthAnimationDuration,
-          bounce: 0
-        ),
+        .spring(duration: ComposerMetrics.widthAnimationDuration, bounce: 0),
         value: horizontalInset
       )
       .padding(.top, ComposerMetrics.outerTopPadding)
       .padding(.bottom, max(0, CGFloat(props.bottomInset)) + ComposerMetrics.outerBottomPadding)
       .frame(maxWidth: .infinity)
       .fixedSize(horizontal: false, vertical: true)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-      .defaultFocus($isInputFocused, props.autoFocus)
-      .onChange(of: props.autoFocus, initial: true) {
-        if props.autoFocus {
-          isInputFocused = true
-        }
+      .onGeometryChange(
+        for: CGFloat.self,
+        of: { geometry in geometry.size.height },
+        action: reportComposerHeight
+      )
+      .onChange(of: props.focusRequest, initial: true) {
+        guard props.focusRequest > lastFocusRequest else { return }
+        lastFocusRequest = props.focusRequest
+        isInputFocused = true
+      }
+      .onChange(of: props.blurRequest, initial: true) {
+        guard props.blurRequest > lastBlurRequest else { return }
+        lastBlurRequest = props.blurRequest
+        isInputFocused = false
+      }
+      .onChange(of: isInputFocused) {
+        props.onFocusChange(["focused": isInputFocused])
       }
       .onChange(of: props.value) {
         if props.value.isEmpty {
@@ -81,17 +92,10 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
 
   private var composer: some View {
     VStack(spacing: 0) {
-      Children()
-        .frame(maxWidth: .infinity)
-        .onGeometryChange(
-          for: CGFloat.self,
-          of: { geometry in
-            geometry.size.height
-          },
-          action: { height in
-            attachmentContentHeight = height
-          }
-        )
+      if props.hasAttachments {
+        Children()
+          .frame(maxWidth: .infinity)
+      }
 
       inputArea
     }
@@ -143,19 +147,9 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
         measuredExpandedContentHeight = height
       }
     }
-    .onGeometryChange(
-      for: CGFloat.self,
-      of: { geometry in
-        geometry.size.height
-      },
-      action: { height in
-        reportComposerHeight(height)
-      }
-    )
     .animation(.smooth(duration: 0.18), value: isExpanded)
     .animation(.smooth(duration: 0.18), value: displayedInputHeight)
     .animation(.smooth(duration: 0.22), value: props.hasAttachments)
-    .animation(.smooth(duration: 0.22), value: attachmentContentHeight)
   }
 
   private var inputArea: some View {
@@ -208,7 +202,9 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       .disabled(props.isGenerating ? props.isStopping : isSendDisabled)
       .opacity((props.isGenerating ? props.isStopping : isSendDisabled) ? 0.6 : 1)
       .animation(.easeInOut(duration: 0.1), value: isSendDisabled)
-      .accessibilityLabel(props.isGenerating ? (props.isStopping ? "Stopping" : "Stop") : "Send message")
+      .accessibilityLabel(
+        props.isGenerating ? (props.isStopping ? "Stopping" : "Stop") : "Send message"
+      )
     }
     .frame(maxWidth: .infinity)
   }
@@ -218,9 +214,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       get: { props.value },
       set: { value in
         props.onChangeText(["value": value])
-        if value.isEmpty {
-          isExpanded = false
-        }
+        if value.isEmpty { isExpanded = false }
       }
     )
   }
@@ -232,10 +226,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private var horizontalInset: CGFloat {
-    if isComposerExpanded || isInputFocused {
-      return ComposerMetrics.openHorizontalInset
-    }
-
+    if isComposerExpanded || isInputFocused { return ComposerMetrics.openHorizontalInset }
     return ComposerMetrics.closedHorizontalInset
   }
 
@@ -246,22 +237,14 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   private var displayedInputHeight: CGFloat {
     let collapsedHeight =
       singleLineHeight
-      ?? UIFont.systemFont(
-        ofSize: ComposerMetrics.fontSize
-      ).lineHeight
+      ?? UIFont.systemFont(ofSize: ComposerMetrics.fontSize).lineHeight
 
-    guard isExpanded, let measuredExpandedContentHeight else {
-      return collapsedHeight
-    }
-
+    guard isExpanded, let measuredExpandedContentHeight else { return collapsedHeight }
     return max(collapsedHeight, measuredExpandedContentHeight)
   }
 
   private var textBottomInset: CGFloat {
-    if isExpanded {
-      return ComposerMetrics.controlSize + ComposerMetrics.expandedActionGap
-    }
-
+    if isExpanded { return ComposerMetrics.controlSize + ComposerMetrics.expandedActionGap }
     return max(0, (ComposerMetrics.controlSize - displayedInputHeight) / 2)
   }
 
@@ -286,9 +269,9 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       .allowsHitTesting(false)
       .onGeometryChange(
         for: CGFloat.self,
-        of: { geometry in
-          geometry.size.height
-        }, action: onHeightChange)
+        of: { geometry in geometry.size.height },
+        action: onHeightChange
+      )
   }
 
   private func updateExpandedState() {
@@ -296,9 +279,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       let singleLineHeight,
       let measuredCollapsedContentHeight
     else {
-      if props.value.isEmpty {
-        isExpanded = false
-      }
+      if props.value.isEmpty { isExpanded = false }
       return
     }
 
@@ -309,25 +290,17 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
 
   private func send() {
     let draft = props.value.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !props.disabled, !draft.isEmpty || props.hasAttachments else {
-      return
-    }
-
+    guard !props.disabled, !draft.isEmpty || props.hasAttachments else { return }
     props.onSend(["value": draft])
   }
 
   private func stop() {
-    guard props.isGenerating, !props.isStopping else {
-      return
-    }
+    guard props.isGenerating, !props.isStopping else { return }
     props.onStop()
   }
 
   private func reportComposerHeight(_ height: CGFloat) {
-    if let lastReportedHeight, abs(lastReportedHeight - height) < 0.25 {
-      return
-    }
-
+    if let lastReportedHeight, abs(lastReportedHeight - height) < 0.25 { return }
     lastReportedHeight = height
     props.onComposerHeightChange(["height": height])
   }

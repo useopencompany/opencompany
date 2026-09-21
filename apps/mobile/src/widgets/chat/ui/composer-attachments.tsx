@@ -90,11 +90,9 @@ function AttachmentPreview({
 
 export function ComposerAttachments({
   attachments,
-  contentWidth,
   onRemove,
 }: {
   attachments: ComposerAttachment[];
-  contentWidth: number;
   onRemove: (id: string) => void;
 }) {
   const hasAttachments = attachments.length > 0;
@@ -144,7 +142,7 @@ export function ComposerAttachments({
     <Reanimated.View
       className="overflow-hidden"
       pointerEvents={hasAttachments ? "auto" : "none"}
-      style={[animatedStyle, { width: hasDisplayedAttachments ? contentWidth : 0 }]}
+      style={[animatedStyle, { width: hasDisplayedAttachments ? "100%" : 0 }]}
     >
       <View
         className="h-[120px] w-full pb-2"

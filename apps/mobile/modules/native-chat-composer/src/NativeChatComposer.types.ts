@@ -9,12 +9,17 @@ interface HeightEvent {
   height: number;
 }
 
+interface FocusEvent {
+  focused: boolean;
+}
+
 export interface NativeChatComposerViewProps extends ViewProps {
   accentColor: string;
   accentForegroundColor: string;
-  autoFocus: boolean;
+  blurRequest: number;
   bottomInset: number;
   disabled: boolean;
+  focusRequest: number;
   hasAttachments: boolean;
   isGenerating: boolean;
   isStopping: boolean;
@@ -23,6 +28,7 @@ export interface NativeChatComposerViewProps extends ViewProps {
   onAttachmentPress?: () => void;
   onComposerHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;
   onChangeText?: (event: NativeSyntheticEvent<ValueEvent>) => void;
+  onFocusChange?: (event: NativeSyntheticEvent<FocusEvent>) => void;
   onSend?: (event: NativeSyntheticEvent<ValueEvent>) => void;
   onStop?: () => void;
 }

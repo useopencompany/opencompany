@@ -13,10 +13,28 @@ const replacePart = <T extends ChatPart>(
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
 };
 
-const textParts = (parts: ChatPart[], content: string): ChatPart[] => [
-  { type: "text", text: content },
-  ...parts.filter((part) => part.type !== "text"),
-];
+const appendText = (parts: ChatPart[], delta: string, startOffset: number): ChatPart[] => {
+  const last = parts.at(-1);
+  if (last?.type === "text") {
+    return parts.map((part, index) =>
+      index === parts.length - 1 ? { ...last, text: last.text + delta } : part,
+    );
+  }
+  return [...parts, { id: `text:${startOffset}`, type: "text", text: delta }];
+};
+
+const reconcileTextContent = (parts: ChatPart[], content: string): ChatPart[] => {
+  const currentText = parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  if (content.startsWith(currentText)) {
+    const suffix = content.slice(currentText.length);
+    return suffix ? appendText(parts, suffix, currentText.length) : parts;
+  }
+  const firstText = parts.findIndex((part) => part.type === "text");
+  if (firstText < 0) return [{ id: "text:0", type: "text", text: content }, ...parts];
+  return parts.map((part, index) =>
+    index === firstText && part.type === "text" ? { ...part, text: content } : part,
+  );
+};
 
 export const projectRunEvent = (
   checkpoint: RunCheckpoint,
@@ -33,7 +51,7 @@ export const projectRunEvent = (
     return {
       ...checkpoint,
       content,
-      parts: textParts(checkpoint.parts, content),
+      parts: appendText(checkpoint.parts, event.payload.delta, event.payload.startOffset),
       presentationCursor: event.presentationCursor,
     };
   }
@@ -53,9 +71,17 @@ export const projectRunEvent = (
         ...base,
         content,
         parts: [
-          ...(content ? ([{ type: "text", text: content }] satisfies ChatPart[]) : []),
+          ...(content
+            ? ([
+                { id: `text:${event.payload.message.id}:0`, type: "text", text: content },
+              ] satisfies ChatPart[])
+            : []),
           ...event.payload.message.attachments.map(
-            (attachment: AttachmentDto): ChatPart => ({ type: "attachment", attachment }),
+            (attachment: AttachmentDto): ChatPart => ({
+              id: `attachment:${attachment.id}`,
+              type: "attachment",
+              attachment,
+            }),
           ),
         ],
       };
@@ -65,7 +91,7 @@ export const projectRunEvent = (
       return {
         ...base,
         content: event.payload.content,
-        parts: textParts(checkpoint.parts, event.payload.content),
+        parts: reconcileTextContent(checkpoint.parts, event.payload.content),
       };
     }
     case "tool.started":
@@ -75,6 +101,7 @@ export const projectRunEvent = (
           checkpoint.parts,
           (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
           {
+            id: `tool:${event.payload.toolCallId}`,
             type: "tool",
             toolCallId: event.payload.toolCallId,
             name: event.payload.name,
@@ -94,6 +121,7 @@ export const projectRunEvent = (
           checkpoint.parts,
           (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
           {
+            id: `tool:${event.payload.toolCallId}`,
             type: "tool",
             toolCallId: event.payload.toolCallId,
             name: existing?.type === "tool" ? existing.name : "Tool",
@@ -113,6 +141,7 @@ export const projectRunEvent = (
           checkpoint.parts,
           (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
           {
+            id: `tool:${event.payload.toolCallId}`,
             type: "tool",
             toolCallId: event.payload.toolCallId,
             name: existing?.type === "tool" ? existing.name : "Tool",
@@ -130,8 +159,10 @@ export const projectRunEvent = (
           checkpoint.parts,
           (part) => part.type === "approval" && part.approvalId === event.payload.approvalId,
           {
+            id: `approval:${event.payload.approvalId}`,
             type: "approval",
             approvalId: event.payload.approvalId,
+            ...(event.payload.toolCallId ? { toolCallId: event.payload.toolCallId } : {}),
             kind: event.payload.kind,
             prompt: event.payload.prompt,
             options: event.payload.options ?? [],
@@ -155,7 +186,7 @@ export const projectRunEvent = (
         parts: replacePart(
           checkpoint.parts,
           (part) => part.type === "artifact" && part.artifactId === event.payload.artifactId,
-          { type: "artifact", ...event.payload },
+          { id: `artifact:${event.payload.artifactId}`, type: "artifact", ...event.payload },
         ),
       };
     case "run.paused":
@@ -167,7 +198,15 @@ export const projectRunEvent = (
         ...base,
         status: "failed",
         isStopping: false,
-        parts: [...checkpoint.parts, { type: "notice", message: event.payload.message }],
+        parts: [
+          ...checkpoint.parts,
+          {
+            id: `notice:${event.id}`,
+            type: "notice",
+            message: event.payload.message,
+            kind: "error",
+          },
+        ],
       };
     case "run.canceled":
       return { ...base, status: "canceled", isStopping: false };

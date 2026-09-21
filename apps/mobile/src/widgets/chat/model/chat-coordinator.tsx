@@ -25,7 +25,7 @@ interface ChatCoordinatorValue {
   partition: ChatPartition | null;
   connectivity: ConnectivityState;
   setVisibleConversation: (id: string | null) => void;
-  sendDraft: (id: string) => Promise<string>;
+  sendDraft: (id: string) => Promise<{ conversationId: string; userMessageId: string }>;
   stopRun: (id: string, runId: string) => Promise<void>;
   resolveApproval: (
     id: string,
@@ -107,7 +107,9 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     session?.setVisibleConversation(visibleId);
   }, [session, visibleId]);
 
-  const sendDraft = async (id: string): Promise<string> => {
+  const sendDraft = async (
+    id: string,
+  ): Promise<{ conversationId: string; userMessageId: string }> => {
     if (!partition) throw new Error("Choose a workspace before sending a message.");
     const [queueError, queued] = await until(() => queueMessageFromDraft(partition, id));
     if (queueError) {
@@ -118,9 +120,15 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     await invalidateConversation(partition, queued.conversationId);
     await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
     if (id !== queued.conversationId)
-      router.replace({ pathname: "/chats/[chatId]", params: { chatId: queued.conversationId } });
+      router.replace({
+        pathname: "/chats/[chatId]",
+        params: {
+          chatId: queued.conversationId,
+          anchorMessageId: queued.clientMessageId,
+        },
+      });
     session?.drain();
-    return queued.conversationId;
+    return { conversationId: queued.conversationId, userMessageId: queued.clientMessageId };
   };
   const stopRun = async (id: string, runId: string): Promise<void> => {
     if (!partition) return;

@@ -23,6 +23,10 @@ public class NativeSidebarHeaderModule: Module {
       Prop("topInset") { (view: NativeSidebarHeaderView, topInset: Double) in
         view.topInset = max(0, CGFloat(topInset))
       }
+
+      Prop("dismissSearchRequest") { (view: NativeSidebarHeaderView, request: Int) in
+        view.consumeDismissSearchRequest(request)
+      }
     }
   }
 }

@@ -16,6 +16,7 @@ import {
   type ComposerAttachment,
   useChatComposer,
 } from "../model/chat-composer-context";
+import { prepareImageAttachments } from "../model/prepare-image-attachment";
 
 interface AttachmentAction {
   label: string;
@@ -40,7 +41,14 @@ export default function AttachmentSheet() {
   } = useChatComposer();
 
   const persistPickedAttachments = async (attachments: ComposerAttachment[]) => {
-    const validation = validateComposerAttachments(currentAttachments.length, attachments);
+    const [preparationError, preparedAttachments] = await until(() =>
+      prepareImageAttachments(attachments),
+    );
+    if (preparationError) {
+      Alert.alert("Attachment Not Added", "opencompany could not convert that image to JPEG.");
+      return;
+    }
+    const validation = validateComposerAttachments(currentAttachments.length, preparedAttachments);
     if (validation.error) {
       analytics.capture("attachment_add_rejected", { reason: "validation" });
       Alert.alert("Attachment Not Added", validation.error);
@@ -127,13 +135,60 @@ export default function AttachmentSheet() {
     await persistPickedAttachments(attachments);
   };
 
+  const takePhoto = async () => {
+    const [permissionError, permission] = await until(() =>
+      ImagePicker.requestCameraPermissionsAsync(),
+    );
+    if (permissionError || !permission.granted) {
+      if (permissionError) captureError("camera_permission_failed", permissionError);
+      Alert.alert(
+        "Camera Access Needed",
+        permissionError
+          ? "opencompany could not request camera access."
+          : "Allow camera access in Settings to take a photo.",
+      );
+      return;
+    }
+
+    const [pickerError, result] = await until(() =>
+      ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        cameraType: ImagePicker.CameraType.back,
+        mediaTypes: ["images"],
+        quality: 0.9,
+      }),
+    );
+    if (pickerError) {
+      captureError("attachment_source_failed", pickerError, { source: "camera" });
+      Alert.alert("Unable to Open Camera", "opencompany could not open the system camera.");
+      return;
+    }
+    if (result.canceled) {
+      analytics.capture("attachment_source_canceled", { source: "camera" });
+      return;
+    }
+
+    await persistPickedAttachments(
+      result.assets.map((asset) => ({
+        id: createAttachmentId(asset.uri),
+        kind: "image",
+        uri: asset.uri,
+        name: asset.fileName ?? "Photo.jpg",
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+        ...(asset.fileSize ? { size: asset.fileSize } : {}),
+        width: asset.width,
+        height: asset.height,
+      })),
+    );
+  };
+
   const attachmentActions: AttachmentAction[] = [
     {
       label: "Camera",
       icon: "camera",
       onPress: () => {
         analytics.capture("attachment_source_selected", { source: "camera" });
-        router.replace("./camera");
+        void takePhoto();
       },
     },
     {

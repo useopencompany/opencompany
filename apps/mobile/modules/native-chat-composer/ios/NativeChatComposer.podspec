@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
   s.summary        = 'Native SwiftUI chat composer for opencompany mobile'
   s.description    = 'A Fabric-native, auto-sizing SwiftUI chat composer exposed through the Expo Modules API.'
   s.author         = 'opencompany'
-  s.homepage       = 'https://github.com/useopencompany/opencompany-experimental'
+  s.homepage       = 'https://github.com/useopencompany/opencompany'
   s.platforms      = {
     :ios => '26.0'
   }
@@ -13,7 +13,6 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
 
-  # Swift/Objective-C compatibility
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
   }

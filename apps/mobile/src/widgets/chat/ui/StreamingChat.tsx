@@ -1,10 +1,21 @@
-import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
+import {
+  KeyboardAwareLegendList,
+  useKeyboardChatComposerInset,
+  useKeyboardScrollToEnd,
+} from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useQuery } from "@tanstack/react-query";
+import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
-import { type RefObject, useLayoutEffect, useRef, useState } from "react";
-import { Alert, Linking, Text, View } from "react-native";
-import { useSharedValue } from "react-native-reanimated";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Linking, Text, useWindowDimensions, View } from "react-native";
+import Reanimated, {
+  FadeIn,
+  FadeOut,
+  Keyframe,
+  ReduceMotion,
+  useReducedMotion,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
 import { analytics } from "@/shared/lib/analytics";
@@ -14,6 +25,7 @@ import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
 import type { ChatMessage as ChatMessageModel, ConnectivityState } from "../model/chat";
 import { useChatComposer } from "../model/chat-composer-context";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
+import { useChatInputController } from "../model/chat-input-controller";
 import {
   getConversationRunCheckpoint,
   hasPendingMessageCommand,
@@ -22,11 +34,24 @@ import {
   NEW_CHAT_ID,
   type RunCheckpoint,
 } from "../model/chat-store";
-import { ChatComposer } from "./ChatComposer";
+import { ChatComposer, type ChatComposerHandle, type SentMessageIdentity } from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
 const CHAT_TOP_CLEARANCE = 70;
+const ANCHOR_MAX_SIZE = 76;
+const STATUS_ENTERING = new Keyframe({
+  0: { opacity: 0, transform: [{ translateY: 4 }] },
+  100: { opacity: 1, transform: [{ translateY: 0 }] },
+})
+  .duration(160)
+  .reduceMotion(ReduceMotion.System);
+const STATUS_EXITING = new Keyframe({
+  0: { opacity: 1, transform: [{ translateY: 0 }] },
+  100: { opacity: 0, transform: [{ translateY: 4 }] },
+})
+  .duration(140)
+  .reduceMotion(ReduceMotion.System);
 
 function getStatusMessage(
   run: RunCheckpoint | null | undefined,
@@ -35,26 +60,22 @@ function getStatusMessage(
   if (run?.isStopping) {
     return connectivity === "offline" ? "Will stop when connected" : "Stopping...";
   }
-  if (connectivity === "waiting") return "Waiting for connection";
+  if (connectivity === "offline") return "Offline";
   if (connectivity === "reconnecting") return "Reconnecting...";
   return null;
 }
 
-function useChatComposerInset(listRef: RefObject<LegendListRef | null>, initialHeight: number) {
-  const contentInsetEndAdjustment = useSharedValue(initialHeight);
-  const lastHeightRef = useRef<number | null>(null);
-  const reportHeight = (height: number) => {
-    if (!Number.isFinite(height) || height === lastHeightRef.current) return;
-    lastHeightRef.current = height;
-    contentInsetEndAdjustment.value = height;
-    listRef.current?.reportContentInset({ bottom: height });
-  };
-  return { contentInsetEndAdjustment, onComposerHeightChange: reportHeight };
-}
-
-export function StreamingChat({ chatId }: { chatId: string }) {
+export function StreamingChat({
+  chatId,
+  pendingAnchorMessageId,
+}: {
+  chatId: string;
+  pendingAnchorMessageId?: string;
+}) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
+  const reducedMotion = useReducedMotion();
   const { theme } = useUniwind();
   const [gradientStart, gradientEnd] = useCSSVariable([
     "--color-background-transparent",
@@ -62,11 +83,21 @@ export function StreamingChat({ chatId }: { chatId: string }) {
   ]) as [string, string];
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
-  const [composerPillHeight, setComposerPillHeight] = useState(52);
+  const [composerHeight, setComposerHeight] = useState(insets.bottom + 68);
+  const [anchorMessageId, setAnchorMessageId] = useState<string | undefined>(
+    pendingAnchorMessageId,
+  );
+  const [following, setFollowing] = useState(true);
+  const [listLayoutReady, setListLayoutReady] = useState(false);
+  const openedAtEndRef = useRef<string | null>(null);
+  const anchorOverflowedRef = useRef(false);
   const listRef = useRef<LegendListRef>(null);
+  const composerContainerRef = useRef<View>(null);
+  const composerHandleRef = useRef<ChatComposerHandle>(null);
   const markdownStyle = useChatMarkdownStyle();
   const coordinator = useChatCoordinator();
   const composer = useChatComposer();
+  const input = useChatInputController();
   const messagesQuery = useQuery({
     queryKey: coordinator.partition
       ? chatQueryKeys.messages(coordinator.partition, chatId)
@@ -88,17 +119,18 @@ export function StreamingChat({ chatId }: { chatId: string }) {
     queryFn: () => hasPendingMessageCommand(coordinator.partition!, chatId),
     enabled: Boolean(coordinator.partition),
   });
+  const messages = messagesQuery.data ?? [];
   const run = runQuery.data;
   const isGenerating = Boolean(run && ["queued", "running", "paused"].includes(run.status));
-  const isHydratingUncachedConversation =
-    chatId !== NEW_CHAT_ID &&
-    messagesQuery.data?.length === 0 &&
-    coordinator.connectivity === "reconnecting";
-  const listKey = messagesQuery.data?.length ? `${chatId}:loaded` : `${chatId}:empty`;
-  const { contentInsetEndAdjustment, onComposerHeightChange } = useChatComposerInset(
+  const anchorIndex = anchorMessageId
+    ? messages.findIndex((message) => message.id === anchorMessageId)
+    : -1;
+  const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
+    composerContainerRef,
     insets.bottom + 68,
   );
+  const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
 
   useLayoutEffect(() => {
     if (!isFocused) return;
@@ -107,6 +139,32 @@ export function StreamingChat({ chatId }: { chatId: string }) {
     if (coordinator.partition) void markConversationViewed(coordinator.partition, chatId);
     return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
+
+  useEffect(() => {
+    openedAtEndRef.current = null;
+    setListLayoutReady(false);
+    setFollowing(true);
+    if (pendingAnchorMessageId) setAnchorMessageId(pendingAnchorMessageId);
+  }, [chatId]);
+
+  useLayoutEffect(() => {
+    if (
+      !listLayoutReady ||
+      messagesQuery.isLoading ||
+      openedAtEndRef.current === chatId ||
+      pendingAnchorMessageId
+    ) {
+      return;
+    }
+    openedAtEndRef.current = chatId;
+    void listRef.current?.scrollToEnd({ animated: false });
+  }, [chatId, listLayoutReady, messagesQuery.isLoading, pendingAnchorMessageId]);
+
+  useEffect(() => {
+    if (!pendingAnchorMessageId || anchorIndex < 0 || !listLayoutReady) return;
+    openedAtEndRef.current = chatId;
+    router.setParams({ anchorMessageId: undefined });
+  }, [anchorIndex, chatId, listLayoutReady, pendingAnchorMessageId]);
 
   const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
@@ -134,6 +192,11 @@ export function StreamingChat({ chatId }: { chatId: string }) {
 
   const renderItem = ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
     <ChatMessage
+      isTerminal={
+        item.role === "assistant" &&
+        (run?.assistantMessageId !== item.id ||
+          !["queued", "running", "paused"].includes(run.status))
+      }
       message={item}
       markdownStyle={markdownStyle}
       onApproval={(approvalId, body) =>
@@ -144,21 +207,50 @@ export function StreamingChat({ chatId }: { chatId: string }) {
     />
   );
 
+  const handleSend = async (): Promise<SentMessageIdentity> => {
+    await input.dismissComposer();
+    const sent = await coordinator.sendDraft(chatId);
+    if (sent.conversationId === chatId) {
+      anchorOverflowedRef.current = false;
+      setFollowing(false);
+      setAnchorMessageId(sent.userMessageId);
+      await scrollMessageToEnd({ animated: messages.length > 0, closeKeyboard: true });
+    }
+    return sent;
+  };
+
   const statusMessage = getStatusMessage(run, coordinator.connectivity);
+  const statusEntering = reducedMotion ? FadeIn.duration(160) : STATUS_ENTERING;
+  const statusExiting = reducedMotion ? FadeOut.duration(140) : STATUS_EXITING;
 
   return (
     <View className="flex-1 bg-background">
       <StyledKeyboardGestureArea
         className="flex-1 bg-background"
         interpolator="ios"
-        offset={composerPillHeight}
+        offset={Math.max(52, composerHeight - insets.bottom - 16)}
         textInputNativeID="chat-composer"
       >
-        {(messagesQuery.isLoading && !messagesQuery.data) || isHydratingUncachedConversation ? (
+        {messagesQuery.isLoading && !messagesQuery.data ? (
           <View className="flex-1" />
         ) : (
           <KeyboardAwareLegendList
             alignItemsAtEnd
+            anchoredEndSpace={
+              anchorIndex >= 0
+                ? {
+                    anchorIndex,
+                    anchorMaxSize: ANCHOR_MAX_SIZE,
+                    anchorOffset: insets.top + CHAT_TOP_CLEARANCE,
+                    onSizeChanged: (size) => {
+                      if (size <= 0 && !anchorOverflowedRef.current) {
+                        anchorOverflowedRef.current = true;
+                        setFollowing(true);
+                      }
+                    },
+                  }
+                : undefined
+            }
             applyWorkaroundForContentInsetHitTestBug
             contentContainerStyle={[
               listContentStyle,
@@ -166,15 +258,24 @@ export function StreamingChat({ chatId }: { chatId: string }) {
             ]}
             contentInsetAdjustmentBehavior="never"
             contentInsetEndAdjustment={contentInsetEndAdjustment}
-            data={messagesQuery.data ?? []}
+            data={messages}
+            dataKey={chatId}
+            estimatedItemSize={80}
+            estimatedListSize={{ width: windowWidth, height: windowHeight }}
             extraData={[theme, run, coordinator.connectivity]}
+            freeze={freeze}
             initialScrollAtEnd
-            key={listKey}
             keyboardDismissMode="interactive"
             keyboardLiftBehavior="whenAtEnd"
             keyboardOffset={insets.bottom}
             keyExtractor={(message) => message.id}
+            maintainScrollAtEnd={
+              following ? { on: { dataChange: true, itemLayout: true } } : undefined
+            }
+            maintainScrollAtEndThreshold={1}
             maintainVisibleContentPosition
+            onLayout={() => setListLayoutReady(true)}
+            onScrollBeginDrag={() => setFollowing(false)}
             recycleItems={false}
             ref={listRef}
             renderItem={renderItem}
@@ -185,38 +286,48 @@ export function StreamingChat({ chatId }: { chatId: string }) {
       </StyledKeyboardGestureArea>
 
       {statusMessage ? (
-        <View
+        <Reanimated.View
           className="absolute inset-x-0 items-center"
-          style={{ bottom: composerPillHeight + insets.bottom + 22 }}
+          entering={statusEntering}
+          exiting={statusExiting}
+          pointerEvents="none"
+          style={{ bottom: composerHeight + 6 }}
         >
-          <Text className="rounded-full bg-secondary px-3 py-1.5 text-[13px] text-muted-foreground">
-            {statusMessage}
-          </Text>
-        </View>
+          <View className="flex-row items-center gap-2 rounded-full bg-secondary px-3 py-1.5">
+            {coordinator.connectivity !== "offline" ? (
+              <ActivityIndicator size="small" colorClassName="accent-muted-foreground" />
+            ) : null}
+            <Text className="text-[13px] text-muted-foreground">{statusMessage}</Text>
+          </View>
+        </Reanimated.View>
       ) : null}
 
       <StyledKeyboardStickyView
         className="absolute right-0 bottom-0 left-0"
+        enabled={input.keyboardOwner === "composer"}
         offset={{ closed: 0, opened: insets.bottom }}
       >
         <StyledLinearGradient
-          className="absolute right-0 top-0 bottom-0 left-0"
+          className="absolute inset-0"
           colors={[gradientStart, gradientEnd]}
-          start={{ x: 0.5, y: 0.5 }}
           pointerEvents="none"
+          start={{ x: 0.5, y: 0.5 }}
         />
         <ChatComposer
-          // Wait for the workspace session so startup remounts cannot interrupt focus.
           autoFocus={chatId === NEW_CHAT_ID && isFocused && Boolean(coordinator.partition)}
           bottomInset={insets.bottom}
+          containerRef={composerContainerRef}
           conversationId={chatId}
           disabled={!coordinator.partition || Boolean(pendingMessageQuery.data)}
           isGenerating={isGenerating}
           isStopping={run?.isStopping ?? false}
-          onComposerHeightChange={onComposerHeightChange}
-          onPillHeightChange={setComposerPillHeight}
-          onSend={() => coordinator.sendDraft(chatId).then(() => undefined)}
+          onLayout={(event) => {
+            setComposerHeight(event.nativeEvent.layout.height);
+            onComposerLayout(event);
+          }}
+          onSend={handleSend}
           onStop={() => (run ? coordinator.stopRun(chatId, run.runId) : Promise.resolve())}
+          ref={composerHandleRef}
         />
       </StyledKeyboardStickyView>
     </View>

@@ -95,6 +95,7 @@ interface ChatComposerContextValue {
   value: string;
   attachments: ComposerAttachment[];
   selectedModelId: ChatModelId;
+  isReady: boolean;
   activateConversation: (conversationId: string) => void;
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
   clearAfterSend: () => void;
@@ -188,6 +189,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         value: draft.text,
         attachments: draft.attachments,
         selectedModelId: draft.modelId,
+        isReady: !partition || draftQuery.isFetched,
         activateConversation: setConversationId,
         addAttachments,
         removeAttachment,

@@ -1,6 +1,6 @@
 import * as SQLite from "expo-sqlite";
 import { throwIfAborted } from "@/shared/lib/abort";
-import { LEGACY_SCHEMA, SINGLE_ID_SCHEMA } from "./migrations";
+import { LEGACY_SCHEMA, MESSAGE_PRESENTATION_CACHE_SCHEMA, SINGLE_ID_SCHEMA } from "./migrations";
 import type { ChatPartition } from "./types";
 
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -12,7 +12,7 @@ async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
   await database.execAsync("PRAGMA journal_mode = WAL;");
   const row = await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
   const version = row?.user_version ?? 0;
-  if (version > 2) throw new Error("The local chat database is newer than this app.");
+  if (version > 3) throw new Error("The local chat database is newer than this app.");
   if (version < 2) {
     // Foreign keys must be disabled outside the transaction while replacing referenced tables.
     await database.execAsync("PRAGMA foreign_keys = OFF;");
@@ -28,6 +28,11 @@ async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
     }
   } else {
     await database.execAsync("PRAGMA foreign_keys = ON;");
+  }
+  if (version < 3) {
+    await database.withTransactionAsync(async () => {
+      await database.execAsync(MESSAGE_PRESENTATION_CACHE_SCHEMA);
+    });
   }
   return database;
 }

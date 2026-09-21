@@ -10,11 +10,14 @@ import {
 } from "@expo/ui/swift-ui/modifiers";
 import { useQuery } from "@tanstack/react-query";
 import { Link, router, useGlobalSearchParams } from "expo-router";
-import { useDrawerProgress } from "expo-router/drawer";
-import { useState } from "react";
+import { useDrawerProgress, useDrawerStatus } from "expo-router/drawer";
+import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import type { MarkdownStyle } from "react-native-enriched-markdown";
 import Reanimated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StreamdownText } from "react-native-streamdown";
+import { useUniwind } from "uniwind";
 import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
@@ -23,7 +26,13 @@ import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { useToast } from "@/shared/ui/toast";
 import { chatQueryKeys, useChatCoordinator } from "@/widgets/chat/model/chat-coordinator";
-import { listStoredConversations } from "@/widgets/chat/model/chat-store";
+import { useChatInputController } from "@/widgets/chat/model/chat-input-controller";
+import {
+  listStoredConversations,
+  listStoredMessages,
+  type StoredConversation,
+} from "@/widgets/chat/model/chat-store";
+import { useChatMarkdownStyle } from "@/widgets/chat/ui/use-chat-markdown-style";
 import {
   NativeSidebarHeader,
   SIDEBAR_HEADER_INITIAL_HEIGHT,
@@ -35,21 +44,99 @@ const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
 const SIDEBAR_ACTION_CONTROL_SCALE = 0.875;
 const SIDEBAR_ACTION_ICON_SCALE = 1.25;
 
+function SidebarConversationRow({
+  active,
+  conversation,
+  markdownStyle,
+  partition,
+  themeKey,
+}: {
+  active: boolean;
+  conversation: StoredConversation;
+  markdownStyle: MarkdownStyle;
+  partition: NonNullable<ReturnType<typeof useChatCoordinator>["partition"]>;
+  themeKey: string;
+}) {
+  const input = useChatInputController();
+  const previewQuery = useQuery({
+    queryKey: [...chatQueryKeys.messages(partition, conversation.id), "sidebar-preview"],
+    queryFn: () => listStoredMessages(partition, conversation.id),
+    staleTime: Infinity,
+  });
+  const assistant = previewQuery.data?.findLast((message) => message.role === "assistant");
+  const previewMarkdown = assistant
+    ? assistant.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
+      assistant.content
+    : "";
+  const noOp = () => {};
+
+  return (
+    <Link asChild href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}>
+      <Link.Trigger>
+        <Pressable
+          accessibilityState={{ selected: active }}
+          collapsable={false}
+          className={
+            active
+              ? "min-h-11 justify-center rounded-xl border-continuous bg-secondary px-4 py-3"
+              : "min-h-11 justify-center rounded-xl border-continuous px-4 py-3 active:bg-secondary"
+          }
+          onPress={() => analytics.capture("conversation_opened")}
+          onPressIn={() => void input.dismissSearch()}
+        >
+          <Text numberOfLines={1} className="text-[17px] text-sidebar-foreground leading-[22px]">
+            {conversation.title}
+          </Text>
+        </Pressable>
+      </Link.Trigger>
+      <Link.Preview style={{ width: 340, height: 300 }}>
+        <View className="h-full w-full gap-4 bg-background p-5">
+          <Text numberOfLines={2} className="text-[19px] font-semibold text-foreground">
+            {conversation.title}
+          </Text>
+          {previewMarkdown ? (
+            <StreamdownText
+              flavor="github"
+              key={themeKey}
+              markdown={previewMarkdown}
+              markdownStyle={markdownStyle}
+            />
+          ) : (
+            <Text className="text-[15px] text-muted-foreground">Preview unavailable</Text>
+          )}
+        </View>
+      </Link.Preview>
+      <Link.Menu>
+        <Link.MenuAction title="Pin" icon="pin" onPress={noOp} />
+        <Link.MenuAction title="Rename" icon="pencil" onPress={noOp} />
+        <Link.MenuAction title="Add to project" icon="folder.badge.plus" onPress={noOp} />
+        <Link.MenuAction title="Archive" icon="archivebox" onPress={noOp} />
+        <Link.MenuAction title="Delete" icon="trash" destructive onPress={noOp} />
+      </Link.Menu>
+    </Link>
+  );
+}
+
 function getConversationsError(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof Error) return error.message;
   return "Recent chats could not be loaded.";
 }
 
-export function Sidebar() {
+export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
   const coordinator = useChatCoordinator();
+  const input = useChatInputController();
+  const drawerStatus = useDrawerStatus();
+  const previousDrawerStatus = useRef(drawerStatus);
   const { showErrorToast } = useToast();
+  const { theme } = useUniwind();
   const { chatId: activeChatId } = useGlobalSearchParams<{ chatId?: string }>();
   const insets = useSafeAreaInsets();
   const [headerHeight, setHeaderHeight] = useState(insets.top + SIDEBAR_HEADER_INITIAL_HEIGHT);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [searchValue, setSearchValue] = useState("");
+  const markdownStyle = useChatMarkdownStyle();
   const conversationsQuery = useQuery({
     queryKey: coordinator.partition
       ? chatQueryKeys.conversations(coordinator.partition)
@@ -65,6 +152,13 @@ export function Sidebar() {
       )
     : conversations;
   const conversationsError = getConversationsError(conversationsQuery.error);
+
+  useEffect(() => {
+    if (previousDrawerStatus.current === "open" && drawerStatus === "closed") {
+      void input.dismissSearch();
+    }
+    previousDrawerStatus.current = drawerStatus;
+  }, [drawerStatus, input]);
 
   const refreshConversations = async () => {
     if (isRefreshing) return;
@@ -92,7 +186,7 @@ export function Sidebar() {
         alwaysBounceVertical
         contentContainerStyle={{
           paddingTop: headerHeight,
-          paddingBottom: insets.bottom + 24,
+          paddingBottom: insets.bottom + 96,
         }}
         refreshControl={
           <RefreshControl
@@ -101,7 +195,7 @@ export function Sidebar() {
             tintColorClassName="accent-sidebar-foreground"
           />
         }
-        scrollIndicatorInsets={{ top: headerHeight }}
+        scrollIndicatorInsets={{ top: headerHeight, bottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
       >
         <Text className="px-3 pb-2 text-[13px] font-semibold text-muted-foreground">Recents</Text>
@@ -136,32 +230,25 @@ export function Sidebar() {
           <Text className="px-3 py-3 text-[14px] leading-5 text-muted-foreground">
             No chats found.
           </Text>
-        ) : (
-          filteredConversations.map((conversation) => (
-            <Link
-              key={conversation.id}
-              href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}
-              asChild
-            >
-              <Pressable
-                className={
-                  conversation.id === activeChatId
-                    ? "rounded-xl border-continuous bg-secondary px-3 py-2.5"
-                    : "rounded-xl border-continuous px-3 py-2.5 active:bg-secondary"
-                }
-                onPress={() => analytics.capture("conversation_opened")}
-              >
-                <Text numberOfLines={1} className="text-[15px] text-sidebar-foreground">
-                  {conversation.title}
-                </Text>
-              </Pressable>
-            </Link>
-          ))
-        )}
+        ) : coordinator.partition ? (
+          <View className="gap-1">
+            {filteredConversations.map((conversation) => (
+              <SidebarConversationRow
+                active={conversation.id === activeChatId}
+                conversation={conversation}
+                key={conversation.id}
+                markdownStyle={markdownStyle}
+                partition={coordinator.partition!}
+                themeKey={theme}
+              />
+            ))}
+          </View>
+        ) : null}
       </ScrollView>
 
       <NativeSidebarHeader
         className="absolute inset-x-0 top-0 z-10"
+        dismissSearchRequest={input.dismissSearchRequestId}
         leading={
           <View accessible accessibilityLabel="opencompany" className="h-6 w-[146px] -mt-2">
             <StyledImage
@@ -181,6 +268,7 @@ export function Sidebar() {
         onHeightChange={setHeaderHeight}
         onSearchActiveChange={(active) => {
           setIsSearchActive(active);
+          input.setKeyboardOwner(active ? "sidebar" : null);
           analytics.capture(active ? "conversation_search_started" : "conversation_search_closed", {
             had_query: Boolean(searchValue.trim()),
           });
@@ -194,6 +282,9 @@ export function Sidebar() {
           <HStack>
             <Button
               onPress={() => {
+                void input.dismissSearch();
+                input.requestComposerFocus();
+                closeDrawer();
                 analytics.capture("new_chat_started");
                 router.navigate("/");
               }}
@@ -226,6 +317,7 @@ export function Sidebar() {
                 scaleEffect(SIDEBAR_ACTION_CONTROL_SCALE),
               ]}
               onPress={() => {
+                void input.dismissSearch();
                 analytics.capture("settings_opened");
                 router.navigate("/settings-sheet");
               }}

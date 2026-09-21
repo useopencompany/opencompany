@@ -45,6 +45,7 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
   private var isSearchActive = false
   private var lastReportedHeight: CGFloat?
   private var searchValue = ""
+  private var lastDismissSearchRequest = 0
 
   private lazy var searchController: UISearchController = {
     let searchController = UISearchController(searchResultsController: nil)
@@ -68,6 +69,7 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
 
     backgroundColor = .clear
     navigationBar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    navigationBar.tintColor = .label
 
     searchItem.accessibilityLabel = searchAccessibilityLabel
     if #available(iOS 26.0, *) {
@@ -151,6 +153,45 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
 
     isSearchActive = active
     onSearchActiveChange(["active": active])
+  }
+
+  @MainActor
+  func dismissSearch() {
+    let preservedSearchValue = searchValue
+    searchController.searchBar.endEditing(true)
+    window?.endEditing(true)
+    searchController.isActive = false
+    setSearchActive(false)
+
+    // UISearchController can restore first responder while a drawer transition
+    // is committing. Repeat the idempotent teardown on the next main run-loop
+    // turn, after UIKit has finished the current navigation update.
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        return
+      }
+
+      self.searchController.searchBar.endEditing(true)
+      self.window?.endEditing(true)
+      self.searchController.isActive = false
+      self.searchController.searchBar.text = preservedSearchValue
+      if #available(iOS 26.0, *) {
+        self.navigationItem.preferredSearchBarPlacement = .integratedButton
+      }
+      self.navigationBar.setNeedsLayout()
+      self.navigationBar.layoutIfNeeded()
+      self.setSearchActive(false)
+    }
+  }
+
+  @MainActor
+  func consumeDismissSearchRequest(_ request: Int) {
+    guard request > lastDismissSearchRequest else {
+      return
+    }
+
+    lastDismissSearchRequest = request
+    dismissSearch()
   }
 
   private func measuredNavigationBarHeight() -> CGFloat {

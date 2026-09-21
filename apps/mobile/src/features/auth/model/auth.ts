@@ -12,6 +12,7 @@
 import { WorkOS } from "@workos-inc/node";
 import * as Linking from "expo-linking";
 import * as SecureStore from "expo-secure-store";
+import { AppState } from "react-native";
 
 // Environment variables (set in .env or app.config.js)
 const WORKOS_CLIENT_ID = process.env.EXPO_PUBLIC_WORKOS_CLIENT_ID!;
@@ -22,7 +23,7 @@ export const REDIRECT_URI = Linking.createURL("callback");
 export const SIGN_OUT_REDIRECT_URI = Linking.createURL("signout-callback");
 
 // Initialize WorkOS in public client mode (no API key needed for PKCE)
-const workos = new WorkOS({ clientId: WORKOS_CLIENT_ID });
+const workos = new WorkOS({ clientId: WORKOS_CLIENT_ID, timeout: 10_000, maxRetries: 1 });
 
 // Storage keys
 const KEYS = {
@@ -66,6 +67,63 @@ interface PkceState {
   expiresAt: number;
 }
 
+export class TerminalSessionError extends Error {
+  constructor(cause: unknown) {
+    super("Your session has expired. Sign in again.", { cause });
+    this.name = "TerminalSessionError";
+  }
+}
+
+export class SessionRefreshDeferredError extends Error {
+  constructor() {
+    super("Session refresh is paused while the app is in the background.");
+    this.name = "SessionRefreshDeferredError";
+  }
+}
+
+export class SessionPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super("The refreshed session could not be saved securely.", { cause });
+    this.name = "SessionPersistenceError";
+  }
+}
+
+const errorValues = (error: unknown): string => {
+  if (typeof error === "string") return error.toLocaleLowerCase();
+  if (!(error instanceof Error)) return "";
+  const record = error as Error & {
+    code?: unknown;
+    error?: unknown;
+    rawData?: Record<string, unknown>;
+    response?: Record<string, unknown>;
+  };
+  return [
+    error.message,
+    record.code,
+    record.error,
+    record.rawData?.error,
+    record.rawData?.error_description,
+    record.rawData?.message,
+    record.response?.error,
+    record.response?.error_description,
+    record.response?.message,
+  ]
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toLocaleLowerCase();
+};
+
+export const isTerminalSessionError = (error: unknown): boolean => {
+  if (error instanceof TerminalSessionError) return true;
+  const value = errorValues(error);
+  return (
+    value.includes("invalid_grant") ||
+    value.includes("refresh token is invalid") ||
+    value.includes("refresh token has expired") ||
+    value.includes("refresh token was revoked")
+  );
+};
+
 /**
  * Generate sign-in URL with PKCE challenge.
  * The WorkOS SDK handles PKCE generation automatically via getAuthorizationUrlWithPKCE.
@@ -88,6 +146,7 @@ export async function getSignInUrl(): Promise<string> {
 
 /** Exchange authorization code for tokens using stored code verifier. */
 export async function handleCallback(code: string): Promise<User> {
+  const generation = sessionGeneration;
   const pkceData = await SecureStore.getItemAsync(KEYS.PKCE);
   if (!pkceData) {
     throw new Error("No PKCE state found - please try signing in again");
@@ -104,6 +163,7 @@ export async function handleCallback(code: string): Promise<User> {
     code,
     codeVerifier: pkceState.codeVerifier,
   });
+  if (generation !== sessionGeneration) throw new Error("Authentication was canceled.");
 
   // Clear PKCE state after successful exchange
   await SecureStore.deleteItemAsync(KEYS.PKCE);
@@ -114,7 +174,9 @@ export async function handleCallback(code: string): Promise<User> {
     refreshToken: auth.refreshToken,
     user: toUser(auth.user),
   };
-  await SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session));
+  sessionMemory = session;
+  await persistSessionBestEffort(session, generation);
+  if (generation !== sessionGeneration) throw new Error("Authentication was canceled.");
 
   return session.user;
 }
@@ -128,14 +190,58 @@ function parseJwtPayload(token: string): Record<string, unknown> {
   return JSON.parse(atob(normalized));
 }
 
+let sessionMemory: StoredSession | null | undefined;
+let pendingPersistence: StoredSession | null = null;
+let sessionGeneration = 0;
+let secureStoreWriteTail: Promise<void> = Promise.resolve();
+
 const readStoredSession = async (): Promise<StoredSession | null> => {
+  if (sessionMemory !== undefined) return sessionMemory;
+  const generation = sessionGeneration;
   const sessionData = await SecureStore.getItemAsync(KEYS.SESSION);
-  if (!sessionData) return null;
-  return JSON.parse(sessionData) as StoredSession;
+  if (generation !== sessionGeneration) return sessionMemory ?? null;
+  sessionMemory = sessionData ? (JSON.parse(sessionData) as StoredSession) : null;
+  return sessionMemory;
+};
+
+const queueSecureStoreWrite = (write: () => Promise<void>): Promise<void> => {
+  const result = secureStoreWriteTail.then(write);
+  secureStoreWriteTail = result.catch(() => undefined);
+  return result;
 };
 
 const persistSession = async (session: StoredSession): Promise<void> => {
-  await SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session));
+  await queueSecureStoreWrite(() =>
+    SecureStore.setItemAsync(KEYS.SESSION, JSON.stringify(session)),
+  );
+};
+
+const persistSessionBestEffort = async (
+  session: StoredSession,
+  generation: number,
+): Promise<void> => {
+  try {
+    await persistSession(session);
+    if (generation === sessionGeneration && pendingPersistence === session) {
+      pendingPersistence = null;
+    }
+  } catch {
+    if (generation === sessionGeneration) pendingPersistence = session;
+  }
+};
+
+const flushPendingPersistence = async (): Promise<void> => {
+  if (!pendingPersistence) return;
+  const session = pendingPersistence;
+  const generation = sessionGeneration;
+  try {
+    await persistSession(session);
+    if (generation === sessionGeneration && pendingPersistence === session) {
+      pendingPersistence = null;
+    }
+  } catch (error) {
+    throw new SessionPersistenceError(error);
+  }
 };
 
 let refreshInFlight: { organizationId?: string; promise: Promise<StoredSession> } | null = null;
@@ -150,19 +256,31 @@ const refreshStoredSession = async (organizationId?: string): Promise<StoredSess
   }
 
   const promise = (async () => {
+    if (AppState.currentState !== "active") throw new SessionRefreshDeferredError();
+    await flushPendingPersistence();
     const session = await readStoredSession();
     if (!session) throw new Error("No active session found.");
+    const generation = sessionGeneration;
 
-    const refreshed = await workos.userManagement.authenticateWithRefreshToken({
-      refreshToken: session.refreshToken,
-      ...(organizationId ? { organizationId } : {}),
-    });
+    let refreshed: Awaited<ReturnType<typeof workos.userManagement.authenticateWithRefreshToken>>;
+    try {
+      refreshed = await workos.userManagement.authenticateWithRefreshToken({
+        refreshToken: session.refreshToken,
+        ...(organizationId ? { organizationId } : {}),
+      });
+    } catch (error) {
+      if (isTerminalSessionError(error)) throw new TerminalSessionError(error);
+      throw error;
+    }
+    if (generation !== sessionGeneration) throw new Error("The session changed during refresh.");
     const newSession: StoredSession = {
       accessToken: refreshed.accessToken,
       refreshToken: refreshed.refreshToken,
       user: toUser(refreshed.user),
     };
-    await persistSession(newSession);
+    sessionMemory = newSession;
+    await persistSessionBestEffort(newSession, generation);
+    if (generation !== sessionGeneration) throw new Error("The session changed during refresh.");
     return newSession;
   })();
   refreshInFlight = { organizationId, promise };
@@ -189,6 +307,7 @@ export async function getAccessToken(): Promise<string> {
   const isExpired = Date.now() > exp * 1000 - 10_000;
 
   if (isExpired) {
+    if (pendingPersistence) await flushPendingPersistence();
     return (await refreshStoredSession()).accessToken;
   }
 
@@ -202,11 +321,9 @@ export async function selectOrganization(organizationId: string): Promise<User> 
 
 /** Get session ID from stored access token (needed for logout). */
 export async function getSessionId(): Promise<string | null> {
-  const sessionData = await SecureStore.getItemAsync(KEYS.SESSION);
-  if (!sessionData) return null;
-
   try {
-    const session: StoredSession = JSON.parse(sessionData);
+    const session = await readStoredSession();
+    if (!session) return null;
     const payload = parseJwtPayload(session.accessToken);
     return (payload.sid as string) ?? null;
   } catch {
@@ -224,6 +341,11 @@ export function getLogoutUrl(sessionId: string): string {
 
 /** Clear stored session and PKCE state. */
 export async function clearSession(): Promise<void> {
-  await SecureStore.deleteItemAsync(KEYS.SESSION);
-  await SecureStore.deleteItemAsync(KEYS.PKCE);
+  sessionGeneration += 1;
+  sessionMemory = null;
+  pendingPersistence = null;
+  await queueSecureStoreWrite(async () => {
+    await SecureStore.deleteItemAsync(KEYS.SESSION);
+    await SecureStore.deleteItemAsync(KEYS.PKCE);
+  });
 }

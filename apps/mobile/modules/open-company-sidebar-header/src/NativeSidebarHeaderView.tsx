@@ -1,15 +1,20 @@
 import { requireNativeView } from "expo";
-import type { ReactNode } from "react";
-import { useState } from "react";
+import type { ReactNode, Ref } from "react";
+import { useImperativeHandle, useRef, useState } from "react";
 import type { ViewProps } from "react-native";
 import { View } from "react-native";
 import Reanimated, { Keyframe } from "react-native-reanimated";
-import { withUniwind } from "uniwind";
 
-import type { NativeSidebarHeaderViewProps } from "./NativeSidebarHeader.types";
+import type {
+  NativeSidebarHeaderNativeRef,
+  NativeSidebarHeaderViewProps,
+} from "./NativeSidebarHeader.types";
 
 const NativeView = requireNativeView<NativeSidebarHeaderViewProps>("NativeSidebarHeader");
-const StyledNativeView = withUniwind(NativeView);
+
+// UIKit keeps ownership here because it positions the navigation bar, expands integrated search,
+// applies safe-area insets, and coordinates scroll-edge treatment. React Native renders the
+// sidebar content below the measured native header height.
 
 // UIKit reports the actual bar height immediately after mount. This value only
 // prevents the scroll content from jumping during that first native layout.
@@ -30,6 +35,7 @@ const WORDMARK_EXITING = new Keyframe({
 
 export function NativeSidebarHeader({
   leading,
+  dismissSearchRequest = 0,
   onHeightChange,
   onSearchActiveChange,
   onSearchPress,
@@ -38,9 +44,11 @@ export function NativeSidebarHeader({
   searchAccessibilityLabel = "Search",
   style,
   topInset,
+  ref,
   ...viewProps
 }: Omit<ViewProps, "children"> & {
   leading?: ReactNode;
+  dismissSearchRequest?: number;
   onHeightChange?: (height: number) => void;
   onSearchActiveChange?: (active: boolean) => void;
   onSearchPress?: () => void;
@@ -48,10 +56,20 @@ export function NativeSidebarHeader({
   scrollViewTestID: string;
   searchAccessibilityLabel?: string;
   topInset: number;
+  ref?: Ref<NativeSidebarHeaderNativeRef>;
 }) {
   const [height, setHeight] = useState(topInset + SIDEBAR_HEADER_INITIAL_HEIGHT);
   const [hasOpenedSearch, setHasOpenedSearch] = useState(false);
   const [isSearchActive, setIsSearchActive] = useState(false);
+  const [imperativeDismissRequest, setImperativeDismissRequest] = useState(0);
+  const imperativeDismissRequestRef = useRef(0);
+
+  useImperativeHandle(ref, () => ({
+    dismissSearch: async () => {
+      imperativeDismissRequestRef.current += 1;
+      setImperativeDismissRequest(imperativeDismissRequestRef.current);
+    },
+  }));
 
   return (
     <View {...viewProps} style={[style, { height }]}>
@@ -67,9 +85,9 @@ export function NativeSidebarHeader({
           {leading}
         </Reanimated.View>
       ) : null}
-      <StyledNativeView
-        className="flex-1 self-stretch"
+      <NativeView
         collapsable={false}
+        dismissSearchRequest={dismissSearchRequest + imperativeDismissRequest}
         onHeaderHeightChange={({ nativeEvent }) => {
           setHeight(nativeEvent.height);
           onHeightChange?.(nativeEvent.height);
@@ -88,6 +106,7 @@ export function NativeSidebarHeader({
         scrollViewTestID={scrollViewTestID}
         searchAccessibilityLabel={searchAccessibilityLabel}
         topInset={topInset}
+        style={{ flex: 1, alignSelf: "stretch" }}
       />
     </View>
   );

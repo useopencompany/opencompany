@@ -3,10 +3,23 @@ import { View } from "react-native";
 import { useResolveClassNames, useUniwind } from "uniwind";
 
 import { SCREEN_CORNER_RADIUS } from "@/lib/screen-corner-radius";
+import {
+  ChatInputControllerProvider,
+  useChatInputController,
+} from "@/widgets/chat/model/chat-input-controller";
 import { Sidebar } from "@/widgets/sidebar";
 
 export default function AppLayout() {
+  return (
+    <ChatInputControllerProvider>
+      <AppDrawer />
+    </ChatInputControllerProvider>
+  );
+}
+
+function AppDrawer() {
   const { theme } = useUniwind();
+  const input = useChatInputController();
   const drawerStyle = useResolveClassNames("w-xs bg-sidebar");
   const sceneStaticStyle = useResolveClassNames(
     theme === "dark"
@@ -30,7 +43,25 @@ export default function AppLayout() {
         }}
         // Render an element so Sidebar's drawer-progress hooks stay below the
         // DrawerProgressContext provider.
-        drawerContent={() => <Sidebar />}
+        drawerContent={({ navigation }) => <Sidebar closeDrawer={() => navigation.closeDrawer()} />}
+        screenListeners={{
+          gestureStart: () => {
+            void input.dismissComposer();
+          },
+          gestureEnd: () => {
+            void input.dismissSearch();
+          },
+          transitionStart: (event) => {
+            if (!event.data.closing) {
+              input.setDrawerOpen(true);
+              void input.dismissComposer();
+            }
+          },
+          transitionEnd: (event) => {
+            input.setDrawerOpen(!event.data.closing);
+            if (event.data.closing) void input.dismissSearch();
+          },
+        }}
       >
         <Drawer.Screen name="(stack)" />
       </Drawer>

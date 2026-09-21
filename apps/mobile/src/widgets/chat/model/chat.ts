@@ -1,20 +1,23 @@
 import type { AttachmentDto } from "@opencompany/protocol/schemas";
 
 export type DeliveryState = "queued" | "sending" | "accepted";
-export type ConnectivityState = "online" | "offline" | "waiting" | "reconnecting";
+export type ConnectivityState = "online" | "offline" | "reconnecting";
 
 export interface TextPart {
+  id: string;
   type: "text";
   text: string;
 }
 
 export interface AttachmentPart {
+  id: string;
   type: "attachment";
   attachment: AttachmentDto;
   localUri?: string;
 }
 
 export interface ToolPart {
+  id: string;
   type: "tool";
   toolCallId: string;
   name: string;
@@ -26,8 +29,10 @@ export interface ToolPart {
 }
 
 export interface ApprovalPart {
+  id: string;
   type: "approval";
   approvalId: string;
+  toolCallId?: string;
   kind: string;
   prompt: string;
   options: string[];
@@ -37,6 +42,7 @@ export interface ApprovalPart {
 }
 
 export interface ArtifactPart {
+  id: string;
   type: "artifact";
   artifactId: string;
   title: string;
@@ -46,8 +52,10 @@ export interface ArtifactPart {
 }
 
 export interface NoticePart {
+  id: string;
   type: "notice";
   message: string;
+  kind?: "error";
 }
 
 export type ChatPart =
