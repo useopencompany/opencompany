@@ -200,7 +200,12 @@ export const projectRunEvent = (
         isStopping: false,
         parts: [
           ...checkpoint.parts,
-          { id: `notice:${event.id}`, type: "notice", message: event.payload.message },
+          {
+            id: `notice:${event.id}`,
+            type: "notice",
+            message: event.payload.message,
+            kind: "error",
+          },
         ],
       };
     case "run.canceled":

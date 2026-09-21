@@ -50,10 +50,7 @@ export const orderedPartsFromPresentation = ({
       });
       continue;
     }
-    if (value.type === "reasoning" && typeof value.text === "string") {
-      parts.push({ id: `notice:${messageId}:${index}`, type: "notice", message: value.text });
-      continue;
-    }
+    if (value.type === "reasoning") continue;
     if (value.type === "data-artifact-file" && isRecord(value.data)) {
       const data = value.data;
       if (

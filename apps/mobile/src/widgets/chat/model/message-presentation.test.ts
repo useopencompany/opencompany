@@ -43,4 +43,19 @@ describe("orderedPartsFromPresentation", () => {
       { id: "tool:tool_2", status: "completed" },
     ]);
   });
+
+  it("omits model reasoning while preserving the surrounding response", () => {
+    const parts = orderedPartsFromPresentation({
+      content: "Answer.",
+      messageId: "message_1",
+      presentation: {
+        uiMessageParts: [
+          { type: "reasoning", text: "Private reasoning", itemId: "reasoning_1" },
+          { type: "text", text: "Answer.", itemId: "item_1" },
+        ],
+      },
+    });
+
+    expect(parts).toEqual([{ id: "text:item_1", type: "text", text: "Answer." }]);
+  });
 });

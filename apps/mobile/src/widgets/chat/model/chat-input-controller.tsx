@@ -7,13 +7,18 @@ import {
   useRef,
   useState,
 } from "react";
-import type { TextInput } from "react-native";
 import { KeyboardController, KeyboardEvents } from "react-native-keyboard-controller";
 
 export type KeyboardOwner = "composer" | "sidebar" | null;
 
+export interface ComposerInputHandle {
+  blur: () => void;
+  focus: () => void;
+  isFocused: () => boolean;
+}
+
 interface ChatInputControllerValue {
-  composerInputRef: RefObject<TextInput | null>;
+  composerInputRef: RefObject<ComposerInputHandle | null>;
   drawerOpen: boolean;
   dismissSearchRequestId: number;
   focusRequestId: number;
@@ -29,7 +34,7 @@ interface ChatInputControllerValue {
 const ChatInputControllerContext = createContext<ChatInputControllerValue | null>(null);
 
 export function ChatInputControllerProvider({ children }: { children: ReactNode }) {
-  const composerInputRef = useRef<TextInput>(null);
+  const composerInputRef = useRef<ComposerInputHandle>(null);
   const consumedFocusRequestRef = useRef(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dismissSearchRequestId, setDismissSearchRequestId] = useState(0);

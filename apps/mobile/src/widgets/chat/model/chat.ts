@@ -55,6 +55,7 @@ export interface NoticePart {
   id: string;
   type: "notice";
   message: string;
+  kind?: "error";
 }
 
 export type ChatPart =

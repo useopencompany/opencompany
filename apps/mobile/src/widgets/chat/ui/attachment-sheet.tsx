@@ -15,6 +15,7 @@ import {
   type ComposerAttachment,
   useChatComposer,
 } from "../model/chat-composer-context";
+import { prepareImageAttachments } from "../model/prepare-image-attachment";
 
 interface AttachmentAction {
   label: string;
@@ -39,7 +40,14 @@ export default function AttachmentSheet() {
   } = useChatComposer();
 
   const persistPickedAttachments = async (attachments: ComposerAttachment[]) => {
-    const validation = validateComposerAttachments(currentAttachments.length, attachments);
+    const [preparationError, preparedAttachments] = await until(() =>
+      prepareImageAttachments(attachments),
+    );
+    if (preparationError) {
+      Alert.alert("Attachment Not Added", "opencompany could not convert that image to JPEG.");
+      return;
+    }
+    const validation = validateComposerAttachments(currentAttachments.length, preparedAttachments);
     if (validation.error) {
       Alert.alert("Attachment Not Added", validation.error);
       return;

@@ -184,7 +184,7 @@ export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
         alwaysBounceVertical
         contentContainerStyle={{
           paddingTop: headerHeight,
-          paddingBottom: insets.bottom + 24,
+          paddingBottom: insets.bottom + 96,
         }}
         refreshControl={
           <RefreshControl
@@ -193,7 +193,7 @@ export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
             tintColorClassName="accent-sidebar-foreground"
           />
         }
-        scrollIndicatorInsets={{ top: headerHeight }}
+        scrollIndicatorInsets={{ top: headerHeight, bottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
       >
         <Text className="px-3 pb-2 text-[13px] font-semibold text-muted-foreground">Recents</Text>

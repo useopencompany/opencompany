@@ -1,11 +1,24 @@
 import type { ResolveApprovalBody } from "@opencompany/protocol/schemas";
+import { useMutation } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import { Alert, Pressable, Share, Text, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, Share, Text, View } from "react-native";
 import type { MarkdownStyle } from "react-native-enriched-markdown";
 import { StreamdownText } from "react-native-streamdown";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
+import { useToast } from "@/shared/ui/toast";
 import type { ApprovalPart, ChatMessage as ChatMessageModel, ChatPart } from "../model/chat";
+import { ShimmerText } from "./ShimmerText";
+
+const SHARE_SPINNER_DELAY_MS = 140;
+const COPY_CONFIRMATION_DURATION_MS = 2000;
+
+function orderedMessageParts(message: ChatMessageModel, text: string): ChatPart[] {
+  if (message.parts.length > 0) return message.parts;
+  if (!text) return [];
+  return [{ id: `text:${message.id}:fallback`, type: "text", text }];
+}
 
 function AttachmentRow({ part }: { part: Extract<ChatPart, { type: "attachment" }> }) {
   if (part.localUri && part.attachment.kind === "image") {
@@ -153,9 +166,47 @@ export function ChatMessage({
   onLinkPress: (url: string) => void;
   themeKey: string;
 }) {
+  const { showErrorToast, showToast } = useToast();
+  const [copied, setCopied] = useState(false);
+  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nonTextParts = message.parts.filter(
     (part): part is Exclude<ChatPart, { type: "text" }> => part.type !== "text",
   );
+  const text =
+    message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
+    message.content;
+  const orderedParts = orderedMessageParts(message, text);
+  const displayedParts = orderedParts.filter(
+    (part) => part.type !== "notice" || part.kind === "error" || (isTerminal && !text),
+  );
+  const copyMutation = useMutation({
+    mutationFn: () => Clipboard.setStringAsync(text),
+    onSuccess: () => {
+      setCopied(true);
+      showToast("Copied to clipboard", { duration: COPY_CONFIRMATION_DURATION_MS });
+      if (copyResetTimeoutRef.current) clearTimeout(copyResetTimeoutRef.current);
+      copyResetTimeoutRef.current = setTimeout(() => {
+        copyResetTimeoutRef.current = null;
+        setCopied(false);
+      }, COPY_CONFIRMATION_DURATION_MS);
+    },
+    onError: (error) => showErrorToast("The response could not be copied.", error, "chat.copy"),
+  });
+  const shareMutation = useMutation({
+    mutationFn: async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, SHARE_SPINNER_DELAY_MS));
+      return Share.share({ message: text });
+    },
+    onError: (error) => showErrorToast("The response could not be shared.", error, "chat.share"),
+  });
+
+  useEffect(
+    () => () => {
+      if (copyResetTimeoutRef.current) clearTimeout(copyResetTimeoutRef.current);
+    },
+    [],
+  );
+
   if (message.role === "user") {
     return (
       <View className="mb-[22px] max-w-[82%] self-end gap-2">
@@ -173,35 +224,10 @@ export function ChatMessage({
     );
   }
 
-  const text =
-    message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
-    message.content;
-  const orderedParts = message.parts.length
-    ? message.parts
-    : text
-      ? ([{ id: `text:${message.id}:fallback`, type: "text", text }] satisfies ChatPart[])
-      : [];
-
-  const copyText = async () => {
-    try {
-      await Clipboard.setStringAsync(text);
-    } catch (error) {
-      Alert.alert("Copy failed", error instanceof Error ? error.message : "Try again.");
-    }
-  };
-
-  const shareText = async () => {
-    try {
-      await Share.share({ message: text });
-    } catch (error) {
-      Alert.alert("Share failed", error instanceof Error ? error.message : "Try again.");
-    }
-  };
-
   return (
     <View className="mb-[22px] min-w-full self-stretch gap-3">
-      {orderedParts.length ? (
-        orderedParts.map((part) =>
+      {displayedParts.length ? (
+        displayedParts.map((part) =>
           part.type === "text" ? (
             <StreamdownText
               flavor="github"
@@ -219,35 +245,47 @@ export function ChatMessage({
           accessibilityLabel="Assistant is thinking"
           className="min-h-[30px] flex-row items-center gap-2"
         >
-          <View className="size-2 rounded-full bg-muted-foreground" />
-          <Text className="text-[15px] text-muted-foreground italic">Thinking...</Text>
+          <StyledSymbolView
+            name="sparkles"
+            size={15}
+            tintColorClassName="accent-muted-foreground"
+          />
+          <ShimmerText text="Thinking" width={112} />
         </View>
       ) : null}
       {isTerminal && text ? (
-        <View className="flex-row items-center gap-1">
+        <View className="flex-row items-center gap-2 pt-0.5">
           <Pressable
             accessibilityLabel="Copy response"
             accessibilityRole="button"
-            className="size-11 items-center justify-center rounded-full active:bg-secondary"
-            onPress={() => void copyText()}
+            className="size-8 items-center justify-center active:opacity-50"
+            disabled={copyMutation.isPending}
+            hitSlop={6}
+            onPress={() => copyMutation.mutate()}
           >
             <StyledSymbolView
-              name="doc.on.doc"
-              size={18}
+              name={copied ? "checkmark" : "doc.on.doc"}
+              size={17}
               tintColorClassName="accent-muted-foreground"
             />
           </Pressable>
           <Pressable
             accessibilityLabel="Share response"
             accessibilityRole="button"
-            className="size-11 items-center justify-center rounded-full active:bg-secondary"
-            onPress={() => void shareText()}
+            className="size-8 items-center justify-center active:opacity-50"
+            disabled={shareMutation.isPending}
+            hitSlop={6}
+            onPress={() => shareMutation.mutate()}
           >
-            <StyledSymbolView
-              name="square.and.arrow.up"
-              size={18}
-              tintColorClassName="accent-muted-foreground"
-            />
+            {shareMutation.isPending ? (
+              <ActivityIndicator size="small" colorClassName="accent-muted-foreground" />
+            ) : (
+              <StyledSymbolView
+                name="square.and.arrow.up"
+                size={17}
+                tintColorClassName="accent-muted-foreground"
+              />
+            )}
           </Pressable>
         </View>
       ) : null}

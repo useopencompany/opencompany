@@ -69,6 +69,7 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
 
     backgroundColor = .clear
     navigationBar.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    navigationBar.tintColor = .label
 
     searchItem.accessibilityLabel = searchAccessibilityLabel
     if #available(iOS 26.0, *) {
@@ -173,22 +174,12 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
       self.searchController.searchBar.endEditing(true)
       self.window?.endEditing(true)
       self.searchController.isActive = false
+      self.searchController.searchBar.text = preservedSearchValue
       if #available(iOS 26.0, *) {
-        // Reattaching restores the integrated button presentation. Merely
-        // setting isActive to false can leave the expanded search field in a
-        // hidden drawer even though it has resigned first responder.
-        self.navigationItem.searchController = nil
-        DispatchQueue.main.async { [weak self] in
-          guard let self else {
-            return
-          }
-
-          self.searchController.searchBar.text = preservedSearchValue
-          self.navigationItem.searchController = self.searchController
-          self.navigationItem.preferredSearchBarPlacement = .integratedButton
-          self.navigationBar.setNeedsLayout()
-        }
+        self.navigationItem.preferredSearchBarPlacement = .integratedButton
       }
+      self.navigationBar.setNeedsLayout()
+      self.navigationBar.layoutIfNeeded()
       self.setSearchActive(false)
     }
   }
