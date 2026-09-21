@@ -1,18 +1,10 @@
-import { createHash } from "node:crypto";
 import {
   type Actor,
   actorHasPermission,
   CHAT_READ_PERMISSION,
   CHAT_WRITE_PERMISSION,
 } from "@opencompany/core";
-import {
-  chatSessions,
-  projects,
-  users,
-  wikis,
-  workspaceMembers,
-} from "@opencompany/db/product-schema";
-import { createWiki, updateWikiSettings } from "@opencompany/db/wikis";
+import { chatSessions, projects, users, workspaceMembers } from "@opencompany/db/product-schema";
 import type { ProjectDto } from "@opencompany/protocol";
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { ApiError } from "./errors";
@@ -22,11 +14,6 @@ export type ProjectService = ReturnType<typeof createProjectService>;
 // Follows the repo-wide injectable-db convention for services that only need a drizzle handle
 // without dragging the full inferred schema type across packages.
 type DbLike = any;
-
-function projectWikiId(projectId: string) {
-  const digest = createHash("sha256").update(projectId).digest("hex").slice(0, 32);
-  return `wiki_project_${digest}`;
-}
 
 /**
  * Sidebar Projects: named folders that group a member's chats and Tasks.
@@ -81,12 +68,10 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
       .select({
         id: projects.id,
         name: projects.name,
-        wikiSlug: wikis.slug,
         createdAt: projects.createdAt,
         conversationId: chatSessions.id,
       })
       .from(projects)
-      .leftJoin(wikis, eq(wikis.id, projects.wikiId))
       .leftJoin(
         chatSessions,
         and(
@@ -108,7 +93,6 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
         ({
           id: row.id,
           name: row.name,
-          wikiSlug: row.wikiSlug,
           conversationIds: [],
           createdAt: new Date(row.createdAt).toISOString(),
         } satisfies ProjectDto);
@@ -116,28 +100,6 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
       if (row.conversationId) project.conversationIds.push(row.conversationId);
     }
     return [...byId.values()];
-  }
-
-  async function ensureProjectWiki(
-    actor: Actor,
-    project: { id: string; name: string; wikiId: string | null },
-  ) {
-    if (project.wikiId) return project.wikiId;
-    const wiki = await createWiki(
-      {
-        id: projectWikiId(project.id),
-        workspaceId: actor.workspaceId,
-        name: project.name,
-        access: "restricted",
-        createdByWorkosId: actor.userId,
-      },
-      { db: input.db },
-    );
-    await input.db
-      .update(projects)
-      .set({ wikiId: wiki.id })
-      .where(and(ownedProject(actor, project.id), isNull(projects.wikiId)));
-    return wiki.id;
   }
 
   return {
@@ -158,9 +120,7 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
     async create(actor: Actor, command: { id: string; name: string }) {
       await authorize(actor, true);
       // The client retains this id across retries, so a replayed create is a no-op rather than a
-      // second folder with the same name. A stable wiki id makes each following step idempotent:
-      // retrying after a process or network failure repairs a missing wiki or attachment without
-      // creating a duplicate. Neon HTTP does not expose multi-statement transactions.
+      // second folder with the same name.
       await input.db
         .insert(projects)
         .values({
@@ -170,13 +130,7 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
           name: command.name,
         })
         .onConflictDoNothing();
-      const [project] = await input.db
-        .select({ id: projects.id, name: projects.name, wikiId: projects.wikiId })
-        .from(projects)
-        .where(ownedProject(actor, command.id))
-        .limit(1);
-      if (!project) throw new ApiError(404, "not_found", "Project not found.");
-      await ensureProjectWiki(actor, project);
+      await requireProject(actor, command.id);
       return list(actor);
     },
 
@@ -186,12 +140,8 @@ export function createProjectService(input: { db: DbLike; now?: () => Date }) {
         .update(projects)
         .set({ name, updatedAt: now() })
         .where(ownedProject(actor, projectId))
-        .returning({ id: projects.id, name: projects.name, wikiId: projects.wikiId });
+        .returning({ id: projects.id });
       if (!renamed) throw new ApiError(404, "not_found", "Project not found.");
-      // A retry repeats both operations, repairing a missing wiki or partial rename if the first
-      // request stopped after the Project row changed.
-      const wikiId = await ensureProjectWiki(actor, renamed);
-      await updateWikiSettings({ wikiId, name }, { db: input.db });
       return list(actor);
     },
 

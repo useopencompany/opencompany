@@ -14,7 +14,6 @@ export type ChatHostContext = {
   actorId: string;
   workspaceId: string;
   workspaceName: string;
-  projectWikiId: string | null;
   conversationId: string;
   messageId: string;
   email: string;
@@ -414,11 +413,10 @@ async function executeOperation(
       // An exact empty string is a structured-output placeholder and means
       // omission. Keep every other explicit string so the command service can
       // reject an invalid reference instead of silently choosing the default.
-      const requestedWikiId =
+      const wikiId =
         typeof toolInput.wiki === "string" && toolInput.wiki.length > 0
           ? toolInput.wiki
           : undefined;
-      const wikiId = requestedWikiId ?? context.projectWikiId ?? undefined;
       const wikiCommand = { ...toolInput };
       delete wikiCommand.wiki;
       return dependencies.runWikiTool({
