@@ -197,13 +197,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
       drainMs: RENDER_SHUTDOWN_DRAIN_MS,
       postAbortWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
       onDeadline: ({ activeAtStart, interruptedAtDeadline }) => {
-        const error = new Error("Runner shutdown drain deadline exceeded.");
-        captureException(error, {
-          event: "opencompany.runner_shutdown_drain_deadline_exceeded",
-          active_at_start: activeAtStart,
-          interrupted_at_deadline: interruptedAtDeadline,
-        });
-        logger.error("Runner shutdown drain deadline exceeded; aborting active work", {
+        logger.warn("Runner shutdown drain deadline exceeded; handing off active work", {
           event: "opencompany.runner_shutdown_drain_deadline_exceeded",
           active_at_start: activeAtStart,
           interrupted_at_deadline: interruptedAtDeadline,
