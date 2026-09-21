@@ -24,7 +24,7 @@ import {
 } from "@opencompany/agent/chat-ui";
 import { executeChatExaFetch } from "@opencompany/agent/chat-web-fetch";
 import { executeChatExaSearch } from "@opencompany/agent/chat-web-search";
-import { guardKimiOutput } from "@opencompany/agent/kimi-output-guard";
+import { guardKimiOutput, KimiToolCallLeakError } from "@opencompany/agent/kimi-output-guard";
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import { createSubagentBudget } from "@opencompany/agent/subagent";
@@ -512,7 +512,7 @@ export async function runProductChatTurn(input: {
         attempt: turn.attempts,
         error_name: effectiveError.name,
         error: effectiveError.message,
-        status_code: effectiveError.statusCode,
+        status_code: "statusCode" in effectiveError ? effectiveError.statusCode : undefined,
         cause_name:
           effectiveError.cause instanceof Error
             ? effectiveError.cause.name
@@ -1683,14 +1683,16 @@ export function errorMessage(error: unknown) {
 export function isReplaySafeProductChatInfrastructureFailure(
   error: unknown,
   projection: ProductChatProjection,
-): error is APICallError | StreamProviderError {
-  const retryableProviderFailure = APICallError.isInstance(error)
-    ? error.isRetryable ||
-      (error.statusCode !== undefined &&
-        error.statusCode >= 200 &&
-        error.statusCode < 300 &&
-        error.message === "Failed to process successful response")
-    : StreamProviderError.isInstance(error) && error.isRetryable;
+): error is APICallError | StreamProviderError | KimiToolCallLeakError {
+  const retryableProviderFailure =
+    error instanceof KimiToolCallLeakError ||
+    (APICallError.isInstance(error)
+      ? error.isRetryable ||
+        (error.statusCode !== undefined &&
+          error.statusCode >= 200 &&
+          error.statusCode < 300 &&
+          error.message === "Failed to process successful response")
+      : StreamProviderError.isInstance(error) && error.isRetryable);
   if (!retryableProviderFailure) return false;
 
   // A completed tool call may already have crossed an external side-effect boundary. Restarting
@@ -1703,8 +1705,11 @@ export function isReplaySafeProductChatInfrastructureFailure(
 }
 
 export function productChatInfrastructureFailureDiagnostic(
-  error: APICallError | StreamProviderError,
+  error: APICallError | StreamProviderError | KimiToolCallLeakError,
 ) {
+  if (error instanceof KimiToolCallLeakError) {
+    return `[run_turn] ${error.name}: ${error.message}`;
+  }
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);
   const cause =
     error.cause instanceof Error
