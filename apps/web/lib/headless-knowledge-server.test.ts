@@ -4,6 +4,7 @@ import {
   getHeadlessPlugin,
   getHeadlessSkill,
   listHeadlessWikiPages,
+  listHeadlessWikis,
 } from "./headless-knowledge-server";
 
 vi.mock("server-only", () => ({}));
@@ -46,5 +47,17 @@ describe("server knowledge reads", () => {
 
     await expect(listHeadlessWikiPages()).rejects.toThrow("canonical API origin is invalid");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["wiki list", () => listHeadlessWikis()],
+    ["wiki page list", () => listHeadlessWikiPages()],
+  ])("rejects an invalid successful %s response at the API boundary", async (_label, read) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ meta: { requestId: "request_1" } })),
+    );
+
+    await expect(read()).rejects.toThrow();
   });
 });

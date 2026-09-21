@@ -8,14 +8,16 @@ import {
   type SkillInstallationDto,
   type SkillListItemDto,
   type WikiDto,
+  WikiListEnvelopeSchema,
   type WikiPageDto,
+  WikiPageListEnvelopeSchema,
 } from "@opencompany/protocol";
 import { headers } from "next/headers";
 
 export async function listHeadlessWikis(): Promise<WikiDto[]> {
   const response = await (await serverKnowledgeClient()).v1.wikis.$get();
   if (!response.ok) throw await serverResponseError(response, "Wiki loading failed");
-  return (await response.json()).data;
+  return WikiListEnvelopeSchema.parse(await response.json()).data;
 }
 
 export async function listHeadlessWikiPages(wikiId?: string): Promise<WikiPageDto[]> {
@@ -23,7 +25,7 @@ export async function listHeadlessWikiPages(wikiId?: string): Promise<WikiPageDt
     query: wikiId ? { wikiId } : {},
   });
   if (!response.ok) throw await serverResponseError(response, "Wiki loading failed");
-  return (await response.json()).data;
+  return WikiPageListEnvelopeSchema.parse(await response.json()).data;
 }
 
 export async function listHeadlessSkills(): Promise<SkillListItemDto[]> {
