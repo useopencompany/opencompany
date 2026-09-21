@@ -20,6 +20,8 @@ import { SplashScreenController } from "@/widgets/splash-screen-controller";
 Sentry.init({
   dsn: "https://46a811602dbe62dc0ac0a0a730b6f641@o4512045432963072.ingest.de.sentry.io/4512119592845392",
   environment: __DEV__ ? "development" : "production",
+  // Events carry the signed-in user id (set in AuthProvider) and nothing else identifying.
+  sendDefaultPii: false,
   tracesSampleRate: __DEV__ ? 1 : 0.1,
   enableNativeFramesTracking: !isRunningInExpoGo(),
 });
