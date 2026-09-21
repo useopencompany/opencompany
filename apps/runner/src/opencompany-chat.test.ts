@@ -759,6 +759,26 @@ describe("opencompany chat infrastructure recovery", () => {
     ).toBe(true);
   });
 
+  it("retries leaked Kimi tool syntax before a tool executes", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(new KimiToolCallLeakError(), { parts: [] }),
+    ).toBe(true);
+  });
+
+  it("does not replay leaked Kimi tool syntax after a tool crossed the execution boundary", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(new KimiToolCallLeakError(), {
+        parts: [
+          {
+            type: "tool-use_action",
+            toolCallId: "call_1",
+            state: "output-available",
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+
   it("does not replay a stream provider error after a tool crossed the execution boundary", () => {
     expect(
       isReplaySafeProductChatInfrastructureFailure(retryableStreamProviderFailure(), {
