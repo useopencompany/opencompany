@@ -166,7 +166,7 @@ jobs:
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
         continue-on-error: true
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -178,7 +178,7 @@ jobs:
       - name: Retry release secrets from Infisical
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && steps.infisical-release-secrets.outcome == 'failure' }}
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -196,7 +196,7 @@ jobs:
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
         continue-on-error: true
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -208,7 +208,7 @@ jobs:
       - name: Retry API secrets from Infisical
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' && steps.infisical-api-secrets.outcome == 'failure' }}
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -226,7 +226,7 @@ jobs:
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
         continue-on-error: true
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -238,7 +238,7 @@ jobs:
       - name: Retry runner secrets from Infisical
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' && steps.infisical-runner-secrets.outcome == 'failure' }}
         timeout-minutes: 2
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
