@@ -27,6 +27,7 @@ export default {
   },
   plugins: [
     "expo-router",
+    "expo-localization",
     [
       "expo-image-picker",
       {
@@ -65,6 +66,14 @@ export default {
     "expo-web-browser",
     "expo-secure-store",
     "react-native-quick-crypto",
+    [
+      "@sentry/react-native/expo",
+      {
+        organization: "opencompany",
+        project: "mobile-app",
+        url: "https://de.sentry.io/",
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,

@@ -45,7 +45,6 @@ const authorized = {
   workspaceId: "workspace_1",
   workspaceName: "Acme",
   workspaceSlug: "acme",
-  projectWikiId: null,
   conversationId: "conversation_1",
   sandboxId: "sandbox_1",
   engine: "claude_code" as const,
@@ -527,7 +526,7 @@ describe("runner ACP tools MCP", () => {
   });
 
   it("proxies the scoped wiki tool through the canonical API boundary", async () => {
-    const authorize = vi.fn(async () => ({ ...authorized, projectWikiId: "wiki_project_1" }));
+    const authorize = vi.fn(async () => authorized);
     const executeWikiCommand = vi.fn(async () => ({
       ok: true as const,
       result: { action: "updated", path: "projects/launch" },
@@ -580,11 +579,6 @@ describe("runner ACP tools MCP", () => {
         idempotencyKey: expect.stringMatching(/^acp-wiki:run_1:[a-f0-9]{24}$/u),
         signal: expect.any(AbortSignal),
       });
-      executeWikiCommand.mockClear();
-      await client.callTool({ name: "wiki", arguments: { command: "tree" } });
-      expect(executeWikiCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ wikiId: "wiki_project_1", toolInput: { command: "tree" } }),
-      );
       expect(authorize.mock.calls.length).toBeGreaterThanOrEqual(3);
     } finally {
       await client.close();

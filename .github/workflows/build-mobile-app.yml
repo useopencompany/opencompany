@@ -51,7 +51,7 @@ jobs:
           packager: bun
 
       - name: Fetch mobile build secrets from Infisical
-        uses: Infisical/secrets-action@6cd3f7c0e4cc0d2395ee4ef414eb6eeb5d3e73db # v1.0.17
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
           method: oidc
           identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
@@ -72,7 +72,9 @@ jobs:
             EXPO_APPLE_TEAM_ID
             EXPO_APPLE_TEAM_TYPE
             EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN
+            EXPO_PUBLIC_POSTHOG_API_KEY
             EXPO_PUBLIC_WORKOS_CLIENT_ID
+            SENTRY_AUTH_TOKEN
           )
           missing=()
           for variable_name in "${required[@]}"; do
@@ -101,8 +103,10 @@ jobs:
           {
             printf 'APP_VARIANT=%s\n' "$APP_VARIANT"
             printf 'EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN=%s\n' "$EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN"
+            printf 'EXPO_PUBLIC_POSTHOG_API_KEY=%s\n' "$EXPO_PUBLIC_POSTHOG_API_KEY"
             printf 'EXPO_PUBLIC_WORKOS_CLIENT_ID=%s\n' "$EXPO_PUBLIC_WORKOS_CLIENT_ID"
           } > "$GITHUB_WORKSPACE/apps/mobile/.env"
+          printf 'SENTRY_AUTH_TOKEN=%s\n' "$SENTRY_AUTH_TOKEN" > "$GITHUB_WORKSPACE/apps/mobile/.env.sentry-build-plugin"
 
           scope_ignore_rules() {
             local prefix="$1"
@@ -125,6 +129,7 @@ jobs:
             scope_ignore_rules "apps/mobile" "$GITHUB_WORKSPACE/apps/mobile/.gitignore"
             scope_ignore_rules "apps/desktop" "$GITHUB_WORKSPACE/apps/desktop/.gitignore"
             printf '\n!apps/mobile/.env\n'
+            printf '!apps/mobile/.env.sentry-build-plugin\n'
           } > "$GITHUB_WORKSPACE/.easignore"
 
       - name: Inspect EAS upload archive
@@ -150,7 +155,7 @@ jobs:
         env:
           EAS_BUILD_NO_EXPO_GO_WARNING: "true"
           EXPO_NO_CAPABILITY_SYNC: "1"
-        run: eas build --platform ios --profile production --non-interactive --wait
+        run: eas build --platform ios --profile production --non-interactive --wait --auto-submit
 
       - name: Remove temporary build files
         if: ${{ always() }}
@@ -158,5 +163,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/asc-api-key.p8" \
             "$GITHUB_WORKSPACE/.easignore" \
-            "$GITHUB_WORKSPACE/apps/mobile/.env"
+            "$GITHUB_WORKSPACE/apps/mobile/.env" \
+            "$GITHUB_WORKSPACE/apps/mobile/.env.sentry-build-plugin"
           rm -rf "$RUNNER_TEMP/mobile-eas-archive"

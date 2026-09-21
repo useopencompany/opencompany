@@ -51,7 +51,6 @@ describe("persisted workflow host tools", () => {
           actorId: "user_1",
           workspaceId: "workspace_1",
           workspaceName: "Acme",
-          projectWikiId: null,
           conversationId: "conversation_1",
           messageId: "message_1",
           email: "ada@example.test",

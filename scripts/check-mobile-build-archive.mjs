@@ -9,13 +9,16 @@ import { parse as parseDotenv } from "dotenv";
 export const MOBILE_BUILD_ENV_KEYS = [
   "APP_VARIANT",
   "EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN",
+  "EXPO_PUBLIC_POSTHOG_API_KEY",
   "EXPO_PUBLIC_WORKOS_CLIENT_ID",
 ];
+export const SENTRY_BUILD_PLUGIN_ENV_KEYS = ["SENTRY_AUTH_TOKEN"];
 
 const MOBILE_ENV_PATH = path.join("apps", "mobile", ".env");
+const SENTRY_BUILD_PLUGIN_ENV_PATH = path.join("apps", "mobile", ".env.sentry-build-plugin");
 
 export function validateMobileBuildArchive(archiveDirectory, ciEnvironment = process.env) {
-  const archiveEnv = readArchiveEnvironment(archiveDirectory);
+  const archiveEnv = readArchiveEnvironment(archiveDirectory, MOBILE_ENV_PATH);
   const archiveKeys = Object.keys(archiveEnv).sort();
   const expectedKeys = [...MOBILE_BUILD_ENV_KEYS].sort();
   const missingKeys = expectedKeys.filter((key) => !archiveKeys.includes(key));
@@ -63,6 +66,48 @@ export function validateMobileBuildArchive(archiveDirectory, ciEnvironment = pro
     );
   }
 
+  const sentryArchiveEnv = readArchiveEnvironment(archiveDirectory, SENTRY_BUILD_PLUGIN_ENV_PATH);
+  const sentryArchiveKeys = Object.keys(sentryArchiveEnv).sort();
+  const expectedSentryKeys = [...SENTRY_BUILD_PLUGIN_ENV_KEYS].sort();
+  const missingSentryKeys = expectedSentryKeys.filter((key) => !sentryArchiveKeys.includes(key));
+  const unexpectedSentryKeys = sentryArchiveKeys.filter((key) => !expectedSentryKeys.includes(key));
+
+  if (missingSentryKeys.length > 0 || unexpectedSentryKeys.length > 0) {
+    const details = [];
+    if (missingSentryKeys.length > 0) details.push(`missing ${missingSentryKeys.join(", ")}`);
+    if (unexpectedSentryKeys.length > 0) {
+      details.push(`unexpected ${unexpectedSentryKeys.join(", ")}`);
+    }
+    throw new Error(
+      `Archived ${SENTRY_BUILD_PLUGIN_ENV_PATH} must contain exactly the expected keys: ${details.join("; ")}.`,
+    );
+  }
+
+  const missingSentryCiKeys = SENTRY_BUILD_PLUGIN_ENV_KEYS.filter(
+    (key) => typeof ciEnvironment[key] !== "string" || ciEnvironment[key].trim() === "",
+  );
+  if (missingSentryCiKeys.length > 0) {
+    throw new Error(`CI is missing values for ${missingSentryCiKeys.join(", ")}.`);
+  }
+
+  const blankSentryKeys = SENTRY_BUILD_PLUGIN_ENV_KEYS.filter(
+    (key) => sentryArchiveEnv[key].trim() === "",
+  );
+  if (blankSentryKeys.length > 0) {
+    throw new Error(
+      `Archived ${SENTRY_BUILD_PLUGIN_ENV_PATH} contains blank values for ${blankSentryKeys.join(", ")}.`,
+    );
+  }
+
+  const mismatchedSentryKeys = SENTRY_BUILD_PLUGIN_ENV_KEYS.filter(
+    (key) => sentryArchiveEnv[key] !== ciEnvironment[key],
+  );
+  if (mismatchedSentryKeys.length > 0) {
+    throw new Error(
+      `Archived ${SENTRY_BUILD_PLUGIN_ENV_PATH} does not match the CI values for ${mismatchedSentryKeys.join(", ")}.`,
+    );
+  }
+
   return true;
 }
 
@@ -86,19 +131,19 @@ export function isAllowedApiOrigin(value) {
   );
 }
 
-function readArchiveEnvironment(archiveDirectory) {
+function readArchiveEnvironment(archiveDirectory, environmentPath) {
   if (typeof archiveDirectory !== "string" || archiveDirectory.trim() === "") {
     throw new Error("An extracted EAS archive directory is required.");
   }
 
-  const envPath = path.join(path.resolve(archiveDirectory), MOBILE_ENV_PATH);
+  const envPath = path.join(path.resolve(archiveDirectory), environmentPath);
   try {
     return parseDotenv(readFileSync(envPath, "utf8"));
   } catch (error) {
     if (error?.code === "ENOENT") {
-      throw new Error(`The inspected archive is missing ${MOBILE_ENV_PATH}.`);
+      throw new Error(`The inspected archive is missing ${environmentPath}.`);
     }
-    throw new Error(`Could not read ${MOBILE_ENV_PATH} from the inspected archive.`);
+    throw new Error(`Could not read ${environmentPath} from the inspected archive.`);
   }
 }
 

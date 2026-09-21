@@ -17,7 +17,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
-| `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials plus public mobile configuration |
+| `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials, Sentry artifact upload credential, and public mobile configuration |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
@@ -83,6 +83,10 @@ Mobile builds also require `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, a fully qualifi
 origin for the canonical API. Local Expo builds normally use `http://localhost:3001`; hosted builds
 use `https://api.opencompany.chat`. The value is public and must not contain credentials, a path,
 query parameters, or a fragment.
+
+Mobile builds use `EXPO_PUBLIC_POSTHOG_API_KEY` to send explicit product analytics events to
+PostHog. Store the project token in Infisical `prod` `/mobile`. It is embedded in the app bundle and
+must be a public PostHog project token, never a personal or server API key.
 
 `OPENCOMPANY_AGENT_USER_EMAIL` and `OPENCOMPANY_AGENT_USER_PASSWORD` identify the shared agent dev
 user in the non-production WorkOS environment. They live in Infisical `dev` `/web` only and are

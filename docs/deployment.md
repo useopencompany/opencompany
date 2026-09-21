@@ -93,10 +93,13 @@ image-backed and stateful, so routine application releases do not restart it.
 
 `.github/workflows/build-mobile-app.yml` starts an EAS iOS build with the `production` profile when
 someone runs the workflow manually. The job does not repeat the repository lint, typecheck, test,
-or web build jobs. It passes `--wait` so the GitHub job reports the final EAS build result.
+or web build jobs. A successful build is submitted to TestFlight with the matching EAS submission
+profile. The profile pins the App Store Connect app ID, and `--wait` makes the GitHub job report the
+final build and submission result.
 
 Concurrency cancels an older GitHub run for the same branch. If that run already submitted its job
-to EAS, the remote build may continue in Expo after GitHub stops waiting for it.
+to EAS, the remote build and its configured submission may continue in Expo after GitHub stops
+waiting for it.
 
 The protected `production` job reads these values from Infisical `prod` `/mobile` in the shared
 project:
@@ -109,7 +112,9 @@ project:
 - `EXPO_APPLE_TEAM_ID`
 - `EXPO_APPLE_TEAM_TYPE`, set to `IN_HOUSE`, `COMPANY_OR_ORGANIZATION`, or `INDIVIDUAL`
 - `EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`
+- `EXPO_PUBLIC_POSTHOG_API_KEY`
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
+- `SENTRY_AUTH_TOKEN`, used only by the native Sentry artifact upload hooks
 
 The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
 shared with the release workflow. The existing OIDC machine identity must have read access to
@@ -118,7 +123,8 @@ shared with the release workflow. The existing OIDC machine identity must have r
 The Infisical action exports every value into the GitHub job environment. `EXPO_TOKEN` and the App
 Store Connect values configure the local EAS CLI invocation. EAS does not copy the caller's complete
 environment to its cloud worker. The workflow writes only `APP_VARIANT`,
-`EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, and `EXPO_PUBLIC_WORKOS_CLIENT_ID` to a temporary
+`EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN`, `EXPO_PUBLIC_POSTHOG_API_KEY`, and
+`EXPO_PUBLIC_WORKOS_CLIENT_ID` to a temporary
 `apps/mobile/.env`. Build credentials stay outside that file.
 
 EAS resolves the ignore file from the Git repository root for this monorepo. The workflow creates a
@@ -126,15 +132,22 @@ temporary root `.easignore` from the root `.gitignore`, adds the mobile and desk
 with their paths scoped to those directories, and ends with `!apps/mobile/.env`. It then runs
 `eas build:inspect --platform ios --profile production --stage archive` into
 `$RUNNER_TEMP/mobile-eas-archive`, outside the checkout. `scripts/check-mobile-build-archive.mjs`
-reads `apps/mobile/.env` from that extracted archive with `dotenv`. It requires exactly the three
+reads `apps/mobile/.env` from that extracted archive with `dotenv`. It requires exactly the four
 expected keys, checks the production variant and API origin, and compares the archived values with
 the CI values before `eas build` starts. A missing archived `.env` fails the job even when the
 runner still has the expected environment variables.
 
-The workflow removes the root `.easignore`, mobile `.env`, signing key, and inspected archive after
-both successful and failed runs. `APP_VARIANT` selects the production app config, and Expo inlines
+The workflow removes the root `.easignore`, mobile `.env`, Sentry build-plugin env file, signing key,
+and inspected archive after both successful and failed runs. `APP_VARIANT` selects the production app config, and Expo inlines
 the public values into the application bundle on the EAS worker. No Expo-hosted environment
 variables are required.
+
+The mobile app's Sentry Expo plugin uploads JavaScript source maps and iOS debug symbols during
+native release builds. The workflow writes `SENTRY_AUTH_TOKEN` from Infisical `prod` `/mobile` to a
+temporary `apps/mobile/.env.sentry-build-plugin` file in the EAS upload archive. The native build
+uses that file for Sentry uploads, but the workflow never writes the token to `apps/mobile/.env` or
+the application bundle. The cleanup step removes the file after the build, including failed runs.
+No EAS environment variable is required.
 
 ## Migrations
 

@@ -7,7 +7,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } fro
 import { type LayoutChangeEvent, View } from "react-native";
 import { useCSSVariable } from "uniwind";
 import { until } from "until-async";
-
+import { analytics } from "@/shared/lib/analytics";
 import { useToast } from "@/shared/ui/toast";
 import { NativeChatComposerView } from "../../../../modules/native-chat-composer";
 import { useChatComposer } from "../model/chat-composer-context";
@@ -73,6 +73,12 @@ export function ChatComposer({
 
   const sendMutation = useMutation({
     mutationFn: async () => {
+      analytics.capture("message_send_started", {
+        attachment_count: attachments.length,
+        has_text: Boolean(value.trim()),
+        is_new_chat: conversationId === "new",
+        model_id: composer.selectedModelId,
+      });
       await composer.flushDraft();
       return onSend();
     },
@@ -119,6 +125,7 @@ export function ChatComposer({
           nativeID="chat-composer"
           onAttachmentPress={() => {
             blurHandle();
+            analytics.capture("attachment_picker_opened");
             router.push("/attachment-sheet");
           }}
           onChangeText={(event) => composer.setValue(event.nativeEvent.value)}

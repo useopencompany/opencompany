@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { withSentryConfig } = require("@sentry/react-native/metro");
 const { getDefaultConfig } = require("expo/metro-config");
 const { getBundleModeMetroConfig } = require("react-native-worklets/bundleMode");
 const { withUniwindConfig } = require("uniwind/metro");
@@ -32,5 +33,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 
   return (resolveRequest ?? context.resolveRequest)(context, moduleName, platform);
 };
+
+config = withSentryConfig(config, {
+  includeWebReplay: false,
+  includeWebFeedback: false,
+  autoWrapExpoRouterErrorBoundary: true,
+});
 
 module.exports = config;

@@ -62,3 +62,7 @@ Use the CLI in the integrated terminal. `agent-device` is installed as a dev dep
 ## Data Fetching
 
 Use TanStack Query for data fetching and async state management (even if it doesn't involve fetch).
+
+## Analytics
+
+When adding a feature, check whether its key user actions, outcomes, and failures need a PostHog event. Never capture message contents, file names, or other sensitive user data.

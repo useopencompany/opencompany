@@ -21,6 +21,7 @@ import { useUniwind } from "uniwind";
 import { until } from "until-async";
 import wordmark from "@/assets/images/wordmark.png";
 import wordmarkDark from "@/assets/images/wordmark-dark.png";
+import { analytics } from "@/shared/lib/analytics";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { useToast } from "@/shared/ui/toast";
@@ -80,6 +81,7 @@ function SidebarConversationRow({
               ? "min-h-11 justify-center rounded-xl border-continuous bg-secondary px-4 py-3"
               : "min-h-11 justify-center rounded-xl border-continuous px-4 py-3 active:bg-secondary"
           }
+          onPress={() => analytics.capture("conversation_opened")}
           onPressIn={() => void input.dismissSearch()}
         >
           <Text numberOfLines={1} className="text-[17px] text-sidebar-foreground leading-[22px]">
@@ -267,6 +269,9 @@ export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
         onSearchActiveChange={(active) => {
           setIsSearchActive(active);
           input.setKeyboardOwner(active ? "sidebar" : null);
+          analytics.capture(active ? "conversation_search_started" : "conversation_search_closed", {
+            had_query: Boolean(searchValue.trim()),
+          });
         }}
         onSearchValueChange={setSearchValue}
         scrollViewTestID={SIDEBAR_SCROLL_VIEW_TEST_ID}
@@ -280,6 +285,7 @@ export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
                 void input.dismissSearch();
                 input.requestComposerFocus();
                 closeDrawer();
+                analytics.capture("new_chat_started");
                 router.navigate("/");
               }}
               modifiers={[
@@ -312,6 +318,7 @@ export function Sidebar({ closeDrawer }: { closeDrawer: () => void }) {
               ]}
               onPress={() => {
                 void input.dismissSearch();
+                analytics.capture("settings_opened");
                 router.navigate("/settings-sheet");
               }}
             >

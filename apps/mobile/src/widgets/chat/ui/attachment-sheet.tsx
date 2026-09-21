@@ -6,6 +6,7 @@ import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import { useUniwind } from "uniwind";
 import { until } from "until-async";
 
+import { analytics, captureError } from "@/shared/lib/analytics";
 import { PressableScale } from "@/shared/ui/pressable-scale";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
@@ -49,14 +50,20 @@ export default function AttachmentSheet() {
     }
     const validation = validateComposerAttachments(currentAttachments.length, preparedAttachments);
     if (validation.error) {
+      analytics.capture("attachment_add_rejected", { reason: "validation" });
       Alert.alert("Attachment Not Added", validation.error);
       return;
     }
     const [copyError] = await until(() => addAttachments(validation.valid));
     if (copyError) {
+      captureError("attachment_add_failed", copyError);
       Alert.alert("Attachment Not Added", "opencompany could not save that file on this device.");
       return;
     }
+    analytics.capture("attachment_added", {
+      count: validation.valid.length,
+      kinds: [...new Set(validation.valid.map((attachment) => attachment.kind))],
+    });
     router.back();
   };
 
@@ -72,11 +79,13 @@ export default function AttachmentSheet() {
     );
 
     if (pickerError) {
+      captureError("attachment_source_failed", pickerError, { source: "photos" });
       Alert.alert("Unable to Open Photos", "opencompany could not open your photo library.");
       return;
     }
 
     if (result.canceled) {
+      analytics.capture("attachment_source_canceled", { source: "photos" });
       return;
     }
 
@@ -104,11 +113,13 @@ export default function AttachmentSheet() {
     );
 
     if (pickerError) {
+      captureError("attachment_source_failed", pickerError, { source: "files" });
       Alert.alert("Unable to Open Files", "opencompany could not open the file picker.");
       return;
     }
 
     if (result.canceled) {
+      analytics.capture("attachment_source_canceled", { source: "files" });
       return;
     }
 
@@ -129,6 +140,7 @@ export default function AttachmentSheet() {
       ImagePicker.requestCameraPermissionsAsync(),
     );
     if (permissionError || !permission.granted) {
+      if (permissionError) captureError("camera_permission_failed", permissionError);
       Alert.alert(
         "Camera Access Needed",
         permissionError
@@ -147,10 +159,14 @@ export default function AttachmentSheet() {
       }),
     );
     if (pickerError) {
+      captureError("attachment_source_failed", pickerError, { source: "camera" });
       Alert.alert("Unable to Open Camera", "opencompany could not open the system camera.");
       return;
     }
-    if (result.canceled) return;
+    if (result.canceled) {
+      analytics.capture("attachment_source_canceled", { source: "camera" });
+      return;
+    }
 
     await persistPickedAttachments(
       result.assets.map((asset) => ({
@@ -170,10 +186,27 @@ export default function AttachmentSheet() {
     {
       label: "Camera",
       icon: "camera",
-      onPress: () => void takePhoto(),
+      onPress: () => {
+        analytics.capture("attachment_source_selected", { source: "camera" });
+        void takePhoto();
+      },
     },
-    { label: "Photos", icon: "photo.on.rectangle", onPress: () => void pickPhotos() },
-    { label: "Files", icon: "paperclip", onPress: () => void pickFiles() },
+    {
+      label: "Photos",
+      icon: "photo.on.rectangle",
+      onPress: () => {
+        analytics.capture("attachment_source_selected", { source: "photos" });
+        void pickPhotos();
+      },
+    },
+    {
+      label: "Files",
+      icon: "paperclip",
+      onPress: () => {
+        analytics.capture("attachment_source_selected", { source: "files" });
+        void pickFiles();
+      },
+    },
   ];
 
   return (

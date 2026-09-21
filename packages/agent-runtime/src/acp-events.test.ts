@@ -659,6 +659,83 @@ describe("createAcpEventNormalizer", () => {
     });
   });
 
+  it("keeps compact workflow card data when the visible MCP result is truncated", () => {
+    const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
+    normalizer.beginRun("session_1");
+    const workflowOutput = {
+      ok: true,
+      operation: "created",
+      workflow: {
+        slug: "weekly-recruiting-heatmap",
+        name: "Weekly recruiting heatmap",
+        steps: [{ instructions: "x".repeat(8_000) }],
+        status: "active",
+        scope: "personal",
+        memory: { enabled: true, content: "private runtime memory" },
+        triggers: [
+          {
+            type: "schedule",
+            cron: "0 9 * * 0",
+            timezone: "Europe/Berlin",
+            enabled: true,
+            nextRunAt: "2026-09-27T07:00:00.000Z",
+          },
+        ],
+      },
+    };
+
+    const events = normalizer.normalize(
+      update({
+        sessionUpdate: "tool_call",
+        toolCallId: "workflow_1",
+        kind: "execute",
+        title: "mcp.opencompany.workflows",
+        status: "completed",
+        rawInput: {
+          server: "opencompany",
+          tool: "workflows",
+          arguments: { command: "create" },
+        },
+        rawOutput: {
+          result: {
+            content: [{ type: "text", text: JSON.stringify(workflowOutput) }],
+          },
+          error: null,
+        },
+        _meta: { is_mcp_tool_call: true },
+      }),
+    );
+
+    expect(events[1]).toMatchObject({
+      type: "mcp_tool.completed",
+      payload: {
+        result: expect.stringMatching(/…$/u),
+        workflowOutput: {
+          ok: true,
+          operation: "created",
+          workflow: {
+            slug: "weekly-recruiting-heatmap",
+            name: "Weekly recruiting heatmap",
+            status: "active",
+            scope: "personal",
+            memory: { enabled: true },
+            triggers: [
+              {
+                type: "schedule",
+                cron: "0 9 * * 0",
+                timezone: "Europe/Berlin",
+                enabled: true,
+                nextRunAt: "2026-09-27T07:00:00.000Z",
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(events[1]?.payload.workflowOutput).not.toHaveProperty("workflow.steps");
+    expect(events[1]?.payload.workflowOutput).not.toHaveProperty("workflow.memory.content");
+  });
+
   it("normalizes the pinned Codex ACP MCP envelope instead of treating it as a command", () => {
     const normalizer = createAcpEventNormalizer({ engineName: "Codex" });
     normalizer.beginRun("session_1");

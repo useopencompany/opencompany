@@ -239,6 +239,44 @@ describe("applyCodexEventToUiMessageParts", () => {
     ]);
   });
 
+  it("carries projected workflow card data beside a truncated MCP result", () => {
+    const workflowOutput = {
+      ok: true,
+      operation: "created",
+      workflow: {
+        name: "Weekly recruiting heatmap",
+        slug: "weekly-recruiting-heatmap",
+        status: "active",
+      },
+    };
+    const parts = reduceNormalized(
+      [],
+      [
+        normalizedEvent("mcp_tool.completed", {
+          itemId: "workflow_1",
+          server: "opencompany",
+          tool: "workflows",
+          status: "completed",
+          rawInput: { command: "create" },
+          result: '{"content":[{"text":"truncated…',
+          workflowOutput,
+        }),
+      ],
+    );
+
+    expect(parts).toMatchObject([
+      {
+        type: "dynamic-tool",
+        toolName: CODEX_MCP_TOOL_NAME,
+        output: {
+          status: "completed",
+          result: '{"content":[{"text":"truncated…',
+          workflowOutput,
+        },
+      },
+    ]);
+  });
+
   it("replaces a command placeholder and persists its description", () => {
     const parts = reduceNormalized(
       [],
