@@ -68,7 +68,8 @@
     "test": "vitest run src/widgets/chat/model/*.test.ts",
     "expo:doctor": "bunx expo-doctor@latest",
     "env:pull:development": "umask 077 && infisical export --output-file=./.env --env=dev --path=/mobile && chmod 600 ./.env",
-    "build:ios:simulator": "infisical run --env=dev --path=/mobile -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz"
+    "build:ios:simulator": "infisical run --env=dev --path=/mobile -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz",
+    "build:ios:production": "EXPO_NO_CAPABILITY_SYNC=1 infisical run --env=prod --path=/mobile -- eas build -p ios --profile production --auto-submit"
   },
   "private": true
 }
