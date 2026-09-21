@@ -813,14 +813,13 @@ function registerExternalEngineWikiTool(input: {
         if (!current) {
           return { ok: false, error: "This engine turn can no longer use the wiki tool." };
         }
-        const selectedWikiId = wikiId ?? current.projectWikiId;
         return input.executeWikiCommand({
           origin: input.env.apiOrigin,
           token: input.env.apiInternalToken,
           workspaceId: current.workspaceId,
           actorId: current.actorId,
           toolInput: command,
-          ...(selectedWikiId ? { wikiId: selectedWikiId } : {}),
+          ...(wikiId ? { wikiId } : {}),
           idempotencyKey: externalEngineWikiIdempotencyKey(
             input.capability.codexChatTurnId,
             idempotencyKey,
