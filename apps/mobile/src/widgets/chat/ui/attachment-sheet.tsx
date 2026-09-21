@@ -116,11 +116,53 @@ export default function AttachmentSheet() {
     await persistPickedAttachments(attachments);
   };
 
+  const takePhoto = async () => {
+    const [permissionError, permission] = await until(() =>
+      ImagePicker.requestCameraPermissionsAsync(),
+    );
+    if (permissionError || !permission.granted) {
+      Alert.alert(
+        "Camera Access Needed",
+        permissionError
+          ? "opencompany could not request camera access."
+          : "Allow camera access in Settings to take a photo.",
+      );
+      return;
+    }
+
+    const [pickerError, result] = await until(() =>
+      ImagePicker.launchCameraAsync({
+        allowsEditing: false,
+        cameraType: ImagePicker.CameraType.back,
+        mediaTypes: ["images"],
+        quality: 0.9,
+      }),
+    );
+    if (pickerError) {
+      Alert.alert("Unable to Open Camera", "opencompany could not open the system camera.");
+      return;
+    }
+    if (result.canceled) return;
+
+    await persistPickedAttachments(
+      result.assets.map((asset) => ({
+        id: createAttachmentId(asset.uri),
+        kind: "image",
+        uri: asset.uri,
+        name: asset.fileName ?? "Photo.jpg",
+        ...(asset.mimeType ? { mimeType: asset.mimeType } : {}),
+        ...(asset.fileSize ? { size: asset.fileSize } : {}),
+        width: asset.width,
+        height: asset.height,
+      })),
+    );
+  };
+
   const attachmentActions: AttachmentAction[] = [
     {
       label: "Camera",
       icon: "camera",
-      onPress: () => router.replace("./camera"),
+      onPress: () => void takePhoto(),
     },
     { label: "Photos", icon: "photo.on.rectangle", onPress: () => void pickPhotos() },
     { label: "Files", icon: "paperclip", onPress: () => void pickFiles() },

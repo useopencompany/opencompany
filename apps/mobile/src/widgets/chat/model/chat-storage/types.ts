@@ -114,6 +114,13 @@ export interface MessageRow {
   parts_json: string;
   delivery: ChatMessage["delivery"];
   created_at: number;
+  presentation_revision: string | null;
+  presentation_etag: string | null;
+}
+
+export interface MessagePresentationCache {
+  revision: string | null;
+  etag: string | null;
 }
 
 export interface OutboxRow {

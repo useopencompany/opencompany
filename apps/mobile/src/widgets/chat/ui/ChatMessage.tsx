@@ -1,8 +1,10 @@
 import type { ResolveApprovalBody } from "@opencompany/protocol/schemas";
-import { Pressable, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
+import { Alert, Pressable, Share, Text, View } from "react-native";
 import type { MarkdownStyle } from "react-native-enriched-markdown";
 import { StreamdownText } from "react-native-streamdown";
 import { StyledImage } from "@/shared/ui/styled-image";
+import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import type { ApprovalPart, ChatMessage as ChatMessageModel, ChatPart } from "../model/chat";
 
 function AttachmentRow({ part }: { part: Extract<ChatPart, { type: "attachment" }> }) {
@@ -137,12 +139,14 @@ function GenericPart({
 }
 
 export function ChatMessage({
+  isTerminal,
   message,
   markdownStyle,
   onApproval,
   onLinkPress,
   themeKey,
 }: {
+  isTerminal: boolean;
   message: ChatMessageModel;
   markdownStyle: MarkdownStyle;
   onApproval: (approvalId: string, body: ResolveApprovalBody) => Promise<void>;
@@ -162,24 +166,55 @@ export function ChatMessage({
             </Text>
           </View>
         ) : null}
-        {nonTextParts.map((part, index) => (
-          <GenericPart key={`${part.type}-${index}`} part={part} onApproval={onApproval} />
+        {nonTextParts.map((part) => (
+          <GenericPart key={part.id} part={part} onApproval={onApproval} />
         ))}
       </View>
     );
   }
 
+  const text =
+    message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
+    message.content;
+  const orderedParts = message.parts.length
+    ? message.parts
+    : text
+      ? ([{ id: `text:${message.id}:fallback`, type: "text", text }] satisfies ChatPart[])
+      : [];
+
+  const copyText = async () => {
+    try {
+      await Clipboard.setStringAsync(text);
+    } catch (error) {
+      Alert.alert("Copy failed", error instanceof Error ? error.message : "Try again.");
+    }
+  };
+
+  const shareText = async () => {
+    try {
+      await Share.share({ message: text });
+    } catch (error) {
+      Alert.alert("Share failed", error instanceof Error ? error.message : "Try again.");
+    }
+  };
+
   return (
     <View className="mb-[22px] min-w-full self-stretch gap-3">
-      {message.content ? (
-        <StreamdownText
-          flavor="github"
-          key={themeKey}
-          markdown={message.content}
-          markdownStyle={markdownStyle}
-          onLinkPress={(event) => onLinkPress(event.url)}
-        />
-      ) : (
+      {orderedParts.length ? (
+        orderedParts.map((part) =>
+          part.type === "text" ? (
+            <StreamdownText
+              flavor="github"
+              key={`${themeKey}:${part.id}`}
+              markdown={part.text}
+              markdownStyle={markdownStyle}
+              onLinkPress={(event) => onLinkPress(event.url)}
+            />
+          ) : (
+            <GenericPart key={part.id} part={part} onApproval={onApproval} />
+          ),
+        )
+      ) : !isTerminal ? (
         <View
           accessibilityLabel="Assistant is thinking"
           className="min-h-[30px] flex-row items-center gap-2"
@@ -187,10 +222,35 @@ export function ChatMessage({
           <View className="size-2 rounded-full bg-muted-foreground" />
           <Text className="text-[15px] text-muted-foreground italic">Thinking...</Text>
         </View>
-      )}
-      {nonTextParts.map((part, index) => (
-        <GenericPart key={`${part.type}-${index}`} part={part} onApproval={onApproval} />
-      ))}
+      ) : null}
+      {isTerminal && text ? (
+        <View className="flex-row items-center gap-1">
+          <Pressable
+            accessibilityLabel="Copy response"
+            accessibilityRole="button"
+            className="size-11 items-center justify-center rounded-full active:bg-secondary"
+            onPress={() => void copyText()}
+          >
+            <StyledSymbolView
+              name="doc.on.doc"
+              size={18}
+              tintColorClassName="accent-muted-foreground"
+            />
+          </Pressable>
+          <Pressable
+            accessibilityLabel="Share response"
+            accessibilityRole="button"
+            className="size-11 items-center justify-center rounded-full active:bg-secondary"
+            onPress={() => void shareText()}
+          >
+            <StyledSymbolView
+              name="square.and.arrow.up"
+              size={18}
+              tintColorClassName="accent-muted-foreground"
+            />
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }

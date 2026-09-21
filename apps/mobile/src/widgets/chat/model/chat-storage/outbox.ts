@@ -118,9 +118,12 @@ export const queueMessageFromDraft = async (
       kind: attachment.kind === "image" ? "image" : "document",
     }));
     const parts: ChatPart[] = [
-      ...(text ? ([{ type: "text", text }] satisfies ChatPart[]) : []),
+      ...(text
+        ? ([{ id: `text:${result.clientMessageId}:0`, type: "text", text }] satisfies ChatPart[])
+        : []),
       ...localAttachments.map(
         (attachment, index): ChatPart => ({
+          id: `attachment:${attachment.id}`,
           type: "attachment",
           attachment,
           localUri: attachments[index]?.uri,

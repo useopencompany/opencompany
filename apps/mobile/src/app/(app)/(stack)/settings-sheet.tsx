@@ -1,5 +1,5 @@
 import { Host } from "@expo/ui";
-import { Button } from "@expo/ui/swift-ui";
+import { Button, HStack, Spacer } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
 import { router } from "expo-router";
 import { Alert, ScrollView, Text, View } from "react-native";
@@ -78,26 +78,30 @@ export default function SettingsSheet() {
         </View>
       ) : null}
 
-      <Host matchContents>
-        <Button
-          label={isSigningOut ? "Signing Out..." : "Sign Out"}
-          onPress={() => {
-            Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-              { text: "Cancel", style: "cancel" },
-              {
-                text: "Sign Out",
-                style: "destructive",
-                onPress: async () => {
-                  router.dismiss();
-                  const [error] = await until(signOut);
-                  if (error) showErrorToast(error.message, error, "auth.sign-out");
+      <Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
+        <HStack>
+          <Spacer />
+          <Button
+            label={isSigningOut ? "Signing Out..." : "Sign Out"}
+            onPress={() => {
+              Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Sign Out",
+                  style: "destructive",
+                  onPress: async () => {
+                    router.dismiss();
+                    const [error] = await until(signOut);
+                    if (error) showErrorToast(error.message, error, "auth.sign-out");
+                  },
                 },
-              },
-            ]);
-          }}
-          role="destructive"
-          modifiers={[buttonStyle("bordered")]}
-        />
+              ]);
+            }}
+            role="destructive"
+            modifiers={[buttonStyle("bordered")]}
+          />
+          <Spacer />
+        </HStack>
       </Host>
     </ScrollView>
   );

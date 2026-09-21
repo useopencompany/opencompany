@@ -140,3 +140,9 @@ ALTER TABLE run_checkpoints DROP COLUMN content;
 ALTER TABLE run_checkpoints DROP COLUMN parts_json;
 PRAGMA user_version = 2;
 `;
+
+export const MESSAGE_PRESENTATION_CACHE_SCHEMA = `
+ALTER TABLE messages ADD COLUMN presentation_revision TEXT;
+ALTER TABLE messages ADD COLUMN presentation_etag TEXT;
+PRAGMA user_version = 3;
+`;

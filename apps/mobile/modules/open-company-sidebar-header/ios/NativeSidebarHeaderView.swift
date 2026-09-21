@@ -45,6 +45,7 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
   private var isSearchActive = false
   private var lastReportedHeight: CGFloat?
   private var searchValue = ""
+  private var lastDismissSearchRequest = 0
 
   private lazy var searchController: UISearchController = {
     let searchController = UISearchController(searchResultsController: nil)
@@ -151,6 +152,55 @@ final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISea
 
     isSearchActive = active
     onSearchActiveChange(["active": active])
+  }
+
+  @MainActor
+  func dismissSearch() {
+    let preservedSearchValue = searchValue
+    searchController.searchBar.endEditing(true)
+    window?.endEditing(true)
+    searchController.isActive = false
+    setSearchActive(false)
+
+    // UISearchController can restore first responder while a drawer transition
+    // is committing. Repeat the idempotent teardown on the next main run-loop
+    // turn, after UIKit has finished the current navigation update.
+    DispatchQueue.main.async { [weak self] in
+      guard let self else {
+        return
+      }
+
+      self.searchController.searchBar.endEditing(true)
+      self.window?.endEditing(true)
+      self.searchController.isActive = false
+      if #available(iOS 26.0, *) {
+        // Reattaching restores the integrated button presentation. Merely
+        // setting isActive to false can leave the expanded search field in a
+        // hidden drawer even though it has resigned first responder.
+        self.navigationItem.searchController = nil
+        DispatchQueue.main.async { [weak self] in
+          guard let self else {
+            return
+          }
+
+          self.searchController.searchBar.text = preservedSearchValue
+          self.navigationItem.searchController = self.searchController
+          self.navigationItem.preferredSearchBarPlacement = .integratedButton
+          self.navigationBar.setNeedsLayout()
+        }
+      }
+      self.setSearchActive(false)
+    }
+  }
+
+  @MainActor
+  func consumeDismissSearchRequest(_ request: Int) {
+    guard request > lastDismissSearchRequest else {
+      return
+    }
+
+    lastDismissSearchRequest = request
+    dismissSearch()
   }
 
   private func measuredNavigationBarHeight() -> CGFloat {

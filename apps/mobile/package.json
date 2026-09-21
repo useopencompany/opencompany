@@ -64,6 +64,7 @@
     "ios": "expo run:ios -d",
     "prebuild:ios": "expo prebuild -p ios",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run src/widgets/chat/model/*.test.ts",
     "expo:doctor": "bunx expo-doctor@latest",
     "env:pull:development": "umask 077 && infisical export --output-file=./.env --env=dev --path=/mobile && chmod 600 ./.env",
     "build:ios:simulator": "infisical run --env=dev --path=/mobile -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz"

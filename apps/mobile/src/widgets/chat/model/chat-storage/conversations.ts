@@ -1,7 +1,30 @@
 import type { AttachmentDto, ConversationDto, MessageDto } from "@opencompany/protocol/schemas";
 import type { ChatMessage, ChatPart } from "../chat";
 import { getChatDatabase, parseJson, values, withChatTransaction } from "./database";
-import type { ChatPartition, ConversationRow, MessageRow, StoredConversation } from "./types";
+import type {
+  ChatPartition,
+  ConversationRow,
+  MessagePresentationCache,
+  MessageRow,
+  StoredConversation,
+} from "./types";
+
+function partIdentity(messageId: string, part: ChatPart, index: number): string {
+  if (typeof part.id === "string" && part.id) return part.id;
+  switch (part.type) {
+    case "tool":
+      return `tool:${part.toolCallId}`;
+    case "approval":
+      return `approval:${part.approvalId}`;
+    case "artifact":
+      return `artifact:${part.artifactId}`;
+    default:
+      return `${part.type}:${messageId}:${index}`;
+  }
+}
+
+const normalizePartIdentities = (messageId: string, parts: ChatPart[]): ChatPart[] =>
+  parts.map((part, index) => ({ ...part, id: partIdentity(messageId, part, index) }));
 
 const conversationFromRow = (row: ConversationRow): StoredConversation => ({
   id: row.local_id,
@@ -35,7 +58,8 @@ export const listStoredMessages = async (
 ): Promise<ChatMessage[]> => {
   const database = await getChatDatabase();
   const rows = await database.getAllAsync<MessageRow>(
-    `SELECT local_id, role, content, parts_json, delivery, created_at
+    `SELECT local_id, role, content, parts_json, delivery, created_at,
+            presentation_revision, presentation_etag
        FROM messages
       WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?
       ORDER BY created_at ASC`,
@@ -52,15 +76,58 @@ export const listStoredMessages = async (
     id: row.local_id,
     role: row.role,
     content: row.content,
-    parts: parseJson<ChatPart[]>(row.parts_json).map((part) =>
-      part.type === "approval" && part.status === "pending" && sendingApprovals.has(part.approvalId)
-        ? { ...part, status: "sending" }
-        : part,
+    parts: normalizePartIdentities(row.local_id, parseJson<ChatPart[]>(row.parts_json)).map(
+      (part) =>
+        part.type === "approval" &&
+        part.status === "pending" &&
+        sendingApprovals.has(part.approvalId)
+          ? { ...part, status: "sending" }
+          : part,
     ),
     delivery: row.delivery,
     createdAt: row.created_at,
   }));
 };
+
+export const getMessagePresentationCache = async (
+  partition: ChatPartition,
+  messageId: string,
+): Promise<MessagePresentationCache | null> => {
+  const database = await getChatDatabase();
+  const row = await database.getFirstAsync<{
+    presentation_revision: string | null;
+    presentation_etag: string | null;
+  }>(
+    `SELECT presentation_revision, presentation_etag FROM messages
+      WHERE user_id = ? AND workspace_id = ? AND local_id = ?`,
+    ...values(partition),
+    messageId,
+  );
+  return row ? { revision: row.presentation_revision, etag: row.presentation_etag } : null;
+};
+
+export const applyMessagePresentationSnapshot = async (
+  partition: ChatPartition,
+  messageId: string,
+  snapshot: { revision: string; etag: string | null; content: string; parts: ChatPart[] },
+): Promise<boolean> =>
+  withChatTransaction(partition, async (database) => {
+    const result = await database.runAsync(
+      `UPDATE messages SET content = ?, parts_json = ?, presentation_revision = ?,
+         presentation_etag = ?, updated_at = ?
+       WHERE user_id = ? AND workspace_id = ? AND local_id = ?
+         AND (presentation_revision IS NULL OR presentation_revision <= ?)`,
+      snapshot.content,
+      JSON.stringify(snapshot.parts),
+      snapshot.revision,
+      snapshot.etag,
+      Date.now(),
+      ...values(partition),
+      messageId,
+      snapshot.revision,
+    );
+    return result.changes > 0;
+  });
 
 export const getStoredConversation = async (
   partition: ChatPartition,
@@ -112,10 +179,16 @@ export const mergeMessageSnapshots = async (
     for (const message of messages) {
       const parts: ChatPart[] = [
         ...(message.content
-          ? ([{ type: "text", text: message.content }] satisfies ChatPart[])
+          ? ([
+              { id: `text:${message.id}:0`, type: "text", text: message.content },
+            ] satisfies ChatPart[])
           : []),
         ...message.attachments.map(
-          (attachment: AttachmentDto): ChatPart => ({ type: "attachment", attachment }),
+          (attachment: AttachmentDto): ChatPart => ({
+            id: `attachment:${attachment.id}`,
+            type: "attachment",
+            attachment,
+          }),
         ),
       ];
       await database.runAsync(
@@ -127,7 +200,7 @@ export const mergeMessageSnapshots = async (
            role = excluded.role, content = excluded.content,
            parts_json = excluded.parts_json,
            delivery = 'accepted', updated_at = excluded.updated_at
-         WHERE NOT EXISTS (
+         WHERE presentation_revision IS NULL AND NOT EXISTS (
            SELECT 1 FROM run_checkpoints r WHERE r.user_id = messages.user_id
              AND r.workspace_id = messages.workspace_id AND r.assistant_message_id = messages.local_id
          )`,

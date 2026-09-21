@@ -26,6 +26,7 @@ import {
   getSignInUrl,
   getStoredUser,
   handleCallback,
+  isTerminalSessionError,
   REDIRECT_URI,
   SIGN_OUT_REDIRECT_URI,
   selectOrganization,
@@ -79,7 +80,10 @@ const normalizeAuthError = (error: unknown): Error =>
 
 /** Cancellations are deliberate and a 401 already reset the session, so neither needs a message. */
 const toDisplayMessage = (error: unknown): string | null =>
-  !error || error instanceof AuthCancellationError || isUnauthorizedApiError(error)
+  !error ||
+  error instanceof AuthCancellationError ||
+  isUnauthorizedApiError(error) ||
+  isTerminalSessionError(error)
     ? null
     : normalizeAuthError(error).message;
 
@@ -127,6 +131,7 @@ const confirmWorkspaceDiscard = (): Promise<boolean> =>
 
 const api = createAuthenticatedApi({
   getAccessToken,
+  isTerminalAuthError: isTerminalSessionError,
   onUnauthorized: clearAuthentication,
 });
 

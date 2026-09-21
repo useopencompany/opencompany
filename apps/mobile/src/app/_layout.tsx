@@ -17,19 +17,18 @@ import { SplashScreenController } from "@/widgets/splash-screen-controller";
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ToastProvider>
-        <QueryClientProvider client={queryClient}>
-          <AuthProvider>
-            <ChatCoordinatorProvider>
-              {/* Preloading focuses a hidden input and can interrupt composer autofocus. */}
-              <KeyboardProvider preload={false}>
+      <KeyboardProvider>
+        <ToastProvider>
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <ChatCoordinatorProvider>
                 <SplashScreenController />
                 <RootNavigator />
-              </KeyboardProvider>
-            </ChatCoordinatorProvider>
-          </AuthProvider>
-        </QueryClientProvider>
-      </ToastProvider>
+              </ChatCoordinatorProvider>
+            </AuthProvider>
+          </QueryClientProvider>
+        </ToastProvider>
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

@@ -1,14 +1,15 @@
 import { router, Stack, useNavigation } from "expo-router";
-import { KeyboardController } from "react-native-keyboard-controller";
 import { useCSSVariable } from "uniwind";
 
 import { ChatComposerProvider } from "@/widgets/chat/model/chat-composer-context";
+import { useChatInputController } from "@/widgets/chat/model/chat-input-controller";
 
 export default function StackLayout() {
   // TS doesn't know the type of navigation, so we cast it to include openDrawer
   const navigation = useNavigation() as ReturnType<typeof useNavigation> & {
     openDrawer: () => void;
   };
+  const input = useChatInputController();
   const backgroundColor = useCSSVariable("--color-background") as string;
   return (
     <ChatComposerProvider>
@@ -25,7 +26,7 @@ export default function StackLayout() {
                 name: "sidebar.left",
               },
               onPress: () => {
-                KeyboardController.dismiss();
+                void input.dismissComposer();
                 navigation.openDrawer();
               },
             },
@@ -34,15 +35,6 @@ export default function StackLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="chats/[chatId]" />
-        <Stack.Screen
-          name="camera"
-          options={{
-            presentation: "fullScreenModal",
-            animation: "fade",
-            headerShown: false,
-            gestureEnabled: true,
-          }}
-        />
         <Stack.Screen
           name="attachment-sheet"
           options={{

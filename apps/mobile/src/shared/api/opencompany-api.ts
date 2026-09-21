@@ -13,6 +13,7 @@ import {
   type IdentityUserDto,
   type IdentityWorkspaceDto,
   MessagePageSchema,
+  MessagePresentationEnvelopeSchema,
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   RunEnvelopeSchema,
@@ -74,6 +75,7 @@ export interface AuthenticatedIdentity extends Omit<IdentityDto, "user" | "works
 
 interface AuthenticatedApiOptions {
   getAccessToken: () => Promise<string>;
+  isTerminalAuthError: (error: unknown) => boolean;
   onUnauthorized: () => Promise<void>;
 }
 
@@ -98,6 +100,10 @@ type CreateMessageEnvelope = z.output<typeof CreateMessageEnvelopeSchema>;
 type RunEnvelope = z.output<typeof RunEnvelopeSchema>;
 type CancelRunEnvelope = z.output<typeof CancelRunEnvelopeSchema>;
 type ResolveApprovalEnvelope = z.output<typeof ResolveApprovalEnvelopeSchema>;
+type MessagePresentationEnvelope = z.output<typeof MessagePresentationEnvelopeSchema>;
+export type MessagePresentationResult =
+  | { status: "not-modified" }
+  | { status: "updated"; data: MessagePresentationEnvelope["data"]; etag: string | null };
 
 export interface AuthenticatedApi {
   getIdentity: (signal?: AbortSignal) => Promise<AuthenticatedIdentity>;
@@ -110,6 +116,12 @@ export interface AuthenticatedApi {
     options?: ListPageOptions,
     signal?: AbortSignal,
   ) => Promise<MessagePage>;
+  getMessagePresentation: (
+    conversationId: string,
+    messageId: string,
+    etag?: string | null,
+    signal?: AbortSignal,
+  ) => Promise<MessagePresentationResult>;
   uploadAttachment: (
     fileUri: string,
     idempotencyKey: string,
@@ -209,8 +221,24 @@ const requireOk = async (response: ResponseLike): Promise<Response> => {
 export const createAuthenticatedApi = (options: AuthenticatedApiOptions): AuthenticatedApi => {
   let unauthorizedCleanup: Promise<void> | null = null;
 
+  const clearUnauthorizedSession = async (): Promise<void> => {
+    if (!unauthorizedCleanup) {
+      const cleanup = options.onUnauthorized().finally(() => {
+        if (unauthorizedCleanup === cleanup) unauthorizedCleanup = null;
+      });
+      unauthorizedCleanup = cleanup;
+    }
+    await unauthorizedCleanup;
+  };
+
   const authenticatedFetch: typeof globalThis.fetch = async (input, init) => {
-    const accessToken = await options.getAccessToken();
+    let accessToken: string;
+    try {
+      accessToken = await options.getAccessToken();
+    } catch (error) {
+      if (options.isTerminalAuthError(error)) await clearUnauthorizedSession();
+      throw error;
+    }
     const headers = new Headers(init?.headers);
     headers.set("Authorization", `Bearer ${accessToken}`);
     if (!headers.has("Accept")) headers.set("Accept", "application/json");
@@ -230,10 +258,7 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
       );
     }
 
-    if (response.status === 401) {
-      unauthorizedCleanup ??= options.onUnauthorized();
-      await unauthorizedCleanup;
-    }
+    if (response.status === 401) await clearUnauthorizedSession();
     return response;
   };
 
@@ -312,6 +337,24 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
         signal,
         { cursor: page.cursor, limit: page.limit ?? 100 },
       ),
+    getMessagePresentation: async (conversationId, messageId, etag, signal) => {
+      const response = await request(
+        `v1/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/presentation`,
+        etag ? { headers: { "If-None-Match": etag } } : undefined,
+        signal,
+      );
+      if (response.status === 304) return { status: "not-modified" };
+      return {
+        status: "updated",
+        data: (
+          await parseJsonResponse<MessagePresentationEnvelope>(
+            response,
+            MessagePresentationEnvelopeSchema,
+          )
+        ).data,
+        etag: response.headers.get("ETag"),
+      };
+    },
     uploadAttachment: async (fileUri, idempotencyKey, signal) => {
       const body = new FormData();
       body.append("file", new File(fileUri) as unknown as Blob);

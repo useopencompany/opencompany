@@ -1,67 +1,107 @@
-import { Host } from "@expo/ui";
-import { RNHostView } from "@expo/ui/swift-ui";
 import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
-import { useEffect, useRef } from "react";
-import { useWindowDimensions, View } from "react-native";
+import type { Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import {
+  type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  Pressable,
+  TextInput,
+  type TextInputContentSizeChangeEventData,
+  View,
+} from "react-native";
 import { useCSSVariable } from "uniwind";
 import { until } from "until-async";
+import { StyledGlassView } from "@/shared/ui/styled-glass-view";
+import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { useToast } from "@/shared/ui/toast";
-import { NativeChatComposerView } from "../../../../modules/native-chat-composer";
 import { useChatComposer } from "../model/chat-composer-context";
+import { useChatInputController } from "../model/chat-input-controller";
 import { ComposerAttachments } from "./composer-attachments";
 
-const COMPOSER_EXPANDED_VERTICAL_PADDING = 10;
+const COMPOSER_MINIMUM_HEIGHT = 52;
 const COMPOSER_INPUT_LINE_HEIGHT = 22;
-const COMPOSER_MAXIMUM_LINE_COUNT = 5;
-const COMPOSER_EXPANDED_ACTION_GAP = 12;
-const COMPOSER_CONTROL_SIZE = 36;
-const COMPOSER_OUTER_VERTICAL_PADDING = 16;
+const COMPOSER_INPUT_MAX_HEIGHT = COMPOSER_INPUT_LINE_HEIGHT * 5;
+const COMPOSER_CLOSED_HORIZONTAL_INSET = 40;
 const COMPOSER_OPEN_HORIZONTAL_INSET = 12;
-const COMPOSER_CONTENT_HORIZONTAL_PADDING = 10;
-const COMPOSER_ATTACHMENTS_CANVAS_HEIGHT = 128;
-const COMPOSER_PILL_HEIGHT_SETTLE_DELAY = 60;
-const COMPOSER_CANVAS_PILL_HEIGHT =
-  COMPOSER_EXPANDED_VERTICAL_PADDING * 2 +
-  COMPOSER_INPUT_LINE_HEIGHT * COMPOSER_MAXIMUM_LINE_COUNT +
-  COMPOSER_EXPANDED_ACTION_GAP +
-  COMPOSER_CONTROL_SIZE;
+
+function sendButtonOpacity(input: {
+  canSend: boolean;
+  disabled: boolean;
+  isGenerating: boolean;
+  isSending: boolean;
+  isStopping: boolean;
+}): number {
+  if (input.isGenerating) return input.isStopping ? 0.6 : 1;
+  return input.disabled || input.isSending || !input.canSend ? 0.45 : 1;
+}
+
+export interface ChatComposerHandle {
+  blur: () => void;
+  focus: () => void;
+  isFocused: () => boolean;
+}
+
+export interface SentMessageIdentity {
+  conversationId: string;
+  userMessageId: string;
+}
 
 export function ChatComposer({
   autoFocus,
   bottomInset,
   conversationId,
+  containerRef,
   disabled,
   isGenerating,
   isStopping,
-  onComposerHeightChange,
-  onPillHeightChange,
+  onLayout,
   onSend,
   onStop,
+  ref,
 }: {
   autoFocus: boolean;
   bottomInset: number;
   conversationId: string;
+  containerRef: Ref<View>;
   disabled: boolean;
   isGenerating: boolean;
   isStopping: boolean;
-  onComposerHeightChange: (height: number) => void;
-  onPillHeightChange: (height: number) => void;
-  onSend: () => Promise<void>;
+  onLayout: (event: LayoutChangeEvent) => void;
+  onSend: () => Promise<SentMessageIdentity>;
   onStop: () => Promise<void>;
+  ref?: Ref<ChatComposerHandle>;
 }) {
-  const { width } = useWindowDimensions();
   const [accent, accentForeground] = useCSSVariable([
     "--color-accent",
     "--color-accent-foreground",
   ]) as [string, string];
   const { showErrorToast } = useToast();
-  const pillHeightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const composer = useChatComposer();
+  const input = useChatInputController();
+  const [contentHeight, setContentHeight] = useState(COMPOSER_INPUT_LINE_HEIGHT);
+  const [focused, setFocused] = useState(false);
+  const focusedRef = useRef(false);
+  const didHandleInitialFocusRef = useRef(false);
+  const isActiveConversation = composer.conversationId === conversationId;
+  const attachments = isActiveConversation ? composer.attachments : [];
+  const value = isActiveConversation ? composer.value : "";
+  const hasMultipleLines = contentHeight > COMPOSER_INPUT_LINE_HEIGHT + 1;
+  const expanded = hasMultipleLines || attachments.length > 0;
+  const canSend = Boolean(value.trim() || attachments.length > 0);
+  const horizontalInset =
+    focused || expanded ? COMPOSER_OPEN_HORIZONTAL_INSET : COMPOSER_CLOSED_HORIZONTAL_INSET;
+
+  useImperativeHandle(ref, () => ({
+    blur: () => input.composerInputRef.current?.blur(),
+    focus: () => input.composerInputRef.current?.focus(),
+    isFocused: () => focusedRef.current,
+  }));
+
   const sendMutation = useMutation({
     mutationFn: async () => {
       await composer.flushDraft();
-      await onSend();
+      return onSend();
     },
     onSuccess: () => composer.clearAfterSend(),
     onError: (error) =>
@@ -71,82 +111,140 @@ export function ChatComposer({
         "chat.message.send",
       ),
   });
-  const isActiveConversation = composer.conversationId === conversationId;
-  const attachments = isActiveConversation ? composer.attachments : [];
-  const value = isActiveConversation ? composer.value : "";
-  const canvasHeight =
-    COMPOSER_CANVAS_PILL_HEIGHT +
-    COMPOSER_ATTACHMENTS_CANVAS_HEIGHT +
-    COMPOSER_OUTER_VERTICAL_PADDING +
-    bottomInset;
-  const attachmentContentWidth = Math.max(
-    0,
-    width - 2 * (COMPOSER_OPEN_HORIZONTAL_INSET + COMPOSER_CONTENT_HORIZONTAL_PADDING),
-  );
 
-  useEffect(
-    () => () => {
-      if (pillHeightTimeoutRef.current !== null) {
-        clearTimeout(pillHeightTimeoutRef.current);
-      }
-    },
-    [],
-  );
-
-  const handleComposerHeightChange = (pillHeight: number) => {
-    onComposerHeightChange(pillHeight + COMPOSER_OUTER_VERTICAL_PADDING + bottomInset);
-
-    if (pillHeightTimeoutRef.current !== null) {
-      clearTimeout(pillHeightTimeoutRef.current);
+  useLayoutEffect(() => {
+    if (!isActiveConversation || !composer.isReady || input.drawerOpen) {
+      return;
     }
+    const shouldHandleInitialFocus = autoFocus && !didHandleInitialFocusRef.current;
+    const shouldHandleRequestedFocus = input.consumeComposerFocusRequest(input.focusRequestId);
+    if (!shouldHandleInitialFocus && !shouldHandleRequestedFocus) return;
+    if (shouldHandleInitialFocus) didHandleInitialFocusRef.current = true;
+    input.composerInputRef.current?.focus();
+  }, [autoFocus, composer.isReady, input.drawerOpen, input.focusRequestId, isActiveConversation]);
 
-    pillHeightTimeoutRef.current = setTimeout(() => {
-      pillHeightTimeoutRef.current = null;
-      onPillHeightChange(pillHeight);
-    }, COMPOSER_PILL_HEIGHT_SETTLE_DELAY);
+  useEffect(() => {
+    if (!isActiveConversation && focusedRef.current) input.composerInputRef.current?.blur();
+  }, [isActiveConversation]);
+
+  const handleContentSizeChange = (
+    event: NativeSyntheticEvent<TextInputContentSizeChangeEventData>,
+  ) => {
+    const nextHeight = Math.min(
+      COMPOSER_INPUT_MAX_HEIGHT,
+      Math.max(COMPOSER_INPUT_LINE_HEIGHT, Math.ceil(event.nativeEvent.contentSize.height)),
+    );
+    setContentHeight((current) => (Math.abs(current - nextHeight) <= 1 ? current : nextHeight));
   };
 
   return (
-    <View pointerEvents="box-none" style={{ height: canvasHeight }}>
-      <Host
-        ignoreSafeArea="all"
-        pointerEvents="box-none"
-        style={{ height: canvasHeight, width: "100%" }}
+    <View
+      className="pt-2"
+      onLayout={onLayout}
+      pointerEvents="box-none"
+      ref={containerRef}
+      style={{ paddingBottom: bottomInset + 8, paddingHorizontal: horizontalInset }}
+    >
+      <StyledGlassView
+        className="w-full overflow-hidden px-2.5"
+        glassEffectStyle="regular"
+        isInteractive
+        style={{
+          borderRadius: expanded ? 24 : COMPOSER_MINIMUM_HEIGHT / 2,
+          minHeight: COMPOSER_MINIMUM_HEIGHT,
+        }}
       >
-        <NativeChatComposerView
-          accentColor={accent}
-          accentForegroundColor={accentForeground}
-          autoFocus={autoFocus}
-          bottomInset={bottomInset}
-          disabled={disabled || sendMutation.isPending || !isActiveConversation}
-          hasAttachments={attachments.length > 0}
-          isGenerating={isGenerating}
-          isStopping={isStopping}
-          nativeID="chat-composer"
-          onAttachmentPress={() => router.push("/attachment-sheet")}
-          onComposerHeightChange={(event) => handleComposerHeightChange(event.nativeEvent.height)}
-          onChangeText={(event) => composer.setValue(event.nativeEvent.value)}
-          onSend={() => {
-            if (!sendMutation.isPending) sendMutation.mutate();
-          }}
-          onStop={() => {
-            void until(onStop).then(([error]) => {
-              if (error)
-                showErrorToast("The stop request could not be saved.", error, "chat.run.stop");
-            });
-          }}
-          style={{ height: "100%", width: "100%" }}
-          value={value}
-        >
-          <RNHostView matchContents>
-            <ComposerAttachments
-              attachments={attachments}
-              contentWidth={attachmentContentWidth}
-              onRemove={composer.removeAttachment}
+        <ComposerAttachments attachments={attachments} onRemove={composer.removeAttachment} />
+        <View className="relative min-h-[40px] justify-center">
+          <TextInput
+            accessibilityLabel="Message"
+            blurOnSubmit={false}
+            className="text-[17px] text-foreground leading-[22px]"
+            editable={!disabled && isActiveConversation}
+            multiline
+            nativeID="chat-composer"
+            onBlur={() => {
+              focusedRef.current = false;
+              setFocused(false);
+            }}
+            onChangeText={composer.setValue}
+            onContentSizeChange={handleContentSizeChange}
+            onFocus={() => {
+              focusedRef.current = true;
+              setFocused(true);
+              input.setKeyboardOwner("composer");
+            }}
+            placeholder="Ask opencompany"
+            placeholderTextColorClassName="accent-muted-foreground"
+            ref={input.composerInputRef}
+            scrollEnabled={contentHeight >= COMPOSER_INPUT_MAX_HEIGHT}
+            selectionColor={accent}
+            style={{
+              height: contentHeight + (expanded ? 48 : 0),
+              maxHeight: COMPOSER_INPUT_MAX_HEIGHT + (expanded ? 48 : 0),
+              minHeight: COMPOSER_INPUT_LINE_HEIGHT,
+              paddingBottom: expanded ? 48 : 0,
+              paddingHorizontal: expanded ? 0 : 44,
+              paddingTop: 0,
+              textAlignVertical: "top",
+            }}
+            value={value}
+          />
+          <Pressable
+            accessibilityLabel="Open attachments"
+            accessibilityRole="button"
+            className="absolute bottom-0 left-0 size-9 items-center justify-center rounded-full active:bg-secondary"
+            disabled={disabled}
+            hitSlop={4}
+            onPress={() => {
+              void input.dismissComposer();
+              router.push("/attachment-sheet");
+            }}
+          >
+            <StyledSymbolView
+              name="plus"
+              size={20}
+              tintColorClassName="accent-foreground"
+              weight="medium"
             />
-          </RNHostView>
-        </NativeChatComposerView>
-      </Host>
+          </Pressable>
+          <Pressable
+            accessibilityLabel={isGenerating ? (isStopping ? "Stopping" : "Stop") : "Send message"}
+            accessibilityRole="button"
+            className="absolute right-0 bottom-0 size-9 items-center justify-center rounded-full active:opacity-70"
+            disabled={isGenerating ? isStopping : disabled || sendMutation.isPending || !canSend}
+            hitSlop={4}
+            onPress={() => {
+              if (isGenerating) {
+                void until(onStop).then(([error]) => {
+                  if (error) {
+                    showErrorToast("The stop request could not be saved.", error, "chat.run.stop");
+                  }
+                });
+                return;
+              }
+              sendMutation.mutate();
+            }}
+            style={{
+              backgroundColor: accent,
+              opacity: sendButtonOpacity({
+                canSend,
+                disabled,
+                isGenerating,
+                isSending: sendMutation.isPending,
+                isStopping,
+              }),
+            }}
+          >
+            <StyledSymbolView
+              name={isGenerating ? "stop.fill" : "arrow.up"}
+              size={isGenerating ? 13 : 15}
+              tintColor={accentForeground}
+              weight="bold"
+            />
+          </Pressable>
+        </View>
+      </StyledGlassView>
     </View>
   );
 }
