@@ -12,6 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
+## [1.32.0] - 2026-09-21
+
+### Added
+- give each schedule or event its own instructions in workflows and the company agents beta. use one agent for hourly checks and a weekly summary, with a different brief for each. run now uses the standing instructions (#1956) — @louis.
+- give a company agent its own slack bot to mention or message directly. an admin first sets up agent identities in settings → channels → slack, then the agent's owner turns on enable slack. slack starts off; runs use the owner's connected accounts (#1957) — @louis.
+
+### Changed
+- workflow changes made by a coding agent now stay visible as cards in chat after the tool activity collapses. see the workflow's status and schedules, then open it from the card (#1969) — @louis.
+
+### Fixed
+- schedules set for the same time now each start their own run, instead of one blocking the other (#1964) — @louis.
+- company agent edits save again after you leave the editor and return. save feedback also stays in place without shifting the form (#1954, #1960) — @louis.
+- answer a coding task's question after it resumes without the answer getting stuck (#1950) — @louis.
+- expired sessions now take you to sign in again instead of showing an error (#1972) — @louis.
+- chats can recover automatically from temporary model overloads and malformed kimi tool replies when it is safe to retry (#1966, #1975) — @louis.
+- setting up a company agent's slack bot now explains when the workspace has reached its app limit and how to make room (#1965) — @louis.
+- cloud sandbox usage is recorded in your credit balance again after a bug delayed usage charges (#1955) — @louis.
+
+### Security
+- removing a workspace member now also removes their access to restricted wikis (#1914) — @louis.
+
 ## [1.31.0] - 2026-09-18
 
 ### Added
