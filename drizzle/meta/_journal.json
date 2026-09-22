@@ -2164,6 +2164,13 @@
       "when": 1790100400029,
       "tag": "0308_remove_project_wikis",
       "breakpoints": true
+    },
+    {
+      "idx": 309,
+      "version": "7",
+      "when": 1790100400030,
+      "tag": "0309_slack_agent_images",
+      "breakpoints": true
     }
   ]
 }
