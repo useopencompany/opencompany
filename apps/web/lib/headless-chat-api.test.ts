@@ -95,4 +95,37 @@ describe("headless Chat direct API transport", () => {
       ),
     ).toHaveLength(2);
   });
+
+  it("refreshes an expired shared session once before retrying concurrent requests", async () => {
+    let apiCalls = 0;
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL) => {
+      if (input.toString().endsWith("/api/auth/share-api-session")) {
+        return Response.json({ ok: true });
+      }
+      apiCalls += 1;
+      return apiCalls <= 2
+        ? Response.json({ error: "Authentication required." }, { status: 401 })
+        : Response.json({ ok: true });
+    });
+    const fetchMock = fetchSpy as unknown as typeof fetch;
+    const apiFetch = createHeadlessChatApiFetch({
+      baseUrl: "https://api.opencompany.chat",
+      webBaseUrl: "https://my.opencompany.chat",
+      fetch: fetchMock,
+      prepareSession: true,
+    });
+
+    const responses = await Promise.all([
+      apiFetch("https://api.opencompany.chat/v1/conversations"),
+      apiFetch("https://api.opencompany.chat/v1/read-models/chat-conversations-v1"),
+    ]);
+
+    expect(responses.every((response) => response.ok)).toBe(true);
+    expect(apiCalls).toBe(4);
+    expect(
+      fetchSpy.mock.calls.filter(([request]) =>
+        request.toString().endsWith("/api/auth/share-api-session"),
+      ),
+    ).toHaveLength(2);
+  });
 });
