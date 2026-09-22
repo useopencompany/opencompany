@@ -11,9 +11,11 @@ import {
   TaskApplicationService,
   WORKFLOW_READ_PERMISSION,
 } from "@opencompany/core";
+import { PostgresChatAttachmentRepository } from "@opencompany/db/chat-repository";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import {
   enqueueSlackThreadReply,
+  type SlackThreadReply,
   type SubscriptionExecute,
   subscriptionRows,
 } from "@opencompany/db/session-subscriptions";
@@ -28,6 +30,10 @@ import {
   type SlackUser,
   slackFollowUpPrompt,
 } from "./slack-channel-worker";
+import {
+  materializeSlackImageAttachments,
+  type SlackImageAttachmentMaterializer,
+} from "./slack-message-attachments";
 import { resolveSlackWorkspaceMember } from "./slack-workspace-member";
 
 type Message = {
@@ -38,6 +44,7 @@ type Message = {
   messageTs: string;
   slackUserId: string;
   text: string;
+  files: NonNullable<SlackThreadReply["files"]>;
   installation: ChannelInstallation & { companyAgentId: string };
 };
 export type SlackAgentWorkerDependencies = {
@@ -49,6 +56,7 @@ export type SlackAgentWorkerDependencies = {
   request: typeof slackApiRequest;
   validateChannel: typeof resolvePublicChannel;
   prepare: typeof prepareWorkflowRunForUser;
+  materializeAttachments: SlackImageAttachmentMaterializer;
 };
 const defaults = (): SlackAgentWorkerDependencies => ({
   db: getDb(),
@@ -56,6 +64,7 @@ const defaults = (): SlackAgentWorkerDependencies => ({
   request: slackApiRequest,
   validateChannel: resolvePublicChannel,
   prepare: prepareWorkflowRunForUser,
+  materializeAttachments: materializeSlackImageAttachments,
 });
 
 export async function processNextSlackAgentMessage(deps = defaults()): Promise<boolean> {
@@ -66,7 +75,7 @@ export async function processNextSlackAgentMessage(deps = defaults()): Promise<b
       const [message] = subscriptionRows<Message>(
         await execute(sql`
         SELECT message.id, message.event_id AS "eventId", message.channel_id AS "channelId",
-          message.thread_ts AS "threadTs", message.message_ts AS "messageTs", message.slack_user_id AS "slackUserId", message.text,
+          message.thread_ts AS "threadTs", message.message_ts AS "messageTs", message.slack_user_id AS "slackUserId", message.text, message.files,
           jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
             'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id,
             'scopes', integration.scopes, 'companyAgentId', integration.company_agent_id) AS installation
@@ -145,6 +154,7 @@ export async function processNextSlackAgentMessage(deps = defaults()): Promise<b
         messageTs: message.messageTs,
         slackUserId: message.slackUserId,
         text: message.text,
+        files: message.files,
       };
       const [subscription] = subscriptionRows(
         await execute(sql`
@@ -171,6 +181,13 @@ export async function processNextSlackAgentMessage(deps = defaults()): Promise<b
         await mark("ignored");
         return { handled: true };
       }
+      const attachmentIds = await deps.materializeAttachments({
+        execute,
+        actor,
+        token,
+        messageKey: `${message.installation.id}:${message.channelId}:${message.messageTs}`,
+        files: message.files,
+      });
       const prompt = slackFollowUpPrompt({
         eventId: message.id,
         slackUserId: message.slackUserId,
@@ -201,18 +218,21 @@ export async function processNextSlackAgentMessage(deps = defaults()): Promise<b
       const harness = prepared.harnessSpec as HarnessSpec;
       const created = await new TaskApplicationService(
         new PostgresTaskRepository(execute, {
+          resolveAttachments: (input) =>
+            new PostgresChatAttachmentRepository(execute).resolve(input),
           resolveHarness: async () => harness,
           compatibility: { initialMessageContent: harness.initialUserMessage },
         }),
       ).createTask(actor, {
         idempotencyKey: `slack-agent:${message.id}`,
         name: workflow.name,
-        goal: message.text.slice(0, 10000),
+        goal: message.text.slice(0, 10000) || "Review the attached Slack image.",
         engine: harness.engine,
         model: harness.model,
         source: "workflow",
         workflowId: workflow.slug,
         agentId: workflow.id,
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
       });
       const sourceKey = {
         teamId: event.teamId,

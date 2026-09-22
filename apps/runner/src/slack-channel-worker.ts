@@ -12,7 +12,8 @@ import {
   resolvePublicChannel,
 } from "@opencompany/agent/integrations/slack-channel";
 import { processNextSlackProvisioning } from "@opencompany/agent/integrations/slack-provisioning";
-import { TASK_WRITE_PERMISSION } from "@opencompany/core";
+import { type Actor, TASK_WRITE_PERMISSION } from "@opencompany/core";
+import { PostgresChatAttachmentRepository } from "@opencompany/db/chat-repository";
 import {
   completeChannelDelivery,
   type SlackThreadReply,
@@ -26,6 +27,10 @@ import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 import { processNextSlackAgentMessage } from "./slack-agent-worker";
 import { processNextSlackDirectMessage } from "./slack-direct-message-worker";
+import {
+  materializeSlackImageAttachments,
+  type SlackImageAttachmentMaterializer,
+} from "./slack-message-attachments";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
 const CLOSED_REPLY = "This thread is closed. Open the task in opencompany to continue the work.";
@@ -85,12 +90,14 @@ export type SlackChannelWorkerDependencies = {
   credential: typeof channelBotCredential;
   request: typeof slackApiRequest;
   validateChannel: typeof resolvePublicChannel;
+  materializeAttachments: SlackImageAttachmentMaterializer;
 };
 const defaults = (): SlackChannelWorkerDependencies => ({
   db: getDb(),
   credential: channelBotCredential,
   request: slackApiRequest,
   validateChannel: resolvePublicChannel,
+  materializeAttachments: materializeSlackImageAttachments,
 });
 
 export async function processNextSubscriptionEvent(deps = defaults()): Promise<boolean> {
@@ -238,16 +245,27 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         await queueReply(tx.execute.bind(tx), event, deliveryId, CLOSED_REPLY);
         return true;
       }
+      const actor: Actor = {
+        userId: owner.userId,
+        workspaceId: event.workspaceId,
+        role: owner.role,
+        permissions: [TASK_WRITE_PERMISSION],
+        authenticationMethod: "service",
+      };
+      const attachmentIds = await deps.materializeAttachments({
+        execute: tx.execute.bind(tx),
+        actor,
+        token,
+        messageKey: `${event.installation.id}:${event.payload.channelId}:${event.payload.messageTs}`,
+        files: event.payload.files ?? [],
+      });
       // Task, runtime, Messages and Run commit with the inbox cursor. A worker crash cannot
       // turn the same event into another Run. The existing runner owns the fenced Run lease.
-      const result = await new PostgresTaskRepository(tx.execute.bind(tx)).createTaskCommentAndRun({
-        actor: {
-          userId: owner.userId,
-          workspaceId: event.workspaceId,
-          role: owner.role,
-          permissions: [TASK_WRITE_PERMISSION],
-          authenticationMethod: "service",
-        },
+      const execute = tx.execute.bind(tx);
+      const result = await new PostgresTaskRepository(execute, {
+        resolveAttachments: (input) => new PostgresChatAttachmentRepository(execute).resolve(input),
+      }).createTaskCommentAndRun({
+        actor,
         taskId: event.taskId,
         command: {
           id: `subscription_event_${event.id}`,
@@ -259,6 +277,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
             botUserId,
             thread,
           }),
+          ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
         },
       });
       if (!result) throw new Error("The subscribed task could not be resumed.");
