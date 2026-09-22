@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - delete a wiki you created from wiki settings. workspace admins can also delete other wikis. deletion permanently removes its pages and history; the company wiki stays protected (#1991) — @louis.
+- send screenshots and other supported images to a company agent in slack, including in follow-up replies. existing agent connections may need to reconnect to read images (#1994) — @louis.
 
 ### Changed
 - hobby accounts can now keep up to five workspaces instead of one, so you can run more than one thing without moving to pro. upgrading a workspace to pro frees up a slot (#1988) — @louis.
