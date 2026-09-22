@@ -21,6 +21,7 @@ import {
   type SlackUser,
   slackUserName,
 } from "./slack-channel-worker";
+import { resolveSlackWorkspaceMember } from "./slack-workspace-member";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-direct-message" });
 // Slack's own cap is generous; the Task goal is capped at 10k, and the full message still reaches
@@ -111,20 +112,12 @@ export async function processNextSlackDirectMessage(deps = defaults()): Promise<
         await ignore(execute, request.id);
         return { handled: true };
       }
-      // Slack verifies the profile email for its own workspace, and the installation binds that
-      // Slack workspace to exactly one opencompany workspace. Membership there is what decides
-      // whose account and connected tools the session runs on.
-      const email = user.profile?.email?.trim().toLowerCase() ?? "";
-      const [member] = subscriptionRows<{ userId: string; role: "admin" | "member" }>(
-        await execute(sql`
-        SELECT member.user_workos_id AS "userId", member.role
-        FROM goat.workspace_members member
-        JOIN goat.users account ON account.workos_user_id = member.user_workos_id
-        WHERE member.workspace_id = ${request.installation.workspaceId}
-          AND lower(account.email) = ${email} AND ${email} <> ''
-        ORDER BY member.user_workos_id LIMIT 1
-      `),
-      );
+      const member = await resolveSlackWorkspaceMember(execute, {
+        workspaceId: request.installation.workspaceId,
+        teamId: request.teamId,
+        slackUserId: request.slackUserId,
+        email: user.profile?.email?.trim().toLowerCase() ?? "",
+      });
       if (!member) {
         await ignore(execute, request.id);
         logger.info("Slack direct message had no matching opencompany account", {

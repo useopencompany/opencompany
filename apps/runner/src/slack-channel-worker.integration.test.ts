@@ -147,6 +147,12 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0306_slack_agent_provisioning.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -323,6 +329,32 @@ describe("dedicated company agent conversations", () => {
     );
     await processNextSlackAgentMessage(agentDeps);
     expect(agentDeps.prepare).not.toHaveBeenCalled();
+  });
+
+  it("accepts the provisioning authorizer when their Slack and opencompany emails differ", async () => {
+    const agentDeps = await setupAgents();
+    await pg.exec(`
+      INSERT INTO goat.slack_provisioning_connections
+        (workspace_id, team_id, team_name, authorized_by, slack_user_id, encrypted_payload)
+      VALUES ('workspace', 'T1', 'Test Slack', 'owner', 'U1', '{}');
+    `);
+    agentDeps.request = vi.fn(async ({ method }: { method: string }) =>
+      method === "users.info"
+        ? {
+            user: {
+              id: "U1",
+              team_id: "T1",
+              profile: { real_name: "Owner Person", email: "different@example.com" },
+            },
+          }
+        : { messages: [] },
+    ) as unknown as SlackAgentWorkerDependencies["request"];
+
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(true);
+    expect(agentDeps.prepare).toHaveBeenCalledOnce();
+    expect(
+      (await pg.query("SELECT user_workos_id FROM goat.tasks WHERE agent_id = 'agent1'")).rows,
+    ).toEqual([{ user_workos_id: "owner" }]);
   });
 });
 
@@ -1162,6 +1194,20 @@ describe("Slack direct message sessions", () => {
         )
       ).rows,
     ).toHaveLength(1);
+  });
+
+  it("prefers the provisioning account link when Slack uses a different email", async () => {
+    await pg.exec(`
+      INSERT INTO goat.slack_provisioning_connections
+        (workspace_id, team_id, team_name, authorized_by, slack_user_id, encrypted_payload)
+      VALUES ('workspace', 'T1', 'Test Slack', 'owner', 'U1', '{}');
+      ${directMessage};
+    `);
+
+    expect(await processNextSlackDirectMessage(directMessageDeps)).toBe(true);
+    expect(
+      (await pg.query("SELECT user_workos_id FROM goat.tasks WHERE id <> 'task'")).rows,
+    ).toEqual([{ user_workos_id: "owner" }]);
   });
 
   it("lets the run answer in the thread even though the task has no workflow", async () => {
