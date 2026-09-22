@@ -52,6 +52,7 @@ describe("personal custom MCP account persistence", () => {
         company_agent_id text, slack_app_id text,
         id text PRIMARY KEY, user_workos_id text NOT NULL REFERENCES goat.users, workspace_id text REFERENCES goat.workspaces,
         shared_with_workspace boolean NOT NULL DEFAULT false, provider text NOT NULL, external_id text NOT NULL,
+        github_installation_id text,
         connection_label text, account_name text, account_email text, account_type text, status text NOT NULL DEFAULT 'connected', status_reason text,
         scopes jsonb NOT NULL DEFAULT '[]', capability_modes jsonb NOT NULL DEFAULT '{}', tool_modes jsonb NOT NULL DEFAULT '{}',
         last_synced_at timestamptz, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
