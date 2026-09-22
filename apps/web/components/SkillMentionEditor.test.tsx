@@ -104,4 +104,35 @@ describe("workflow skill mentions in the real markdown editor", () => {
     expect(editor.view.dom.textContent?.trim()).toBe(`@${SKILL.name}`);
     expect(onChange).toHaveBeenLastCalledWith(editor.getMarkdown());
   });
+
+  it("does not run a delayed bubble menu update after the editor unmounts", async () => {
+    render(<MarkdownEditor content="hello" onChange={vi.fn()} />);
+    await waitFor(() => expect(capturedEditor).not.toBeNull());
+    const editor = capturedEditor as Editor;
+
+    vi.useFakeTimers();
+    let timerError: unknown;
+    const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
+    try {
+      act(() => {
+        editor.commands.setTextSelection({ from: 1, to: 2 });
+      });
+      cleanup();
+      vi.advanceTimersByTime(1);
+      Reflect.deleteProperty(globalThis, "document");
+      try {
+        vi.advanceTimersByTime(249);
+      } catch (error) {
+        timerError = error;
+      }
+    } finally {
+      if (documentDescriptor) {
+        Object.defineProperty(globalThis, "document", documentDescriptor);
+      }
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+
+    expect(timerError).toBeUndefined();
+  });
 });
