@@ -799,6 +799,37 @@ describe("durable Slack subscriptions", () => {
         .rows,
     ).toEqual([{ status: "running", resumed: true }]);
   });
+  it("uses the provisioned Slack identity when a company agent reply has a different email", async () => {
+    await pg.exec(`
+      UPDATE goat.integrations SET company_agent_id = 'workflow-id', slack_app_id = 'A1'
+      WHERE id = 'install';
+      UPDATE goat.workflows SET kind = 'agent' WHERE id = 'workflow-id';
+      UPDATE goat.session_subscriptions
+      SET source_key = source_key || '{"integrationId":"install"}'::jsonb;
+      INSERT INTO goat.slack_provisioning_connections
+        (workspace_id, team_id, team_name, authorized_by, slack_user_id, encrypted_payload)
+      VALUES ('workspace', 'T1', 'Test Slack', 'owner', 'U1', '{}');
+    `);
+    deps.request = vi.fn(async ({ method }: { method: string }) =>
+      method === "users.info"
+        ? {
+            user: {
+              id: "U1",
+              team_id: "T1",
+              profile: { real_name: "Owner Person", email: "different@example.com" },
+            },
+          }
+        : { messages: [] },
+    ) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await enqueueSlackThreadReply(execute, { ...reply, integrationId: "install" });
+
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT status, run_id IS NOT NULL AS resumed FROM goat.subscription_events"))
+        .rows,
+    ).toEqual([{ status: "running", resumed: true }]);
+  });
   it("does not copy a completed assistant turn into Slack when the reply tool was not used", async () => {
     await enqueueSlackThreadReply(execute, reply);
     await processNextSubscriptionEvent(deps);
