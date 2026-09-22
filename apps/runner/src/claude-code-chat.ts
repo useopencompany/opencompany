@@ -180,6 +180,8 @@ const logger = createLogger({
 
 export const CLAUDE_CODE_CHAT_REAUTH_MESSAGE =
   "Claude Code is disconnected. Reconnect Claude Code in opencompany settings, then send your message again.";
+export const CLAUDE_CODE_CHAT_SUBSCRIPTION_DISABLED_MESSAGE =
+  "Claude Code subscription access is disabled by your Anthropic organization. Ask an Anthropic admin to enable it, then reconnect Claude Code in opencompany settings and retry.";
 export const CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE =
   "Connected integrations are temporarily unavailable because opencompany tools did not initialize in Claude Code. Send your message again to retry.";
 
@@ -194,9 +196,26 @@ class ClaudeCoreMcpUnavailableError extends Error {
 // against claude 2.1.220) and "authentication". Usage-credit and credit-balance failures are
 // temporary quota states: the same OAuth credential becomes usable again after a reset or top-up.
 const AUTH_FAILURE_PATTERN = /oauth|authenticat|unauthorized|401|login expired|invalid api key/i;
+const SUBSCRIPTION_ACCESS_DISABLED_PATTERN =
+  /organi[sz]ation has disabled claude subscription access/i;
+
+export function claudeCodeCredentialRejection(value: string) {
+  if (SUBSCRIPTION_ACCESS_DISABLED_PATTERN.test(value)) {
+    return {
+      statusReason:
+        "Your Anthropic organization disabled Claude subscription access. Ask an Anthropic admin to enable it, then reconnect Claude Code.",
+      userMessage: CLAUDE_CODE_CHAT_SUBSCRIPTION_DISABLED_MESSAGE,
+    };
+  }
+  if (!AUTH_FAILURE_PATTERN.test(value)) return null;
+  return {
+    statusReason: "Claude Code rejected the stored token. Reconnect in opencompany settings.",
+    userMessage: CLAUDE_CODE_CHAT_REAUTH_MESSAGE,
+  };
+}
 
 export function isClaudeCodeAuthenticationFailure(value: string) {
-  return AUTH_FAILURE_PATTERN.test(value);
+  return claudeCodeCredentialRejection(value) !== null;
 }
 
 export type ClaudeCoreMcpInitialization = {
@@ -1020,13 +1039,14 @@ export async function runClaudeCodeChatTurn(input: {
     }
     if (summary.status === "failure") {
       const failureText = `${summary.error ?? ""}\n${stderrTail}`;
-      if (isClaudeCodeAuthenticationFailure(failureText)) {
+      const credentialRejection = claudeCodeCredentialRejection(failureText);
+      if (credentialRejection) {
         await markClaudeCodeCredentialNeedsReauth({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
-          statusReason: "Claude Code rejected the stored token. Reconnect in opencompany settings.",
+          statusReason: credentialRejection.statusReason,
         });
-        summary = { ...summary, error: CLAUDE_CODE_CHAT_REAUTH_MESSAGE };
+        summary = { ...summary, error: credentialRejection.userMessage };
       }
     }
     if (summary.status === "success") {
@@ -1219,13 +1239,14 @@ export async function runClaudeCodeChatTurn(input: {
       );
     } else {
       let message = redact(errorMessage(effectiveError));
-      if (isClaudeCodeAuthenticationFailure(message)) {
+      const credentialRejection = claudeCodeCredentialRejection(message);
+      if (credentialRejection) {
         await markClaudeCodeCredentialNeedsReauth({
           db: getDb(),
           userWorkosId: turn.userWorkosId,
-          statusReason: "Claude Code rejected the stored token. Reconnect in opencompany settings.",
+          statusReason: credentialRejection.statusReason,
         });
-        message = CLAUDE_CODE_CHAT_REAUTH_MESSAGE;
+        message = credentialRejection.userMessage;
       }
       logger.warn("opencompany Claude Code chat turn execution failed", {
         event: "opencompany.goat_claude_chat_turn_execution_failed",
