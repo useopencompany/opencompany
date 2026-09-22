@@ -42,6 +42,7 @@ beforeEach(async () => {
     INSERT INTO goat.workflows(id, workspace_id) VALUES ('agent1', 'workspace'), ('agent2', 'workspace');
     CREATE TABLE goat.integrations(id text PRIMARY KEY, user_workos_id text NOT NULL, workspace_id text,
       shared_with_workspace boolean DEFAULT false, provider text NOT NULL, external_id text NOT NULL,
+      github_installation_id text,
       connection_label text, account_name text, account_email text, account_type text, status text DEFAULT 'connected', status_reason text,
       scopes jsonb DEFAULT '[]', capability_modes jsonb DEFAULT '{}', tool_modes jsonb DEFAULT '{}',
       last_synced_at timestamptz, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
