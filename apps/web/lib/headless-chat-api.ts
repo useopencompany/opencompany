@@ -2,7 +2,9 @@
 
 const SESSION_BRIDGE_PATH = "/api/auth/share-api-session";
 
-let sessionPreparation: { key: string; promise: Promise<void> } | null = null;
+type SessionPreparation = { key: string; promise: Promise<void> };
+
+let sessionPreparation: SessionPreparation | null = null;
 
 export function headlessChatApiBaseUrl(
   configured = process.env.NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN,
@@ -37,10 +39,19 @@ export function createHeadlessChatApiFetch(
   const prepareSession = options.prepareSession ?? typeof window !== "undefined";
 
   return async (input, init) => {
+    let preparation: SessionPreparation | null = null;
     if (prepareSession && apiOrigin !== webOrigin) {
-      await prepareBrowserSession({ apiOrigin, webOrigin, fetch: fetchImpl });
+      preparation = await prepareBrowserSession({ apiOrigin, webOrigin, fetch: fetchImpl });
     }
-    return fetchImpl(input, { ...init, credentials: "include" });
+    const retryInput = input instanceof Request ? input.clone() : input;
+    const response = await fetchImpl(input, { ...init, credentials: "include" });
+    if (response.status !== 401 || !preparation) return response;
+
+    // A browser tab can outlive the API session shared when it first loaded. Refresh that session
+    // once and retry the rejected request; concurrent 401s all join the same replacement setup.
+    if (sessionPreparation === preparation) sessionPreparation = null;
+    await prepareBrowserSession({ apiOrigin, webOrigin, fetch: fetchImpl });
+    return fetchImpl(retryInput, { ...init, credentials: "include" });
   };
 }
 
@@ -52,16 +63,18 @@ async function prepareBrowserSession(input: {
   apiOrigin: string;
   webOrigin: string;
   fetch: typeof globalThis.fetch;
-}) {
+}): Promise<SessionPreparation> {
   const key = `${input.webOrigin}->${input.apiOrigin}`;
-  if (sessionPreparation?.key !== key) {
-    const promise = shareBrowserSession(input);
-    sessionPreparation = { key, promise };
+  let preparation = sessionPreparation;
+  if (preparation?.key !== key) {
+    preparation = { key, promise: shareBrowserSession(input) };
+    sessionPreparation = preparation;
   }
   try {
-    await sessionPreparation.promise;
+    await preparation.promise;
+    return preparation;
   } catch (error) {
-    if (sessionPreparation?.key === key) sessionPreparation = null;
+    if (sessionPreparation === preparation) sessionPreparation = null;
     throw error;
   }
 }
