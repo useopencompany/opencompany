@@ -18,8 +18,9 @@ The initial supported events are:
 GitHub's `pull_request.opened` event starts for a pull request opened as ready for review and for a
 draft later marked ready. Opening a draft does not start a run. The personal GitHub App sends signed
 Pull request deliveries to the API-owned ingress; the App installation id routes each delivery to
-the same personal connection selected by the workflow. Existing GitHub plugin installations show an
-update action to get the event declaration.
+the same personal connection selected by the workflow. The non-secret installation id is indexed on
+the connection; API startup backfills existing connections before accepting webhook traffic.
+Existing GitHub plugin installations show an update action to get the event declaration.
 
 Linear's tool connection and event connection are separate. The event OAuth app must have Issue
 webhooks enabled and point at the API-owned Linear webhook ingress. Its existing client, secret,

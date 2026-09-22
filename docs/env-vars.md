@@ -113,6 +113,10 @@ its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
 
+Local setup generates its own `GITHUB_USER_APP_WEBHOOK_SECRET` so ordinary development does not
+depend on a shared hosted webhook secret. Override it in `.env.override.local` only when testing a
+GitHub App delivery whose configured secret must match the local ingress.
+
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
 processes.

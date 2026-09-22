@@ -1076,6 +1076,10 @@ export const integrations = productSchema.table(
     sharedWithWorkspace: boolean("shared_with_workspace").notNull().default(false),
     provider: text("provider").$type<IntegrationProvider>().notNull(),
     externalId: text("external_id").notNull(),
+    // Non-secret routing identity for personal GitHub App webhook deliveries. GitHub's App
+    // installation id is distinct from the personal connection's stable external id and can be
+    // shared by several members of the same organization installation.
+    githubInstallationId: text("github_installation_id"),
     companyAgentId: text("company_agent_id").references(() => workflows.id, {
       onDelete: "cascade",
     }),
@@ -1124,6 +1128,11 @@ export const integrations = productSchema.table(
       table.provider,
       table.externalId,
     ),
+    githubInstallationIdx: index("goat_integrations_github_installation_idx")
+      .on(table.githubInstallationId)
+      .where(
+        sql`${table.provider} = 'github_user' AND ${table.workspaceId} IS NULL AND ${table.githubInstallationId} IS NOT NULL`,
+      ),
     // One connection per external account per workspace, regardless of which
     // admin connected it.
     workspaceProviderExternalIdx: uniqueIndex("goat_integrations_workspace_provider_external_idx")
@@ -1161,6 +1170,10 @@ export const integrations = productSchema.table(
     providerCheck: check(
       "goat_integrations_provider_check",
       sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+    ),
+    githubInstallationCheck: check(
+      "goat_integrations_github_installation_check",
+      sql`${table.githubInstallationId} IS NULL OR (${table.provider} = 'github_user' AND ${table.workspaceId} IS NULL)`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",

@@ -72,6 +72,7 @@ type ConnectPersonalOAuthIntegrationInput = {
   userWorkosId: string;
   provider: IntegrationProvider;
   externalId: string;
+  githubInstallationId?: string | null;
   connectionLabel: string;
   accountName: string | null;
   accountEmail: string | null;
@@ -93,6 +94,7 @@ async function connectPersonalOAuthIntegration(input: ConnectPersonalOAuthIntegr
     userWorkosId: input.userWorkosId,
     provider: input.provider,
     externalId: input.externalId,
+    githubInstallationId: input.githubInstallationId ?? null,
     connectionLabel: input.connectionLabel,
     accountName: input.accountName,
     accountEmail: input.accountEmail,
@@ -114,6 +116,7 @@ async function connectPersonalOAuthIntegration(input: ConnectPersonalOAuthIntegr
         accountName: input.accountName,
         accountEmail: input.accountEmail,
         accountType: input.accountType,
+        githubInstallationId: input.githubInstallationId ?? null,
         status: "connected",
         statusReason: null,
         scopes: input.scopes,
@@ -260,6 +263,7 @@ export async function connectGitHubUserIntegration(input: {
     // The Plugin supports one personal GitHub identity at a time; the stable
     // sentinel makes reconnecting replace the previous credential.
     externalId: GITHUB_USER_INTEGRATION_EXTERNAL_ID,
+    githubInstallationId: input.installationId,
     connectionLabel,
     accountName: input.name?.trim() || input.login,
     accountEmail,

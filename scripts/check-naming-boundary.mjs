@@ -29,11 +29,12 @@ const allowedStandaloneFiles = new Set([
 // merge. Comparing with origin/main plus a PR-specific delta makes the check
 // self-invalidating once origin/main advances to that merged tree.
 const protectedCompatibilityTokens = [
-  // 870 = 1185 - the goat_brain_*, goat_gmail_message_events, goat_linear_issue_events,
+  // 872 = 1185 - the goat_brain_*, goat_gmail_message_events, goat_linear_issue_events,
   // goat_hubspot_object_events, goat_attio_object_events, goat_slack_message_events,
   // goat_github_pull_request_events, goat_fathom_* and goat_google_drive_* identifiers that left
-  // with the legacy Brain and its ingestion spine (drizzle/0304_retire_legacy_brain.sql).
-  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 870],
+  // with the legacy Brain and its ingestion spine (drizzle/0304_retire_legacy_brain.sql), plus the
+  // two retained GitHub installation routing constraint/index names.
+  ["physical and stored quoted goat_* identifiers", /["'`]goat_[a-z0-9_]*["'`]/gu, 872],
   // Includes the composer's remembered reasoning-effort and per-engine model storage keys.
   ["quoted sandbox runtime roots", /["'`]opencompany-goat[a-z0-9_./${}:*-]*["'`]/gu, 28],
   // 4 = the retained source-provider check constraint plus its three stored-value call sites; the

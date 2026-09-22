@@ -1,0 +1,3 @@
+ALTER TABLE "goat"."integrations" ADD COLUMN "github_installation_id" text;--> statement-breakpoint
+ALTER TABLE "goat"."integrations" ADD CONSTRAINT "goat_integrations_github_installation_check" CHECK ("goat"."integrations"."github_installation_id" IS NULL OR ("goat"."integrations"."provider" = 'github_user' AND "goat"."integrations"."workspace_id" IS NULL));--> statement-breakpoint
+CREATE INDEX "goat_integrations_github_installation_idx" ON "goat"."integrations" USING btree ("github_installation_id") WHERE "goat"."integrations"."provider" = 'github_user' AND "goat"."integrations"."workspace_id" IS NULL AND "goat"."integrations"."github_installation_id" IS NOT NULL;

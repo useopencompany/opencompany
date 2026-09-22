@@ -36,6 +36,7 @@ import {
   PostgresChatAttachmentRepository,
   PostgresChatRepository,
 } from "@opencompany/db/chat-repository";
+import { backfillGitHubUserInstallationIds } from "@opencompany/db/github-user";
 import { PostgresKnowledgeRepository } from "@opencompany/db/knowledge-repository";
 import { PostgresPluginRepository } from "@opencompany/db/plugin-repository";
 import { createPooledDb } from "@opencompany/db/pool";
@@ -106,6 +107,15 @@ registerNodeObservability({ serviceName: "opencompany-api" });
 const shutdownController = new AbortController();
 
 const database = createPooledDb(resolveApiDatabaseUrl(), { max: resolvePoolMax() });
+const githubInstallationBackfill = await backfillGitHubUserInstallationIds(database.db);
+if (githubInstallationBackfill.scanned > 0) {
+  logger.info("GitHub webhook routing identities backfilled", {
+    event: "opencompany.github_installation_ids_backfilled",
+    scanned: githubInstallationBackfill.scanned,
+    updated: githubInstallationBackfill.updated,
+    invalid: githubInstallationBackfill.invalid,
+  });
+}
 const execute = (query: Parameters<typeof database.db.execute>[0]) => database.db.execute(query);
 const attachmentRepository = new PostgresChatAttachmentRepository(execute);
 const chat = new ChatApplicationService(

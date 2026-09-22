@@ -65,6 +65,7 @@ describe("connectGitHubUserIntegration", () => {
       expect.arrayContaining([
         "user_1",
         "github_user",
+        "123",
         "@octocat",
         "The Octocat",
         "42+octocat@users.noreply.github.com",

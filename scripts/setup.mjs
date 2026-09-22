@@ -36,6 +36,7 @@ const CHECK_MODE = argv.includes("--check");
 const PULL_ENV_MODE = argv.includes("--pull-env");
 const START_DEV_MODE = argv.includes("--dev");
 const STRIPE_MODE = argv.includes("--stripe");
+const GITHUB_WEBHOOK_SECRET_ENV = "GITHUB_USER_APP_WEBHOOK_SECRET";
 const LOCAL_ENV_PATHS = [".env.local", ".env.override.local", "apps/web/.env.local"];
 const PERSONAL_ENV_PATH = ".env.override.local";
 const GENERATED_ERROR_REPORTING_ENV_PATHS = [".env.local", "apps/web/.env.local"];
@@ -80,7 +81,6 @@ const GITHUB_USER_INTEGRATION_ENV_KEYS = [
   "GITHUB_USER_APP_CLIENT_ID",
   "GITHUB_USER_APP_CLIENT_SECRET",
   "GITHUB_USER_APP_STATE_SECRET",
-  "GITHUB_USER_APP_WEBHOOK_SECRET",
 ];
 const INTEGRATION_CREDENTIAL_ENV_KEYS = ["INTEGRATION_CREDENTIAL_ENCRYPTION_KEY"];
 const GOOGLE_INTEGRATION_ENV_KEYS = [
@@ -237,6 +237,7 @@ const LOCAL_WEB_WORKOS_REDIRECT_URI = `${LOCAL_WEB_APP_URL}/auth/callback`;
 const WEB_ENV_PATH = "apps/web/.env.local";
 const LOCAL_ONLY_ENV_KEYS = new Set([
   DESKTOP_AUTH_SECRET_ENV,
+  GITHUB_WEBHOOK_SECRET_ENV,
   "DATABASE_URL",
   "NEON_BRANCH",
   "API_BROWSER_ORIGINS",
@@ -644,6 +645,7 @@ async function ensureEnvFile(state) {
 
 async function ensureLocalDevDefaults() {
   await ensureDesktopAuthSecret();
+  await ensureLocalGitHubWebhookSecret();
   const env = parseEnv(".env.local");
   const missingDefaults = Object.fromEntries(
     Object.entries(LOCAL_DEV_DEFAULT_ENV_VALUES).filter(
@@ -655,6 +657,29 @@ async function ensureLocalDevDefaults() {
 
   writeEnvValues(".env.local", missingDefaults);
   ok(`Added local-only defaults: ${Object.keys(missingDefaults).join(", ")}`);
+}
+
+async function ensureLocalGitHubWebhookSecret() {
+  const localEnv = parseEnv(".env.local");
+  const personalEnv = parseEnv(PERSONAL_ENV_PATH);
+  const personalValue = personalEnv[GITHUB_WEBHOOK_SECRET_ENV]?.trim();
+  if (personalValue !== undefined && (isPlaceholder(personalValue) || personalValue.length < 32)) {
+    throw new Error(
+      `${GITHUB_WEBHOOK_SECRET_ENV} in ${PERSONAL_ENV_PATH} must be at least 32 characters.`,
+    );
+  }
+  const localValue = localEnv[GITHUB_WEBHOOK_SECRET_ENV]?.trim();
+  const value =
+    personalValue ||
+    (localValue && !isPlaceholder(localValue) && localValue.length >= 32
+      ? localValue
+      : randomBytes(32).toString("hex"));
+  process.env[GITHUB_WEBHOOK_SECRET_ENV] = value;
+  if (personalValue !== undefined || localValue === value) return;
+
+  writeEnvValues(".env.local", { [GITHUB_WEBHOOK_SECRET_ENV]: value });
+  chmodSync(".env.local", 0o600);
+  ok("Configured a local GitHub webhook signing secret");
 }
 
 async function ensureDesktopAuthSecret() {
