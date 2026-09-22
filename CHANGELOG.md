@@ -12,8 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
+<!-- Hold #1978 here until a distributed iOS build containing it is confirmed. -->
+
+- copy or share an assistant's reply from the iphone app. attach heic photos from photos or files; the app converts them to jpeg before uploading (#1978) — @louis.
+
+### Fixed
+- the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
+- iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+
+## [1.33.0] - 2026-09-22
+
+### Added
+- delete a wiki you created from wiki settings. workspace admins can also delete other wikis. deletion permanently removes its pages and history; the company wiki stays protected (#1991) — @louis.
+
 ### Changed
 - hobby accounts can now keep up to five workspaces instead of one, so you can run more than one thing without moving to pro. upgrading a workspace to pro frees up a slot (#1988) — @louis.
+- chat can now make up to ten web searches per turn, up from four. compare more options and check more sources in one question (#1985) — @louis.
+
+### Fixed
+- if you set up company agent identities in slack, you can now message those agents even when your slack and opencompany emails differ. other teammates still need matching emails (#1987) — @louis.
+- when your organization blocks claude subscription access, the connection now shows that it needs attention and explains the admin action required. scheduled runs stop retrying the blocked connection (#1989) — @louis.
+- coding chats can now start even when github access is temporarily unavailable. a notice explains the missing access so you can continue work that does not need github (#1990) — @louis.
 
 ## [1.32.0] - 2026-09-21
 
