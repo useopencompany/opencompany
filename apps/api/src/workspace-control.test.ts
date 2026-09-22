@@ -234,7 +234,7 @@ describe("workspace control service", () => {
 
   it("identifies the owned Hobby workspace that blocks another creation", async () => {
     vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue({
-      id: "goat_ws_hobby",
+      id: "workspace_hobby",
       name: "Acta School",
     });
     const service = createWorkspaceControlService({
@@ -243,7 +243,7 @@ describe("workspace control service", () => {
     });
 
     await expect(
-      service.create(admin, { workspaceId: "goat_ws_new", name: "New Organization" }),
+      service.create(admin, { workspaceId: "workspace_new", name: "New Organization" }),
     ).rejects.toMatchObject({
       status: 409,
       message:
