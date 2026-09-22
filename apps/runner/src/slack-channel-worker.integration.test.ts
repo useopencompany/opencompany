@@ -8,6 +8,7 @@ import {
 } from "@opencompany/db/session-subscriptions";
 import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import { TASK_TEST_BASE_SCHEMA } from "@opencompany/db/test-task-schema";
+import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,7 @@ import {
   type SlackDirectMessageWorkerDependencies,
   slackDirectMessagePrompt,
 } from "./slack-direct-message-worker";
+import type { SlackImageAttachmentMaterializer } from "./slack-message-attachments";
 
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -47,6 +49,13 @@ const reply = {
   messageTs: "100.002",
   slackUserId: "U1",
   text: "What are the DB implications?",
+};
+const slackImage = {
+  id: "F1",
+  name: "bug.png",
+  mediaType: "image/png",
+  sizeBytes: 4,
+  urlPrivateDownload: "https://files.slack.com/files-pri/T1-F1/bug.png",
 };
 const ACTIVE_RUN = `
   UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
@@ -80,7 +89,7 @@ beforeAll(async () => {
     }
     await db.exec(`ALTER TABLE goat.users ADD COLUMN email text;
       CREATE TABLE goat.plugins (id text PRIMARY KEY, workspace_id text, owner_user_id text, status text);
-      CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb);
+      CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb, status_reason text, updated_at timestamptz DEFAULT now());
       CREATE UNIQUE INDEX goat_integrations_workspace_provider_external_idx ON goat.integrations(workspace_id, provider, external_id) WHERE workspace_id IS NOT NULL;
       CREATE UNIQUE INDEX goat_integrations_slack_bot_workspace_idx ON goat.integrations(workspace_id, provider) WHERE workspace_id IS NOT NULL AND provider = 'slack_bot';
       CREATE TABLE goat.workflows (
@@ -153,6 +162,12 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0309_slack_agent_images.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -181,6 +196,7 @@ beforeEach(async () => {
             ],
           },
     ) as unknown as SlackChannelWorkerDependencies["request"],
+    materializeAttachments: testAttachmentMaterializer(),
   };
   await pg.exec(`
     INSERT INTO goat.users (workos_user_id, email) VALUES ('owner', 'owner@example.com'), ('member', 'member@example.com');
@@ -316,6 +332,30 @@ describe("dedicated company agent conversations", () => {
     ).toEqual([{ sequence: 0 }, { sequence: 1 }]);
   });
 
+  it("attaches Slack images to the company agent's first message", async () => {
+    const agentDeps = await setupAgents();
+    await pg.exec(`
+      UPDATE goat.slack_agent_messages
+      SET files = '[{"id":"F1","name":"bug.png","mediaType":"image/png","sizeBytes":4,"urlPrivateDownload":"https://files.slack.com/files-pri/T1-F1/bug.png"}]'
+      WHERE integration_id = 'agent-install1';
+      UPDATE goat.slack_agent_messages SET status = 'ignored' WHERE integration_id = 'agent-install2';
+    `);
+
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(true);
+    expect(agentDeps.materializeAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [slackImage] }),
+    );
+    expect(
+      (
+        await pg.query(
+          `SELECT message.attachments FROM goat.chat_messages message
+           JOIN goat.tasks task ON task.session_id = message.session_id
+           WHERE task.agent_id = 'agent1' AND message.role = 'user'`,
+        )
+      ).rows,
+    ).toEqual([{ attachments: [expect.objectContaining({ id: "attachment_test_f1" })] }]);
+  });
+
   it("does not create an owner-authorized run for an unmatched sender or an inactive owner", async () => {
     const agentDeps = await setupAgents();
     await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
@@ -359,6 +399,22 @@ describe("dedicated company agent conversations", () => {
 });
 
 describe("durable Slack subscriptions", () => {
+  it("attaches Slack images to a follow-up run", async () => {
+    await enqueueSlackThreadReply(execute, { ...reply, files: [slackImage] });
+
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.materializeAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [slackImage] }),
+    );
+    expect(
+      (
+        await pg.query(
+          "SELECT attachments FROM goat.chat_messages WHERE role = 'user' AND attachments <> '[]'::jsonb",
+        )
+      ).rows,
+    ).toEqual([{ attachments: [expect.objectContaining({ id: "attachment_test_f1" })] }]);
+  });
+
   it("upgrades existing thread policies without losing the subscription or other settings", async () => {
     await pg.exec(
       `UPDATE goat.session_subscriptions SET policy = '{"authorization":"workspace_member","queue":"serial","custom":true}'`,
@@ -985,6 +1041,27 @@ describe("durable Slack subscriptions", () => {
     expect(await processNextChannelDelivery(deps)).toBe(false);
   });
 });
+
+function testAttachmentMaterializer(): SlackImageAttachmentMaterializer {
+  return vi.fn(async ({ execute: run, actor, files }) => {
+    const ids: string[] = [];
+    for (const file of files) {
+      const id = `attachment_test_${file.id.toLowerCase()}`;
+      await run(sql`
+        INSERT INTO goat.chat_attachment_uploads (
+          id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+          blob_pathname, blob_url, extracted_text, expires_at
+        ) VALUES (
+          ${id}, ${actor.userId}, ${actor.workspaceId}, 'image', ${file.mediaType}, ${file.name},
+          ${file.sizeBytes}, ${`test/${id}`}, ${`https://blob.test/${id}`}, NULL,
+          now() + interval '1 day'
+        )
+      `);
+      ids.push(id);
+    }
+    return ids;
+  });
+}
 
 describe("Slack thread progress reactions", () => {
   const REACTING_INSTALL = `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email","reactions:write"]';`;
