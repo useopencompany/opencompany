@@ -3,8 +3,9 @@ import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { getWorkspacePlan } from "@opencompany/db/billing";
+import { HOBBY_MAX_WORKSPACES } from "@opencompany/db/billing-constants";
 import {
-  findOwnedHobbyWorkspace,
+  countOwnedHobbyWorkspaces,
   getWorkspaceSandboxSize,
   listWorkspaceMembers,
   listWorkspacesForUser,
@@ -19,16 +20,19 @@ vi.mock("@opencompany/billing/seats", () => ({
   syncStripeSeatQuantityForWorkspace: vi.fn(async () => ({ ok: true, changed: true })),
 }));
 
-vi.mock("@opencompany/db/billing", () => ({
+// billing-constants is client-safe, so the cap the service enforces comes from
+// the real module rather than a literal that could drift from it.
+vi.mock("@opencompany/db/billing", async () => ({
   getWorkspacePlan: vi.fn(async () => "pro"),
   workspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
+  HOBBY_MAX_WORKSPACES: (await import("@opencompany/db/billing-constants")).HOBBY_MAX_WORKSPACES,
 }));
 
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getWorkspaceSandboxSize: vi.fn(async () => "standard"),
   updateWorkspaceSandboxSize: vi.fn(async () => "small"),
-  findOwnedHobbyWorkspace: vi.fn(async () => null),
+  countOwnedHobbyWorkspaces: vi.fn(async () => 0),
   listWorkspaceMembers: vi.fn(),
   listWorkspacesForUser: vi.fn(),
   removeWorkspaceMember: vi.fn(async () => undefined),
@@ -83,7 +87,7 @@ describe("workspace control service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getWorkspacePlan).mockResolvedValue("pro");
-    vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue(null);
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(0);
     vi.mocked(listWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({
@@ -232,11 +236,21 @@ describe("workspace control service", () => {
     );
   });
 
-  it("identifies the owned Hobby workspace that blocks another creation", async () => {
-    vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue({
-      id: "workspace_hobby",
-      name: "Acta School",
+  it("still provisions while the caller is under the Hobby workspace cap", async () => {
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES - 1);
+    const service = createWorkspaceControlService({
+      db: dbWithWorkspace(),
+      workos: workos as never,
     });
+
+    await expect(
+      service.create(admin, { workspaceId: "workspace_new", name: "New Organization" }),
+    ).resolves.toMatchObject({ organizationId: "org_new" });
+    expect(provisionWorkspace).toHaveBeenCalled();
+  });
+
+  it("blocks creation once the caller owns the maximum Hobby workspaces", async () => {
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES);
     const service = createWorkspaceControlService({
       db: dbWithWorkspace(),
       workos: workos as never,
@@ -246,9 +260,24 @@ describe("workspace control service", () => {
       service.create(admin, { workspaceId: "workspace_new", name: "New Organization" }),
     ).rejects.toMatchObject({
       status: 409,
-      message:
-        "You already own a Hobby workspace: “Acta School”. Upgrade that workspace to Pro to create another.",
+      message: `You already own ${HOBBY_MAX_WORKSPACES} Hobby workspaces, the most a free account can have. Upgrade one to Pro to create another.`,
     });
+    expect(provisionWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("replays a retried creation at the cap instead of reporting a conflict", async () => {
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES);
+    vi.mocked(listWorkspacesForUser).mockResolvedValue([
+      { workspace: { ...workspace, id: "workspace_new" }, role: "admin" },
+    ] as never);
+    const service = createWorkspaceControlService({
+      db: dbWithWorkspace(),
+      workos: workos as never,
+    });
+
+    await expect(
+      service.create(admin, { workspaceId: "workspace_new", name: "New Organization" }),
+    ).resolves.toEqual({ workspaceId: "workspace_new", organizationId: "org_current" });
     expect(provisionWorkspace).not.toHaveBeenCalled();
   });
 

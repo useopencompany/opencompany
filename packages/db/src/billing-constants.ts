@@ -14,6 +14,10 @@ export const HOBBY_INCLUDED_USAGE_USD_CENTS = 500;
 export const PRO_STRIPE_PRODUCT_KEY = "goat_pro";
 export const HOBBY_MAX_MEMBERS = 1;
 export const PRO_MAX_MEMBERS = 10;
+// How many Hobby workspaces one person may own. Each one carries its own
+// $5 included-usage pool, so this cap also bounds the free usage a single
+// account can draw. Upgrading a workspace to Pro releases a slot.
+export const HOBBY_MAX_WORKSPACES = 5;
 
 export const TOP_UP_AMOUNTS_USD_CENTS = [500, 1_000, 2_000, 5_000, 10_000] as const;
 export const DEFAULT_TOP_UP_USD_CENTS = 2_000;

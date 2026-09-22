@@ -40,7 +40,7 @@ const PRICING_FAQS = [
   },
   {
     q: "What counts as included usage?",
-    a: "A monthly balance for agent and model usage — $5 on Hobby, $20 per seat on Pro. It resets every calendar month and doesn't roll over.",
+    a: "A monthly balance for agent and model usage — $5 per workspace on Hobby, $20 per seat on Pro. It resets every calendar month and doesn't roll over.",
   },
   {
     q: "Can I top up if I'm running low?",
@@ -48,7 +48,7 @@ const PRICING_FAQS = [
   },
   {
     q: "Can I add teammates on Hobby?",
-    a: "Hobby is one seat on one workspace. Upgrade to Pro to invite teammates — up to 10 seats, billed centrally for the whole team.",
+    a: "Hobby is one seat, and you can keep up to 5 workspaces on it. Upgrade to Pro to invite teammates — up to 10 seats, billed centrally for the whole team.",
   },
 ];
 

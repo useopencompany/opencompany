@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import { DEFAULT_SANDBOX_SIZE, type SandboxSize } from "@opencompany/core/sandbox-sizes";
-import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, isNull, or, sql } from "drizzle-orm";
 import { calendarMonthWindow, PRO_STRIPE_PRODUCT_KEY } from "./billing-constants";
 import { getDb } from "./client";
 import { grantMonthlyIncludedUsage } from "./credits";
@@ -62,6 +62,15 @@ export async function listWorkspacesForUser(
   return rows;
 }
 
+// The workspaces a user created that are not on a paid Pro subscription: the
+// set the Hobby workspace cap counts. Upgrading one to Pro removes it here.
+function ownedHobbyWorkspaceFilter(userWorkosId: string) {
+  return and(
+    eq(workspaces.createdByWorkosId, userWorkosId),
+    sql`NOT COALESCE(${workspaceBilling.plan} = 'pro' AND ${workspaceBilling.stripeProductKey} = ${PRO_STRIPE_PRODUCT_KEY}, false)`,
+  );
+}
+
 export async function findOwnedHobbyWorkspace(
   userWorkosId: string,
   options: { db?: DbClient } = {},
@@ -71,14 +80,22 @@ export async function findOwnedHobbyWorkspace(
     .select({ id: workspaces.id, name: workspaces.name })
     .from(workspaces)
     .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
-    .where(
-      and(
-        eq(workspaces.createdByWorkosId, userWorkosId),
-        sql`NOT COALESCE(${workspaceBilling.plan} = 'pro' AND ${workspaceBilling.stripeProductKey} = ${PRO_STRIPE_PRODUCT_KEY}, false)`,
-      ),
-    )
+    .where(ownedHobbyWorkspaceFilter(userWorkosId))
     .limit(1);
   return rows[0] ?? null;
+}
+
+export async function countOwnedHobbyWorkspaces(
+  userWorkosId: string,
+  options: { db?: DbClient } = {},
+): Promise<number> {
+  const db = options.db ?? getDb();
+  const rows = await db
+    .select({ total: count() })
+    .from(workspaces)
+    .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
+    .where(ownedHobbyWorkspaceFilter(userWorkosId));
+  return Number(rows[0]?.total ?? 0);
 }
 
 export async function markMcpSetupCompletedForUser(
