@@ -239,6 +239,9 @@ export function MarkdownEditor({
       {editor && !readOnly ? (
         <BubbleMenu
           editor={editor}
+          // Tiptap's delayed update survives plugin teardown. Run selection updates
+          // immediately so an unmounted editor cannot touch the destroyed document.
+          updateDelay={0}
           className="flex items-center gap-0.5 rounded-lg border border-black/[0.08] bg-surface-raised p-1 shadow-[0_12px_28px_rgba(0,0,0,0.14),0_2px_8px_rgba(0,0,0,0.08)]"
         >
           <FormatButton
