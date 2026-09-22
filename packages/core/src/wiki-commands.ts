@@ -9,6 +9,7 @@
 // through here so authorization, validation, and error shaping stay identical.
 
 import {
+  DEFAULT_WIKI_SELECTOR,
   firstWikiPageRef,
   isValidWikiKind,
   isWikiDescendantPath,
@@ -266,8 +267,8 @@ export class WikiCommandApplicationService {
     ) {
       throw new CoreError("forbidden", "The actor is not allowed to access Wiki.");
     }
-    const hasWikiSelector = wikiId !== undefined;
     const wanted = wikiId?.trim() ?? "";
+    const hasWikiSelector = wikiId !== undefined && wanted !== DEFAULT_WIKI_SELECTOR;
     let resolvedWikiId: string | undefined;
     let reachable: WikiCommandTarget[] | undefined;
     if (hasWikiSelector) {

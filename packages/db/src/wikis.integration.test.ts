@@ -153,7 +153,7 @@ describe("createWiki", () => {
     expect(wiki.id.startsWith("wiki_")).toBe(true);
   });
 
-  it("suffixes a slug reserved by a static /wiki route", async () => {
+  it("suffixes slugs reserved by static routes or the agent's default alias", async () => {
     // `/wiki/sources` and `/wiki/import` are pages of their own, so Next would resolve them before
     // ever reaching a wiki holding that slug. Suffixing keeps the name the reader typed.
     const sources = await createWiki(
@@ -164,9 +164,14 @@ describe("createWiki", () => {
       { workspaceId: WS, name: "Import", access: "workspace", createdByWorkosId: FOUNDER },
       { db },
     );
+    const defaultAlias = await createWiki(
+      { workspaceId: WS, name: "Default", access: "workspace", createdByWorkosId: FOUNDER },
+      { db },
+    );
     expect(sources.name).toBe("Sources");
     expect(sources.slug).toBe("sources-2");
     expect(importing.slug).toBe("import-2");
+    expect(defaultAlias.slug).toBe("default-2");
   });
 
   it("stores markdown instructions and makes the creator a member of a restricted wiki", async () => {
