@@ -108,10 +108,13 @@ describe("createWorkspaceAction", () => {
 
   it("preserves API errors without activating a workspace", async () => {
     mocks.createWorkspace.mockResolvedValueOnce(Response.json({}, { status: 409 }));
-    serverApiErrorMessageMock.mockResolvedValueOnce("Hobby includes one workspace.");
+    serverApiErrorMessageMock.mockResolvedValueOnce(
+      "You already own a Hobby workspace: “Acta School”. Upgrade that workspace to Pro to create another.",
+    );
     await expect(createWorkspaceAction("Another workspace")).resolves.toEqual({
       ok: false,
-      error: "Hobby includes one workspace.",
+      error:
+        "You already own a Hobby workspace: “Acta School”. Upgrade that workspace to Pro to create another.",
     });
     expect(activateWorkspaceMock).not.toHaveBeenCalled();
   });
