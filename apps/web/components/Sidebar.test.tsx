@@ -21,6 +21,7 @@ import { SIDEBAR_NESTED_ROW_PADDING_CLASSNAME } from "./SidebarProjects";
 const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 const routerMock = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
   refresh: vi.fn(),
   prefetch: vi.fn(),
 }));
@@ -121,6 +122,7 @@ const wikisApiMock = vi.hoisted(() => ({
   listWikis: vi.fn(async () => [] as ReturnType<typeof wikiDto>[]),
   createWiki: vi.fn(),
   updateWiki: vi.fn(),
+  deleteWiki: vi.fn(),
   getWikiAccess: vi.fn(),
   setWikiAccess: vi.fn(),
 }));
@@ -571,6 +573,34 @@ describe("Sidebar", () => {
       const dialog = await screen.findByRole("dialog", { name: "Company settings" });
       expect(within(dialog).getByText(/agents write when no wiki is named/)).toBeInTheDocument();
       expect(within(dialog).queryByRole("button", { name: /Private/ })).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Delete wiki" })).not.toBeInTheDocument();
+    });
+
+    it("confirms and removes a non-default wiki from settings", async () => {
+      pathnameMock.value = "/wiki/handbook/getting-started";
+      wikisApiMock.listWikis.mockResolvedValue([
+        wikiDto("wiki_1", "Company", "company", true),
+        wikiDto("wiki_2", "Handbook", "handbook"),
+      ]);
+      wikisApiMock.getWikiAccess.mockResolvedValue({
+        access: "workspace",
+        memberIds: [],
+        workspaceMembers: [],
+      });
+      wikisApiMock.deleteWiki.mockResolvedValue(undefined);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      await userEvent.click(await screen.findByRole("button", { name: "Handbook settings" }));
+      const dialog = await screen.findByRole("dialog", { name: "Handbook settings" });
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete wiki" }));
+      expect(within(dialog).getByText(/all of its pages/)).toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole("button", { name: "Delete permanently" }));
+
+      await waitFor(() => expect(wikisApiMock.deleteWiki).toHaveBeenCalledWith("wiki_2"));
+      expect(screen.queryByRole("link", { name: "Handbook" })).not.toBeInTheDocument();
+      expect(routerMock.replace).toHaveBeenCalledWith("/wiki");
+      expect(screen.queryByRole("dialog", { name: "Handbook settings" })).not.toBeInTheDocument();
     });
 
     it("discards an abandoned name and leaves a collapsed section closed", async () => {

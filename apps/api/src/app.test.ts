@@ -4737,6 +4737,9 @@ function fakeWikiControl(): Parameters<typeof createApiApp>[0]["wikiControl"] {
     updateWiki: async () => {
       throw new Error("Unexpected Wiki update.");
     },
+    deleteWiki: async () => {
+      throw new Error("Unexpected Wiki deletion.");
+    },
     getAccess: async () => {
       throw new Error("Unexpected Wiki access read.");
     },

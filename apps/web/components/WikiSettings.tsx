@@ -2,10 +2,11 @@
 
 import type { WikiAccessDetailsDto, WikiDto } from "@opencompany/protocol";
 import { toast } from "@opencompany/ui/components/sonner";
+import { Loader2, Trash2 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { wikiHref, wikiPagePathFromPathname } from "@/lib/wiki-routes";
-import { getWikiAccess, setWikiAccess, updateWiki } from "@/lib/wikis";
+import { activeWikiSlugFromPathname, wikiHref, wikiPagePathFromPathname } from "@/lib/wiki-routes";
+import { deleteWiki, getWikiAccess, setWikiAccess, updateWiki } from "@/lib/wikis";
 
 /**
  * A wiki's name, its instructions, and who can reach it.
@@ -40,11 +41,13 @@ export function WikiSettings({
   currentUserWorkosId,
   onClose,
   onSaved,
+  onDeleted,
 }: {
   wiki: WikiDto;
   currentUserWorkosId: string;
   onClose: () => void;
   onSaved: (wiki: WikiDto) => void;
+  onDeleted: (wikiId: string) => void;
 }) {
   const [name, setName] = useState(wiki.name);
   const [instructions, setInstructions] = useState(wiki.instructions);
@@ -55,6 +58,8 @@ export function WikiSettings({
   const [invited, setInvited] = useState<ReadonlySet<string>>(new Set());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -136,6 +141,22 @@ export function WikiSettings({
   const roster = (details?.workspaceMembers ?? []).filter(
     (member) => member.id !== currentUserWorkosId,
   );
+
+  const remove = async () => {
+    if (wiki.isDefault || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteWiki(wiki.id);
+      onDeleted(wiki.id);
+      onClose();
+      toast.success(`Deleted “${wiki.name}”.`);
+      if (activeWikiSlugFromPathname(pathname) === wiki.slug) router.replace("/wiki");
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "The wiki could not be deleted.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div
@@ -263,17 +284,62 @@ export function WikiSettings({
           )}
         </div>
 
+        {!wiki.isDefault ? (
+          <div className="mt-1 border-t border-border-subtle pt-3">
+            <div className="flex items-start justify-between gap-3 rounded-md border border-danger-border bg-danger-bg px-2.5 py-2.5">
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium text-danger">Delete wiki</p>
+                <p className="mt-0.5 text-[11.5px] leading-4 text-ink-subtle">
+                  Permanently removes this wiki and all of its pages. This cannot be undone.
+                </p>
+              </div>
+              {confirmingDelete ? (
+                <div className="flex shrink-0 gap-1.5">
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => setConfirmingDelete(false)}
+                    className="h-8 rounded-md px-2.5 text-[12px] text-ink-muted hover:bg-surface-hover disabled:opacity-60"
+                  >
+                    Keep wiki
+                  </button>
+                  <button
+                    type="button"
+                    disabled={deleting}
+                    onClick={() => void remove()}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md bg-danger px-2.5 text-[12px] font-medium text-white disabled:opacity-60"
+                  >
+                    {deleting ? <Loader2 size={13} className="animate-spin" /> : null}
+                    Delete permanently
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setConfirmingDelete(true)}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-danger-border px-2.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:opacity-60"
+                >
+                  <Trash2 size={13} />
+                  Delete wiki
+                </button>
+              )}
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex justify-end gap-2 pt-1">
           <button
             type="button"
             onClick={onClose}
+            disabled={deleting}
             className="rounded-md px-3 py-1.5 text-[13px] text-ink/70 transition-colors hover:bg-surface-hover"
           >
             Cancel
           </button>
           <button
             type="button"
-            disabled={saving}
+            disabled={saving || deleting}
             onClick={() => void save()}
             className="rounded-md bg-ink px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity disabled:opacity-60"
           >

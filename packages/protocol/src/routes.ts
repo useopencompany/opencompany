@@ -815,6 +815,18 @@ export const updateWikiRoute = createRoute({
   },
 });
 
+export const deleteWikiRoute = createRoute({
+  method: "delete",
+  path: "/v1/wikis/{wikiId}",
+  tags: ["Wiki"],
+  security: actorSecurity,
+  request: { params: z.object({ wikiId: ResourceIdSchema }) },
+  responses: {
+    204: { description: "Wiki and all of its content deleted." },
+    default: errorResponse,
+  },
+});
+
 export const getWikiAccessRoute = createRoute({
   method: "get",
   path: "/v1/wikis/{wikiId}/access",
@@ -3998,6 +4010,7 @@ export type V1RouteHandlers = {
   listWikis: RouteHandler<typeof listWikisRoute>;
   createWiki: RouteHandler<typeof createWikiRoute>;
   updateWiki: RouteHandler<typeof updateWikiRoute>;
+  deleteWiki: RouteHandler<typeof deleteWikiRoute>;
   getWikiAccess: RouteHandler<typeof getWikiAccessRoute>;
   setWikiAccess: RouteHandler<typeof setWikiAccessRoute>;
   listWikiPages: RouteHandler<typeof listWikiPagesRoute>;
@@ -4230,6 +4243,7 @@ export function createV1Router(
       .openapi(listWikisRoute, handlers.listWikis)
       .openapi(createWikiRoute, handlers.createWiki)
       .openapi(updateWikiRoute, handlers.updateWiki)
+      .openapi(deleteWikiRoute, handlers.deleteWiki)
       .openapi(getWikiAccessRoute, handlers.getWikiAccess)
       .openapi(setWikiAccessRoute, handlers.setWikiAccess)
       .openapi(listWikiPagesRoute, handlers.listWikiPages)
@@ -5025,6 +5039,7 @@ const contractDocumentHandlers: V1RouteHandlers = {
   listWikis: (c) => c.json({ data: [placeholderWiki], meta }, 200),
   createWiki: (c) => c.json({ data: placeholderWiki, meta }, 201),
   updateWiki: (c) => c.json({ data: placeholderWiki, meta }, 200),
+  deleteWiki: (c) => c.body(null, 204),
   getWikiAccess: (c) => c.json({ data: placeholderWikiAccess, meta }, 200),
   setWikiAccess: (c) => c.json({ data: placeholderWikiAccess, meta }, 200),
   listWikiPages: (c) => c.json({ data: [placeholderWikiPage], meta }, 200),

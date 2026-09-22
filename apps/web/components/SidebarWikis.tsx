@@ -92,7 +92,17 @@ export function useSidebarWikis() {
     setWikis((current) => current.map((wiki) => (wiki.id === saved.id ? saved : wiki)));
   }, []);
 
-  return { wikis, loading, error, reload, create, replace };
+  // A response that started before deletion may still contain the removed wiki. Invalidate that
+  // request as well as removing the row, so it cannot briefly reappear after the dialog closes.
+  const remove = useCallback((wikiId: string) => {
+    generation.current += 1;
+    createdLocally.current = createdLocally.current.filter((wiki) => wiki.id !== wikiId);
+    setWikis((current) => current.filter((wiki) => wiki.id !== wikiId));
+    setError(null);
+    setLoading(false);
+  }, []);
+
+  return { wikis, loading, error, reload, create, replace, remove };
 }
 
 export function SidebarWikis({
@@ -232,6 +242,7 @@ export function SidebarWikis({
           currentUserWorkosId={currentUserWorkosId}
           onClose={() => setSettingsFor(null)}
           onSaved={state.replace}
+          onDeleted={state.remove}
         />
       ) : null}
     </section>

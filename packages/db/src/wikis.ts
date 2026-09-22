@@ -247,6 +247,22 @@ export async function updateWikiSettings(
   return wiki;
 }
 
+/**
+ * Deletes a non-default wiki and all records that belong to it through the
+ * database's foreign-key cascades. The default wiki is the stable target for
+ * every entry point without an explicit selector, so it must always remain.
+ */
+export async function deleteWiki(
+  input: { wikiId: string },
+  options: { db?: DbClient } = {},
+): Promise<void> {
+  const db = options.db ?? getDb();
+  const [wiki]: Wiki[] = await db.select().from(wikis).where(eq(wikis.id, input.wikiId)).limit(1);
+  if (!wiki) throw new WikiAccessError("Wiki not found.");
+  if (wiki.isDefault) throw new WikiAccessError("The default wiki cannot be deleted.");
+  await db.delete(wikis).where(eq(wikis.id, input.wikiId));
+}
+
 export async function updateWikiAccess(
   input: { wikiId: string; access: WikiAccessLevel; actingUserWorkosId: string },
   options: { db?: DbClient } = {},
