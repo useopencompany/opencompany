@@ -909,6 +909,12 @@ export function createApiApp(input: CreateApiAppInput) {
       );
       return c.json({ data: wikiDto(wiki), meta }, 200);
     },
+    deleteWiki: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      await input.wikiControl.deleteWiki(actor, c.req.valid("param").wikiId);
+      return c.body(null, 204);
+    },
     getWikiAccess: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);

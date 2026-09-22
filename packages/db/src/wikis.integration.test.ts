@@ -12,6 +12,7 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createTestPGlite } from "./test-pglite";
 import {
   createWiki,
+  deleteWiki,
   listWikiMemberIds,
   listWikisForUser,
   replaceWikiMembers,
@@ -411,6 +412,27 @@ describe("updateWikiSettings", () => {
     await expect(
       updateWikiSettings({ wikiId: "goat_wiki_missing", name: "Nope" }, { db }),
     ).rejects.toBeInstanceOf(WikiAccessError);
+  });
+});
+
+describe("deleteWiki", () => {
+  it("deletes a non-default wiki and its membership records", async () => {
+    const wiki = await restrictedWiki();
+
+    await deleteWiki({ wikiId: wiki.id }, { db });
+
+    expect(await forUser(FOUNDER, wiki.id)).toBeNull();
+    expect(await listWikiMemberIds(wiki.id, { db })).toEqual([]);
+  });
+
+  it("never deletes the workspace's default wiki", async () => {
+    const wiki = await forUser(FOUNDER);
+    expect(wiki?.isDefault).toBe(true);
+
+    await expect(deleteWiki({ wikiId: wiki!.id }, { db })).rejects.toThrow(
+      "The default wiki cannot be deleted.",
+    );
+    expect((await forUser(FOUNDER))?.id).toBe(wiki?.id);
   });
 });
 
