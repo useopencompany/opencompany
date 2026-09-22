@@ -111,9 +111,16 @@ export async function prepareGitHubSandboxAuth(input: {
       data: `http_unix_socket: ${root}/http.sock\ngit_protocol: https\n`,
     },
   ]);
+  let relayStderr = "";
   const command = await input.sandbox.commands.run(
     `exec python3 ${shellQuote(`${root}/relay.py`)} ${shellQuote(`${root}/config.json`)}`,
-    { background: true, timeoutMs: lifetimeSeconds * 1000 },
+    {
+      background: true,
+      timeoutMs: lifetimeSeconds * 1000,
+      onStderr: (data) => {
+        relayStderr = `${relayStderr}${data}`.slice(-2_000);
+      },
+    },
   );
   const dispose = async () => {
     try {
@@ -140,6 +147,10 @@ export async function prepareGitHubSandboxAuth(input: {
     };
   } catch (error) {
     await dispose();
+    const startupDiagnostic = relayStderr.trim();
+    if (startupDiagnostic) {
+      throw new Error(`GitHub relay failed to start: ${startupDiagnostic}`, { cause: error });
+    }
     throw error;
   }
 }

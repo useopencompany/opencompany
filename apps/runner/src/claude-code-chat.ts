@@ -651,12 +651,33 @@ export async function runClaudeCodeChatTurn(input: {
 
     if (github && githubCapability && env.runnerPublicUrl) {
       executionStage = "prepare_github_auth";
-      githubSandboxAuth = await prepareGitHubSandboxAuth({
-        sandbox,
-        brokerUrl: env.runnerPublicUrl,
-        capability: githubCapability,
-        identity: github,
-      });
+      try {
+        githubSandboxAuth = await prepareGitHubSandboxAuth({
+          sandbox,
+          brokerUrl: env.runnerPublicUrl,
+          capability: githubCapability,
+          identity: github,
+        });
+      } catch (error) {
+        github = null;
+        logger.warn("GitHub sandbox auth setup failed; continuing the chat turn", {
+          event: "opencompany.goat_claude_chat_github_auth_setup_failed",
+          turn_id: turn.id,
+          error_name: error instanceof Error ? error.name : typeof error,
+          error: redact(errorMessage(error)),
+        });
+        if (shouldAppendGitHubAuthNotice(conversationHistory, GITHUB_UNAVAILABLE_NOTICE)) {
+          try {
+            await projector.appendNotice(GITHUB_UNAVAILABLE_NOTICE);
+          } catch (noticeError) {
+            logger.warn("GitHub auth notice could not be persisted; continuing the chat turn", {
+              event: "opencompany.goat_claude_chat_github_auth_notice_failed",
+              turn_id: turn.id,
+              error_name: noticeError instanceof Error ? noticeError.name : typeof noticeError,
+            });
+          }
+        }
+      }
     }
     executionStage = "load_attachments";
     const attachments = await loadCodexChatAttachments(turn);
