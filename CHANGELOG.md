@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
+### Changed
+- hobby accounts can now keep up to five workspaces instead of one, so you can run more than one thing without moving to pro. upgrading a workspace to pro frees up a slot (#1988) — @louis.
+
 ## [1.32.0] - 2026-09-21
 
 ### Added
