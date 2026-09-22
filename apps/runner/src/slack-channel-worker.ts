@@ -31,6 +31,7 @@ import {
   materializeSlackImageAttachments,
   type SlackImageAttachmentMaterializer,
 } from "./slack-message-attachments";
+import { resolveSlackWorkspaceMember } from "./slack-workspace-member";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
 const CLOSED_REPLY = "This thread is closed. Open the task in opencompany to continue the work.";
@@ -212,13 +213,16 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       }
       if (event.installation.companyAgentId) {
         const email = user.user.profile?.email?.trim().toLowerCase() ?? "";
-        const member = subscriptionRows(
-          await tx.execute(sql`
-          SELECT 1 FROM goat.workspace_members member JOIN goat.users account ON account.workos_user_id = member.user_workos_id
-          WHERE member.workspace_id = ${event.workspaceId} AND lower(account.email) = ${email} AND ${email} <> ''
-        `),
-        );
-        if (user.user.team_id !== event.installation.teamId || member.length === 0) {
+        const member =
+          user.user.team_id === event.installation.teamId
+            ? await resolveSlackWorkspaceMember(tx.execute.bind(tx), {
+                workspaceId: event.workspaceId,
+                teamId: event.installation.teamId,
+                slackUserId: event.payload.slackUserId,
+                email,
+              })
+            : undefined;
+        if (!member) {
           await ignoreEvent(tx.execute.bind(tx), event.id);
           return true;
         }
