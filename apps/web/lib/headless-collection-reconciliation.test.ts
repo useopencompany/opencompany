@@ -1,7 +1,8 @@
 import { TimeoutWaitingForTxIdError } from "@tanstack/electric-db-collection";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   awaitCollectionTransaction,
+  observeCommittedProjection,
   reconcileCommittedProjection,
 } from "./headless-collection-reconciliation";
 
@@ -10,6 +11,8 @@ const captureExceptionMock = vi.hoisted(() => vi.fn());
 vi.mock("@opencompany/observability", () => ({
   captureException: captureExceptionMock,
 }));
+
+beforeEach(() => captureExceptionMock.mockClear());
 
 describe("committed projection reconciliation", () => {
   it("accepts a delayed Electric projection after the command has committed", async () => {
@@ -25,6 +28,18 @@ describe("committed projection reconciliation", () => {
     await expect(
       reconcileCommittedProjection(Promise.reject(new Error("Invalid projection"))),
     ).rejects.toThrow("Invalid projection");
+  });
+
+  it("reports unexpected failures while observing reconciliation in the background", async () => {
+    const error = new Error("Invalid projection");
+
+    observeCommittedProjection(Promise.reject(error));
+
+    await vi.waitFor(() =>
+      expect(captureExceptionMock).toHaveBeenCalledWith(error, {
+        event: "opencompany.read_model_reconciliation_failed",
+      }),
+    );
   });
 });
 

@@ -39,3 +39,14 @@ export async function reconcileCommittedProjection(wait: Promise<unknown>) {
     throw error;
   }
 }
+
+// A committed command must not keep the UI waiting for the eventually consistent Electric read
+// model. Keep observing the projection so unexpected failures remain visible without delaying the
+// authoritative command response.
+export function observeCommittedProjection(wait: Promise<unknown>) {
+  void reconcileCommittedProjection(wait).catch((error) => {
+    captureException(error, {
+      event: "opencompany.read_model_reconciliation_failed",
+    });
+  });
+}
