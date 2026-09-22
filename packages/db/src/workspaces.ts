@@ -62,13 +62,13 @@ export async function listWorkspacesForUser(
   return rows;
 }
 
-export async function hasOwnedHobbyWorkspace(
+export async function findOwnedHobbyWorkspace(
   userWorkosId: string,
   options: { db?: DbClient } = {},
 ) {
   const db = options.db ?? getDb();
   const rows = await db
-    .select({ id: workspaces.id })
+    .select({ id: workspaces.id, name: workspaces.name })
     .from(workspaces)
     .leftJoin(workspaceBilling, eq(workspaceBilling.workspaceId, workspaces.id))
     .where(
@@ -78,7 +78,7 @@ export async function hasOwnedHobbyWorkspace(
       ),
     )
     .limit(1);
-  return rows.length > 0;
+  return rows[0] ?? null;
 }
 
 export async function markMcpSetupCompletedForUser(

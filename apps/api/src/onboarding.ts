@@ -5,8 +5,8 @@ import {
 } from "@opencompany/agent/workspaces/provisioning";
 import type { WorkspaceWithRole } from "@opencompany/db/workspaces";
 import {
+  findOwnedHobbyWorkspace,
   getOnboarding,
-  hasOwnedHobbyWorkspace,
   isWorkspaceSlugAvailable,
   listWorkspacesForUser,
   markUserOnboarded,
@@ -138,7 +138,7 @@ export function createOnboardingService(input: { db: DbLike; workos: WorkOS }): 
           };
         }
 
-        if (await hasOwnedHobbyWorkspace(identity.userId, { db })) {
+        if (await findOwnedHobbyWorkspace(identity.userId, { db })) {
           throw new ApiError(409, "conflict", "Your existing Hobby workspace could not be loaded.");
         }
         const created = await provisionWorkspace(

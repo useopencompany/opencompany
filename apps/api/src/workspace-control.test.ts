@@ -4,8 +4,8 @@ import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { getWorkspacePlan } from "@opencompany/db/billing";
 import {
+  findOwnedHobbyWorkspace,
   getWorkspaceSandboxSize,
-  hasOwnedHobbyWorkspace,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
@@ -28,7 +28,7 @@ vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getWorkspaceSandboxSize: vi.fn(async () => "standard"),
   updateWorkspaceSandboxSize: vi.fn(async () => "small"),
-  hasOwnedHobbyWorkspace: vi.fn(async () => false),
+  findOwnedHobbyWorkspace: vi.fn(async () => null),
   listWorkspaceMembers: vi.fn(),
   listWorkspacesForUser: vi.fn(),
   removeWorkspaceMember: vi.fn(async () => undefined),
@@ -83,7 +83,7 @@ describe("workspace control service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getWorkspacePlan).mockResolvedValue("pro");
-    vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
+    vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue(null);
     vi.mocked(listWorkspaceMembers).mockResolvedValue(workspaceMembers() as never);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([{ workspace, role: "admin" }] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({
@@ -230,6 +230,26 @@ describe("workspace control service", () => {
       },
       { workos, db },
     );
+  });
+
+  it("identifies the owned Hobby workspace that blocks another creation", async () => {
+    vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue({
+      id: "goat_ws_hobby",
+      name: "Acta School",
+    });
+    const service = createWorkspaceControlService({
+      db: dbWithWorkspace(),
+      workos: workos as never,
+    });
+
+    await expect(
+      service.create(admin, { workspaceId: "goat_ws_new", name: "New Organization" }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message:
+        "You already own a Hobby workspace: “Acta School”. Upgrade that workspace to Pro to create another.",
+    });
+    expect(provisionWorkspace).not.toHaveBeenCalled();
   });
 
   it("authorizes workspace switches through the verified identity's memberships", async () => {

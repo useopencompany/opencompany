@@ -1,8 +1,8 @@
 import { ensureWorkspaceOrganization } from "@opencompany/agent/workspaces/organizations";
 import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
 import {
+  findOwnedHobbyWorkspace,
   getOnboarding,
-  hasOwnedHobbyWorkspace,
   isWorkspaceSlugAvailable,
   listWorkspacesForUser,
   markUserOnboarded,
@@ -16,7 +16,7 @@ import { createOnboardingService } from "./onboarding";
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   getOnboarding: vi.fn(),
-  hasOwnedHobbyWorkspace: vi.fn(async () => false),
+  findOwnedHobbyWorkspace: vi.fn(async () => null),
   isWorkspaceSlugAvailable: vi.fn(async () => true),
   listWorkspacesForUser: vi.fn(),
   markUserOnboarded: vi.fn(async () => undefined),
@@ -59,7 +59,7 @@ describe("onboarding service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(getOnboarding).mockResolvedValue({ role: "founder" } as never);
-    vi.mocked(hasOwnedHobbyWorkspace).mockResolvedValue(false);
+    vi.mocked(findOwnedHobbyWorkspace).mockResolvedValue(null);
     vi.mocked(isWorkspaceSlugAvailable).mockResolvedValue(true);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([] as never);
     vi.mocked(provisionWorkspace).mockResolvedValue({

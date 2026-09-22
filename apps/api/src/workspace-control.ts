@@ -9,8 +9,8 @@ import { isSandboxSize, type SandboxSize } from "@opencompany/core/sandbox-sizes
 import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
 import { users, workspaces } from "@opencompany/db/product-schema";
 import {
+  findOwnedHobbyWorkspace,
   getWorkspaceSandboxSize,
-  hasOwnedHobbyWorkspace,
   listWorkspaceMembers,
   listWorkspacesForUser,
   removeWorkspaceMember,
@@ -242,7 +242,8 @@ export function createWorkspaceControlService(input: {
 
     async create(actor, command) {
       const name = validWorkspaceName(command.name);
-      if (await hasOwnedHobbyWorkspace(actor.userId, { db })) {
+      const hobbyWorkspace = await findOwnedHobbyWorkspace(actor.userId, { db });
+      if (hobbyWorkspace) {
         const replay = await findWorkspaceActivation(actor.userId, command.workspaceId, {
           db,
           workos,
@@ -251,7 +252,7 @@ export function createWorkspaceControlService(input: {
         throw new ApiError(
           409,
           "conflict",
-          "Hobby includes one workspace. Upgrade your Hobby workspace to Pro to create another.",
+          `You already own a Hobby workspace: “${hobbyWorkspace.name}”. Upgrade that workspace to Pro to create another.`,
         );
       }
       let created: Awaited<ReturnType<typeof provisionWorkspace>>;
