@@ -4,7 +4,7 @@ import { Arrow } from "./primitives";
 import { BODY, DISPLAY, SHELL } from "./tokens";
 import { Button } from "./V2Button";
 
-const CHANGELOG_URL = "https://my.opencompany.chat/changelog#release-1.32.0";
+const CHANGELOG_URL = "https://my.opencompany.chat/changelog#release-1.33.0";
 
 /**
  * Asymmetric hero: a 340px text column pinned to the left gutter, with the app
@@ -51,7 +51,7 @@ export function V2Hero() {
         >
           <span aria-hidden="true" className="size-1.5 rounded-full bg-violet-500" />
           <span className="text-foreground">Recent</span>
-          <span className="text-foreground/50">what shipped in 1.32.0</span>
+          <span className="text-foreground/50">what shipped in 1.33.0</span>
           <Arrow className="size-3 text-foreground/40" />
         </a>
       </div>
