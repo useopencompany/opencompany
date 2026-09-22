@@ -28,6 +28,7 @@ import {
   type SlackUser,
   slackFollowUpPrompt,
 } from "./slack-channel-worker";
+import { resolveSlackWorkspaceMember } from "./slack-workspace-member";
 
 type Message = {
   id: number;
@@ -88,21 +89,30 @@ export async function processNextSlackAgentMessage(deps = defaults()): Promise<b
         signal: AbortSignal.timeout(10000),
       });
       const user = response.user;
-      const email = user?.profile?.email?.trim().toLowerCase() ?? "";
-      const [sender] = subscriptionRows(
-        await execute(sql`
-        SELECT 1 FROM goat.workspace_members member JOIN goat.users account ON account.workos_user_id = member.user_workos_id
-        WHERE member.workspace_id = ${message.installation.workspaceId} AND lower(account.email) = ${email} AND ${email} <> ''
-      `),
-      );
       if (
         !user ||
         user.id !== message.slackUserId ||
         user.team_id !== message.installation.teamId ||
         user.is_bot ||
-        user.deleted ||
-        !sender
+        user.deleted
       ) {
+        await mark("ignored");
+        return {
+          handled: true,
+          notice: {
+            token,
+            message,
+            text: "Ask an opencompany workspace admin to invite you with your Slack email before using this agent.",
+          },
+        };
+      }
+      const sender = await resolveSlackWorkspaceMember(execute, {
+        workspaceId: message.installation.workspaceId,
+        teamId: message.installation.teamId,
+        slackUserId: message.slackUserId,
+        email: user.profile?.email?.trim().toLowerCase() ?? "",
+      });
+      if (!sender) {
         await mark("ignored");
         return {
           handled: true,
