@@ -110,7 +110,10 @@ function getSandboxInfo(sandboxId: string, signal?: AbortSignal) {
 }
 
 function reportBillingError(error: unknown, sandboxId?: string) {
-  if (error instanceof TimeoutError) {
+  if (
+    error instanceof TimeoutError ||
+    (error instanceof DOMException && error.name === "TimeoutError")
+  ) {
     logger.warn("E2B usage settlement timed out; the billing cursor remains retryable", {
       event: "opencompany.sandbox_billing_deferred",
       sandbox_id: sandboxId,

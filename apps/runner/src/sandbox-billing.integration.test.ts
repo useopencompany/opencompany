@@ -4,7 +4,7 @@ import { calculateSandboxUsageCost } from "@opencompany/billing";
 import { loadCreditOverview, loadSpendBreakdown } from "@opencompany/db/credits";
 import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import { drizzle } from "drizzle-orm/pglite";
-import { SandboxNotFoundError, TimeoutError } from "e2b";
+import { SandboxNotFoundError } from "e2b";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   registerSandboxBilling,
@@ -256,7 +256,9 @@ describe("E2B workspace billing", () => {
     await database.exec(
       "UPDATE goat.sandbox_billing_cursors SET next_poll_at = '2026-09-10T12:00:00Z'",
     );
-    const timeout = new TimeoutError("The operation timed out.");
+    // Sandbox.getInfo uses AbortSignal.timeout for requestTimeoutMs, which rejects with this
+    // platform error rather than E2B's similarly named SDK TimeoutError class.
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
 
     await pollSandboxBilling({
       namespace: "test",
