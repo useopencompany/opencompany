@@ -781,6 +781,32 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(githubRelayMocks.dispose).toHaveBeenCalledOnce();
   });
 
+  it("continues without GitHub access when the sandbox relay fails to start", async () => {
+    chatMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
+      githubToken: "ghu_provider_secret",
+      githubAuthHeader: "provider-header",
+      provider: "github_user",
+    });
+    githubRelayMocks.prepare.mockRejectedValueOnce(new Error("relay failed to start"));
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env({ runnerPublicUrl: "https://runner.example.com" }),
+        canonicalAttemptId: "attempt_github",
+      }),
+    ).resolves.toBe("settled");
+
+    expect(eventMocks.appendNotice).toHaveBeenCalledWith(
+      "GitHub access is temporarily unavailable. This turn continued without GitHub access.",
+    );
+    expect(cliMocks.buildClaudeAcpCommandEnv.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "githubEnv",
+    );
+    expect(acpMocks.runTurn).toHaveBeenCalledOnce();
+  });
+
   it("does not fall back to provider-token injection when the GitHub broker is unavailable", async () => {
     chatMocks.loadGitHubAuthForUser.mockResolvedValueOnce({
       githubToken: "ghu_provider_secret",
