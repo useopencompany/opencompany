@@ -14,9 +14,20 @@ import {
 } from "./sandbox-billing";
 import { billRegisteredSandbox, pollSandboxBilling } from "./sandbox-billing-worker";
 
-vi.mock("@opencompany/observability", () => ({
+const observability = vi.hoisted(() => ({
   captureException: vi.fn(),
-  createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }),
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: observability.captureException,
+  createLogger: () => ({
+    error: observability.error,
+    warn: observability.warn,
+    info: observability.info,
+  }),
 }));
 
 const start = new Date("2026-09-10T12:00:00Z");
@@ -75,6 +86,7 @@ describe("E2B workspace billing", () => {
   });
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     database = await restoreDatabase();
     db = drizzle(database) as unknown as SandboxBillingDb;
     await registerSandboxBilling({ ...owner, sandboxId: "sandbox_1", billableFrom: start, db });
@@ -219,6 +231,10 @@ describe("E2B workspace billing", () => {
     expect(getInfo).toHaveBeenCalledWith("sandbox_1", input.signal);
     await pollSandboxBilling({ ...input, now: at(60) });
     expect(getInfo).toHaveBeenCalledTimes(2);
+    expect(observability.captureException).toHaveBeenCalledWith(expect.any(Error), {
+      event: "opencompany.sandbox_billing_failed",
+      sandbox_id: "sandbox_1",
+    });
     expect(
       (
         await database.query(
@@ -234,6 +250,43 @@ describe("E2B workspace billing", () => {
     expect(
       (await loadCreditOverview(owner.workspaceId, { db, now: at(120) })).spendThisMonthUsdMicros,
     ).toBe(price(45_000));
+  });
+
+  it("keeps provider request timeouts in retry telemetry", async () => {
+    await database.exec(
+      "UPDATE goat.sandbox_billing_cursors SET next_poll_at = '2026-09-10T12:00:00Z'",
+    );
+    // Sandbox.getInfo uses AbortSignal.timeout for requestTimeoutMs, which rejects with this
+    // platform error rather than E2B's similarly named SDK TimeoutError class.
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+
+    await pollSandboxBilling({
+      namespace: "test",
+      signal: new AbortController().signal,
+      now: at(0),
+      db,
+      getInfo: async () => {
+        throw timeout;
+      },
+    });
+
+    expect(observability.captureException).not.toHaveBeenCalled();
+    expect(observability.error).not.toHaveBeenCalled();
+    expect(observability.warn).toHaveBeenCalledWith(
+      "E2B usage settlement timed out; the billing cursor remains retryable",
+      {
+        event: "opencompany.sandbox_billing_deferred",
+        sandbox_id: "sandbox_1",
+        error: timeout,
+      },
+    );
+    expect(
+      (
+        await database.query(
+          "SELECT settled_through FROM goat.sandbox_billing_cursors WHERE sandbox_id = 'sandbox_1'",
+        )
+      ).rows,
+    ).toEqual([{ settled_through: null }]);
   });
 
   it("does not guess charges for deleted sandboxes and reactivates registration on reuse", async () => {

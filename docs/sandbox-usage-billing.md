@@ -46,9 +46,11 @@ applies if the pre-transition billing attempt fails during a database/provider
 outage. Unknown time is not charged from an assumed timeout. A provider 404 retires
 the cursor from polling; a subsequent successful acquisition reactivates it.
 
-Worker errors emit `opencompany.sandbox_billing_failed` and remain eligible for a
-later poll. Full provider event history would be the next step if exact invoice
-reconciliation becomes necessary.
+E2B request timeouts emit the warning event `opencompany.sandbox_billing_deferred`;
+the unchanged cursor remains eligible for a later poll. Other worker errors emit
+`opencompany.sandbox_billing_failed` as production exceptions and remain retryable.
+Full provider event history would be the next step if exact invoice reconciliation
+becomes necessary.
 
 ## Deployment and rollback
 
