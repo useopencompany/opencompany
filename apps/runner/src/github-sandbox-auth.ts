@@ -98,35 +98,26 @@ export async function prepareGitHubSandboxAuth(input: {
     throw new Error("GitHub broker requires HTTPS outside local development.");
   }
   const { root, localToken, ticket, lifetimeSeconds } = input.capability;
-  // mktemp-like random path with exclusive creation: never follow sandbox-provided links.
-  await input.sandbox.commands.run(`umask 077 && mkdir ${shellQuote(root)}`, { timeoutMs: 30_000 });
-  await input.sandbox.files.write([
-    { path: `${root}/relay.py`, data: githubSandboxRelayScript },
-    {
-      path: `${root}/config.json`,
-      data: JSON.stringify({ brokerUrl: url.origin, ticket, localToken, lifetimeSeconds }),
-    },
-    {
-      path: `${root}/config.yml`,
-      data: `http_unix_socket: ${root}/http.sock\ngit_protocol: https\n`,
-    },
-  ]);
+  let rootCreated = false;
+  let relayPid: number | null = null;
   let relayStderr = "";
-  const command = await input.sandbox.commands.run(
-    `exec python3 ${shellQuote(`${root}/relay.py`)} ${shellQuote(`${root}/config.json`)}`,
-    {
-      background: true,
-      timeoutMs: lifetimeSeconds * 1000,
-      onStderr: (data) => {
-        relayStderr = `${relayStderr}${data}`.slice(-2_000);
-      },
-    },
-  );
   const dispose = async () => {
-    try {
-      await input.sandbox.commands.kill(command.pid);
-      await input.sandbox.commands.run(`rm -rf -- ${shellQuote(root)}`, { timeoutMs: 15_000 });
-    } catch (error) {
+    const cleanupErrors: unknown[] = [];
+    if (relayPid !== null) {
+      try {
+        await input.sandbox.commands.kill(relayPid);
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (rootCreated) {
+      try {
+        await input.sandbox.commands.run(`rm -rf -- ${shellQuote(root)}`, { timeoutMs: 15_000 });
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    for (const error of cleanupErrors) {
       logger.warn("GitHub sandbox relay cleanup failed", {
         event: "opencompany.github_sandbox_relay_cleanup_failed",
         error_name: error instanceof Error ? error.name : typeof error,
@@ -134,6 +125,33 @@ export async function prepareGitHubSandboxAuth(input: {
     }
   };
   try {
+    // mktemp-like random path with exclusive creation: never follow sandbox-provided links.
+    await input.sandbox.commands.run(`umask 077 && mkdir ${shellQuote(root)}`, {
+      timeoutMs: 30_000,
+    });
+    rootCreated = true;
+    await input.sandbox.files.write([
+      { path: `${root}/relay.py`, data: githubSandboxRelayScript },
+      {
+        path: `${root}/config.json`,
+        data: JSON.stringify({ brokerUrl: url.origin, ticket, localToken, lifetimeSeconds }),
+      },
+      {
+        path: `${root}/config.yml`,
+        data: `http_unix_socket: ${root}/http.sock\ngit_protocol: https\n`,
+      },
+    ]);
+    const command = await input.sandbox.commands.run(
+      `exec python3 ${shellQuote(`${root}/relay.py`)} ${shellQuote(`${root}/config.json`)}`,
+      {
+        background: true,
+        timeoutMs: lifetimeSeconds * 1000,
+        onStderr: (data) => {
+          relayStderr = `${relayStderr}${data}`.slice(-2_000);
+        },
+      },
+    );
+    relayPid = command.pid;
     const ready = await input.sandbox.commands.run(
       `python3 -c ${shellQuote(`import os,time\np=${JSON.stringify(`${root}/ready.json`)}\nfor _ in range(100):\n if os.path.exists(p):\n  print(open(p).read());break\n time.sleep(0.1)\nelse: raise RuntimeError("GitHub relay failed to start")`)}`,
       { timeoutMs: 15_000 },
