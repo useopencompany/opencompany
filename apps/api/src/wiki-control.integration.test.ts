@@ -127,4 +127,23 @@ describe("wiki control", () => {
       status: 404,
     });
   });
+
+  it("lets the creator delete a non-default wiki", async () => {
+    const wiki = await service.createWiki(cofounder, { name: "Temporary", access: "restricted" });
+
+    await service.deleteWiki(cofounder, wiki.id);
+
+    expect((await service.listWikis(cofounder)).map((entry) => entry.id)).toEqual(["wiki_default"]);
+  });
+
+  it("keeps the default wiki and another member's wiki protected", async () => {
+    const shared = await service.createWiki(cofounder, { name: "Handbook", access: "workspace" });
+
+    await expect(service.deleteWiki(employee, shared.id)).rejects.toMatchObject({ status: 403 });
+    await expect(service.deleteWiki(founder, "wiki_default")).rejects.toMatchObject({
+      status: 400,
+      message: "The default wiki cannot be deleted.",
+    });
+    expect((await service.listWikis(founder)).map((entry) => entry.id)).toContain(shared.id);
+  });
 });

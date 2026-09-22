@@ -11,6 +11,7 @@ import type { WikiAccessLevel } from "@opencompany/db/product-schema";
 import {
   countWikiMembers,
   createWiki,
+  deleteWiki as deleteWikiRecord,
   listWikiMemberIds,
   listWikisForUser,
   replaceWikiMembers,
@@ -64,6 +65,7 @@ export type WikiControlService = {
     wikiId: string,
     input: { name?: string; instructions?: string },
   ): Promise<WikiControlView>;
+  deleteWiki(actor: Actor, wikiId: string): Promise<void>;
   getAccess(actor: Actor, wikiId: string): Promise<WikiControlAccessView>;
   setAccess(
     actor: Actor,
@@ -160,6 +162,15 @@ export function createWikiControlService(input: { db: DbLike }): WikiControlServ
           db,
         });
         return wikiView(wiki, actor, counts.get(wiki.id) ?? 0);
+      } catch (error) {
+        throw wikiControlError(error);
+      }
+    },
+
+    async deleteWiki(actor, wikiId) {
+      await requireWikiOwner(actor, wikiId);
+      try {
+        await deleteWikiRecord({ wikiId }, { db });
       } catch (error) {
         throw wikiControlError(error);
       }

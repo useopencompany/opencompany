@@ -19,14 +19,16 @@ async function data<T>(
   response: Response & { json(): Promise<{ data: T }> },
   fallback: string,
 ): Promise<T> {
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as {
-      error?: { message?: unknown };
-    } | null;
-    const message = typeof body?.error?.message === "string" ? body.error.message : null;
-    throw new Error(message ?? fallback);
-  }
+  if (!response.ok) throw await responseError(response, fallback);
   return (await response.json()).data;
+}
+
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  const body = (await response.json().catch(() => null)) as {
+    error?: { message?: unknown };
+  } | null;
+  const message = typeof body?.error?.message === "string" ? body.error.message : null;
+  return new Error(message ?? fallback);
 }
 
 /** Every wiki in the workspace the reader may open, the default one first. */
@@ -46,6 +48,13 @@ export async function updateWiki(wikiId: string, body: UpdateWikiBody): Promise<
     await client().v1.wikis[":wikiId"].$patch({ param: { wikiId }, json: body }),
     "The wiki could not be updated. Please try again.",
   );
+}
+
+export async function deleteWiki(wikiId: string): Promise<void> {
+  const response = await client().v1.wikis[":wikiId"].$delete({ param: { wikiId } });
+  if (!response.ok) {
+    throw await responseError(response, "The wiki could not be deleted. Please try again.");
+  }
 }
 
 /** The wiki's access level, who is invited, and the workspace roster to pick from. */
