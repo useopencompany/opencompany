@@ -87,6 +87,7 @@ const groups = {
       "GITHUB_USER_APP_CLIENT_ID",
       "GITHUB_USER_APP_CLIENT_SECRET",
       "GITHUB_USER_APP_STATE_SECRET",
+      "GITHUB_USER_APP_WEBHOOK_SECRET",
       // Google-family OAuth ingress (#1203 4a2).
       "GOOGLE_OAUTH_CLIENT_ID",
       "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -514,6 +515,12 @@ const githubUserAppStateSecret = process.env.GITHUB_USER_APP_STATE_SECRET;
 if (!isUnset(githubUserAppStateSecret) && githubUserAppStateSecret.length < 32) {
   failed = true;
   console.log("\nGITHUB_USER_APP_STATE_SECRET must be at least 32 characters.");
+}
+
+const githubUserAppWebhookSecret = process.env.GITHUB_USER_APP_WEBHOOK_SECRET;
+if (!isUnset(githubUserAppWebhookSecret) && githubUserAppWebhookSecret.length < 32) {
+  failed = true;
+  console.log("\nGITHUB_USER_APP_WEBHOOK_SECRET must be at least 32 characters.");
 }
 
 const webRedirectUri = process.env.OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI;

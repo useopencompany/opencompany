@@ -40,7 +40,7 @@ export function workflowEventProviderOptions(input: {
         label: metadata?.label ?? provider,
         accountHref: metadata?.eventAccountHref ?? `/plugins/${provider}`,
         accountLabel: metadata?.eventAccountLabel ?? `Connect ${metadata?.label ?? provider}`,
-        accounts: (input.personalAccounts[provider] ?? [])
+        accounts: (input.personalAccounts[metadata?.connectionProvider ?? provider] ?? [])
           .filter((account) => account.connected)
           .map((account) => ({
             integrationId: account.integrationId,

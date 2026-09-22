@@ -9,10 +9,17 @@ The initial supported events are:
 
 | Plugin | Event | Configuration | Delivery |
 | --- | --- | --- | --- |
+| GitHub | Pull request opened (`pull_request.opened`) | Connected GitHub App installation | Signed webhook |
 | Linear | Issue created (`issue.created`) | Optional team and status category, including Triage | Signed webhook |
 | Granola | Meeting notes ready (`meeting.notes_ready`) | Optional folder, including its subfolders | REST polling, normally within five minutes |
 | Jamie | Meeting completed (`meeting.completed`) | Optional guests: outside your company, or internal only | Webhook you create in Jamie |
 | Gmail | Email received (`email.received`) | Optional label | REST polling, normally within five minutes |
+
+GitHub's `pull_request.opened` event starts for a pull request opened as ready for review and for a
+draft later marked ready. Opening a draft does not start a run. The personal GitHub App sends signed
+Pull request deliveries to the API-owned ingress; the App installation id routes each delivery to
+the same personal connection selected by the workflow. Existing GitHub plugin installations show an
+update action to get the event declaration.
 
 Linear's tool connection and event connection are separate. The event OAuth app must have Issue
 webhooks enabled and point at the API-owned Linear webhook ingress. Its existing client, secret,

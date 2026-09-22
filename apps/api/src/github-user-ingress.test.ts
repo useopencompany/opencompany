@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
 import {
   createGitHubUserIntegrationState,
@@ -9,7 +10,12 @@ import {
   resolveGitHubUserInstallTarget,
   verifyGitHubAppUserInstallation,
 } from "@opencompany/agent/integrations/github-user";
+import { listGitHubUserIntegrationsForInstallation } from "@opencompany/db/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
+import {
+  enqueueWorkflowEventRuns,
+  listWorkflowEventTriggerRoutes,
+} from "@opencompany/db/workflow-event-routes";
 import { listWorkspacesForUser } from "@opencompany/db/workspaces";
 import { PROTOCOL_VERSION } from "@opencompany/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,12 +37,62 @@ vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   connectGitHubUserIntegration: vi.fn(async () => ({ integrationId: "gint_github_user" })),
 }));
+vi.mock("@opencompany/db/github-user", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  listGitHubUserIntegrationsForInstallation: vi.fn(),
+}));
+vi.mock("@opencompany/db/workflow-event-routes", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  enqueueWorkflowEventRuns: vi.fn(),
+  listWorkflowEventTriggerRoutes: vi.fn(),
+}));
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   listWorkspacesForUser: vi.fn(),
 }));
 
 const db = { sentinel: "db" };
+const GITHUB_WEBHOOK_SECRET = "github-webhook-secret";
+
+function webhookRequest(envelope: Record<string, unknown>, headers: Record<string, string> = {}) {
+  const rawBody = JSON.stringify(envelope);
+  return new Request("https://api.example.com/webhooks/github-user/events", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-github-event": "pull_request",
+      "x-github-delivery": "delivery_1",
+      "x-hub-signature-256": `sha256=${createHmac("sha256", GITHUB_WEBHOOK_SECRET)
+        .update(rawBody)
+        .digest("hex")}`,
+      ...headers,
+    },
+    body: rawBody,
+  });
+}
+
+function pullRequestEnvelope(
+  action: "opened" | "ready_for_review" | "reopened" = "opened",
+  draft = false,
+) {
+  return {
+    action,
+    installation: { id: 123 },
+    repository: { full_name: "useopencompany/opencompany" },
+    pull_request: {
+      number: 1991,
+      title: "Add GitHub workflow events",
+      body: "Please review this change.",
+      draft,
+      html_url: "https://github.com/useopencompany/opencompany/pull/1991",
+      created_at: "2026-09-22T12:00:00.000Z",
+      updated_at: "2026-09-22T13:00:00.000Z",
+      user: { login: "octocat" },
+      base: { ref: "main" },
+      head: { ref: "github-events", sha: "abc123" },
+    },
+  };
+}
 
 function ingress(
   input: {
@@ -74,6 +130,7 @@ describe("GitHub user ingress", () => {
     vi.stubEnv("GITHUB_USER_APP_CLIENT_ID", "Iv1_user_client");
     vi.stubEnv("GITHUB_USER_APP_CLIENT_SECRET", "client-secret");
     vi.stubEnv("GITHUB_USER_APP_STATE_SECRET", "state-secret-state-secret-state-secret");
+    vi.stubEnv("GITHUB_USER_APP_WEBHOOK_SECRET", GITHUB_WEBHOOK_SECRET);
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 9).toString("base64"));
     vi.mocked(exchangeGitHubAppUserCode).mockResolvedValue({
       accessToken: "ghu_access",
@@ -94,11 +151,107 @@ describe("GitHub user ingress", () => {
       installations: [],
       target: null,
     });
+    vi.mocked(listGitHubUserIntegrationsForInstallation).mockResolvedValue([
+      {
+        id: "gint_github_user",
+        workspaceId: null,
+        userWorkosId: "user_1",
+        status: "connected",
+      },
+    ]);
+    vi.mocked(listWorkflowEventTriggerRoutes).mockResolvedValue([
+      {
+        workflowId: "workflow_1",
+        workspaceId: "workspace_1",
+        userWorkosId: "user_1",
+        workflowSlug: "review-prs",
+        workflowName: "Review PRs",
+        prompt: "Review this pull request.",
+        harnessSpec: {} as never,
+        provider: "github",
+        event: "pull_request.opened",
+        filters: {},
+      },
+    ]);
+    vi.mocked(enqueueWorkflowEventRuns).mockResolvedValue(1);
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it("starts workflow runs when a pull request opens ready for review", async () => {
+    const response = await ingress().webhook(webhookRequest(pullRequestEnvelope()));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, workflowRuns: 1 });
+    expect(listGitHubUserIntegrationsForInstallation).toHaveBeenCalledWith("123", db);
+    expect(listWorkflowEventTriggerRoutes).toHaveBeenCalledWith(
+      {
+        provider: "github",
+        integrations: [
+          {
+            id: "gint_github_user",
+            workspaceId: null,
+            userWorkosId: "user_1",
+            status: "connected",
+          },
+        ],
+      },
+      db,
+    );
+    expect(enqueueWorkflowEventRuns).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryId: "delivery_1",
+        eventAt: new Date("2026-09-22T12:00:00.000Z"),
+        context: expect.objectContaining({ tag: "github_pull_request_context" }),
+      }),
+      db,
+    );
+  });
+
+  it("uses the ready-for-review time when a draft becomes reviewable", async () => {
+    const response = await ingress().webhook(
+      webhookRequest(pullRequestEnvelope("ready_for_review")),
+    );
+
+    expect(response.status).toBe(200);
+    expect(enqueueWorkflowEventRuns).toHaveBeenCalledWith(
+      expect.objectContaining({ eventAt: new Date("2026-09-22T13:00:00.000Z") }),
+      db,
+    );
+  });
+
+  it.each([
+    ["draft pull request", pullRequestEnvelope("opened", true)],
+    ["reopened pull request", pullRequestEnvelope("reopened")],
+  ])("ignores a %s", async (_label, envelope) => {
+    const response = await ingress().webhook(webhookRequest(envelope));
+
+    await expect(response.json()).resolves.toEqual({ ok: true, ignored: true });
+    expect(listGitHubUserIntegrationsForInstallation).not.toHaveBeenCalled();
+    expect(enqueueWorkflowEventRuns).not.toHaveBeenCalled();
+  });
+
+  it("rejects a delivery with an invalid signature", async () => {
+    const response = await ingress().webhook(
+      webhookRequest(pullRequestEnvelope(), { "x-hub-signature-256": "sha256=invalid" }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(listGitHubUserIntegrationsForInstallation).not.toHaveBeenCalled();
+  });
+
+  it("returns a retryable response when durable enqueueing fails", async () => {
+    vi.mocked(enqueueWorkflowEventRuns).mockRejectedValueOnce(new Error("database unavailable"));
+
+    const response = await ingress().webhook(webhookRequest(pullRequestEnvelope()));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "GitHub event processing failed; retry this delivery.",
+    });
   });
 
   it("lets a workspace member start the personal App install and authorization flow", async () => {

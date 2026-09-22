@@ -46,7 +46,8 @@ MCP `create_pull_request` tool or from `gh pr create` output, never from assista
 `goat.session_pull_requests`, keyed on `chat_sessions` so both kinds of row read the same table.
 `GET /v1/session-pull-requests` returns those links, refreshing any non-terminal PR against GitHub
 behind a 60s TTL with the caller's own user token; merged and closed are final and never re-read.
-There is no GitHub webhook ingress, and this feature does not add one.
+The badge refresh remains token-based and does not consume the separate GitHub workflow-event
+webhook ingress.
 
 Claude Code coding chats and Workflow steps share the model catalog in
 `packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
@@ -162,6 +163,12 @@ confirmed outside that intersection links back through the combined install-and-
 the client uses bounded, backoff polling with ordinary access reads instead of depending on
 GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
 re-check may refresh the expiring user token once per install attempt.
+
+The same GitHub App sends signed Pull request webhooks through the stable web relay to the API.
+An `opened` delivery routes only when the pull request is already ready for review; a
+`ready_for_review` delivery covers drafts promoted later. The encrypted connection credential's
+installation id binds the delivery to the personal account selected by each active
+`pull_request.opened` workflow trigger, and the GitHub delivery id makes retries idempotent.
 
 Sandbox `gh` and HTTPS Git requests use an attempt-scoped GitHub broker. A private Unix
 socket carries `gh` HTTP traffic; a Git HTTPS remote helper carries Git traffic through an

@@ -140,6 +140,10 @@
       "types": "./src/gmail.ts",
       "default": "./src/gmail.ts"
     },
+    "./github-user": {
+      "types": "./src/github-user.ts",
+      "default": "./src/github-user.ts"
+    },
     "./jamie": {
       "types": "./src/jamie.ts",
       "default": "./src/jamie.ts"

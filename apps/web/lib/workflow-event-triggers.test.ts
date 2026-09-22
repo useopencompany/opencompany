@@ -59,6 +59,34 @@ describe("workflowEventProviderOptions", () => {
     expect(option?.accounts).toEqual([{ integrationId: "gint_1", label: "ada@example.com" }]);
   });
 
+  it("uses the official plugin's connection provider when it differs from the package name", () => {
+    const [option] = workflowEventProviderOptions({
+      plugins: [
+        plugin({
+          name: "github",
+          events: [
+            {
+              id: "pull_request.opened",
+              label: "Pull request opened",
+              description: "Starts when a pull request is ready for review.",
+              delivery: "webhook",
+              filters: [],
+            },
+          ],
+          eventModes: { "pull_request.opened": true },
+        }),
+      ],
+      personalAccounts: {
+        github_user: [account({ integrationId: "gint_github_user" })],
+      },
+    });
+
+    expect(option?.provider).toBe("github");
+    expect(option?.accounts).toEqual([
+      { integrationId: "gint_github_user", label: "ada@example.com" },
+    ]);
+  });
+
   it("skips a disabled plugin and one with every event off", () => {
     expect(
       workflowEventProviderOptions({

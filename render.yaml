@@ -104,6 +104,8 @@ services:
         sync: false
       - key: GITHUB_USER_APP_STATE_SECRET
         sync: false
+      - key: GITHUB_USER_APP_WEBHOOK_SECRET
+        sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
       # (Gmail, Calendar, Drive; Drive webhook verification is row-based).
       - key: GOOGLE_OAUTH_CLIENT_ID

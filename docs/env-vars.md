@@ -99,13 +99,16 @@ variables must never exist in a production Infisical path.
 while the API owns onboarding-email persistence.
 
 The official GitHub Plugin uses a personal GitHub App. Put `GITHUB_USER_APP_SLUG`, `GITHUB_USER_APP_CLIENT_ID`,
-`GITHUB_USER_APP_CLIENT_SECRET`, and `GITHUB_USER_APP_STATE_SECRET` in prod `/api`; put the client
-ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
+`GITHUB_USER_APP_CLIENT_SECRET`, `GITHUB_USER_APP_STATE_SECRET`, and
+`GITHUB_USER_APP_WEBHOOK_SECRET` in prod `/api`; put the client ID and client secret in prod
+`/runner` as well so sandbox sessions can refresh the same expiring user
 credential. The public callback remains
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
 API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks,
 Commit statuses, and Metadata read, with expiring user tokens and user authorization during
-installation enabled. Set
+installation enabled. Set its webhook URL to
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/webhooks/github-user/events`, use the same webhook secret,
+and subscribe to Pull request events. Set
 its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.

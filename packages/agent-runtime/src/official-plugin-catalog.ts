@@ -9,7 +9,7 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   fathom:
     "https://github.com/useopencompany/plugins/tree/444dd4dbfaaed6abd2c7c8000024c5be0ff4fa48/fathom",
   github:
-    "https://github.com/useopencompany/plugins/tree/232e380e8850c440c28e4588ef79143d41c000db/github",
+    "https://github.com/useopencompany/plugins/tree/b343c1b7b7d2b308bbb94078a0d95faca05ef350/github",
   gmail:
     "https://github.com/useopencompany/plugins/tree/82998a44647a31c0b1f973f0554ca25c33e822dc/gmail",
   granola:

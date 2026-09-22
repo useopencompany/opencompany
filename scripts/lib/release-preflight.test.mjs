@@ -60,6 +60,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "GITHUB_USER_APP_CLIENT_ID",
     "GITHUB_USER_APP_CLIENT_SECRET",
     "GITHUB_USER_APP_STATE_SECRET",
+    "GITHUB_USER_APP_WEBHOOK_SECRET",
     "ELECTRIC_AUTH_MODE",
     "BUN_CONFIG_MAX_HTTP_REQUESTS",
   ]);

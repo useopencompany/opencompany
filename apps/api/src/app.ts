@@ -3034,6 +3034,8 @@ export function createApiApp(input: CreateApiAppInput) {
     app.post("/integrations/github-user/installations", (c) =>
       ingress.installations(c.req.raw, requestIdFrom(c)),
     );
+    app.use("/webhooks/github-user/events", ingressBodyLimit(5 * 1024 * 1024));
+    app.post("/webhooks/github-user/events", (c) => ingress.webhook(c.req.raw));
   }
   if (input.googleIngress) {
     const ingress = input.googleIngress;

@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { getAppUrl } from "@opencompany/agent/app-url";
 import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations/analytics";
 import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
+import { verifyGitHubWebhookSignature } from "@opencompany/agent/integrations/github-signature";
 import {
   appendGitHubUserIntegrationStatus,
   buildGitHubUserInstallUrl,
@@ -15,7 +17,16 @@ import {
   verifyGitHubAppUserInstallation,
   verifyGitHubUserIntegrationState,
 } from "@opencompany/agent/integrations/github-user";
+import {
+  GITHUB_PULL_REQUEST_OPENED_EVENT,
+  githubPullRequestWorkflowEventContext,
+  listGitHubUserIntegrationsForInstallation,
+} from "@opencompany/db/github-user";
 import { connectGitHubUserIntegration } from "@opencompany/db/integrations";
+import {
+  enqueueWorkflowEventRuns,
+  listWorkflowEventTriggerRoutes,
+} from "@opencompany/db/workflow-event-routes";
 import { createLogger } from "@opencompany/observability";
 import type { ApiIdentityVerifier } from "./auth";
 import { ApiError, errorResponse } from "./errors";
@@ -29,6 +40,7 @@ export type GitHubUserIngressService = {
   start(request: Request): Promise<Response>;
   callback(request: Request): Promise<Response>;
   installations(request: Request, requestId: string): Promise<Response>;
+  webhook(request: Request): Promise<Response>;
 };
 
 type RefreshPluginRegistrations = (input: {
@@ -47,7 +59,114 @@ export function createGitHubUserIngress(input: GitHubUserIngressInput): GitHubUs
     start: (request) => handleStart(input, request),
     callback: (request) => handleCallback(input, request),
     installations: (request, requestId) => handleInstallations(input, request, requestId),
+    webhook: (request) => handleWebhook(input, request),
   };
+}
+
+type GitHubPullRequestWebhookEnvelope = {
+  action?: unknown;
+  installation?: { id?: unknown };
+  pull_request?: Record<string, unknown>;
+  repository?: Record<string, unknown>;
+};
+
+async function handleWebhook(input: GitHubUserIngressInput, request: Request): Promise<Response> {
+  const rawBody = await request.text();
+  if (
+    !verifyGitHubWebhookSignature({
+      rawBody,
+      signature: request.headers.get("x-hub-signature-256"),
+    })
+  ) {
+    return Response.json({ error: "Invalid GitHub signature." }, { status: 401 });
+  }
+
+  if (request.headers.get("x-github-event") !== "pull_request") {
+    return Response.json({ ok: true, ignored: true });
+  }
+
+  let envelope: GitHubPullRequestWebhookEnvelope;
+  try {
+    envelope = JSON.parse(rawBody) as GitHubPullRequestWebhookEnvelope;
+  } catch {
+    return Response.json({ error: "Invalid JSON payload." }, { status: 400 });
+  }
+
+  try {
+    return Response.json(await handlePullRequestEvent(input.db, envelope, request, rawBody));
+  } catch (error) {
+    logger.error("Failed to process GitHub pull request event", {
+      event: "opencompany.github_pull_request_event_failed",
+      action: typeof envelope.action === "string" ? envelope.action : null,
+      error_message: error instanceof Error ? error.message : String(error),
+    });
+    return Response.json(
+      { error: "GitHub event processing failed; retry this delivery." },
+      { status: 503 },
+    );
+  }
+}
+
+async function handlePullRequestEvent(
+  db: DbLike,
+  envelope: GitHubPullRequestWebhookEnvelope,
+  request: Request,
+  rawBody: string,
+) {
+  const action = githubReviewablePullRequestAction(envelope);
+  if (!action) return { ok: true, ignored: true };
+
+  const installationId = githubInstallationId(envelope.installation?.id);
+  const pullRequest = envelope.pull_request;
+  const repository = envelope.repository;
+  if (!installationId || !pullRequest || !repository) return { ok: true, dropped: true };
+
+  const integrations = await listGitHubUserIntegrationsForInstallation(installationId, db);
+  if (integrations.length === 0) return { ok: true, dropped: true };
+
+  const routes = (
+    await listWorkflowEventTriggerRoutes({ provider: "github", integrations }, db)
+  ).filter((route) => route.event === GITHUB_PULL_REQUEST_OPENED_EVENT);
+  if (routes.length === 0) return { ok: true, workflowRuns: 0 };
+
+  const deliveryId =
+    request.headers.get("x-github-delivery")?.trim() ||
+    createHash("sha256").update(rawBody).digest("hex");
+  const workflowRuns = await enqueueWorkflowEventRuns(
+    {
+      routes,
+      deliveryId,
+      eventAt: githubPullRequestEventTime(pullRequest, action),
+      context: githubPullRequestWorkflowEventContext(pullRequest, repository, action),
+    },
+    db,
+  );
+  return { ok: true, workflowRuns };
+}
+
+function githubReviewablePullRequestAction(
+  envelope: GitHubPullRequestWebhookEnvelope,
+): "opened" | "ready_for_review" | null {
+  if (envelope.pull_request?.draft !== false) return null;
+  return envelope.action === "opened" || envelope.action === "ready_for_review"
+    ? envelope.action
+    : null;
+}
+
+function githubInstallationId(value: unknown) {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  if (typeof value === "string" && /^\d+$/u.test(value)) return value;
+  return null;
+}
+
+function githubPullRequestEventTime(
+  pullRequest: Record<string, unknown>,
+  action: "opened" | "ready_for_review",
+) {
+  const value = pullRequest[action === "opened" ? "created_at" : "updated_at"];
+  if (typeof value !== "string") return new Date();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
 }
 
 async function handleStart(input: GitHubUserIngressInput, request: Request): Promise<Response> {
