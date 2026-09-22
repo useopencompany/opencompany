@@ -40,7 +40,7 @@ const PRICING_FAQS = [
   },
   {
     q: "What counts as included usage?",
-    a: "A monthly balance for agent and model usage — $5 on Hobby, $20 per seat on Pro. It resets every calendar month and doesn't roll over.",
+    a: "A monthly balance for agent and model usage — $5 per workspace on Hobby, $20 per seat on Pro. It resets every calendar month and doesn't roll over.",
   },
   {
     q: "Can I top up if I'm running low?",

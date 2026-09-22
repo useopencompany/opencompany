@@ -19,7 +19,7 @@ const PLANS: Plan[] = [
     includesNote: "Includes:",
     features: [
       "1 seat, up to 5 workspaces",
-      "$5/mo of included usage, billed at cost",
+      "$5/mo of included usage per workspace, billed at cost",
       "Full product access — agents, workflows, the wiki",
       "Pay-per-use beyond your included balance",
     ],

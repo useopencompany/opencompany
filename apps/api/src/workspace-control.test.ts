@@ -3,6 +3,7 @@ import { provisionWorkspace } from "@opencompany/agent/workspaces/provisioning";
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { getWorkspacePlan } from "@opencompany/db/billing";
+import { HOBBY_MAX_WORKSPACES } from "@opencompany/db/billing-constants";
 import {
   countOwnedHobbyWorkspaces,
   getWorkspaceSandboxSize,
@@ -19,10 +20,12 @@ vi.mock("@opencompany/billing/seats", () => ({
   syncStripeSeatQuantityForWorkspace: vi.fn(async () => ({ ok: true, changed: true })),
 }));
 
-vi.mock("@opencompany/db/billing", () => ({
+// billing-constants is client-safe, so the cap the service enforces comes from
+// the real module rather than a literal that could drift from it.
+vi.mock("@opencompany/db/billing", async () => ({
   getWorkspacePlan: vi.fn(async () => "pro"),
-  HOBBY_MAX_WORKSPACES: 5,
   workspaceMemberCap: (plan: string) => (plan === "pro" ? 10 : 1),
+  HOBBY_MAX_WORKSPACES: (await import("@opencompany/db/billing-constants")).HOBBY_MAX_WORKSPACES,
 }));
 
 vi.mock("@opencompany/db/workspaces", async (importOriginal) => ({
@@ -234,7 +237,7 @@ describe("workspace control service", () => {
   });
 
   it("still provisions while the caller is under the Hobby workspace cap", async () => {
-    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(4);
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES - 1);
     const service = createWorkspaceControlService({
       db: dbWithWorkspace(),
       workos: workos as never,
@@ -247,7 +250,7 @@ describe("workspace control service", () => {
   });
 
   it("blocks creation once the caller owns the maximum Hobby workspaces", async () => {
-    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(5);
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES);
     const service = createWorkspaceControlService({
       db: dbWithWorkspace(),
       workos: workos as never,
@@ -257,14 +260,13 @@ describe("workspace control service", () => {
       service.create(admin, { workspaceId: "workspace_new", name: "New Organization" }),
     ).rejects.toMatchObject({
       status: 409,
-      message:
-        "You already own 5 Hobby workspaces, the most a free account can have. Upgrade one to Pro to create another.",
+      message: `You already own ${HOBBY_MAX_WORKSPACES} Hobby workspaces, the most a free account can have. Upgrade one to Pro to create another.`,
     });
     expect(provisionWorkspace).not.toHaveBeenCalled();
   });
 
   it("replays a retried creation at the cap instead of reporting a conflict", async () => {
-    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(5);
+    vi.mocked(countOwnedHobbyWorkspaces).mockResolvedValue(HOBBY_MAX_WORKSPACES);
     vi.mocked(listWorkspacesForUser).mockResolvedValue([
       { workspace: { ...workspace, id: "workspace_new" }, role: "admin" },
     ] as never);
