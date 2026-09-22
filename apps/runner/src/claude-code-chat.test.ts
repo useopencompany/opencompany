@@ -16,7 +16,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpHarnessTurnInput } from "./acp-harness";
 import { loadBotIdentityPrompt } from "./bot-context";
 import {
+  CLAUDE_CODE_CHAT_SUBSCRIPTION_DISABLED_MESSAGE,
   CLAUDE_CORE_MCP_UNAVAILABLE_MESSAGE,
+  claudeCodeCredentialRejection,
   extractAcpScheduleWakeup,
   inspectClaudeCoreMcpInitialization,
   isClaudeCodeAuthenticationFailure,
@@ -305,8 +307,21 @@ describe("isClaudeCodeAuthenticationFailure", () => {
     "OAuth token has expired",
     "Unauthorized: login expired",
     "Invalid API key",
+    "Your organization has disabled Claude subscription access for Claude Code",
   ])("recognizes rejected credentials: %s", (message) => {
     expect(isClaudeCodeAuthenticationFailure(message)).toBe(true);
+  });
+
+  it("gives organization policy denials an actionable reconnect reason", () => {
+    expect(
+      claudeCodeCredentialRejection(
+        "Internal error: Your organization has disabled Claude subscription access for Claude Code",
+      ),
+    ).toEqual({
+      statusReason:
+        "Your Anthropic organization disabled Claude subscription access. Ask an Anthropic admin to enable it, then reconnect Claude Code.",
+      userMessage: CLAUDE_CODE_CHAT_SUBSCRIPTION_DISABLED_MESSAGE,
+    });
   });
 
   it.each([
@@ -552,6 +567,34 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect.objectContaining({
         billingOwner: { namespace: "test", workspaceId: "workspace_1", userWorkosId: "user_1" },
         onLatency: expect.any(Function),
+      }),
+    );
+  });
+
+  it("marks organization policy denials unavailable instead of retrying the same credential", async () => {
+    acpMocks.runTurn.mockRejectedValueOnce(
+      new Error(
+        "Internal error: Your organization has disabled Claude subscription access for Claude Code",
+      ),
+    );
+
+    await expect(
+      runClaudeCodeChatTurn({ turn: claudeTurn(), session: claudeSession(), env: env() }),
+    ).resolves.toBe("settled");
+
+    expect(authMocks.markClaudeCodeCredentialNeedsReauth).toHaveBeenCalledWith({
+      db: expect.anything(),
+      userWorkosId: "user_1",
+      statusReason:
+        "Your Anthropic organization disabled Claude subscription access. Ask an Anthropic admin to enable it, then reconnect Claude Code.",
+    });
+    const projector = eventMocks.createExternalEngineProjector.mock.results.at(-1)?.value;
+    expect(projector.fail).toHaveBeenCalledWith(
+      CLAUDE_CODE_CHAT_SUBSCRIPTION_DISABLED_MESSAGE,
+      expect.objectContaining({
+        failureDiagnostic: expect.stringContaining(
+          "Your organization has disabled Claude subscription access",
+        ),
       }),
     );
   });
