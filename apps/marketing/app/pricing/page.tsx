@@ -48,7 +48,7 @@ const PRICING_FAQS = [
   },
   {
     q: "Can I add teammates on Hobby?",
-    a: "Hobby is one seat on one workspace. Upgrade to Pro to invite teammates — up to 10 seats, billed centrally for the whole team.",
+    a: "Hobby is one seat, and you can keep up to 5 workspaces on it. Upgrade to Pro to invite teammates — up to 10 seats, billed centrally for the whole team.",
   },
 ];
 

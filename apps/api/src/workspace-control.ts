@@ -6,10 +6,14 @@ import {
 import { syncStripeSeatQuantityForWorkspace } from "@opencompany/billing/seats";
 import type { Actor } from "@opencompany/core";
 import { isSandboxSize, type SandboxSize } from "@opencompany/core/sandbox-sizes";
-import { getWorkspacePlan, workspaceMemberCap } from "@opencompany/db/billing";
+import {
+  getWorkspacePlan,
+  HOBBY_MAX_WORKSPACES,
+  workspaceMemberCap,
+} from "@opencompany/db/billing";
 import { users, workspaces } from "@opencompany/db/product-schema";
 import {
-  findOwnedHobbyWorkspace,
+  countOwnedHobbyWorkspaces,
   getWorkspaceSandboxSize,
   listWorkspaceMembers,
   listWorkspacesForUser,
@@ -242,8 +246,8 @@ export function createWorkspaceControlService(input: {
 
     async create(actor, command) {
       const name = validWorkspaceName(command.name);
-      const hobbyWorkspace = await findOwnedHobbyWorkspace(actor.userId, { db });
-      if (hobbyWorkspace) {
+      const ownedHobbyCount = await countOwnedHobbyWorkspaces(actor.userId, { db });
+      if (ownedHobbyCount >= HOBBY_MAX_WORKSPACES) {
         const replay = await findWorkspaceActivation(actor.userId, command.workspaceId, {
           db,
           workos,
@@ -252,7 +256,7 @@ export function createWorkspaceControlService(input: {
         throw new ApiError(
           409,
           "conflict",
-          `You already own a Hobby workspace: “${hobbyWorkspace.name}”. Upgrade that workspace to Pro to create another.`,
+          `You already own ${HOBBY_MAX_WORKSPACES} Hobby workspaces, the most a free account can have. Upgrade one to Pro to create another.`,
         );
       }
       let created: Awaited<ReturnType<typeof provisionWorkspace>>;
