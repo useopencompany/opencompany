@@ -83,7 +83,37 @@ describe("headless Task commands", () => {
     });
   });
 
-  it("archives through the typed Task mutation and waits for its read model", async () => {
+  it("returns a committed Task without waiting for its delayed read model", async () => {
+    vi.mocked(awaitHeadlessTaskTransaction).mockReturnValueOnce(new Promise<void>(() => undefined));
+    const fetchMock = vi.fn(async () =>
+      Response.json(
+        {
+          data: {
+            task,
+            messageId: "message_1",
+            runId: "run_1",
+            transactionId: "42",
+            replayed: false,
+          },
+          meta,
+        },
+        { status: 202 },
+      ),
+    );
+
+    await expect(
+      createHeadlessTask(
+        { goal: task.goal, engine: "opencompany", model: task.model },
+        {
+          baseUrl: "https://app.example.test",
+          fetch: fetchMock as typeof fetch,
+          scopeKey: "workspace_1",
+        },
+      ),
+    ).resolves.toMatchObject({ transactionId: "42" });
+  });
+
+  it("archives through the typed Task mutation and observes its read model", async () => {
     let request: Request | null = null;
     const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       request = input instanceof Request ? input : new Request(input, init);

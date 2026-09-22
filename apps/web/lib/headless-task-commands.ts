@@ -11,7 +11,7 @@ import {
   type TaskSummaryDto,
 } from "@opencompany/protocol";
 import { createHeadlessChatApiFetch, headlessChatApiBaseUrl } from "./headless-chat-api";
-import { reconcileCommittedProjection } from "./headless-collection-reconciliation";
+import { observeCommittedProjection } from "./headless-collection-reconciliation";
 import {
   awaitHeadlessTaskCommentTransaction,
   awaitHeadlessTaskTransaction,
@@ -28,7 +28,7 @@ export async function createHeadlessTask(command: CreateTaskBody, options: Scope
   });
   if (!response.ok) throw await taskResponseError(response, "Task creation failed");
   const data = (await response.json()).data;
-  await reconcileCommittedProjection(
+  observeCommittedProjection(
     awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
   );
   return data;
@@ -49,7 +49,7 @@ export async function createHeadlessTaskComment(
   });
   if (!response.ok) throw await taskResponseError(response, "Task comment failed");
   const data = (await response.json()).data;
-  await reconcileCommittedProjection(
+  observeCommittedProjection(
     awaitHeadlessTaskCommentTransaction(taskId, data.transactionId, {
       scopeKey: options.scopeKey,
     }),
@@ -103,7 +103,7 @@ export async function archiveHeadlessTask(taskId: string, options: ScopedClientO
   });
   if (!response.ok) throw await taskResponseError(response, "Task archive failed");
   const data = (await response.json()).data;
-  await reconcileCommittedProjection(
+  observeCommittedProjection(
     awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
   );
   return data.task;
@@ -116,7 +116,7 @@ export async function markHeadlessTaskSeen(taskId: string, options: ScopedClient
   });
   if (!response.ok) throw await taskResponseError(response, "Task acknowledgment failed");
   const data = (await response.json()).data;
-  await reconcileCommittedProjection(
+  observeCommittedProjection(
     awaitHeadlessTaskTransaction(data.transactionId, { scopeKey: options.scopeKey }),
   );
   return data.task;
