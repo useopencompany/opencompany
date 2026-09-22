@@ -1,6 +1,6 @@
 import { captureException, createLogger } from "@opencompany/observability";
 import { sql } from "drizzle-orm";
-import { Sandbox, SandboxNotFoundError } from "e2b";
+import { Sandbox, SandboxNotFoundError, TimeoutError } from "e2b";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 import {
@@ -110,6 +110,14 @@ function getSandboxInfo(sandboxId: string, signal?: AbortSignal) {
 }
 
 function reportBillingError(error: unknown, sandboxId?: string) {
+  if (error instanceof TimeoutError) {
+    logger.warn("E2B usage settlement timed out; the billing cursor remains retryable", {
+      event: "opencompany.sandbox_billing_deferred",
+      sandbox_id: sandboxId,
+      error,
+    });
+    return;
+  }
   captureException(error, { event: "opencompany.sandbox_billing_failed", sandbox_id: sandboxId });
   logger.error("E2B usage settlement failed; the billing cursor remains retryable", {
     event: "opencompany.sandbox_billing_failed",
