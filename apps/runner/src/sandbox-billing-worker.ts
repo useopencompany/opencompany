@@ -110,7 +110,7 @@ function getSandboxInfo(sandboxId: string, signal?: AbortSignal) {
 }
 
 function reportBillingError(error: unknown, sandboxId?: string) {
-  if (error instanceof TimeoutError) {
+  if (isRetryableProviderTimeout(error)) {
     logger.warn("E2B usage settlement timed out; the billing cursor remains retryable", {
       event: "opencompany.sandbox_billing_deferred",
       sandbox_id: sandboxId,
@@ -124,4 +124,12 @@ function reportBillingError(error: unknown, sandboxId?: string) {
     sandbox_id: sandboxId,
     error,
   });
+}
+
+function isRetryableProviderTimeout(error: unknown) {
+  // E2B RPCs use its SDK error; requestTimeoutMs aborts fetch with a DOM exception.
+  return (
+    error instanceof TimeoutError ||
+    (error instanceof DOMException && error.name === "TimeoutError")
+  );
 }

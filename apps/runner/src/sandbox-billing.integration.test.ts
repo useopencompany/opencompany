@@ -252,11 +252,13 @@ describe("E2B workspace billing", () => {
     ).toBe(price(45_000));
   });
 
-  it("keeps provider request timeouts in retry telemetry", async () => {
+  it.each([
+    ["E2B", new TimeoutError("The operation timed out.")],
+    ["request", new DOMException("The operation timed out.", "TimeoutError")],
+  ])("keeps %s timeouts in retry telemetry", async (_kind, timeout) => {
     await database.exec(
       "UPDATE goat.sandbox_billing_cursors SET next_poll_at = '2026-09-10T12:00:00Z'",
     );
-    const timeout = new TimeoutError("The operation timed out.");
 
     await pollSandboxBilling({
       namespace: "test",
