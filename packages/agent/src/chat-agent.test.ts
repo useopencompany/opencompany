@@ -11,13 +11,14 @@ import {
   prepareProductChatStep,
   UPDATE_TASK_STATUS_TOOL_NAME,
 } from "./chat-agent";
-import { MAX_WORKFLOW_STARTS_PER_TURN } from "./chat-limits";
+import { MAX_WEB_SEARCH_CALLS_PER_TURN, MAX_WORKFLOW_STARTS_PER_TURN } from "./chat-limits";
 import {
   CREATE_WORKSPACE_SKILL_TOOL_NAME,
   EDIT_WORKSPACE_SKILL_TOOL_NAME,
   LIST_SKILLS_TOOL_NAME,
   SLACK_BOT_TOOL_NAME,
   START_WORKFLOW_TOOL_NAME,
+  WEB_SEARCH_TOOL_NAME,
 } from "./chat-ui";
 
 const model = "moonshotai/kimi-k2.6" as never;
@@ -640,6 +641,57 @@ describe("start_workflow tool", () => {
       status: "already_started",
     });
     expect(workflowExecute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("web_search tool", () => {
+  const runSearches = async (limits?: {
+    webSearchCallsPerTurn: number;
+  }): Promise<{ webSearch: ReturnType<typeof vi.fn>; results: unknown[] }> => {
+    const webSearch = vi.fn(async ({ query }: { query: string }) => ({
+      ok: true as const,
+      query,
+      searchedAt: "2026-01-01T00:00:00.000Z",
+      results: [],
+    }));
+    const context = createProductChatToolContext({
+      model,
+      webSearch,
+      ...(limits ? { limits } : {}),
+    });
+    const tool = context.tools[WEB_SEARCH_TOOL_NAME] as {
+      execute: (args: unknown) => Promise<unknown>;
+    };
+    const cap = limits?.webSearchCallsPerTurn ?? MAX_WEB_SEARCH_CALLS_PER_TURN;
+    const results: unknown[] = [];
+    for (let attempt = 0; attempt < cap + 1; attempt += 1) {
+      results.push(await tool.execute({ query: `query ${attempt}` }));
+    }
+    return { webSearch, results };
+  };
+
+  it("allows the per-turn cap of searches and refuses the next one", async () => {
+    const { webSearch, results } = await runSearches();
+
+    expect(webSearch).toHaveBeenCalledTimes(MAX_WEB_SEARCH_CALLS_PER_TURN);
+    expect(results.slice(0, MAX_WEB_SEARCH_CALLS_PER_TURN)).toEqual(
+      Array.from({ length: MAX_WEB_SEARCH_CALLS_PER_TURN }, (_unused, attempt) => ({
+        ok: true,
+        query: `query ${attempt}`,
+        searchedAt: "2026-01-01T00:00:00.000Z",
+        results: [],
+      })),
+    );
+    expect(results.at(-1)).toEqual({
+      ok: false,
+      error: `web_search is limited to ${MAX_WEB_SEARCH_CALLS_PER_TURN} searches per chat turn. Answer from what you already found and say what is still unverified.`,
+    });
+  });
+
+  it("lets a background task raise the cap above the chat default", async () => {
+    const { webSearch } = await runSearches({ webSearchCallsPerTurn: 20 });
+
+    expect(webSearch).toHaveBeenCalledTimes(20);
   });
 });
 
