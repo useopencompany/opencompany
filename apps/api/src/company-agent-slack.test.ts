@@ -66,6 +66,12 @@ beforeEach(async () => {
       "utf8",
     ),
   );
+  await pg.exec(
+    await readFile(
+      new URL("../../../drizzle/0309_slack_agent_images.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   await pg.exec("UPDATE goat.workflows SET slack_channel_enabled = true");
   fetcher = vi.fn(
     async () =>
@@ -201,6 +207,39 @@ describe("company agent Slack setup and ingress", () => {
     const rows = (await pg.query("SELECT thread_ts, message_ts FROM goat.slack_agent_messages"))
       .rows;
     expect(rows).toEqual([{ thread_ts: "99.001", message_ts: "100.001" }]);
+  });
+  it("persists supported image metadata from a signed Slack event", async () => {
+    await connect();
+    await service.webhook(
+      "agent1",
+      signed(
+        envelope({
+          ...mention,
+          files: [
+            {
+              id: "F1",
+              name: "bug.png",
+              mimetype: "image/png",
+              size: 4,
+              url_private_download: "https://files.slack.com/files-pri/T1-F1/bug.png",
+            },
+          ],
+        }),
+      ),
+    );
+    expect((await pg.query("SELECT files FROM goat.slack_agent_messages")).rows).toEqual([
+      {
+        files: [
+          {
+            id: "F1",
+            name: "bug.png",
+            mediaType: "image/png",
+            sizeBytes: 4,
+            urlPrivateDownload: "https://files.slack.com/files-pri/T1-F1/bug.png",
+          },
+        ],
+      },
+    ]);
   });
   it("only captures unmentioned replies for a thread belonging to this agent", async () => {
     await connect();
