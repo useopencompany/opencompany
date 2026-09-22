@@ -13,6 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { newResourceId } from "@opencompany/core/resource-ids";
+import { DEFAULT_WIKI_SELECTOR } from "@opencompany/wiki";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import { type Wiki, type WikiAccessLevel, wikiMembers, wikis } from "./product-schema";
@@ -22,11 +23,15 @@ type DbClient = any;
 export const DEFAULT_WIKI_NAME = "Company";
 export const DEFAULT_WIKI_SLUG = "company";
 /**
- * Slugs that are static segments under `/wiki/` in the web app. Next resolves a
- * static segment before the `[wikiSlug]` one, so a wiki holding one of these
- * would be permanently unreachable at its own URL.
+ * Slugs reserved by a static `/wiki/` route or an agent-tool selector. Next resolves static routes
+ * before `[wikiSlug]`, and a wiki named `default` would be unreachable to agents because that word
+ * explicitly selects the workspace default.
  */
-export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set(["sources", "import"]);
+export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set([
+  "sources",
+  "import",
+  DEFAULT_WIKI_SELECTOR,
+]);
 const WIKI_SLUG_MAX_LENGTH = 64;
 const WIKI_NAME_MAX_LENGTH = 120;
 const WIKI_INSTRUCTIONS_MAX_BYTES = 20_000;
