@@ -2,7 +2,9 @@ import "@testing-library/jest-dom/vitest";
 import type { SkillImportPreviewDto } from "@opencompany/protocol";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ChatPaneWorkspaceProvider } from "@/components/chat-panes/ChatPaneWorkspace";
 import {
   HomeRoute,
   InferenceSettingsRoute,
@@ -19,7 +21,10 @@ const routerMock = vi.hoisted(() => ({
   refresh: vi.fn(),
   push: vi.fn(),
   prefetch: vi.fn(),
+  replace: vi.fn(),
 }));
+
+const pathnameMock = vi.hoisted(() => ({ value: "/" }));
 
 const appDataMock = vi.hoisted(() => ({
   value: {
@@ -118,6 +123,7 @@ const themeMock = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   useRouter: () => routerMock,
+  usePathname: () => pathnameMock.value,
 }));
 
 vi.mock("@tanstack/react-db", () => ({
@@ -211,6 +217,24 @@ vi.mock("@/components/ThemeProvider", () => ({
 }));
 
 describe("HomeRoute", () => {
+  // HomeRoute renders the chat surface through the split-pane canvas, which
+  // reads the workspace's pane arrangement.
+  const renderHome = (ui: ReactElement) =>
+    render(<ChatPaneWorkspaceProvider>{ui}</ChatPaneWorkspaceProvider>);
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    pathnameMock.value = "/";
+    // jsdom has no media queries; the canvas asks whether the viewport is wide
+    // enough to show panes side by side.
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+  });
+
   it("does not let a sidebar runtime row control the active Conversation", () => {
     Object.assign(appDataMock.value, {
       tasks: [],
@@ -234,11 +258,13 @@ describe("HomeRoute", () => {
         },
       ],
       archivedChats: [],
+      openChats: [],
       codexConnected: false,
       claudeCodeConnected: false,
     });
 
-    render(<HomeRoute chatId="conversation_1" />);
+    pathnameMock.value = "/chat/conversation_1";
+    renderHome(<HomeRoute chatId="conversation_1" />);
 
     expect(surfaceMock.props?.initialChat).toMatchObject({
       id: "conversation_1",
@@ -252,15 +278,16 @@ describe("HomeRoute", () => {
       schedules: [],
       recentChats: [],
       archivedChats: [],
+      openChats: [],
       codexConnected: false,
       claudeCodeConnected: false,
     });
 
-    render(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
+    renderHome(<HomeRoute chatId={null} projectId="project_1" projectName="product" />);
     expect(surfaceMock.props?.newChatProjectId).toBe("project_1");
     expect(surfaceMock.props?.newChatProjectName).toBe("product");
 
-    render(<HomeRoute chatId={null} />);
+    renderHome(<HomeRoute chatId={null} />);
     expect(surfaceMock.props?.newChatProjectId).toBeNull();
     expect(surfaceMock.props?.newChatProjectName).toBeNull();
   });

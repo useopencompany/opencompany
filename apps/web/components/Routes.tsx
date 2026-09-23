@@ -63,6 +63,7 @@ import {
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { BrowserProfilesSettings } from "@/components/BrowserProfilesSettings";
+import { ChatPaneCanvas } from "@/components/chat-panes/ChatPaneCanvas";
 import { FathomIntegrationSetup } from "@/components/FathomIntegrationSetup";
 import { InferenceSettingsPanel } from "@/components/InferenceSettingsPanel";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
@@ -83,7 +84,6 @@ import {
   type Scope as SkillScope,
 } from "@/components/ScopeControls";
 import { StatusDot } from "@/components/StatusDot";
-import { Surface } from "@/components/Surface";
 import { TaskDetailPanel } from "@/components/TaskDetailPanel";
 import { type ThemeMode, useTheme } from "@/components/ThemeProvider";
 import { useHydrated } from "@/components/useHydrated";
@@ -108,7 +108,6 @@ import {
   setHeadlessSkillScope,
   updateHeadlessWorkspaceSkill,
 } from "@/lib/headless-knowledge-commands";
-import { DEFAULT_MODEL } from "@/lib/model-options";
 import type { RepoConfigView, WorkspaceRepository } from "@/lib/repo-config-actions";
 import type { WorkspaceSandboxSizeResult } from "@/lib/sandbox-size";
 import {
@@ -164,22 +163,12 @@ export function HomeRoute({
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
-      <Surface
-        tasks={data.tasks}
-        allTasks={data.allTasks}
-        defaultModel={DEFAULT_MODEL}
-        initialChat={initialChat}
+      {/* One pane renders exactly the chat surface this route always showed; the
+          canvas only adds chrome once the reader opens a second chat beside it. */}
+      <ChatPaneCanvas
+        routeInitialChat={initialChat}
         newChatProjectId={projectId}
         newChatProjectName={projectName}
-        userFirstName={data.user.firstName}
-        recentChats={data.recentChats}
-        archivedChats={data.archivedChats}
-        codexConnected={data.codexConnected}
-        claudeCodeConnected={data.claudeCodeConnected}
-        sharedModelAccessEnabled={data.sharedModelAccessEnabled}
-        autoModelRoutingEnabled={data.featureFlags.autoModelRouting}
-        workspaceId={data.workspace.id}
-        userWorkosId={data.user.workosUserId}
       />
     </main>
   );
