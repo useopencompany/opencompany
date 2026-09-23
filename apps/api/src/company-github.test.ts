@@ -115,7 +115,7 @@ describe("company GitHub trigger access", () => {
     provider: "github-app",
     event: "issue.opened",
     integrationId: "gint_company",
-    filters: { repository: { id: "42" } },
+    filters: { repository: { id: "42", name: "acme/app" } },
     prompt: "Triage it.",
   };
 

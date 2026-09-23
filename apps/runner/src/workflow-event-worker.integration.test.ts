@@ -153,7 +153,9 @@ describe("durable plugin event delivery", () => {
     it("creates the owner's task without a personal plugin or connection", async () => {
       await database.exec("DELETE FROM goat.plugins");
       expect(await enqueueCompany()).toBe(1);
-      const createTask = vi.fn(async () => ({ taskId: "task_company" }));
+      const createTask = vi.fn<
+        NonNullable<NonNullable<Parameters<typeof createNextWorkflowEventTask>[1]>["createTask"]>
+      >(async () => ({ taskId: "task_company" }));
       await database.exec("INSERT INTO goat.tasks VALUES ('task_company')");
       expect(await createNextWorkflowEventTask(now, { db: db as never, createTask })).toMatchObject(
         { status: "created" },
