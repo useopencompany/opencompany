@@ -1,4 +1,6 @@
-export const CLAUDE_CODE_CLI_VERSION = "2.1.220";
+// Keep the standalone CLI and adapter's bundled Agent SDK on the same Claude Code
+// release. Opus 5.5 requires Claude Code 2.1.280 or newer.
+export const CLAUDE_CODE_CLI_VERSION = "2.1.280";
 export const CLAUDE_CODE_CLI_PACKAGE = `@anthropic-ai/claude-code@${CLAUDE_CODE_CLI_VERSION}`;
 
 // The ACP adapter is installed inside the coding sandbox. Keep it pinned so its
@@ -10,5 +12,8 @@ export const CLAUDE_CODE_CLI_PACKAGE = `@anthropic-ai/claude-code@${CLAUDE_CODE_
 // can still be absent from the session's selectable options, which is why the runner
 // opens the session on ANTHROPIC_MODEL and reconciles against what the adapter reports
 // rather than asserting the id back at it.
-export const CLAUDE_CODE_ACP_ADAPTER_VERSION = "0.76.0";
+// 0.81.0 pins @anthropic-ai/claude-agent-sdk 0.3.280, whose bundled Claude Code
+// binary matches CLAUDE_CODE_CLI_VERSION. Existing sandboxes receive this adapter
+// through ensureClaudeAcpAdapterInstalled before their next turn.
+export const CLAUDE_CODE_ACP_ADAPTER_VERSION = "0.81.0";
 export const CLAUDE_CODE_ACP_ADAPTER_PACKAGE = `@agentclientprotocol/claude-agent-acp@${CLAUDE_CODE_ACP_ADAPTER_VERSION}`;
