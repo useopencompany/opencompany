@@ -101,6 +101,9 @@ export type AppInitialData = {
 type AppData = AppInitialData & {
   taskRows: TaskRow[];
   tasksReady: boolean;
+  // True once the complete conversation projection has loaded. Until then
+  // openChats may only contain the server's bounded recent-chat fallback.
+  chatsReady: boolean;
   // Full task history for global navigation, including archived Tasks.
   allTasks: TaskView[];
   // Closed (archived) chats, surfaced in the command palette so the user can
@@ -459,6 +462,7 @@ function AppLiveDataSubscriptions({
       integrations,
       taskRows: currentTaskRows,
       tasksReady: legacyTaskRows !== null && (!tasksLoading || (taskRows?.length ?? 0) > 0),
+      chatsReady: !chatsLoading,
     }),
     [
       archivedChats,
@@ -474,6 +478,7 @@ function AppLiveDataSubscriptions({
       taskRows,
       unreadTaskIds,
       tasks,
+      chatsLoading,
       tasksLoading,
       currentTaskRows,
       legacyTaskRows,
@@ -507,6 +512,7 @@ function initialAppData(initialData: AppInitialData): AppData {
     recentChats: selectSidebarChats(initialData.recentChats),
     taskRows: [],
     tasksReady: false,
+    chatsReady: false,
     allTasks: initialData.tasks,
     archivedChats: [],
     // The server snapshot has no conversation read-model rows yet; the queue fills in on the

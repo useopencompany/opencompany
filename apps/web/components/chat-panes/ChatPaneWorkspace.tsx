@@ -102,7 +102,7 @@ function chatPath(chatId: string | null) {
  * drag source — can read the same state the canvas renders.
  */
 export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode }) {
-  const { workspace, openChats, recentChats } = useAppData();
+  const { workspace, openChats, recentChats, chatsReady } = useAppData();
   const workspaceId = workspace.id;
   const router = useRouter();
   const pathname = usePathname();
@@ -143,12 +143,9 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
   }
 
   const knownChatIds = useMemo(() => {
-    // `openChats` is the authoritative set: every conversation the reader can
-    // open, including ones older than the Recents window. Until it arrives there
-    // is nothing safe to check against — `recentChats` alone would condemn any
-    // pane holding an older chat — so the empty set stands for "not loaded yet"
-    // and prunes nothing.
-    if (openChats.length === 0) return new Set<string>();
+    // Once chatsReady is true, openChats is the authoritative set of every
+    // conversation the reader can open. Recent chats also carries optimistic
+    // rows that have not reached the live projection yet.
     const ids = new Set<string>();
     for (const chat of openChats) ids.add(chat.id);
     for (const chat of recentChats) ids.add(chat.id);
@@ -159,8 +156,8 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
   // arrives. Derived rather than written back, so a chat that reappears (an
   // unarchive, a slow first sync) brings its pane back with it.
   const layout = useMemo(
-    () => pruneClosedChats(storedLayout, knownChatIds, routedChatId),
-    [knownChatIds, routedChatId, storedLayout],
+    () => pruneClosedChats(storedLayout, chatsReady ? knownChatIds : null, routedChatId),
+    [chatsReady, knownChatIds, routedChatId, storedLayout],
   );
 
   useEffect(() => {
@@ -180,9 +177,11 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
    */
   const update = useCallback(
     (change: (layout: ChatPaneLayout) => ChatPaneLayout) => {
-      setStoredLayout((current) => change(pruneClosedChats(current, knownChatIds, routedChatId)));
+      setStoredLayout((current) =>
+        change(pruneClosedChats(current, chatsReady ? knownChatIds : null, routedChatId)),
+      );
     },
-    [knownChatIds, routedChatId],
+    [chatsReady, knownChatIds, routedChatId],
   );
 
   const focusedChatId = findPane(layout.root, layout.focusedPaneId)?.chatId ?? null;
@@ -253,8 +252,14 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
         }
         return splitPane(current, current.focusedPaneId, edge, chatId);
       });
+      // The provider also lives on Settings and other non-chat routes so the
+      // arrangement survives navigation. Opening beside from there should
+      // reveal the canvas after the layout update has committed.
+      if (!onCanvas) {
+        setTimeout(() => router.push(chatPath(chatId), { scroll: false }), 0);
+      }
     },
-    [flashPane, update],
+    [flashPane, onCanvas, router, update],
   );
 
   const focusPaneById = useCallback(
