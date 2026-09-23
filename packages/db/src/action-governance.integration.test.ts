@@ -28,7 +28,11 @@ it("atomically claims both the invocation id and write key while counting one ac
       workspaceId: "workspace_1",
       policy: "foregroundInteractive" as const,
     };
-    await recordActionSourceDiscovery({ turn, sourceId: "calendar", db });
+    await Promise.all(
+      Array.from({ length: 20 }, () =>
+        recordActionSourceDiscovery({ turn, sourceId: "calendar", db }),
+      ),
+    );
     const claim = (invocationId: string, deduplicationKey?: string) =>
       claimActionInvocation({
         turn,
