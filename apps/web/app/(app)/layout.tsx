@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { AppShell } from "@/components/AppShell";
+import { ChatPaneWorkspaceProvider } from "@/components/chat-panes/ChatPaneWorkspace";
 import { Shell } from "@/components/Shell";
 import { currentUser } from "@/lib/auth";
 import { isDesktopRequest } from "@/lib/desktop";
@@ -15,7 +16,12 @@ export default async function InteractiveLayout({ children }: { children: ReactN
 
   return (
     <AppShell>
-      <Shell desktopApp={desktop}>{children}</Shell>
+      {/* Above the chrome so the sidebar (the drag source) and the chat canvas
+          (the drop target) read one arrangement, and so it survives a trip to
+          Settings and back. */}
+      <ChatPaneWorkspaceProvider>
+        <Shell desktopApp={desktop}>{children}</Shell>
+      </ChatPaneWorkspaceProvider>
     </AppShell>
   );
 }

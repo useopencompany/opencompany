@@ -22,6 +22,8 @@ import {
   ScrollText,
   Settings,
   Sparkles,
+  SplitSquareHorizontal,
+  SplitSquareVertical,
   Workflow,
 } from "lucide-react";
 import Link from "next/link";
@@ -39,6 +41,7 @@ import {
 import { useAppData } from "@/components/AppDataProvider";
 import { SidebarBots } from "@/components/Bots";
 import { ChatStateIndicator } from "@/components/ChatStateIndicator";
+import { useOptionalChatPaneWorkspace } from "@/components/chat-panes/ChatPaneWorkspace";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { PullRequestBadge } from "@/components/PullRequestBadge";
 import { SidebarFeedback } from "@/components/SidebarFeedback";
@@ -423,6 +426,7 @@ const RECENTS_LIST_ID = "sidebar-recents";
 const RECENTS_COLLAPSED_STORAGE_KEY = "goat-sidebar-recents-collapsed";
 
 function SidebarWorkList() {
+  const panes = useOptionalChatPaneWorkspace();
   const { featureFlags, openChats, openSidebarTasks, recentChats, sidebarTasks, workspace } =
     useAppData();
   const { collapsed: recentsCollapsed, toggle: toggleRecents } = useCollapsedSidebarSection(
@@ -542,9 +546,26 @@ function SidebarWorkList() {
     });
   };
 
-  // Nothing to drag a row into while Projects are off, and a draggable row changes native text
-  // selection, so the handlers only exist when the section does.
-  const rowDragProps = (conversationId: string): SidebarRowDragProps =>
+  // A chat row drags into a Project to file it, or onto the chat canvas to open
+  // it in a pane. The pane workspace is told about the drag so every pane can
+  // raise its drop surface, and the state flip is deferred a tick because a
+  // synchronous re-render during dragstart cancels the drag in some browsers
+  // before the drag image is captured.
+  const chatRowDragProps = (conversationId: string): SidebarRowDragProps =>
+    conversationDragProps(conversationId, {
+      onDragStart: () => {
+        if (!panes) return;
+        setTimeout(() => panes.beginChatDrag(conversationId), 0);
+      },
+      onDragEnd: () => panes?.endChatDrag(),
+    });
+
+  // A Task row only files into a Project. The chat canvas renders conversations
+  // the chat surface owns, so a Task drag never announces itself to the panes
+  // and no pane offers itself as a drop target. Nothing to drag into while
+  // Projects are off, and a draggable row changes native text selection, so the
+  // handlers only exist when the section does.
+  const taskRowDragProps = (conversationId: string): SidebarRowDragProps =>
     projects.enabled ? conversationDragProps(conversationId) : {};
 
   const renderChatRow = (chat: ChatSummaryView) => {
@@ -565,12 +586,15 @@ function SidebarWorkList() {
         chat={chat}
         href={href}
         active={pathname === href}
+        openInPane={panes?.openChatIds.has(chat.id) ?? false}
+        canSplit={panes?.canSplit ?? false}
+        onOpenBeside={panes ? (edge) => panes.openChatBeside(chat.id, edge) : null}
         optimistic={optimistic}
         localState={localChatStates.get(chat.id) ?? null}
         pullRequest={pullRequests.get(chat.id) ?? null}
         pinned={pinned}
         pinning={pinningIds.has(chat.id)}
-        dragProps={optimistic ? {} : rowDragProps(chat.id)}
+        dragProps={optimistic ? {} : chatRowDragProps(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
@@ -590,7 +614,7 @@ function SidebarWorkList() {
         href={href}
         pullRequest={pullRequests.get(item.task.conversationId) ?? null}
         active={isTaskRouteActive(pathname, href)}
-        dragProps={rowDragProps(item.task.conversationId)}
+        dragProps={taskRowDragProps(item.task.conversationId)}
         onArchive={() => archiveTask(item.task, href)}
       />
     );
@@ -713,6 +737,9 @@ function SidebarChatRow({
   chat,
   href,
   active,
+  openInPane,
+  canSplit,
+  onOpenBeside,
   optimistic,
   localState,
   pullRequest,
@@ -727,6 +754,13 @@ function SidebarChatRow({
   chat: ChatSummaryView;
   href: string;
   active: boolean;
+  // Open in a pane that is not the focused one. The focused chat is already
+  // marked by `active`, so this is the quieter "also on screen" state.
+  openInPane: boolean;
+  // False at the pane cap, which disables opening this chat beside another.
+  canSplit: boolean;
+  // Null when no pane workspace is mounted, which hides the menu entirely.
+  onOpenBeside: ((edge: "right" | "bottom") => void) | null;
   optimistic: boolean;
   localState: ReturnType<typeof chatSummaryState> | null;
   /** The PR this chat's coding agent opened, when it opened one. */
@@ -745,12 +779,17 @@ function SidebarChatRow({
   const contentPadding = useSidebarRowPadding();
   const runStateDescriptionId = useRunStateDescription(state);
   const marked = hasSessionMarker({ state, pullRequest });
+  const [openBesideOpen, setOpenBesideOpen] = useState(false);
   const content = <span className="truncate tracking-[-0.005em]">{chat.title}</span>;
   return (
     <div
       {...dragProps}
       className={`group flex items-center rounded-md text-[13px] transition-colors duration-150 ${
-        active ? "bg-surface-active text-ink" : "text-ink/90 hover:bg-surface-hover hover:text-ink"
+        active
+          ? "bg-surface-active text-ink"
+          : openInPane
+            ? "bg-surface-active/40 text-ink hover:bg-surface-active"
+            : "text-ink/90 hover:bg-surface-hover hover:text-ink"
       }`}
     >
       {marked ? (
@@ -799,6 +838,58 @@ function SidebarChatRow({
       )}
       {optimistic ? null : (
         <>
+          {onOpenBeside && !openInPane ? (
+            <Popover open={openBesideOpen} onOpenChange={setOpenBesideOpen}>
+              <PopoverTrigger
+                type="button"
+                title={canSplit ? "Open beside" : "Four panes is the limit"}
+                aria-label={`Open ${chat.title} beside the current chat`}
+                disabled={!canSplit}
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-40 ${
+                  openBesideOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                }`}
+              >
+                <SplitSquareHorizontal size={12.5} strokeWidth={1.8} />
+              </PopoverTrigger>
+              <PopoverContent align="start" sideOffset={4} className="w-[168px] bg-surface p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenBesideOpen(false);
+                    onOpenBeside("right");
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <SplitSquareHorizontal
+                    size={13}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-ink/60"
+                  />
+                  Open right
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenBesideOpen(false);
+                    onOpenBeside("bottom");
+                  }}
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px] text-ink/90 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+                >
+                  <SplitSquareVertical
+                    size={13}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-ink/60"
+                  />
+                  Open below
+                </button>
+                <p className="px-2 pt-1 pb-1 text-[11px] leading-4 text-ink-faint">
+                  Or drag the chat onto a pane edge.
+                </p>
+              </PopoverContent>
+            </Popover>
+          ) : null}
           <button
             type="button"
             title={pinned ? "Unpin chat" : "Pin chat"}
