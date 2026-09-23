@@ -536,4 +536,32 @@ describe("chat pane layout", () => {
       expect(openPaneChatIds(pruned.root)).toEqual([]);
     });
   });
+
+  describe("keeping every pane usable", () => {
+    it("evens the split out rather than minting a pane below the minimum", () => {
+      let layout = createChatPaneLayout("chat_a");
+      layout = splitPane(layout, "pane-1", "right", "chat_b");
+      layout = splitPane(layout, paneIdFor(layout, "chat_b"), "right", "chat_c");
+      // A third same-axis split of the 25% pane would leave 12.5%.
+      layout = splitPane(layout, paneIdFor(layout, "chat_c"), "right", "chat_d");
+
+      const sizes = splitOf(layout.root).children.map((child) => child.size);
+      expect(sizes).toEqual([25, 25, 25, 25]);
+      for (const size of sizes) expect(size).toBeGreaterThanOrEqual(MIN_PANE_PERCENT);
+      expectSizesSumTo100(layout.root);
+    });
+
+    it("keeps a restored layout's id counter above every pane it renamed", () => {
+      let stored = createChatPaneLayout("chat_a");
+      stored = splitPane(stored, "pane-1", "right", "chat_b");
+      // A workspace switch restores onto whatever pane the previous workspace
+      // had focused, which can be an id this tree never used.
+      const restored = restoreOntoMountedPane(stored, "chat_b", "pane-12");
+
+      const grown = splitPane(restored, restored.focusedPaneId, "bottom", "chat_c");
+      const ids = listPanes(grown.root).map((pane) => pane.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(ids).toContain("pane-12");
+    });
+  });
 });

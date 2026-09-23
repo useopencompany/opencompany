@@ -195,7 +195,10 @@ export function ChatPane({
         isActivePane={focused}
         onActivate={() => focusPaneById(pane.id)}
         onOpenChat={(chat) => setPaneChatId(pane.id, chat?.id ?? null)}
-        onClosePane={() => closePaneById(pane.id)}
+        // Only a split workspace detaches instead of closing. A lone pane keeps
+        // Surface's own Escape behaviour, where closing the chat also stops the
+        // turn it is running — there is no other view of that turn to keep.
+        {...(showHeader ? { onClosePane: () => closePaneById(pane.id) } : {})}
         onConversationResolved={({ optimisticId, durableId }) =>
           resolvePaneChatId(optimisticId, durableId)
         }

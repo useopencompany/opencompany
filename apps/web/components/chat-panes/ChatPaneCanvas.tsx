@@ -171,6 +171,10 @@ function ChatPaneResizer({
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      // Only a primary-button drag resizes. A right-click would otherwise arm
+      // the drag and never see a matching pointerup, leaving plain hovering to
+      // drag the seam around.
+      if (event.button !== 0) return;
       const canvas = canvasRef.current?.getBoundingClientRect();
       if (!canvas) return;
       // The split occupies a known fraction of the canvas, so its own pixel

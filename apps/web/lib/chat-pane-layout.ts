@@ -180,6 +180,16 @@ function insertBeside(
       1,
       ...orderedPair({ node: newPane, size: share }, { ...target, size: share }, before),
     );
+    // Halving repeatedly would eventually mint a pane too narrow to compose in
+    // (a third split of the same pane leaves 12.5%). When there is no room to
+    // halve, the split evens out instead, which is predictable and always
+    // leaves every pane usable.
+    if (share < MIN_PANE_PERCENT) {
+      return {
+        ...node,
+        children: children.map((child) => ({ ...child, size: 100 / children.length })),
+      };
+    }
     return { ...node, children };
   }
 
@@ -473,12 +483,20 @@ export function restoreOntoMountedPane(
   const base = existingPaneId ? stored : setPaneChat(stored, stored.focusedPaneId, routedChatId);
   const targetPaneId = existingPaneId ?? stored.focusedPaneId;
 
-  // Swapping is a bijection over the ids already in the tree, so they stay unique.
+  // Swapping two ids is a bijection, so they stay unique. When `mountedPaneId`
+  // is not already in the tree the swap is one-way, which can retire the id
+  // `nextNodeId` was counting from — so the counter is recomputed rather than
+  // trusted, or a later split could mint an id a renamed pane already holds.
   const root = renamePanes(base.root, (paneId) =>
     paneId === targetPaneId ? mountedPaneId : paneId === mountedPaneId ? targetPaneId : paneId,
   );
   // The focused pane owns the URL, so focus follows the routed chat.
-  return { ...base, root, focusedPaneId: mountedPaneId };
+  return {
+    ...base,
+    root,
+    focusedPaneId: mountedPaneId,
+    nextNodeId: Math.max(base.nextNodeId, highestNodeNumber(root) + 1),
+  };
 }
 
 function renamePanes(node: ChatPaneTree, rename: (paneId: string) => string): ChatPaneTree {

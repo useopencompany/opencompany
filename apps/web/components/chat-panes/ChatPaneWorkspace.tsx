@@ -143,6 +143,12 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
   }
 
   const knownChatIds = useMemo(() => {
+    // `openChats` is the authoritative set: every conversation the reader can
+    // open, including ones older than the Recents window. Until it arrives there
+    // is nothing safe to check against — `recentChats` alone would condemn any
+    // pane holding an older chat — so the empty set stands for "not loaded yet"
+    // and prunes nothing.
+    if (openChats.length === 0) return new Set<string>();
     const ids = new Set<string>();
     for (const chat of openChats) ids.add(chat.id);
     for (const chat of recentChats) ids.add(chat.id);
@@ -163,6 +169,21 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
     if (restoredWorkspaceId !== workspaceId) return;
     persistChatPaneLayout(workspaceId, layout);
   }, [layout, restoredWorkspaceId, workspaceId]);
+
+  /**
+   * Applies a change to the layout the reader can actually see.
+   *
+   * Pruning is derived, so the state behind it can still hold panes that are no
+   * longer rendered. Every action pins the pruned layout first, so pane counts,
+   * the split cap and resize-boundary indices all mean the same thing to the
+   * canvas and to the reducer.
+   */
+  const update = useCallback(
+    (change: (layout: ChatPaneLayout) => ChatPaneLayout) => {
+      setStoredLayout((current) => change(pruneClosedChats(current, knownChatIds, routedChatId)));
+    },
+    [knownChatIds, routedChatId],
+  );
 
   const focusedChatId = findPane(layout.root, layout.focusedPaneId)?.chatId ?? null;
 
@@ -208,7 +229,7 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
       // can render in a pane, so anything else (a Task row, a stale drag) is
       // ignored rather than opening a pane that could never load.
       if (!knownChatIds.has(chatId)) return;
-      setStoredLayout((current) => {
+      update((current) => {
         const existingPaneId = findPaneIdByChatId(current.root, chatId);
         if (existingPaneId) {
           // Never two panes of the same chat: point at the one already open.
@@ -219,12 +240,12 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
         return splitPane(current, paneId, edge, chatId);
       });
     },
-    [flashPane, knownChatIds],
+    [flashPane, knownChatIds, update],
   );
 
   const openChatBeside = useCallback(
     (chatId: string, edge: PaneEdge) => {
-      setStoredLayout((current) => {
+      update((current) => {
         const existingPaneId = findPaneIdByChatId(current.root, chatId);
         if (existingPaneId) {
           flashPane(existingPaneId);
@@ -233,30 +254,35 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
         return splitPane(current, current.focusedPaneId, edge, chatId);
       });
     },
-    [flashPane],
+    [flashPane, update],
   );
 
-  const focusPaneById = useCallback((paneId: string) => {
-    setStoredLayout((current) => focusPane(current, paneId));
-  }, []);
+  const focusPaneById = useCallback(
+    (paneId: string) => update((current) => focusPane(current, paneId)),
+    [update],
+  );
 
-  const closePaneById = useCallback((paneId: string) => {
-    setStoredLayout((current) => closePane(current, paneId));
-  }, []);
+  const closePaneById = useCallback(
+    (paneId: string) => update((current) => closePane(current, paneId)),
+    [update],
+  );
 
-  const setPaneChatId = useCallback((paneId: string, chatId: string | null) => {
-    setStoredLayout((current) => setPaneChat(current, paneId, chatId));
-  }, []);
+  const setPaneChatId = useCallback(
+    (paneId: string, chatId: string | null) =>
+      update((current) => setPaneChat(current, paneId, chatId)),
+    [update],
+  );
 
-  const resolvePaneChatId = useCallback((optimisticId: string, durableId: string) => {
-    setStoredLayout((current) => replacePaneChatId(current, optimisticId, durableId));
-  }, []);
+  const resolvePaneChatId = useCallback(
+    (optimisticId: string, durableId: string) =>
+      update((current) => replacePaneChatId(current, optimisticId, durableId)),
+    [update],
+  );
 
   const resizeSplitBoundary = useCallback(
-    (splitId: string, index: number, deltaPercent: number) => {
-      setStoredLayout((current) => resizeSplit(current, splitId, index, deltaPercent));
-    },
-    [],
+    (splitId: string, index: number, deltaPercent: number) =>
+      update((current) => resizeSplit(current, splitId, index, deltaPercent)),
+    [update],
   );
 
   const paneCount = countPanes(layout.root);
