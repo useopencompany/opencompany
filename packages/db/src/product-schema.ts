@@ -168,6 +168,7 @@ export type IntegrationProvider =
   | "google_drive"
   | "linear"
   | "github"
+  | "github_app"
   | "github_user"
   | "jamie"
   | "slack"
@@ -194,13 +195,14 @@ export type IntegrationProvider =
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Notion, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
-// connections (Jamie webhook secrets and the Slack answer-bot install) are
-// workspace plumbing: they carry no human identity,
+// connections (Jamie webhook secrets, the Slack answer-bot install, and GitHub App
+// installations linked as a company plugin) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
 // workspace admin. `github` remains here only for historical rows from the
 // retired workspace-ingestion integration.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
+  "github_app",
   "jamie",
   "slack_bot",
   "stripe",
@@ -1164,7 +1166,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1214,7 +1216,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1264,7 +1266,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",

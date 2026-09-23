@@ -195,6 +195,8 @@ const AGENT_MCP_ENV_KEYS = ["SIGNOZ_MCP_REGION", "SIGNOZ_MCP_URL"];
 // scripts/agent-provision.mjs and scripts/agent-session.mjs.
 const AGENT_DEV_USER_ENV_KEYS = ["OPENCOMPANY_AGENT_USER_EMAIL", "OPENCOMPANY_AGENT_USER_PASSWORD"];
 const OPTIONAL_SHARED_DEV_ENV_KEYS = [
+  // Signs GitHub App webhooks for the company GitHub plugin; events stay off without it.
+  "GITHUB_USER_APP_WEBHOOK_SECRET",
   "NEON_PARENT_BRANCH",
   "NEON_API_KEY",
   "NEON_DATABASE_NAME",

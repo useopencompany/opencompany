@@ -448,12 +448,10 @@ async function ensureActionTurn(turn: ActionTurnRef, db: DbLike) {
       createdAt: now,
       updatedAt: now,
     })
-    // Identity and policy are bound on first admission. A later request may
-    // refresh turn state through the guarded update that follows, but it must
-    // never be able to rewrite the principal attached to an existing turn.
-    .onConflictDoNothing({
-      target: [actionTurns.sessionId, actionTurns.turnId],
-    });
+    // The deterministic primary key and the session/turn index both identify
+    // this row. Concurrent first requests can race on either constraint, so
+    // ignore both and let the guarded update below enforce the bound identity.
+    .onConflictDoNothing();
 }
 
 function actionTurnId(sessionId: string, turnId: string) {

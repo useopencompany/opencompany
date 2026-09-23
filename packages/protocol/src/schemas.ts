@@ -3607,6 +3607,73 @@ export const SlackBotWorkspaceSettingsEnvelopeSchema = z
   .strict()
   .openapi("SlackBotWorkspaceSettingsEnvelope");
 
+// Plugins → Company → GitHub. Every member can read which GitHub accounts the workspace linked,
+// because company automations bind their event triggers to them; only admins change the links.
+export const CompanyGitHubInstallationSchema = z
+  .object({
+    integrationId: IntegrationAccountIdSchema,
+    installationId: z.string().min(1).max(64),
+    accountLogin: z.string().min(1).max(256),
+    accountType: z.enum(["Organization", "User"]),
+    status: z.enum(["connected", "needs_reauth", "sync_failed", "disconnected"]),
+    statusReason: z.string().max(2_000).nullable(),
+    linkedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("CompanyGitHubInstallation");
+
+export const CompanyGitHubPluginSchema = z
+  .object({
+    configured: z.boolean(),
+    canManage: z.boolean(),
+    installations: z.array(CompanyGitHubInstallationSchema).max(100),
+    events: z.array(PluginEventDefinitionSchema).max(64),
+  })
+  .strict()
+  .openapi("CompanyGitHubPlugin");
+
+export const CompanyGitHubPluginEnvelopeSchema = z
+  .object({ data: CompanyGitHubPluginSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyGitHubPluginEnvelope");
+
+// The App installations the admin's own GitHub account can reach, offered for linking. `null`
+// installations means the admin has not connected GitHub as themselves yet.
+export const CompanyGitHubAvailableInstallationsSchema = z
+  .object({
+    installations: z
+      .array(
+        z
+          .object({
+            installationId: z.string().min(1).max(64),
+            accountLogin: z.string().min(1).max(256),
+            accountType: z.enum(["Organization", "User"]),
+            avatarUrl: z.url().nullable(),
+            suspended: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(500)
+      .nullable(),
+  })
+  .strict()
+  .openapi("CompanyGitHubAvailableInstallations");
+
+export const CompanyGitHubAvailableInstallationsEnvelopeSchema = z
+  .object({ data: CompanyGitHubAvailableInstallationsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyGitHubAvailableInstallationsEnvelope");
+
+export const LinkCompanyGitHubInstallationBodySchema = z
+  .object({
+    installationId: z
+      .string()
+      .trim()
+      .regex(/^\d{1,20}$/u),
+  })
+  .strict()
+  .openapi("LinkCompanyGitHubInstallationBody");
+
 // Settings → Channels → iMessage. `binding` is null until the member asks for a link code.
 export const ImessageSettingsSchema = z
   .object({
@@ -3663,7 +3730,7 @@ export const SlackBotMutationEnvelopeSchema = z
   .openapi("SlackBotMutationEnvelope");
 
 // Workflow event triggers offer real filter options (a Linear team, a Gmail
-// label, a Granola folder) from the author's connected account.
+// label, a Granola folder, a GitHub repository) from the author's connected account.
 // Wiki company imports are retired; the routes stay mounted so a stale client
 // gets an explicit 410 instead of a 404.
 export const RetiredWikiImportBodySchema = z.looseObject({}).openapi("RetiredWikiImportBody");
@@ -3675,6 +3742,7 @@ export const IntegrationResourceOptionsBodySchema = z
       .strict(),
     z.object({ provider: z.literal("granola") }).strict(),
     z.object({ provider: z.literal("gmail") }).strict(),
+    z.object({ provider: z.literal("github_app") }).strict(),
   ])
   .openapi("IntegrationResourceOptionsBody");
 
@@ -3723,6 +3791,17 @@ export const IntegrationResourceOptionsSchema = z
             z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(200) }).strict(),
           )
           .max(2_000),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("github_app"),
+        // GitHub's own pagination ceiling for one installation's repositories.
+        repositories: z
+          .array(
+            z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(200) }).strict(),
+          )
+          .max(10_000),
       })
       .strict(),
   ])
@@ -4509,6 +4588,11 @@ export type IntegrationAccountStatus = z.infer<typeof IntegrationAccountStatusSc
 export type PersonalIntegrationProvider = z.infer<typeof PersonalIntegrationProviderSchema>;
 export type IntegrationAccountDto = z.infer<typeof IntegrationAccountSchema>;
 export type SlackBotWorkspaceSettingsDto = z.infer<typeof SlackBotWorkspaceSettingsSchema>;
+export type CompanyGitHubInstallationDto = z.infer<typeof CompanyGitHubInstallationSchema>;
+export type CompanyGitHubPluginDto = z.infer<typeof CompanyGitHubPluginSchema>;
+export type CompanyGitHubAvailableInstallationsDto = z.infer<
+  typeof CompanyGitHubAvailableInstallationsSchema
+>;
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;

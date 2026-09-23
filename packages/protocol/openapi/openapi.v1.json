@@ -10390,6 +10390,332 @@
         ],
         "additionalProperties": false
       },
+      "CompanyGitHubPluginEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompanyGitHubPlugin"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyGitHubPlugin": {
+        "type": "object",
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "canManage": {
+            "type": "boolean"
+          },
+          "installations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompanyGitHubInstallation"
+            },
+            "maxItems": 100
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventDefinition"
+            },
+            "maxItems": 64
+          }
+        },
+        "required": [
+          "configured",
+          "canManage",
+          "installations",
+          "events"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyGitHubInstallation": {
+        "type": "object",
+        "properties": {
+          "integrationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "example": "gint_0f8e7d6c5b4a",
+            "description": "Integration connection id."
+          },
+          "installationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "accountLogin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "accountType": {
+            "type": "string",
+            "enum": [
+              "Organization",
+              "User"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "needs_reauth",
+              "sync_failed",
+              "disconnected"
+            ]
+          },
+          "statusReason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "linkedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "integrationId",
+          "installationId",
+          "accountLogin",
+          "accountType",
+          "status",
+          "statusReason",
+          "linkedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PluginEventDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "poll"
+            ]
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventFilterDefinition"
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "delivery",
+          "filters"
+        ],
+        "additionalProperties": false
+      },
+      "PluginEventFilterDefinition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "integration_resource"
+                ]
+              },
+              "resourceType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "resourceType",
+              "required"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "options",
+              "required"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "CompanyGitHubAvailableInstallationsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CompanyGitHubAvailableInstallations"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "CompanyGitHubAvailableInstallations": {
+        "type": "object",
+        "properties": {
+          "installations": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object",
+              "properties": {
+                "installationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "accountLogin": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                },
+                "accountType": {
+                  "type": "string",
+                  "enum": [
+                    "Organization",
+                    "User"
+                  ]
+                },
+                "avatarUrl": {
+                  "type": "string",
+                  "nullable": true,
+                  "format": "uri"
+                },
+                "suspended": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "installationId",
+                "accountLogin",
+                "accountType",
+                "avatarUrl",
+                "suspended"
+              ],
+              "additionalProperties": false
+            },
+            "maxItems": 500
+          }
+        },
+        "required": [
+          "installations"
+        ],
+        "additionalProperties": false
+      },
+      "LinkCompanyGitHubInstallationBody": {
+        "type": "object",
+        "properties": {
+          "installationId": {
+            "type": "string",
+            "pattern": "^\\d{1,20}$/u"
+          }
+        },
+        "required": [
+          "installationId"
+        ],
+        "additionalProperties": false
+      },
       "IntegrationResourceOptionsEnvelope": {
         "type": "object",
         "properties": {
@@ -10551,6 +10877,46 @@
               "labels"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "github_app"
+                ]
+              },
+              "repositories": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 10000
+              }
+            },
+            "required": [
+              "provider",
+              "repositories"
+            ],
+            "additionalProperties": false
           }
         ]
       },
@@ -10596,6 +10962,21 @@
                 "type": "string",
                 "enum": [
                   "gmail"
+                ]
+              }
+            },
+            "required": [
+              "provider"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "github_app"
                 ]
               }
             },
@@ -12611,146 +12992,6 @@
           "hiddenPluginNames"
         ],
         "additionalProperties": false
-      },
-      "PluginEventDefinition": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "description": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          },
-          "delivery": {
-            "type": "string",
-            "enum": [
-              "webhook",
-              "poll"
-            ]
-          },
-          "filters": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginEventFilterDefinition"
-            },
-            "maxItems": 16
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "description",
-          "delivery",
-          "filters"
-        ],
-        "additionalProperties": false
-      },
-      "PluginEventFilterDefinition": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 120
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "integration_resource"
-                ]
-              },
-              "resourceType": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "required": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "id",
-              "label",
-              "kind",
-              "resourceType",
-              "required"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 120
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "choice"
-                ]
-              },
-              "options": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 64
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "minItems": 1,
-                "maxItems": 64
-              },
-              "required": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "id",
-              "label",
-              "kind",
-              "options",
-              "required"
-            ],
-            "additionalProperties": false
-          }
-        ]
       },
       "PluginPricing": {
         "type": "object",
@@ -22917,6 +23158,179 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SlackBotMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/github": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub accounts linked to the active workspace as its company GitHub plugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGitHubPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/github/available-installations": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub App installations the acting admin's own GitHub account can link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGitHubAvailableInstallationsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/github/installations": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkCompanyGitHubInstallationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "GitHub App installation linked to the workspace by an administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGitHubPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/github/installations/{integrationId}": {
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "example": "gint_0f8e7d6c5b4a",
+              "description": "Integration connection id."
+            },
+            "required": true,
+            "description": "Integration connection id.",
+            "name": "integrationId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "GitHub App installation unlinked from the workspace by an administrator.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyGitHubPluginEnvelope"
                 }
               }
             }
