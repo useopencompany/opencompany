@@ -74,11 +74,18 @@ time could only ever save the build time, and the build time is less than the re
 entry is large because it carries `.turbo` build artifacts — Next.js output among them — and a
 big tarball is slow to fetch no matter whose cache it lives in.
 
-So the `Build` job now restores only `~/.bun/install/cache`, which keeps `bun install` at the 1–3s
-it already costs, and rebuilds its artifacts instead of fetching them. `Static` and `Test` keep
-their Turbo caches: those artifacts are small and restore in about 16s, so they still pay for
-themselves. `scripts/lib/workflow-security.test.mjs` pins the new shape so the artifact cache
-cannot quietly return.
+So the `Build` job now restores only `~/.bun/install/cache` and rebuilds its artifacts instead of
+fetching them. `Static` and `Test` keep their Turbo caches: those artifacts are small and restore
+in about 16s, so they still pay for themselves.
+`scripts/lib/workflow-security.test.mjs` pins the new shape so the artifact cache cannot quietly
+return.
+
+The restore step dropped from a 94s median to 1s. The net job saving is smaller than that,
+because the build now always runs cold — 9 of the 40 sampled runs had been getting a near-total
+Turbo hit. The change's own gate run is the conservative data point: a full-scope build with no
+Turbo cache and no dependency cache finished the job in 156s, against a baseline of 175s at p50
+and 364s at p90. The steady-state median for `affected`-scoped runs will settle somewhere below
+the baseline but above that restore saving alone; a few post-merge runs will show where.
 
 This is a vendor-independent fix. It would have been worth making on Depot too, and it is worth
 more than the migration would have been.
