@@ -5491,8 +5491,20 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
-  if (mention.kind === "workflow") return `#${workflowSlugFromName(mention.name ?? mention.id)}`;
+  if (mention.kind === "workflow") return `#${workflowMentionHandle(mention)}`;
   return `/${mention.name ?? mention.id}`;
+}
+
+function workflowMentionHandle(
+  workflow: Pick<Extract<ChatMention, { kind: "workflow" }>, "id" | "name">,
+) {
+  const displayHandle = workflowSlugFromName(workflow.name ?? workflow.id);
+  // #task is the reserved ad-hoc task command. A workflow renamed to "Task"
+  // keeps its stable handle so selecting it cannot silently start the wrong task.
+  // Older workflows whose stable id is also `task` get a presentation-only
+  // handle; invocation still carries their stable id in mention metadata.
+  if (displayHandle !== AD_HOC_TASK_ID) return displayHandle;
+  return workflow.id === AD_HOC_TASK_ID ? `${AD_HOC_TASK_ID}-workflow` : workflow.id;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -5646,7 +5658,7 @@ function workflowMentionsFromPastedText(input: {
   workflows: WorkflowCatalogItem[];
 }): ChatMention[] {
   const matches = input.workflows.flatMap((workflow) => {
-    const displayId = workflowSlugFromName(workflow.name);
+    const displayId = workflowMentionHandle({ id: workflow.id, name: workflow.name });
     const usesCurrentName = input.workflowIds.has(displayId);
     if (!usesCurrentName && !input.workflowIds.has(workflow.id)) return [];
     const mention: ChatMention = {
@@ -5659,8 +5671,10 @@ function workflowMentionsFromPastedText(input: {
       ? [mention]
       : [];
   });
-  // One workflow per message.
-  return matches.slice(0, 1);
+  // One workflow per message. If a current display handle collides with another
+  // workflow's stable id (or two names slugify alike), leave pasted text plain
+  // instead of choosing an arbitrary workflow from catalog order.
+  return matches.length === 1 ? matches : [];
 }
 
 function mergeVisibleChatMentions(value: string, current: ChatMention[], additions: ChatMention[]) {
@@ -5708,16 +5722,15 @@ function buildMentionOptions(input: {
     }
     if (input.workflowsEnabled) {
       for (const workflow of input.workflows) {
-        if (workflow.id === AD_HOC_TASK_ID) continue;
         const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
         if (query && !haystack.includes(query)) continue;
-        const token = `#${workflowSlugFromName(workflow.name)}`;
+        const mention: ChatMention = { kind: "workflow", id: workflow.id, name: workflow.name };
         options.push({
           kind: "workflow",
-          token,
+          token: chatMentionToken(mention),
           label: workflow.name,
           description: workflow.description,
-          mention: { kind: "workflow", id: workflow.id, name: workflow.name },
+          mention,
         });
       }
     }

@@ -4251,6 +4251,112 @@ describe("Surface chat streaming UI", () => {
     expect(routerMock.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a workflow named Task distinct from the ad-hoc task command", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === "/api/workflows"
+          ? Response.json({
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Task",
+                  description: "Run the saved workflow.",
+                },
+              ],
+            })
+          : Response.json({}),
+      ),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+        workspaceId="workspace_1"
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await user.click(await screen.findByText("#morning-test"));
+    expect(textarea).toHaveValue("#morning-test ");
+    await user.type(textarea, "run it{Enter}");
+
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      expect.objectContaining({ description: "#morning-test run it" }),
+      { scopeKey: "workspace_1" },
+    );
+    expect(taskCommandMocks.create).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ambiguous pasted workflow handle as plain text", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === "/api/workflows"
+          ? Response.json({
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Daily Brief",
+                  description: "Run the morning checks.",
+                },
+                {
+                  id: "daily-brief",
+                  name: "Afternoon Brief",
+                  description: "Run the afternoon checks.",
+                },
+              ],
+            })
+          : Response.json({}),
+      ),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+        workspaceId="workspace_1"
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await screen.findByRole("option", { name: /Daily Brief/i });
+    await user.clear(textarea);
+
+    const pastedText = "#daily-brief prepare the update";
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (format: string) => (format === "text/plain" ? pastedText : ""),
+      },
+    });
+
+    expect(textarea).toHaveValue(pastedText);
+    expect(
+      textarea.parentElement?.querySelectorAll('[data-opencompany-chat-mention="workflow"]'),
+    ).toHaveLength(0);
+  });
+
   it.each([false, true])(
     "uses workflow models for image drops and run-only overrides (quick composer: %s)",
     async (quick) => {
