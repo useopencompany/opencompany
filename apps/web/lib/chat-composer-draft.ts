@@ -11,7 +11,9 @@ const draftSchema = z.object({
       z
         .object({ kind: z.literal("skill"), id: z.string(), name: z.string().optional() })
         .transform(({ kind, id, name }) => ({ kind, id, ...(name !== undefined ? { name } : {}) })),
-      z.object({ kind: z.literal("workflow"), id: z.string() }),
+      z
+        .object({ kind: z.literal("workflow"), id: z.string(), name: z.string().optional() })
+        .transform(({ kind, id, name }) => ({ kind, id, ...(name !== undefined ? { name } : {}) })),
     ]),
   ),
 });

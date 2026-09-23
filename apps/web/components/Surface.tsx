@@ -7,6 +7,7 @@ import type {
   TaskStage,
   TaskStatus,
 } from "@opencompany/agent/task-runtime-types";
+import { workflowSlugFromName } from "@opencompany/agent/workflow-slug";
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
@@ -5490,8 +5491,20 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
-  if (mention.kind === "workflow") return `#${mention.id}`;
+  if (mention.kind === "workflow") return `#${workflowMentionHandle(mention)}`;
   return `/${mention.name ?? mention.id}`;
+}
+
+function workflowMentionHandle(
+  workflow: Pick<Extract<ChatMention, { kind: "workflow" }>, "id" | "name">,
+) {
+  const displayHandle = workflowSlugFromName(workflow.name ?? workflow.id);
+  // #task is the reserved ad-hoc task command. A workflow renamed to "Task"
+  // keeps its stable handle so selecting it cannot silently start the wrong task.
+  // Older workflows whose stable id is also `task` get a presentation-only
+  // handle; invocation still carries their stable id in mention metadata.
+  if (displayHandle !== AD_HOC_TASK_ID) return displayHandle;
+  return workflow.id === AD_HOC_TASK_ID ? `${AD_HOC_TASK_ID}-workflow` : workflow.id;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -5645,18 +5658,23 @@ function workflowMentionsFromPastedText(input: {
   workflows: WorkflowCatalogItem[];
 }): ChatMention[] {
   const matches = input.workflows.flatMap((workflow) => {
-    if (!input.workflowIds.has(workflow.id)) return [];
+    const displayId = workflowMentionHandle({ id: workflow.id, name: workflow.name });
+    const usesCurrentName = input.workflowIds.has(displayId);
+    if (!usesCurrentName && !input.workflowIds.has(workflow.id)) return [];
     const mention: ChatMention = {
       kind: "workflow",
       id: workflow.id,
+      ...(usesCurrentName ? { name: workflow.name } : {}),
     };
     return chatMentionIsVisible(input.pastedText, mention) &&
       chatMentionIsVisible(input.fullInput, mention)
       ? [mention]
       : [];
   });
-  // One workflow per message.
-  return matches.slice(0, 1);
+  // One workflow per message. If a current display handle collides with another
+  // workflow's stable id (or two names slugify alike), leave pasted text plain
+  // instead of choosing an arbitrary workflow from catalog order.
+  return matches.length === 1 ? matches : [];
 }
 
 function mergeVisibleChatMentions(value: string, current: ChatMention[], additions: ChatMention[]) {
@@ -5704,15 +5722,15 @@ function buildMentionOptions(input: {
     }
     if (input.workflowsEnabled) {
       for (const workflow of input.workflows) {
-        if (workflow.id === AD_HOC_TASK_ID) continue;
         const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
         if (query && !haystack.includes(query)) continue;
+        const mention: ChatMention = { kind: "workflow", id: workflow.id, name: workflow.name };
         options.push({
           kind: "workflow",
-          token: `#${workflow.id}`,
+          token: chatMentionToken(mention),
           label: workflow.name,
           description: workflow.description,
-          mention: { kind: "workflow", id: workflow.id },
+          mention,
         });
       }
     }
