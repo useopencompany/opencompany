@@ -11,7 +11,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-09-10.standard.1";
+const MODEL_PRICING_VERSION = "2026-09-23.standard.1";
 
 type PricingProvider =
   | "openai"
@@ -197,6 +197,15 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cachedInputUsdMicrosPerMillion: 500_000,
     cacheWriteUsdMicrosPerMillion: 6_250_000,
     outputUsdMicrosPerMillion: 25_000_000,
+  },
+  // verified 2026-09-23 against Anthropic's published API pricing
+  "anthropic/claude-opus-5.5": {
+    model: "anthropic/claude-opus-5.5",
+    provider: "anthropic",
+    inputUsdMicrosPerMillion: 4_000_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 5_000_000,
+    outputUsdMicrosPerMillion: 20_000_000,
   },
   "anthropic/claude-fable-5": {
     model: "anthropic/claude-fable-5",

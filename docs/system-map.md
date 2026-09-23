@@ -49,9 +49,11 @@ behind a 60s TTL with the caller's own user token; merged and closed are final a
 There is no GitHub webhook ingress, and this feature does not add one.
 
 Claude Code coding chats and Workflow steps share the model catalog in
-`packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
-`anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort
-controls and a 1M-token context window. Claude Sonnet 5 remains the default.
+`packages/agent-runtime/src/models.ts`. Claude Opus 5.5 is available in normal chat through AI
+Gateway and in Claude Code coding chats as `anthropic/claude-opus-5.5`, mapped to
+`claude-opus-5-5` for sandbox execution, with reasoning-effort controls and a 1M-token context
+window. Superseded Opus models remain loadable for saved sessions but are hidden from new
+selections. Claude Sonnet 5 remains the Claude Code default.
 
 ## Tasks and Workflows
 
