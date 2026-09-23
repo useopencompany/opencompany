@@ -11,7 +11,7 @@ export const PLATFORM_FEE_BPS = 0;
 
 const TOKENS_PER_MILLION = 1_000_000;
 const GPT_5_4_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD = 272_000;
-const MODEL_PRICING_VERSION = "2026-09-23.standard.1";
+const MODEL_PRICING_VERSION = "2026-09-23.standard.2";
 
 type PricingProvider =
   | "openai"
@@ -88,6 +88,34 @@ const MODEL_PRICING: Partial<Record<BillableModelId, ModelPricing>> = {
     cachedInputUsdMicrosPerMillion: 1_000_000,
     cacheWriteUsdMicrosPerMillion: 12_500_000,
     outputUsdMicrosPerMillion: 50_000_000,
+    longContext: {
+      inputTokenThreshold: 272_001,
+      inputMultiplier: 2,
+      outputMultiplier: 1.5,
+    },
+  },
+  // verified 2026-09-23 against the Vercel AI Gateway model catalog
+  "openai/gpt-6-sol": {
+    model: "openai/gpt-6-sol",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 2_000_000,
+    cachedInputUsdMicrosPerMillion: 200_000,
+    cacheWriteUsdMicrosPerMillion: 2_500_000,
+    outputUsdMicrosPerMillion: 10_000_000,
+    longContext: {
+      inputTokenThreshold: 272_001,
+      inputMultiplier: 2,
+      outputMultiplier: 1.5,
+    },
+  },
+  // verified 2026-09-23 against the Vercel AI Gateway model catalog
+  "openai/gpt-6-luna": {
+    model: "openai/gpt-6-luna",
+    provider: "openai",
+    inputUsdMicrosPerMillion: 100_000,
+    cachedInputUsdMicrosPerMillion: 10_000,
+    cacheWriteUsdMicrosPerMillion: 125_000,
+    outputUsdMicrosPerMillion: 500_000,
     longContext: {
       inputTokenThreshold: 272_001,
       inputMultiplier: 2,

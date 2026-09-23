@@ -55,6 +55,8 @@ export const OPENCOMPANY_CHAT_MODEL_IDS = [
   "anthropic/claude-opus-5.5",
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
+  "openai/gpt-6-sol",
+  "openai/gpt-6-luna",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.5",
@@ -82,6 +84,8 @@ export function isAgentModelSelectable(modelId: string): boolean {
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-6-astra",
+  "openai/gpt-6-sol",
+  "openai/gpt-6-luna",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
@@ -234,6 +238,48 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: false,
     ratings: { capability: 3, speed: 1, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-6-sol",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Sol",
+    description: "OpenAI's GPT-6 reasoning model for complex coding and agentic workflows.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-6-luna",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Luna",
+    description: "Efficient GPT-6 reasoning model for focused, high-volume work.",
+    category: "Fast",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 2, speed: 3, cost: 1 },
     reasoning: {
       providerOptions: {
         openai: {

@@ -38,6 +38,8 @@ describe("image context budgets", () => {
     expect(estimateImageContextTokens(image(4000, 4000, "low"), "openai/gpt-5.5")).toBe(308);
     expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-5.4-mini")).toBe(3000);
     expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-5.6-sol")).toBe(18750);
+    expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-6-sol")).toBe(18750);
+    expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-6-luna")).toBe(18750);
   });
 
   it("rejects the documented non-resizing patch limit instead of undercounting", () => {
@@ -45,6 +47,12 @@ describe("image context budgets", () => {
       "supported image dimensions",
     );
     expect(estimateImageContextTokens(image(6000, 6000, "high"), "openai/gpt-6-astra")).toBe(3000);
+    // The high-detail edge limit is a GPT-6 family property, not an Astra-only one.
+    expect(() => estimateImageContextTokens(image(6000, 6000), "openai/gpt-6-sol")).toThrow(
+      "supported image dimensions",
+    );
+    expect(estimateImageContextTokens(image(6000, 6000, "high"), "openai/gpt-6-sol")).toBe(3000);
+    expect(estimateImageContextTokens(image(6000, 6000, "high"), "openai/gpt-6-luna")).toBe(3000);
   });
 
   it.each([
