@@ -3621,7 +3621,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_1",
+          id: "conversation_1",
           title: "Chat",
           model: DEFAULT_MODEL,
           messages: [
@@ -4212,7 +4212,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_1",
+          id: "conversation_1",
           title: "Existing chat",
           model: DEFAULT_MODEL,
           messages: [],
