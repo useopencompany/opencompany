@@ -392,6 +392,60 @@ export async function listGitHubUserRepositoryAccess(input: {
   };
 }
 
+// The App installations the member's own GitHub account can reach, without their repositories.
+export async function listGitHubUserInstallations(input: {
+  userWorkosId: string;
+  db?: DbLike;
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+}): Promise<Omit<GitHubUserInstallationAccess, "repositories">[]> {
+  const connection = await resolveGitHubUserAccessConnection(input);
+  const accessToken = await getGitHubUserAccessToken(connection, {
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  return fetchAllGitHubPages({
+    endpoint: `${GITHUB_API_ROOT}/user/installations`,
+    accessToken,
+    ...(input.signal ? { signal: input.signal } : {}),
+    fetch: input.fetch ?? globalThis.fetch,
+    readPage: parseInstallationsPage,
+  });
+}
+
+// The repositories of one installation that the member's own GitHub account can access. An
+// installation the member cannot reach at all has none.
+export async function listGitHubUserInstallationRepositories(input: {
+  userWorkosId: string;
+  installationId: string;
+  db?: DbLike;
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+}): Promise<GitHubUserRepositoryAccessItem[]> {
+  const connection = await resolveGitHubUserAccessConnection(input);
+  const accessToken = await getGitHubUserAccessToken(connection, {
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const fetcher = input.fetch ?? globalThis.fetch;
+  const installations = await fetchAllGitHubPages({
+    endpoint: `${GITHUB_API_ROOT}/user/installations`,
+    accessToken,
+    ...(input.signal ? { signal: input.signal } : {}),
+    fetch: fetcher,
+    readPage: parseInstallationsPage,
+  });
+  const installation = installations.find((candidate) => candidate.id === input.installationId);
+  if (!installation || installation.suspendedAt) return [];
+  return fetchAllGitHubPages({
+    endpoint: `${GITHUB_API_ROOT}/user/installations/${encodeURIComponent(installation.id)}/repositories`,
+    accessToken,
+    ...(input.signal ? { signal: input.signal } : {}),
+    fetch: fetcher,
+    readPage: parseRepositoriesPage,
+  });
+}
+
 // Shared by the action gateway now and the runner sandbox injection slice
 // later. Refresh responses rotate both GitHub tokens; persistence therefore
 // replaces the encrypted payload as one write before returning the new access

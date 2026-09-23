@@ -39,6 +39,8 @@ import {
   CompanyAgentRunPageSchema,
   CompanyAgentSlackEnvelopeSchema,
   CompanyAgentUpdateEnvelopeSchema,
+  CompanyGitHubAvailableInstallationsEnvelopeSchema,
+  CompanyGitHubPluginEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConnectCompanyAgentSlackBodySchema,
   ConversationEnvelopeSchema,
@@ -101,6 +103,7 @@ import {
   JamieEventsAccountStateEnvelopeSchema,
   LegacyTaskHistoryEnvelopeSchema,
   LegacyTaskPageSchema,
+  LinkCompanyGitHubInstallationBodySchema,
   ManagedCapabilitySourceSchema,
   McpSetupEnvelopeSchema,
   MessagePageSchema,
@@ -3425,6 +3428,71 @@ export const disconnectSlackBotRoute = createRoute({
   },
 });
 
+export const getCompanyGitHubPluginRoute = createRoute({
+  method: "get",
+  path: "/v1/company-plugins/github",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "GitHub accounts linked to the active workspace as its company GitHub plugin.",
+      content: { "application/json": { schema: CompanyGitHubPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listCompanyGitHubAvailableInstallationsRoute = createRoute({
+  method: "get",
+  path: "/v1/company-plugins/github/available-installations",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "GitHub App installations the acting admin's own GitHub account can link.",
+      content: {
+        "application/json": { schema: CompanyGitHubAvailableInstallationsEnvelopeSchema },
+      },
+    },
+    default: errorResponse,
+  },
+});
+
+export const linkCompanyGitHubInstallationRoute = createRoute({
+  method: "post",
+  path: "/v1/company-plugins/github/installations",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: LinkCompanyGitHubInstallationBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: "GitHub App installation linked to the workspace by an administrator.",
+      content: { "application/json": { schema: CompanyGitHubPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const unlinkCompanyGitHubInstallationRoute = createRoute({
+  method: "delete",
+  path: "/v1/company-plugins/github/installations/{integrationId}",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: { params: z.object({ integrationId: IntegrationAccountIdSchema }) },
+  responses: {
+    200: {
+      description: "GitHub App installation unlinked from the workspace by an administrator.",
+      content: { "application/json": { schema: CompanyGitHubPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const listIntegrationResourceOptionsRoute = createRoute({
   method: "post",
   path: "/v1/integrations/{integrationId}/resource-options",
@@ -4137,6 +4205,12 @@ export type V1RouteHandlers = {
   disconnectSlackProvisioning: RouteHandler<typeof disconnectSlackProvisioningRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
+  getCompanyGitHubPlugin: RouteHandler<typeof getCompanyGitHubPluginRoute>;
+  listCompanyGitHubAvailableInstallations: RouteHandler<
+    typeof listCompanyGitHubAvailableInstallationsRoute
+  >;
+  linkCompanyGitHubInstallation: RouteHandler<typeof linkCompanyGitHubInstallationRoute>;
+  unlinkCompanyGitHubInstallation: RouteHandler<typeof unlinkCompanyGitHubInstallationRoute>;
   listIntegrationResourceOptions: RouteHandler<typeof listIntegrationResourceOptionsRoute>;
   setIntegrationCapabilityMode: RouteHandler<typeof setIntegrationCapabilityModeRoute>;
   setIntegrationToolMode: RouteHandler<typeof setIntegrationToolModeRoute>;
@@ -4352,6 +4426,13 @@ export function createV1Router(
       .openapi(disconnectSlackProvisioningRoute, handlers.disconnectSlackProvisioning)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
+      .openapi(getCompanyGitHubPluginRoute, handlers.getCompanyGitHubPlugin)
+      .openapi(
+        listCompanyGitHubAvailableInstallationsRoute,
+        handlers.listCompanyGitHubAvailableInstallations,
+      )
+      .openapi(linkCompanyGitHubInstallationRoute, handlers.linkCompanyGitHubInstallation)
+      .openapi(unlinkCompanyGitHubInstallationRoute, handlers.unlinkCompanyGitHubInstallation)
       .openapi(listIntegrationResourceOptionsRoute, handlers.listIntegrationResourceOptions)
       .openapi(setIntegrationCapabilityModeRoute, handlers.setIntegrationCapabilityMode)
       .openapi(setIntegrationToolModeRoute, handlers.setIntegrationToolMode)
@@ -5776,6 +5857,23 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   disconnectSlackBot: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  getCompanyGitHubPlugin: (c) =>
+    c.json(
+      { data: { configured: true, canManage: true, installations: [], events: [] }, meta },
+      200,
+    ),
+  listCompanyGitHubAvailableInstallations: (c) =>
+    c.json({ data: { installations: [] }, meta }, 200),
+  linkCompanyGitHubInstallation: (c) =>
+    c.json(
+      { data: { configured: true, canManage: true, installations: [], events: [] }, meta },
+      200,
+    ),
+  unlinkCompanyGitHubInstallation: (c) =>
+    c.json(
+      { data: { configured: true, canManage: true, installations: [], events: [] }, meta },
+      200,
+    ),
   listIntegrationResourceOptions: (c) =>
     c.json({ data: { provider: "gmail" as const, labels: [] }, meta }, 200),
   setIntegrationCapabilityMode: (c) =>

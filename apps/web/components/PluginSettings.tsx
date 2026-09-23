@@ -30,6 +30,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { PluginScopeTabs } from "@/components/CompanyPluginSettings";
 import { IntentPrefetchLink } from "@/components/IntentPrefetchLink";
 import { PageContent } from "@/components/PageContent";
 import { PluginConnectionFeedback } from "@/components/PluginConnectionSettings";
@@ -205,11 +206,14 @@ export function PluginsRoute({
   canEdit,
   workspaceId,
   dopplerConnected = false,
+  showScopeTabs = false,
 }: {
   plugins: PluginListItemDto[];
   canEdit: boolean;
   workspaceId: string;
   dopplerConnected?: boolean;
+  /** Admins switch between their own plugins and the workspace's company plugins. */
+  showScopeTabs?: boolean;
 }) {
   const router = useRouter();
   const { integrations } = useAppData();
@@ -335,15 +339,18 @@ export function PluginsRoute({
   return (
     <PageContent title="Plugins" contentClassName="max-w-[960px]">
       <PluginConnectionFeedback />
-      {canEdit ? (
-        <div className="mb-5 flex justify-end">
-          <Link
-            href="/plugins/add-mcp"
-            className={buttonVariants({ variant: "outline", size: "sm" })}
-          >
-            <ServerCog className="mr-2 size-4" />
-            Add custom MCP
-          </Link>
+      {canEdit || showScopeTabs ? (
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          {showScopeTabs ? <PluginScopeTabs value="personal" /> : null}
+          {canEdit ? (
+            <Link
+              href="/plugins/add-mcp"
+              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "ml-auto")}
+            >
+              <ServerCog className="mr-2 size-4" />
+              Add custom MCP
+            </Link>
+          ) : null}
         </div>
       ) : null}
       <div className="flex flex-col gap-7">

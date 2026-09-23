@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  listCompanyWorkflowEventTriggerRoutes,
   listWorkflowEventTriggerRoutes,
   parseWorkflowEventConfig,
   type WorkflowEventTriggerRoute,
@@ -147,6 +148,85 @@ describe("personal workflow event authorization", () => {
     );
 
     expect(routes.map((route) => route.triggerId)).toEqual(["trigger_1", "trigger_2"]);
+  });
+});
+
+describe("company plugin workflow event routes", () => {
+  const trigger = (overrides: Record<string, unknown> = {}) => ({
+    id: "trigger_1",
+    type: "event",
+    provider: "github-app",
+    event: "issue.opened",
+    integrationId: "company",
+    filters: { repository: { id: "42", name: "acme/app" } },
+    prompt: "Triage it.",
+    userWorkosId: "owner_1",
+    activatedAt: "2026-09-20T10:00:00.000Z",
+    harnessSpec: {},
+    ...overrides,
+  });
+  const workflow = (automationTriggers: unknown[], workspaceId = "workspace_1") => ({
+    workflowId: "agent_1",
+    workspaceId,
+    workflowSlug: "triage",
+    workflowName: "Triage",
+    automationTriggers,
+  });
+  const integrations = [
+    {
+      id: "company",
+      workspaceId: "workspace_1",
+      userWorkosId: "admin_1",
+      status: "connected" as const,
+    },
+  ];
+  const dbReturning = (rows: unknown[]) => ({
+    select: vi.fn(() => ({ from: () => ({ where: async () => rows }) })),
+  });
+
+  it("ignores personal connections without querying", async () => {
+    const db = { select: vi.fn() };
+    await expect(
+      listCompanyWorkflowEventTriggerRoutes(
+        {
+          provider: "github-app",
+          integrations: [
+            { id: "personal", workspaceId: null, userWorkosId: "user_1", status: "connected" },
+          ],
+        },
+        db as never,
+      ),
+    ).resolves.toEqual([]);
+    expect(db.select).not.toHaveBeenCalled();
+  });
+
+  it("routes to the member who activated the trigger without a personal plugin", async () => {
+    const routes = await listCompanyWorkflowEventTriggerRoutes(
+      { provider: "github-app", integrations },
+      dbReturning([workflow([trigger()])]) as never,
+    );
+    expect(routes).toEqual([
+      expect.objectContaining({
+        workflowId: "agent_1",
+        userWorkosId: "owner_1",
+        event: "issue.opened",
+        filters: { repository: { id: "42" } },
+      }),
+    ]);
+  });
+
+  it("drops undeclared events, missing required filters, and other workspaces' connections", async () => {
+    const routes = await listCompanyWorkflowEventTriggerRoutes(
+      { provider: "github-app", integrations },
+      dbReturning([
+        workflow([
+          trigger({ id: "unknown", event: "issue.closed" }),
+          trigger({ id: "unfiltered", filters: {} }),
+        ]),
+        workflow([trigger()], "workspace_2"),
+      ]) as never,
+    );
+    expect(routes).toEqual([]);
   });
 });
 

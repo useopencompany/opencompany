@@ -8,6 +8,7 @@
 import {
   type Actor,
   actorHasPermission,
+  COMPANY_GITHUB_INTEGRATION_PROVIDER,
   CoreError,
   WORKFLOW_READ_PERMISSION,
 } from "@opencompany/core";
@@ -22,6 +23,12 @@ import {
   isWorkspaceOwnedIntegrationProvider,
 } from "@opencompany/db/product-schema";
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
+import { ExpiringOAuthReauthRequired } from "./integrations/expiring-oauth-access-token";
+import {
+  GitHubUserAccessAuthError,
+  GitHubUserAccessRateLimitError,
+  listGitHubUserInstallationRepositories,
+} from "./integrations/github-user";
 import { listGmailLabels, loadOwnGmailAccount } from "./integrations/gmail-source";
 import { GoogleAccessAuthError } from "./integrations/google-access-token";
 import { listGranolaFolders } from "./integrations/granola";
@@ -34,7 +41,8 @@ type DbLike = any;
 export type IntegrationResourceOptionsCommand =
   | { provider: "linear"; includeTriageStateIds?: boolean }
   | { provider: "granola" }
-  | { provider: "gmail" };
+  | { provider: "gmail" }
+  | { provider: typeof COMPANY_GITHUB_INTEGRATION_PROVIDER };
 
 export type IntegrationResourceOptions =
   | { provider: "linear"; teams: LinearTeamRef[]; partial: boolean }
@@ -43,7 +51,11 @@ export type IntegrationResourceOptions =
       folders: Array<{ id: string; name: string; parentFolderId: string | null }>;
       partial: boolean;
     }
-  | { provider: "gmail"; labels: GmailLabelRef[] };
+  | { provider: "gmail"; labels: GmailLabelRef[] }
+  | {
+      provider: typeof COMPANY_GITHUB_INTEGRATION_PROVIDER;
+      repositories: Array<{ id: string; name: string }>;
+    };
 
 type IntegrationRow = {
   id: string;
@@ -73,6 +85,53 @@ export class IntegrationResourceOptionsService {
         return this.listGranolaOptions(actor, integration);
       case "gmail":
         return this.listGmailOptions(actor, integration);
+      case COMPANY_GITHUB_INTEGRATION_PROVIDER:
+        return this.listCompanyGitHubOptions(actor, integration);
+    }
+  }
+
+  // The installation is the workspace's, but the repository list is the author's: only repositories
+  // their own GitHub account can open are offered, and saving re-checks the same rule.
+  private async listCompanyGitHubOptions(
+    actor: Actor,
+    integrationId: string,
+  ): Promise<
+    Extract<IntegrationResourceOptions, { provider: typeof COMPANY_GITHUB_INTEGRATION_PROVIDER }>
+  > {
+    const integration = await this.loadIntegration(
+      actor,
+      integrationId,
+      COMPANY_GITHUB_INTEGRATION_PROVIDER,
+    );
+    if (!integration || integration.status !== "connected") {
+      throw new CoreError("conflict", "Ask a workspace admin to connect GitHub in Plugins.");
+    }
+    try {
+      const repositories = await listGitHubUserInstallationRepositories({
+        userWorkosId: actor.userId,
+        installationId: integration.externalId,
+        db: this.db,
+      });
+      return {
+        provider: COMPANY_GITHUB_INTEGRATION_PROVIDER,
+        repositories: repositories
+          .map((repository) => ({ id: repository.id, name: repository.fullName }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
+    } catch (error) {
+      if (
+        error instanceof GitHubUserAccessAuthError ||
+        error instanceof ExpiringOAuthReauthRequired
+      ) {
+        throw new CoreError(
+          "conflict",
+          "Connect GitHub as you in Plugins to choose from the repositories you can access.",
+        );
+      }
+      if (error instanceof GitHubUserAccessRateLimitError) {
+        throw new CoreError("unavailable", "GitHub is rate limiting requests. Try again shortly.");
+      }
+      throw new CoreError("unavailable", "Could not load GitHub repositories.", { cause: error });
     }
   }
 

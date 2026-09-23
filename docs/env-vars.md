@@ -111,6 +111,12 @@ its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
 
+The company GitHub plugin reuses that App for workspace-level events. Set the App's webhook URL to
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/webhooks/github` with content type `application/json`,
+subscribe it to Issues and Pull request events, and put the same webhook secret in prod `/api` as `GITHUB_USER_APP_WEBHOOK_SECRET`. The
+variable is optional: without it, admins can still link accounts and the plugin page says events
+are not set up, but the API rejects deliveries. Only the API reads it.
+
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin
 processes.

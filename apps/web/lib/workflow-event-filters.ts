@@ -1,7 +1,9 @@
 import {
+  type GitHubRepositoryListResult,
   type GmailLabelListResult,
   type GranolaFolderListResult,
   type LinearTeamListResult,
+  listCompanyGitHubRepositoriesAction,
   listGmailLabelsAction,
   listGranolaFoldersAction,
   listLinearTeamsAction,
@@ -66,6 +68,12 @@ const WORKFLOW_EVENT_FILTER_LOADERS: Record<string, WorkflowEventFilterLoader> =
     if (!result.ok) return result;
     const options = granolaFolderOptions(result.folders);
     return { ok: true, options, ...(result.partial ? { partial: true } : {}) };
+  },
+  "github-app:repository": async ({ integrationId }) => {
+    const result: GitHubRepositoryListResult =
+      await listCompanyGitHubRepositoriesAction(integrationId);
+    if (!result.ok) return result;
+    return { ok: true, options: result.repositories };
   },
   "posthog:event": async ({ integrationId }) => {
     const result: PostHogEventDefinitionListResult =

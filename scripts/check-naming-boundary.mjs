@@ -193,6 +193,7 @@ const baseEnvKeys = envKeys(
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
   "API_INTERNAL_TOKEN",
+  "GITHUB_USER_APP_WEBHOOK_SECRET",
   "MESSAGES_API_KEY",
   "MESSAGES_LINE_HANDLE",
   "MESSAGES_WEBHOOK_SECRET",

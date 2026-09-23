@@ -1,4 +1,9 @@
-import type { PluginEventDefinitionDto, PluginListItemDto } from "@opencompany/protocol";
+import type {
+  CompanyGitHubInstallationDto,
+  CompanyGitHubPluginDto,
+  PluginEventDefinitionDto,
+  PluginListItemDto,
+} from "@opencompany/protocol";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   isOfficialMcpPluginName,
@@ -23,8 +28,9 @@ export type WorkflowEventProviderOption = {
 export function workflowEventProviderOptions(input: {
   plugins: readonly PluginListItemDto[];
   personalAccounts: Record<string, IntegrationAccountView[] | undefined>;
+  companyGitHub?: CompanyGitHubPluginDto | null;
 }): WorkflowEventProviderOption[] {
-  return input.plugins.flatMap((plugin: PluginListItemDto) => {
+  const personal = input.plugins.flatMap((plugin: PluginListItemDto) => {
     if (plugin.status !== "enabled") return [];
     const events = plugin.events.filter(
       (event: PluginEventDefinitionDto) => plugin.eventModes[event.id] === true,
@@ -55,6 +61,27 @@ export function workflowEventProviderOptions(input: {
       },
     ];
   });
+  return input.companyGitHub
+    ? [...personal, companyGitHubEventProvider(input.companyGitHub)]
+    : personal;
+}
+
+// The company GitHub plugin binds to accounts an admin linked for the whole workspace, so there is
+// no personal installation or event opt-in to wait for.
+function companyGitHubEventProvider(plugin: CompanyGitHubPluginDto): WorkflowEventProviderOption {
+  return {
+    provider: "github-app",
+    label: "GitHub (company)",
+    accountHref: "/plugins/company/github",
+    accountLabel: plugin.canManage ? "Connect GitHub" : "Ask an admin to connect GitHub",
+    accounts: plugin.installations
+      .filter((installation: CompanyGitHubInstallationDto) => installation.status === "connected")
+      .map((installation: CompanyGitHubInstallationDto) => ({
+        integrationId: installation.integrationId,
+        label: installation.accountLogin,
+      })),
+    events: plugin.events,
+  };
 }
 
 export function workflowEventProvidersReady(providers: readonly WorkflowEventProviderOption[]) {

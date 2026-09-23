@@ -24,6 +24,10 @@
       "types": "./src/workflow-repository.ts",
       "default": "./src/workflow-repository.ts"
     },
+    "./company-github": {
+      "types": "./src/company-github.ts",
+      "default": "./src/company-github.ts"
+    },
     "./workflow-event-routes": {
       "types": "./src/workflow-event-routes.ts",
       "default": "./src/workflow-event-routes.ts"

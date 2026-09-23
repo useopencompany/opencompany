@@ -94,6 +94,7 @@ import type { BotService } from "./bots";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
 import type { CompanyAgentSlackService } from "./company-agent-slack";
+import type { CompanyGitHubService } from "./company-github";
 import type { ConvexIngressService } from "./convex-ingress";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
@@ -101,6 +102,7 @@ import { admitEngineMessage } from "./engine-messages";
 import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
+import type { GitHubAppIngressService } from "./github-app-ingress";
 import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { IdentityService } from "./identity";
@@ -219,6 +221,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
+  companyGitHub?: CompanyGitHubService;
   slackProvisioning?: SlackProvisioningService;
   imessageSettings?: ImessageSettingsService;
   whatsappSettings?: WhatsappSettingsService;
@@ -242,6 +245,7 @@ export type CreateApiAppInput = {
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubUserIngress?: GitHubUserIngressService;
+  githubAppIngress?: GitHubAppIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
@@ -278,6 +282,11 @@ export function createApiApp(input: CreateApiAppInput) {
   const rateLimiter = input.rateLimiter ?? new InMemoryApiRateLimiter();
   const now = input.now ?? (() => new Date());
   const browserOrigins = [...(input.browserOrigins ?? [])];
+  const companyGitHub = () => {
+    if (!input.companyGitHub)
+      throw new CoreError("unavailable", "Company plugins are unavailable.");
+    return input.companyGitHub;
+  };
   const handlers: V1RouteHandlers = {
     listTasks: async (c) => {
       const actor = actorFrom(c);
@@ -2473,6 +2482,28 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.slackBotSettings.disconnect(actor);
       return c.json({ data: { updated: true as const }, meta }, 200);
     },
+    getCompanyGitHubPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await companyGitHub().get(actor), meta }, 200);
+    },
+    listCompanyGitHubAvailableInstallations: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 60);
+      return c.json({ data: await companyGitHub().listAvailableInstallations(actor), meta }, 200);
+    },
+    linkCompanyGitHubInstallation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { installationId } = c.req.valid("json");
+      return c.json({ data: await companyGitHub().link(actor, installationId), meta }, 200);
+    },
+    unlinkCompanyGitHubInstallation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { integrationId } = c.req.valid("param");
+      return c.json({ data: await companyGitHub().unlink(actor, integrationId), meta }, 200);
+    },
     listIntegrationResourceOptions: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 60);
@@ -3024,6 +3055,12 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
+  if (input.githubAppIngress) {
+    const ingress = input.githubAppIngress;
+    // GitHub caps webhook payloads at 25 MB; issue and pull request bodies are far smaller.
+    app.use("/webhooks/github", ingressBodyLimit(25 * 1024 * 1024));
+    app.post("/webhooks/github", (c) => ingress.webhook(c.req.raw));
+  }
   if (input.githubUserIngress) {
     const ingress = input.githubUserIngress;
     app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));

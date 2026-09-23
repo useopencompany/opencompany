@@ -26,6 +26,7 @@ import {
   PostgresWorkflowRepository,
   type WorkflowSqlExecute,
 } from "@opencompany/db/workflow-repository";
+import { validateCompanyGitHubTriggerAccess } from "./company-github";
 
 type AutomationServicesInput = {
   execute: WorkflowSqlExecute;
@@ -87,8 +88,9 @@ export function createAutomationServices(input: AutomationServicesInput) {
         steps: definition.steps as never,
         trigger: definition.trigger as never,
       }),
-    validateEventSubscription: (subscription) =>
-      validateWorkflowEventSubscription(input.execute, subscription),
+    validateEventSubscription: async (subscription) =>
+      (await validateWorkflowEventSubscription(input.execute, subscription)) ??
+      (await validateCompanyGitHubTriggerAccess({ execute: input.execute, ...subscription })),
   };
   // Two services over one table, each pinned to the automation kind it serves. A Company agent is
   // unreachable through the Workflows API, and a workflow is unreachable through the agents API,

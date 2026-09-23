@@ -82,6 +82,53 @@ describe("workflowEventProviderOptions", () => {
     expect(workflowEventProvidersReady([option!])).toBe(false);
   });
 
+  it("adds the company GitHub plugin with only its connected accounts", () => {
+    const [github] = workflowEventProviderOptions({
+      plugins: [],
+      personalAccounts: {},
+      companyGitHub: {
+        configured: true,
+        canManage: false,
+        installations: [
+          {
+            integrationId: "gint_acme",
+            installationId: "7",
+            accountLogin: "acme",
+            accountType: "Organization",
+            status: "connected",
+            statusReason: null,
+            linkedAt: "2026-09-23T10:00:00.000Z",
+          },
+          {
+            integrationId: "gint_old",
+            installationId: "8",
+            accountLogin: "old-org",
+            accountType: "Organization",
+            status: "needs_reauth",
+            statusReason: null,
+            linkedAt: "2026-09-23T10:00:00.000Z",
+          },
+        ],
+        events: [
+          {
+            id: "issue.opened",
+            label: "Issue opened",
+            description: "Someone opens an issue in the repository.",
+            delivery: "webhook",
+            filters: [],
+          },
+        ],
+      },
+    });
+    expect(github).toMatchObject({
+      provider: "github-app",
+      label: "GitHub (company)",
+      accountHref: "/plugins/company/github",
+      accountLabel: "Ask an admin to connect GitHub",
+      accounts: [{ integrationId: "gint_acme", label: "acme" }],
+    });
+  });
+
   it("drops a disconnected account so the trigger cannot bind to it", () => {
     const [option] = workflowEventProviderOptions({
       plugins: [plugin()],

@@ -2,6 +2,7 @@ import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
+import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
 import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-automation-server";
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
@@ -17,16 +18,25 @@ type WorkflowEditorPageProps = {
 export default async function WorkflowEditorPage({ params }: WorkflowEditorPageProps) {
   const { slug } = await params;
   const context = await currentUser();
-  const [workflow, memory, skillCatalog, personalAccounts, plugins, members, slackBotSettings] =
-    await Promise.all([
-      getHeadlessWorkflow(slug),
-      getHeadlessWorkflowMemory(slug),
-      listHeadlessSkillCatalog(),
-      getPersonalAccounts(),
-      listHeadlessPlugins(),
-      listWorkspaceMembersAction(),
-      getSlackBotWorkspaceSettingsAction(),
-    ]);
+  const [
+    workflow,
+    memory,
+    skillCatalog,
+    personalAccounts,
+    plugins,
+    members,
+    slackBotSettings,
+    companyGitHub,
+  ] = await Promise.all([
+    getHeadlessWorkflow(slug),
+    getHeadlessWorkflowMemory(slug),
+    listHeadlessSkillCatalog(),
+    getPersonalAccounts(),
+    listHeadlessPlugins(),
+    listWorkspaceMembersAction(),
+    getSlackBotWorkspaceSettingsAction(),
+    getCompanyGitHubPluginForTriggersAction(),
+  ]);
 
   if (!workflow) {
     return (
@@ -50,7 +60,11 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     );
   }
 
-  const eventProviders = workflowEventProviderOptions({ plugins, personalAccounts });
+  const eventProviders = workflowEventProviderOptions({
+    plugins,
+    personalAccounts,
+    companyGitHub,
+  });
   const owner =
     members.find(
       (member: WorkspaceMemberView) => member.userWorkosId === workflow.createdByUserId,
