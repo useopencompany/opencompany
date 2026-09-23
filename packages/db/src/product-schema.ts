@@ -4505,9 +4505,11 @@ export const messageReadModelV1 = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => ({
-    actorWorkspaceConversationIdx: index(
-      "goat_message_read_model_v1_actor_workspace_conversation_idx",
-    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+    // Electric opens this shape for one conversation at a time. Keep that
+    // equality predicate first so authorization does not force a skip scan.
+    conversationWorkspaceActorIdx: index(
+      "goat_message_read_model_v1_conversation_workspace_actor_idx",
+    ).on(table.conversationId, table.workspaceId, table.actorId, table.createdAt),
   }),
 );
 
@@ -4529,9 +4531,11 @@ export const runReadModelV1 = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => ({
-    actorWorkspaceConversationIdx: index(
-      "goat_run_read_model_v1_actor_workspace_conversation_idx",
-    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+    // Electric opens this shape for one conversation at a time. Keep that
+    // equality predicate first so authorization does not force a sequential scan.
+    conversationWorkspaceActorIdx: index(
+      "goat_run_read_model_v1_conversation_workspace_actor_idx",
+    ).on(table.conversationId, table.workspaceId, table.actorId, table.createdAt),
   }),
 );
 

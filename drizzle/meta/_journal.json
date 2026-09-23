@@ -2171,6 +2171,13 @@
       "when": 1790100400030,
       "tag": "0309_slack_agent_images",
       "breakpoints": true
+    },
+    {
+      "idx": 310,
+      "version": "7",
+      "when": 1790100400031,
+      "tag": "0310_electric_conversation_shape_indexes",
+      "breakpoints": true
     }
   ]
 }
