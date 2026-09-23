@@ -17,6 +17,16 @@ export async function getCompanyGitHubPluginAction(): Promise<CompanyGitHubPlugi
   return (await response.json()).data;
 }
 
+// Trigger editors offer company GitHub as one more provider; if it can't be read, they keep working
+// with the member's personal providers instead of failing the whole page.
+export async function getCompanyGitHubPluginForTriggersAction(): Promise<CompanyGitHubPluginDto | null> {
+  try {
+    return await getCompanyGitHubPluginAction();
+  } catch {
+    return null;
+  }
+}
+
 export async function listCompanyGitHubAvailableInstallationsAction(): Promise<
   CompanyPluginActionResult<CompanyGitHubAvailableInstallationsDto>
 > {

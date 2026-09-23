@@ -2,7 +2,7 @@ import type { SkillCatalogItemDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
-import { getCompanyGitHubPluginAction } from "@/lib/company-plugin-actions";
+import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
 import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-automation-server";
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
@@ -35,7 +35,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     listHeadlessPlugins(),
     listWorkspaceMembersAction(),
     getSlackBotWorkspaceSettingsAction(),
-    getCompanyGitHubPluginAction(),
+    getCompanyGitHubPluginForTriggersAction(),
   ]);
 
   if (!workflow) {

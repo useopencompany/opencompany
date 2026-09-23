@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { CompanyAgentEditor } from "@/components/CompanyAgentEditor";
 import { currentUser } from "@/lib/auth";
 import { getCompanyAgent } from "@/lib/company-agents-server";
-import { getCompanyGitHubPluginAction } from "@/lib/company-plugin-actions";
+import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
@@ -23,7 +23,7 @@ export default async function CompanyAgentPage({ params }: { params: Promise<{ s
     getPersonalAccounts(),
     listHeadlessPlugins(),
     listWorkspaceMembersAction(),
-    getCompanyGitHubPluginAction(),
+    getCompanyGitHubPluginForTriggersAction(),
   ]);
 
   const isOwner = agent.ownerUserId === context.user.workosUserId;
