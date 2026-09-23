@@ -61,11 +61,13 @@ import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
 import { createCompanyAgentSlackService } from "./company-agent-slack";
+import { createCompanyGitHubService } from "./company-github";
 import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
+import { createGitHubAppIngress } from "./github-app-ingress";
 import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createIdentityService } from "./identity";
@@ -253,6 +255,7 @@ const app = createApiApp({
   }),
   slackProvisioning: createSlackProvisioningService({ db: database.db }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  companyGitHub: createCompanyGitHubService({ db: database.db }),
   companyAgentSlack: createCompanyAgentSlackService({
     db: database.db,
     agents: automations.agents,
@@ -384,6 +387,7 @@ const app = createApiApp({
       }),
   }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
+  githubAppIngress: createGitHubAppIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
   convexIngress: createConvexIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({

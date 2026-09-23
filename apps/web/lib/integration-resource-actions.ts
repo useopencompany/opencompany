@@ -53,6 +53,23 @@ export async function listGmailLabelsAction(integrationId: string): Promise<Gmai
   return { ok: true, labels: result.data.labels };
 }
 
+export type GitHubRepositoryListResult =
+  | (Omit<Extract<IntegrationResourceOptions, { provider: "github_app" }>, "provider"> & {
+      ok: true;
+    })
+  | { ok: false; error: string };
+
+export async function listCompanyGitHubRepositoriesAction(
+  integrationId: string,
+): Promise<GitHubRepositoryListResult> {
+  const result = await listResourceOptions(integrationId, { provider: "github_app" });
+  if (!result.ok) return result;
+  if (result.data.provider !== "github_app") {
+    return { ok: false, error: "GitHub returned an invalid resource-option response." };
+  }
+  return { ok: true, repositories: result.data.repositories };
+}
+
 async function listResourceOptions(
   integrationId: string,
   body: IntegrationResourceOptionsCommand,

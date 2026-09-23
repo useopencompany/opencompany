@@ -73,6 +73,24 @@ events; full transcripts are no longer fetched, so an oversized transcript canno
 An event-only account is polled only while its owner has an enabled plugin event and an active
 workflow in a workspace they still belong to.
 
+## Company GitHub events
+
+Company plugins are connected by an admin for the whole workspace (ADR 0018). Admins open
+**Plugins → Company → GitHub** and connect any account where the GitHub App is installed and their
+own GitHub account has access. In Workflows or a Company agent, choose **GitHub (company)**, an
+event, the connected account, and a repository.
+
+| Event | Configuration | Delivery |
+| --- | --- | --- |
+| Issue opened (`issue.opened`) | Required repository | Signed App webhook |
+| Pull request opened (`pull_request.opened`) | Required repository, drafts included | Signed App webhook |
+
+Repository options are the ones the trigger author's own GitHub account can access, and saving a
+changed trigger re-checks that access. There is no per-member event toggle: linking the account is
+the opt-in. Issues and pull requests opened by bots never start runs. Issue and pull request bodies
+are written by whoever opened them, which on a public repository is anyone, so the run context marks
+them as untrusted data.
+
 ## Contract and ownership
 
 Reviewed plugin packages declare `so.opencompany.events`. Each event has an ID, label, description,

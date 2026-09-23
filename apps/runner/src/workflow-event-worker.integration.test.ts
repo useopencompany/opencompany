@@ -1,6 +1,7 @@
 import { PGlite } from "@electric-sql/pglite";
 import {
   enqueueWorkflowEventRuns,
+  listCompanyWorkflowEventTriggerRoutes,
   listWorkflowEventTriggerRoutes,
 } from "@opencompany/db/workflow-event-routes";
 import { sql } from "drizzle-orm";
@@ -23,7 +24,7 @@ describe("durable plugin event delivery", () => {
       CREATE TABLE goat.tasks (id text PRIMARY KEY, agent_id text);
       CREATE TABLE goat.workflow_event_runs (
         id text PRIMARY KEY, workflow_id text REFERENCES goat.workflows(id), trigger_id text NOT NULL DEFAULT 'legacy', workspace_id text, user_workos_id text,
-        workflow_slug text, workflow_name text, provider text, event_type text, delivery_id text, goal text, harness_spec jsonb, event_at timestamptz,
+        workflow_slug text, workflow_name text, provider text CHECK (provider ~ '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'), event_type text, delivery_id text, goal text, harness_spec jsonb, event_at timestamptz,
         task_id text REFERENCES goat.tasks(id), status text DEFAULT 'pending', attempt_count int DEFAULT 0,
         next_attempt_at timestamptz DEFAULT '2026-09-12T20:00:00Z', last_error text,
         created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), UNIQUE (workflow_id, trigger_id, provider, delivery_id)
@@ -112,5 +113,70 @@ describe("durable plugin event delivery", () => {
     expect(
       (await database.query("SELECT status, attempt_count FROM goat.workflow_event_runs")).rows,
     ).toEqual([{ status: "pending", attempt_count: 1 }]);
+  });
+  describe("company plugin events", () => {
+    beforeEach(async () => {
+      await database.exec(`
+        INSERT INTO goat.integrations VALUES ('company_1', 'github_app', 'workspace_1', 'admin_1', 'connected', '7');
+        INSERT INTO goat.workflows (id, workspace_id, slug, name, trigger, status, automation_triggers, kind)
+        VALUES ('agent_1', 'workspace_1', 'triage', 'Triage', 'event', 'active',
+          '[{"id":"trigger_1","type":"event","provider":"github-app","event":"issue.opened","integrationId":"company_1","filters":{"repository":{"id":"42"}},"prompt":"Triage it.","userWorkosId":"user_1","activatedAt":"2026-09-12T19:00:00Z","harnessSpec":{}}]',
+          'agent');
+      `);
+    });
+    async function enqueueCompany() {
+      const routes = await listCompanyWorkflowEventTriggerRoutes(
+        {
+          provider: "github-app",
+          integrations: [
+            {
+              id: "company_1",
+              workspaceId: "workspace_1",
+              userWorkosId: "admin_1",
+              status: "connected",
+            },
+          ],
+        },
+        db,
+      );
+      return enqueueWorkflowEventRuns(
+        {
+          routes,
+          deliveryId: "github_delivery_1",
+          eventAt: now,
+          context: { tag: "github_issue_context", lines: ["Title: Bug"] },
+        },
+        db,
+      );
+    }
+
+    it("creates the owner's task without a personal plugin or connection", async () => {
+      await database.exec("DELETE FROM goat.plugins");
+      expect(await enqueueCompany()).toBe(1);
+      const createTask = vi.fn(async () => ({ taskId: "task_company" }));
+      await database.exec("INSERT INTO goat.tasks VALUES ('task_company')");
+      expect(await createNextWorkflowEventTask(now, { db: db as never, createTask })).toMatchObject(
+        { status: "created" },
+      );
+      expect(createTask.mock.calls[0]?.[1]).toMatchObject({
+        userWorkosId: "user_1",
+        workflowKind: "agent",
+      });
+    });
+
+    it.each([
+      "UPDATE goat.integrations SET status = 'disconnected' WHERE id = 'company_1'",
+      "UPDATE goat.integrations SET workspace_id = 'workspace_2' WHERE id = 'company_1'",
+      "UPDATE goat.workflows SET status = 'draft' WHERE id = 'agent_1'",
+      "DELETE FROM goat.workspace_members",
+    ])("reauthorizes queued company events: %s", async (mutation) => {
+      expect(await enqueueCompany()).toBe(1);
+      await database.exec(mutation);
+      const createTask = vi.fn();
+      expect(await createNextWorkflowEventTask(now, { db: db as never, createTask })).toMatchObject(
+        { status: "ignored" },
+      );
+      expect(createTask).not.toHaveBeenCalled();
+    });
   });
 });

@@ -46,7 +46,8 @@ MCP `create_pull_request` tool or from `gh pr create` output, never from assista
 `goat.session_pull_requests`, keyed on `chat_sessions` so both kinds of row read the same table.
 `GET /v1/session-pull-requests` returns those links, refreshing any non-terminal PR against GitHub
 behind a 60s TTL with the caller's own user token; merged and closed are final and never re-read.
-There is no GitHub webhook ingress, and this feature does not add one.
+This feature reads GitHub on demand; the company GitHub plugin's webhook ingress
+(`/webhooks/github`, ADR 0018) only routes workflow events.
 
 Claude Code coding chats and Workflow steps share the model catalog in
 `packages/agent-runtime/src/models.ts`. Claude Opus 5.5 is available in normal chat through AI

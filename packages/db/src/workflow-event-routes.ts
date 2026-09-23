@@ -6,7 +6,7 @@
 // redeliveries, and a context block describing what happened.
 
 import { randomUUID } from "node:crypto";
-import type { PluginEventDefinition } from "@opencompany/core";
+import { companyPluginEvent, type PluginEventDefinition } from "@opencompany/core";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
@@ -20,8 +20,8 @@ import { workflowEventFilterValidationError } from "./workflow-event-subscriptio
 
 type DbLike = any;
 
-// The subset of an integration row the router needs. Event triggers bind to personal connections,
-// so a workspace-scoped row never routes.
+// The subset of an integration row the router needs. Plugin event triggers bind to personal
+// connections and company plugin triggers to workspace-owned ones; each lister ignores the other.
 export type WorkflowEventIntegration = {
   id: string;
   workspaceId: string | null;
@@ -200,6 +200,88 @@ export async function listWorkflowEventTriggerRoutes(
         ];
       });
     },
+  );
+}
+
+// Routes for a company plugin's workspace-owned connections. The admin who linked the connection
+// made its events available to the whole workspace, so there is no per-member plugin or event
+// opt-in to check; the platform-owned declaration is the vocabulary. The run still belongs to the
+// member who activated the trigger (for a Company agent, its owner).
+export async function listCompanyWorkflowEventTriggerRoutes(
+  input: {
+    provider: string;
+    integrations: readonly WorkflowEventIntegration[];
+  },
+  db: DbLike = getDb(),
+): Promise<WorkflowEventTriggerRoute[]> {
+  const connected = new Map(
+    input.integrations
+      .filter(
+        (integration): integration is WorkflowEventIntegration & { workspaceId: string } =>
+          integration.status === "connected" && integration.workspaceId !== null,
+      )
+      .map((integration) => [integration.id, integration.workspaceId]),
+  );
+  if (connected.size === 0) return [];
+
+  const rows = await db
+    .select({
+      workflowId: workflows.id,
+      workspaceId: workflows.workspaceId,
+      workflowSlug: workflows.slug,
+      workflowName: workflows.name,
+      automationTriggers: workflows.automationTriggers,
+    })
+    .from(workflows)
+    .where(
+      and(
+        eq(workflows.status, "active"),
+        isNull(workflows.archivedAt),
+        inArray(workflows.workspaceId, [...new Set(connected.values())]),
+        sql`EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(${workflows.automationTriggers}) AS trigger(value)
+          WHERE trigger.value->>'type' = 'event'
+            AND trigger.value->>'provider' = ${input.provider}
+            AND ${inArray(sql`trigger.value->>'integrationId'`, [...connected.keys()])}
+        )`,
+      ),
+    );
+
+  return (
+    rows as Array<{
+      workflowId: string;
+      workspaceId: string;
+      workflowSlug: string;
+      workflowName: string;
+      automationTriggers: unknown;
+    }>
+  ).flatMap((row) =>
+    parseAutomationEventTriggers(row.automationTriggers).flatMap((candidate) => {
+      const { config, userWorkosId, harnessSpec } = candidate;
+      if (config.provider !== input.provider) return [];
+      if (connected.get(config.integrationId) !== row.workspaceId) return [];
+      const declaration = companyPluginEvent(config.provider, config.event);
+      if (!declaration || workflowEventFilterValidationError(declaration, config.filters)) {
+        return [];
+      }
+      return [
+        {
+          ...(candidate.activatedAt ? { activatedAt: candidate.activatedAt } : {}),
+          workflowId: row.workflowId,
+          triggerId: candidate.triggerId,
+          workspaceId: row.workspaceId,
+          userWorkosId,
+          workflowSlug: row.workflowSlug,
+          workflowName: row.workflowName,
+          prompt: config.prompt,
+          harnessSpec,
+          provider: config.provider,
+          event: config.event,
+          filters: config.filters,
+        },
+      ];
+    }),
   );
 }
 

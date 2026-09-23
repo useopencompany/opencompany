@@ -29,6 +29,11 @@ export function ScopeBadge({ children }: { children: ReactNode }) {
   );
 }
 
+const SCOPE_TABS = [
+  { value: "personal", label: "Personal" },
+  { value: "company", label: "Company" },
+] as const;
+
 export function ScopeFilterTabs({
   label,
   value,
@@ -38,9 +43,36 @@ export function ScopeFilterTabs({
   value: ScopeFilter;
   onChange: (value: ScopeFilter) => void;
 }) {
+  return <ScopePills label={label} options={SCOPE_FILTERS} value={value} onChange={onChange} />;
+}
+
+/** Switches between two scoped views of one surface, where "All" would mix unlike things. */
+export function ScopeTabs({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: Scope;
+  onChange: (value: Scope) => void;
+}) {
+  return <ScopePills label={label} options={SCOPE_TABS} value={value} onChange={onChange} />;
+}
+
+function ScopePills<T extends ScopeFilter>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   return (
     <div role="group" aria-label={label} className="flex flex-wrap items-center gap-2">
-      {SCOPE_FILTERS.map((filter) => (
+      {options.map((filter) => (
         <Button
           key={filter.value}
           variant={value === filter.value ? "default" : "secondary"}
