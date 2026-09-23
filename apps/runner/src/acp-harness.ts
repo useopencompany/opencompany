@@ -10,6 +10,8 @@ const ACP_STDERR_TAIL_LIMIT = 4_000;
 const ACP_FAILURE_DIAGNOSTIC_LIMIT = 2_000;
 const ACP_COMMAND_STREAM_RECONNECT_ATTEMPTS = 3;
 const ACP_GUEST_PROBE_INTERVAL_MS = 60_000;
+const ACP_GUEST_PROBE_RETRY_INTERVAL_MS = 15_000;
+const ACP_GUEST_PROBE_FAILURE_THRESHOLD = 2;
 const ACP_HEALTHY_SILENCE_WARNING_MS = 5 * 60_000;
 const logger = createLogger({ service: "opencompany-runner", runtime: "acp-harness" });
 
@@ -754,6 +756,7 @@ class AcpJsonRpcClient {
   private pumping = false;
   private watchGeneration = 0;
   private lastGuestActivityAt = Date.now();
+  private consecutiveGuestProbeFailures = 0;
   private warnedGuestActivityAt: number | null = null;
   private guestProbeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending = new Map<
@@ -788,7 +791,7 @@ class AcpJsonRpcClient {
         this.consumeStdout(data);
       },
       onStderr: (data: string) => {
-        this.lastGuestActivityAt = Date.now();
+        this.markGuestActivity();
         this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(-ACP_STDERR_TAIL_LIMIT);
       },
     });
@@ -872,7 +875,7 @@ class AcpJsonRpcClient {
   }
 
   private consumeStdout(data: string) {
-    this.lastGuestActivityAt = Date.now();
+    this.markGuestActivity();
     this.buffer += data;
     const lines = this.buffer.split("\n");
     this.buffer = lines.pop() ?? "";
@@ -1023,7 +1026,7 @@ class AcpJsonRpcClient {
             this.consumeStdout(data);
           },
           onStderr: (data: string) => {
-            this.lastGuestActivityAt = Date.now();
+            this.markGuestActivity();
             this.lastStderr = (this.lastStderr + this.input.redact(data)).slice(
               -ACP_STDERR_TAIL_LIMIT,
             );
@@ -1057,12 +1060,17 @@ class AcpJsonRpcClient {
     );
   }
 
-  private scheduleGuestProbe() {
+  private markGuestActivity() {
+    this.lastGuestActivityAt = Date.now();
+    this.consecutiveGuestProbeFailures = 0;
+  }
+
+  private scheduleGuestProbe(delayMs = ACP_GUEST_PROBE_INTERVAL_MS) {
     if (this.stopping || this.failure) return;
     this.guestProbeTimer = setTimeout(() => {
       this.guestProbeTimer = null;
       void this.checkGuestHealth();
-    }, ACP_GUEST_PROBE_INTERVAL_MS);
+    }, delayMs);
     this.guestProbeTimer.unref?.();
   }
 
@@ -1075,6 +1083,7 @@ class AcpJsonRpcClient {
       // alive. Silence alone is normal during thinking and long tools; test guest execution
       // before entering the existing fenced recovery path, which can reboot from disk state.
       await probeSandboxGuest(this.input.sandbox);
+      this.consecutiveGuestProbeFailures = 0;
       const silenceMs = Date.now() - lastActivityAt;
       if (
         !this.stopping &&
@@ -1098,6 +1107,16 @@ class AcpJsonRpcClient {
     } catch (error) {
       if (this.stopping || this.failure || this.lastGuestActivityAt !== lastActivityAt) return;
       const cause = asError(error);
+      this.consecutiveGuestProbeFailures += 1;
+      if (this.consecutiveGuestProbeFailures < ACP_GUEST_PROBE_FAILURE_THRESHOLD) {
+        logger.warn("ACP guest health probe failed; confirming before recovery", {
+          event: "opencompany.goat_acp_guest_probe_retrying",
+          adapter: this.input.adapterName,
+          consecutive_failures: this.consecutiveGuestProbeFailures,
+          error_name: cause.name,
+        });
+        return;
+      }
       this.fail(
         new CodexChatRetryableInfrastructureError(
           `${this.input.adapterName} sandbox stopped answering during the active turn.`,
@@ -1110,7 +1129,11 @@ class AcpJsonRpcClient {
       );
     } finally {
       // Schedule after completion so slow probes never overlap.
-      this.scheduleGuestProbe();
+      this.scheduleGuestProbe(
+        this.consecutiveGuestProbeFailures > 0
+          ? ACP_GUEST_PROBE_RETRY_INTERVAL_MS
+          : ACP_GUEST_PROBE_INTERVAL_MS,
+      );
     }
   }
 

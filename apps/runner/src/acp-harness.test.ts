@@ -120,12 +120,13 @@ describe("AcpHarness", () => {
         expect(transport.requests.some((request) => request.method === "session/prompt")).toBe(
           true,
         );
-        transport.run.mockImplementationOnce(async () => {
+        const rejectProbe = async () => {
           await new Promise((resolve) => setTimeout(resolve, 15_000));
           throw Object.assign(new Error("guest did not answer"), { name: "TimeoutError" });
-        });
+        };
+        transport.run.mockImplementationOnce(rejectProbe).mockImplementationOnce(rejectProbe);
 
-        await vi.advanceTimersByTimeAsync(75_000);
+        await vi.advanceTimersByTimeAsync(105_000);
         await rejected;
         expect(transport.run).toHaveBeenLastCalledWith("true", {
           timeoutMs: 15_000,
@@ -133,12 +134,57 @@ describe("AcpHarness", () => {
         });
         expect(transport.kill).toHaveBeenCalledWith(41);
         await vi.advanceTimersByTimeAsync(120_000);
-        expect(transport.run).toHaveBeenCalledTimes(2);
+        expect(transport.run).toHaveBeenCalledTimes(3);
       } finally {
         vi.useRealTimers();
       }
     },
   );
+
+  it("keeps a silent turn running after one transient guest probe timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      let finish: (() => Promise<void>) | undefined;
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({ id: message.id, result: { agentCapabilities: {} } });
+        } else if (message.method === "session/new") {
+          await emit({ id: message.id, result: { sessionId: "session_probe_recovers" } });
+        } else if (message.method === "session/prompt") {
+          finish = () => emit({ id: message.id, result: { stopReason: "end_turn" } });
+        }
+      });
+      const running = new AcpHarness().runTurn(
+        harnessInput(transport.sandbox, { timeoutMs: 3 * 60 * 60_000 }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      transport.run.mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        throw Object.assign(new Error("request handshake timed out"), { name: "TimeoutError" });
+      });
+
+      await vi.advanceTimersByTimeAsync(90_000);
+
+      expect(transport.kill).not.toHaveBeenCalled();
+      expect(transport.run).toHaveBeenCalledTimes(3);
+      expect(loggerMocks.warn).toHaveBeenCalledWith(
+        "ACP guest health probe failed; confirming before recovery",
+        {
+          event: "opencompany.goat_acp_guest_probe_retrying",
+          adapter: "Claude Code",
+          consecutive_failures: 1,
+          error_name: "TimeoutError",
+        },
+      );
+      expect(finish).toBeDefined();
+      await finish?.();
+      await expect(running).resolves.toMatchObject({
+        promptResponse: { stopReason: "end_turn" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("allows long silent work when the guest is healthy and stops probing after completion", async () => {
     vi.useFakeTimers();
