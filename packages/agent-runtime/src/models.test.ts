@@ -21,9 +21,11 @@ import {
 } from "./models";
 
 describe("Codex model catalog", () => {
-  it("offers Astra and the GPT 5.6 family for new Codex work", () => {
+  it("offers the GPT 6 and GPT 5.6 families for new Codex work", () => {
     expect(CODEX_AGENT_MODEL_IDS).toEqual([
       "openai/gpt-6-astra",
+      "openai/gpt-6-sol",
+      "openai/gpt-6-luna",
       "openai/gpt-5.6-sol",
       "openai/gpt-5.6-terra",
       "openai/gpt-5.6-luna",
@@ -41,6 +43,8 @@ describe("Codex model catalog", () => {
 
   it.each([
     ["openai/gpt-6-astra", "gpt-6-astra"],
+    ["openai/gpt-6-sol", "gpt-6-sol"],
+    ["openai/gpt-6-luna", "gpt-6-luna"],
     ["openai/gpt-5.6-sol", "gpt-5.6-sol"],
     ["openai/gpt-5.6-terra", "gpt-5.6-terra"],
     ["openai/gpt-5.6-luna", "gpt-5.6-luna"],
@@ -56,6 +60,12 @@ describe("Codex model catalog", () => {
       "openai/gpt-6-astra",
     );
     expect(AGENT_MODEL_CATALOG.map((model) => model.id)).toContain("openai/gpt-6-astra");
+    // Sol and Luna are verified on the opencompany provider, so they are not gated.
+    expect(resolveAvailableAgentModelId("openai/gpt-6-sol")).toBe("openai/gpt-6-sol");
+    expect(resolveAvailableAgentModelId("openai/gpt-6-luna")).toBe("openai/gpt-6-luna");
+    expect(AVAILABLE_AGENT_MODEL_CATALOG.map((model) => model.id)).toEqual(
+      expect.arrayContaining(["openai/gpt-6-sol", "openai/gpt-6-luna"]),
+    );
   });
 
   it("keeps retired Codex selections runnable for persisted work", () => {
@@ -67,6 +77,8 @@ describe("Codex model catalog", () => {
 
   it("recognizes only the subscription-eligible model IDs", () => {
     expect(isCodexSubscriptionModel("openai/gpt-6-astra")).toBe(false);
+    expect(isCodexSubscriptionModel("openai/gpt-6-sol")).toBe(false);
+    expect(isCodexSubscriptionModel("openai/gpt-6-luna")).toBe(false);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-sol")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-terra")).toBe(true);
     expect(isCodexSubscriptionModel("openai/gpt-5.6-luna")).toBe(false);

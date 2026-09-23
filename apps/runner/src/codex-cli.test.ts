@@ -14,11 +14,11 @@ import {
 
 describe("ensureCodexInstalled", () => {
   it("keeps the expected Codex CLI version", async () => {
-    const run = vi.fn().mockResolvedValue({ stdout: "codex-cli 0.153.4\n" });
+    const run = vi.fn().mockResolvedValue({ stdout: "codex-cli 0.156.1\n" });
 
     await ensureCodexInstalled({ commands: { run } } as never);
 
-    expect(CODEX_FALLBACK_NPM_PACKAGE).toBe("@openai/codex@0.153.4");
+    expect(CODEX_FALLBACK_NPM_PACKAGE).toBe("@openai/codex@0.156.1");
     expect(run).toHaveBeenCalledOnce();
     expect(run.mock.calls[0]?.[0]).toContain("codex --version");
     expect(run.mock.calls[0]?.[1]).toEqual({ timeoutMs: 60_000 });
@@ -27,22 +27,22 @@ describe("ensureCodexInstalled", () => {
   it("replaces a mismatched Codex CLI in the active home prefix", async () => {
     const run = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: "codex-cli 0.147.0\n" })
+      .mockResolvedValueOnce({ stdout: "codex-cli 0.150.0\n" })
       .mockResolvedValueOnce({ stdout: "" });
 
     await ensureCodexInstalled({ commands: { run } } as never);
 
     expect(run).toHaveBeenCalledTimes(2);
     expect(run.mock.calls[1]?.[0]).toContain('npm install -g --prefix "$HOME/.codex"');
-    expect(run.mock.calls[1]?.[0]).toContain("@openai/codex@0.153.4");
-    expect(run.mock.calls[1]?.[0]).toContain("codex-cli 0.153.4");
+    expect(run.mock.calls[1]?.[0]).toContain("@openai/codex@0.156.1");
+    expect(run.mock.calls[1]?.[0]).toContain("codex-cli 0.156.1");
   });
 });
 
 describe("ensureCodexAcpAdapterInstalled", () => {
   it("accepts only the exact adapter and bundled Codex versions", async () => {
     const run = vi.fn().mockResolvedValue({
-      stdout: "@agentclientprotocol/codex-acp 1.10.0\ncodex-cli 0.153.4\n",
+      stdout: "@agentclientprotocol/codex-acp 1.13.1\ncodex-cli 0.156.1\n",
     });
 
     await ensureCodexAcpAdapterInstalled({ commands: { run } } as never);
@@ -55,18 +55,18 @@ describe("ensureCodexAcpAdapterInstalled", () => {
     const run = vi
       .fn()
       .mockResolvedValueOnce({
-        stdout: "@agentclientprotocol/codex-acp 1.9.0\ncodex-cli 0.153.4\n",
+        stdout: "@agentclientprotocol/codex-acp 1.12.0\ncodex-cli 0.156.1\n",
       })
       .mockResolvedValueOnce({ stdout: "" });
 
     await ensureCodexAcpAdapterInstalled({ commands: { run } } as never);
 
-    expect(run.mock.calls[1]?.[0]).toContain("@agentclientprotocol/codex-acp@1.10.0");
-    expect(run.mock.calls[1]?.[0]).toContain("@openai/codex@0.153.4");
+    expect(run.mock.calls[1]?.[0]).toContain("@agentclientprotocol/codex-acp@1.13.1");
+    expect(run.mock.calls[1]?.[0]).toContain("@openai/codex@0.156.1");
     expect(run.mock.calls[1]?.[0]).toContain(
-      "test \"$(codex-acp --version)\" = '@agentclientprotocol/codex-acp 1.10.0'",
+      "test \"$(codex-acp --version)\" = '@agentclientprotocol/codex-acp 1.13.1'",
     );
-    expect(run.mock.calls[1]?.[0]).toContain("test \"$(codex --version)\" = 'codex-cli 0.153.4'");
+    expect(run.mock.calls[1]?.[0]).toContain("test \"$(codex --version)\" = 'codex-cli 0.156.1'");
   });
 });
 
