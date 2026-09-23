@@ -37,14 +37,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useEffect,
-  useMemo,
-  useOptimistic,
-  useState,
-  useSyncExternalStore,
-  useTransition,
-} from "react";
+import { useEffect, useMemo, useOptimistic, useState, useTransition } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { CapabilityModeToggle } from "@/components/CapabilityModeToggle";
 import { ConvexDeployKeyConnectionForm } from "@/components/ConvexDeployKeyConnectionForm";
@@ -58,6 +51,7 @@ import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginC
 import { PostHogEventsSetup } from "@/components/PostHogEventsSetup";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
+import { useHydrated } from "@/components/useHydrated";
 import {
   type CapabilityId,
   type CapabilityMode,
@@ -2529,16 +2523,8 @@ function displayToolName(value: string) {
   return words ? `${words.slice(0, 1).toLocaleUpperCase()}${words.slice(1)}` : value;
 }
 
-const subscribeToHydration = () => () => undefined;
-const getClientHydrationSnapshot = () => true;
-const getServerHydrationSnapshot = () => false;
-
 function LocalDateTime({ value }: { value: string }) {
-  const hydrated = useSyncExternalStore(
-    subscribeToHydration,
-    getClientHydrationSnapshot,
-    getServerHydrationSnapshot,
-  );
+  const hydrated = useHydrated();
 
   return (
     <time dateTime={value}>
