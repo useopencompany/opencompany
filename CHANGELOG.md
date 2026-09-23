@@ -20,6 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
 
+## [1.34.0] - 2026-09-23
+
+### Added
+- work in up to four chats at once. drag a chat from the sidebar to a pane edge, or choose open right or open below from its menu. resize the panes and return to the same layout after a refresh (#2005, #2008) — @louis.
+- choose gpt 6 sol or gpt 6 luna in chat, workflows, and codex coding sessions. both use workspace credits in normal chat, even with a connected chatgpt subscription (#2006) — @louis.
+- choose claude opus 5.5 in chat and claude code sessions, including existing coding sandboxes (#2001, #2003) — @louis.
+- select ultracode from claude code's reasoning choices in chats and workflows using sonnet 5 or opus 5.5 (#2002) — @louis.
+
+### Fixed
+- renamed workflows now show their current name when you select their shortcut in the composer (#2004) — @louis.
+- creating, commenting on, or archiving a task no longer waits up to five extra seconds for the page to catch up (#1998) — @louis.
+- chats can refresh an expired connection automatically, so you can keep working without reloading the page (#1996) — @louis.
+- if you set up company agent identities in slack, thread replies now reach the agent even when your slack and opencompany emails differ (#1997) — @louis.
+- coding sessions are less likely to restart or fail because of a brief sandbox connection timeout (#1999) — @louis.
+
 ## [1.33.0] - 2026-09-22
 
 ### Added
