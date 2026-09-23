@@ -26,6 +26,15 @@ describe("tab composer drafts", () => {
     expect(values.has(key)).toBe(false);
   });
 
+  it("keeps a workflow's current display name separate from its stable id", () => {
+    const workflowDraft = {
+      input: "#daily-brief Prepare the update",
+      mentions: [{ kind: "workflow" as const, id: "morning-test", name: "Daily Brief" }],
+    };
+    persistComposerDraft(key, workflowDraft);
+    expect(readComposerDraft(key)).toEqual(workflowDraft);
+  });
+
   it("does not read a draft from another tab's storage", () => {
     persistComposerDraft(key, draft);
     const firstTab = values;
