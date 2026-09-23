@@ -3499,7 +3499,7 @@ function conversationDto(conversation: {
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
   composerSettings: {
-    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    reasoningEffort: "low" | "medium" | "high" | "xhigh" | "ultracode";
     planModeEnabled?: boolean;
     goalMode?: { objective: string; tokenBudget?: number | null } | null;
   } | null;

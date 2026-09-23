@@ -1041,9 +1041,10 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       },
     );
 
+    const turn = claudeTurn({ settings: { reasoningEffort: "ultracode" } });
     await expect(
       runClaudeCodeChatTurn({
-        turn: claudeTurn(),
+        turn,
         session: claudeSession(),
         env: env(),
       }),
@@ -1054,10 +1055,11 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       expect.objectContaining({
         existingSessionId: "claude_thread_1",
         model: "claude-sonnet-5",
+        reasoningEffort: "ultracode",
         permissionMode: "bypassPermissions",
       }),
     );
-    expect(chatMocks.loadCodexChatSessionSkills).toHaveBeenCalledWith(claudeTurn(), false);
+    expect(chatMocks.loadCodexChatSessionSkills).toHaveBeenCalledWith(turn, false);
     expect(projector.finalize).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "acp_session_1",

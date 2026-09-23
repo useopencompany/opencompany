@@ -1,4 +1,8 @@
-import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type {
+  AgentModelId,
+  CloudCodingReasoningEffort,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import {
   APPROVAL_RESOLUTIONS,
   type ApprovalResolution,
@@ -114,7 +118,7 @@ export type WorkflowStep = {
   model: string;
   // Concrete cloud-coding model selected when `model` is "codex" or "claude-code".
   runtimeModel?: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   instructions: string;
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
@@ -298,7 +302,7 @@ export type HarnessWorkflowStep = {
   title: string;
   engine: HarnessEngine;
   model: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
@@ -342,7 +346,7 @@ export type HarnessSpec = {
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
-    reasoningEffort?: CodexReasoningEffort;
+    reasoningEffort?: CloudCodingReasoningEffort;
     goalMode?: {
       objective: string;
       tokenBudget?: number | null;
@@ -577,7 +581,7 @@ export type CodexChatTurnSettings = {
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
   taskResultMode?: TaskResultMode;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
   scheduledWakeup?: {

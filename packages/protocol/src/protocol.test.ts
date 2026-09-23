@@ -9,6 +9,7 @@ import {
   CreateTaskBodySchema,
   CreateTaskCommentBodySchema,
   InvokeWorkflowBodySchema,
+  MessageEngineSchema,
   MessageReadModelSchema,
   MessageSummaryReadModelSchema,
   ReadModelSchema,
@@ -18,6 +19,23 @@ import {
 } from "./schemas";
 
 describe("headless protocol", () => {
+  it("accepts Ultracode for Claude Code and rejects it for Codex", () => {
+    expect(
+      MessageEngineSchema.safeParse({
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "ultracode" },
+      }).success,
+    ).toBe(true);
+    expect(
+      MessageEngineSchema.safeParse({
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "ultracode" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts Task comments with text, attachments, or both", () => {
     expect(
       CreateTaskCommentBodySchema.safeParse({

@@ -2923,7 +2923,7 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("selects Opus 5.5 and submits per-turn reasoning effort", async () => {
+  it("selects Opus 5.5 and submits Ultracode", async () => {
     const label = "Claude Opus 5.5";
     const model = "anthropic/claude-opus-5.5";
     const user = userEvent.setup();
@@ -2972,6 +2972,12 @@ describe("Surface chat streaming UI", () => {
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Ultracode (click to cycle)" }),
+    ).toHaveAttribute("title", "XHigh reasoning with dynamic workflows");
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
@@ -2985,7 +2991,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "xhigh" },
+        settings: { reasoningEffort: "ultracode" },
       },
     });
   });
@@ -3024,6 +3030,15 @@ describe("Surface chat streaming UI", () => {
     expect(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
 
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
@@ -3036,7 +3051,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "high" },
+        settings: { reasoningEffort: "low" },
       },
     });
   });

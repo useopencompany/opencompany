@@ -40,7 +40,15 @@ export const ConversationRuntimeSchema = z
   })
   .strict()
   .openapi("ConversationRuntime");
-export const EngineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const CodexReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const ClaudeCodeReasoningEffortSchema = z.enum([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "ultracode",
+]);
+export const EngineReasoningEffortSchema = ClaudeCodeReasoningEffortSchema;
 export const CodexGoalModeSchema = z
   .object({
     objective: z.string().min(1).max(4_000),
@@ -70,7 +78,7 @@ export const MessageEngineSchema = z
         schemaVersion: z.literal(1),
         settings: z
           .object({
-            reasoningEffort: EngineReasoningEffortSchema,
+            reasoningEffort: CodexReasoningEffortSchema,
             planModeEnabled: z.boolean().optional(),
             goalMode: CodexGoalModeSchema.nullable().optional(),
           })
@@ -83,7 +91,7 @@ export const MessageEngineSchema = z
         schemaVersion: z.literal(1),
         settings: z
           .object({
-            reasoningEffort: EngineReasoningEffortSchema,
+            reasoningEffort: ClaudeCodeReasoningEffortSchema,
           })
           .strict(),
       })

@@ -433,6 +433,7 @@ describe("AcpHarness", () => {
             emitRawSDKMessages: [{ type: "system", subtype: "init" }],
             options: {
               maxTurns: 250,
+              settings: { ultracode: false },
               disallowedTools: ["Monitor"],
               strictMcpConfig: true,
               mcpServers: {
@@ -481,6 +482,65 @@ describe("AcpHarness", () => {
       onEngineStopped.mock.invocationCallOrder[0] ?? 0,
     );
   });
+
+  it.each([
+    { existingSessionId: null, method: "session/new", loadedSession: false },
+    { existingSessionId: "session_ultracode", method: "session/load", loadedSession: true },
+  ])(
+    "passes Ultracode through Claude's native SDK settings on $method",
+    async ({ existingSessionId, method, loadedSession }) => {
+      const transport = fakeAcpSandbox(async (message, emit) => {
+        if (message.method === "initialize") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { agentCapabilities: { loadSession: true } },
+          });
+        } else if (message.method === method) {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              sessionId: "session_ultracode",
+              configOptions: [{ id: "effort" }],
+            },
+          });
+        } else if (message.method === "session/prompt") {
+          await emit({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { stopReason: "end_turn" },
+          });
+        }
+      });
+
+      await expect(
+        new AcpHarness().runTurn(
+          harnessInput(transport.sandbox, {
+            existingSessionId,
+            reasoningEffort: "ultracode",
+          }),
+        ),
+      ).resolves.toMatchObject({ sessionId: "session_ultracode", loadedSession });
+
+      expect(transport.requests.find((request) => request.method === method)).toMatchObject({
+        params: {
+          _meta: {
+            claudeCode: {
+              options: { settings: { ultracode: true } },
+            },
+          },
+        },
+      });
+      expect(
+        transport.requests.some(
+          (request) =>
+            request.method === "session/set_config_option" &&
+            (request.params as { configId?: string }).configId === "effort",
+        ),
+      ).toBe(false);
+    },
+  );
 
   it.each([
     {

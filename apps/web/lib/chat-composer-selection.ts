@@ -1,5 +1,9 @@
-import { type AgentModelId, isCodexReasoningEffort } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import {
+  type AgentModelId,
+  isClaudeCodeReasoningEffort,
+  isCodexReasoningEffort,
+} from "@opencompany/agent-runtime";
+import type { CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 import { AUTO_MODEL_SELECTION, type AutoModelSelection } from "@/lib/chat-auto-model";
 import {
   CLAUDE_PICKER_VALUE,
@@ -151,12 +155,15 @@ function engineScopedPreference<T extends string>(
 
 // Kept per engine because Codex and Claude Code have different sensible defaults: dialling one
 // down must not drag the other with it.
-const reasoningEffortPreference = engineScopedPreference<CodexReasoningEffort>(
+const reasoningEffortPreference = engineScopedPreference<CloudCodingReasoningEffort>(
   REASONING_EFFORT_STORAGE_KEY,
-  (stored, engine) =>
-    stored !== null && isCodexReasoningEffort(stored)
-      ? stored
-      : ENGINE_REGISTRY[engine].defaultReasoningEffort,
+  (stored, engine) => {
+    if (stored !== null) {
+      if (engine === "claude_code" && isClaudeCodeReasoningEffort(stored)) return stored;
+      if (engine === "codex" && isCodexReasoningEffort(stored)) return stored;
+    }
+    return ENGINE_REGISTRY[engine].defaultReasoningEffort;
+  },
 );
 
 const engineModelPreference = engineScopedPreference<EngineChatModelId>(
