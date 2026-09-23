@@ -517,8 +517,14 @@ describe("chat pane layout", () => {
 
     it("waits for live chat data instead of closing everything", () => {
       const layout = twoPanes();
-      // An empty set means "not loaded yet", not "no chats exist".
-      expect(pruneClosedChats(layout, new Set(), null)).toBe(layout);
+      expect(pruneClosedChats(layout, null, null)).toBe(layout);
+    });
+
+    it("closes stored chats once an empty workspace has loaded", () => {
+      const pruned = pruneClosedChats(twoPanes(), new Set(), null);
+
+      expect(countPanes(pruned.root)).toBe(1);
+      expect(openPaneChatIds(pruned.root)).toEqual([]);
     });
 
     it("keeps the routed chat, which may still be optimistic", () => {

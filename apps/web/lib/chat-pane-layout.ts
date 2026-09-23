@@ -531,16 +531,16 @@ export function applyRoutedChat(
  * Closes panes holding a chat the reader can no longer open — archived,
  * deleted, or belonging to another workspace.
  *
- * `knownChatIds` empty means chat data has not arrived yet, which is not the
- * same as "no chats exist", so nothing is closed. The routed chat is always
- * kept: a chat opened seconds ago has not reached the live set yet.
+ * `knownChatIds` null means chat data has not arrived yet, which is not the
+ * same as an empty loaded workspace. The routed chat is always kept: a chat
+ * opened seconds ago has not reached the live set yet.
  */
 export function pruneClosedChats(
   layout: ChatPaneLayout,
-  knownChatIds: ReadonlySet<string>,
+  knownChatIds: ReadonlySet<string> | null,
   routedChatId: string | null,
 ): ChatPaneLayout {
-  if (knownChatIds.size === 0) return layout;
+  if (!knownChatIds) return layout;
   let next = layout;
   for (const pane of listPanes(layout.root)) {
     if (pane.chatId && pane.chatId !== routedChatId && !knownChatIds.has(pane.chatId)) {
