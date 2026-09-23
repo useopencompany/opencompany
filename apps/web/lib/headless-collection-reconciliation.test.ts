@@ -7,21 +7,28 @@ import {
 } from "./headless-collection-reconciliation";
 
 const captureExceptionMock = vi.hoisted(() => vi.fn());
+const warnMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@opencompany/observability", () => ({
   captureException: captureExceptionMock,
+  createLogger: vi.fn(() => ({ warn: warnMock })),
 }));
 
-beforeEach(() => captureExceptionMock.mockClear());
+beforeEach(() => {
+  captureExceptionMock.mockClear();
+  warnMock.mockClear();
+});
 
 describe("committed projection reconciliation", () => {
   it("accepts a delayed Electric projection after the command has committed", async () => {
     const timeout = new TimeoutWaitingForTxIdError(42, "headless-workflows:v1:workspace_1");
 
     await expect(reconcileCommittedProjection(Promise.reject(timeout))).resolves.toBeUndefined();
-    expect(captureExceptionMock).toHaveBeenCalledWith(timeout, {
+    expect(warnMock).toHaveBeenCalledWith("Committed projection reconciliation timed out", {
       event: "opencompany.read_model_reconciliation_timeout",
+      error: timeout,
     });
+    expect(captureExceptionMock).not.toHaveBeenCalled();
   });
 
   it("does not hide unexpected reconciliation failures", async () => {
