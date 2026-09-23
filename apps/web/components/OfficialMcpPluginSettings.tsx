@@ -51,6 +51,7 @@ import { PluginAccountRow, PluginConnectionFeedback } from "@/components/PluginC
 import { PostHogEventsSetup } from "@/components/PostHogEventsSetup";
 import { RenderApiKeyConnectionForm } from "@/components/RenderApiKeyConnectionForm";
 import { ToolPermissionRow } from "@/components/ToolPermissionRow";
+import { useHydrated } from "@/components/useHydrated";
 import {
   type CapabilityId,
   type CapabilityMode,
@@ -1699,11 +1700,16 @@ function DiscoveryStatus({
         stale: { label: "Stale", variant: "warning" as const },
         error: { label: "Failed", variant: "destructive" as const },
       }[discovery.status];
-  const summary = needsConnection
-    ? `Connect a ${pluginLabel} account to activate tools.`
-    : discovery.discoveredAt
-      ? `${discovery.toolCount} ${discovery.toolCount === 1 ? "tool" : "tools"} discovered ${formatDateTime(discovery.discoveredAt)}`
-      : "Waiting for the first successful discovery.";
+  const summary = needsConnection ? (
+    `Connect a ${pluginLabel} account to activate tools.`
+  ) : discovery.discoveredAt ? (
+    <>
+      {discovery.toolCount} {discovery.toolCount === 1 ? "tool" : "tools"} discovered{" "}
+      <LocalDateTime value={discovery.discoveredAt} />
+    </>
+  ) : (
+    "Waiting for the first successful discovery."
+  );
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-muted px-3 py-2.5">
@@ -1712,7 +1718,7 @@ function DiscoveryStatus({
         <p className="text-[12px] leading-4 text-ink">{summary}</p>
         {discovery.refreshAfter ? (
           <p className="mt-0.5 text-[11px] leading-4 text-ink-faint">
-            Next automatic attempt {formatDateTime(discovery.refreshAfter)}
+            Next automatic attempt <LocalDateTime value={discovery.refreshAfter} />
           </p>
         ) : null}
       </div>
@@ -2517,10 +2523,21 @@ function displayToolName(value: string) {
   return words ? `${words.slice(0, 1).toLocaleUpperCase()}${words.slice(1)}` : value;
 }
 
-function formatDateTime(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+function LocalDateTime({ value }: { value: string }) {
+  const hydrated = useHydrated();
+
+  return (
+    <time dateTime={value}>
+      {hydrated ? formatDateTime(value) : formatDateTime(value, "en-US", "UTC")}
+    </time>
+  );
+}
+
+function formatDateTime(value: string, locale?: string, timeZone?: string) {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
+    ...(timeZone ? { timeZone } : {}),
   }).format(new Date(value));
 }
 
