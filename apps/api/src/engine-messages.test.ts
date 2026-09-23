@@ -7,7 +7,7 @@ const connectedAuth = {
 };
 
 describe("engine message model admission", () => {
-  it("admits Opus 5 and passes its CLI model name and effort to Claude Code", async () => {
+  it("admits Opus 5.5 and passes its CLI model name and effort to Claude Code", async () => {
     await expect(
       admitEngineMessage({
         actor: {} as never,
@@ -16,14 +16,14 @@ describe("engine message model admission", () => {
           schemaVersion: 1,
           settings: { reasoningEffort: "high" },
         },
-        model: "anthropic/claude-opus-5",
+        model: "anthropic/claude-opus-5.5",
         defaultProductModel: "moonshotai/kimi-k3",
         auth: connectedAuth as never,
       }),
     ).resolves.toEqual({
       engine: "claude_code",
-      model: "anthropic/claude-opus-5",
-      runtimeModel: "claude-opus-5",
+      model: "anthropic/claude-opus-5.5",
+      runtimeModel: "claude-opus-5-5",
       settings: { reasoningEffort: "high" },
     });
   });

@@ -53,7 +53,7 @@ describe("image context budgets", () => {
     [1920, 1080, 2691],
     [3840, 2160, 4784],
   ])("matches Claude's documented high-resolution example %ix%i", (width, height, tokens) => {
-    expect(estimateImageContextTokens(image(width, height), "anthropic/claude-opus-5")).toBe(
+    expect(estimateImageContextTokens(image(width, height), "anthropic/claude-opus-5.5")).toBe(
       tokens,
     );
   });

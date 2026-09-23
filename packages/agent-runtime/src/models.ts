@@ -47,6 +47,7 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 // here, beside the model definitions, so adding or retiring a model updates every model picker.
 export const OPENCOMPANY_CHAT_DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k3";
 export const OPENCOMPANY_CHAT_MODEL_IDS = [
+  "anthropic/claude-opus-5.5",
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
   "openai/gpt-5.6-sol",
@@ -61,10 +62,11 @@ export const OPENCOMPANY_CHAT_MODEL_IDS = [
   "zai/glm-5.2",
 ] as const satisfies readonly AgentModelId[];
 
-// Opus 4.8 remains loadable for persisted conversations and runtime settings, but is unavailable
-// for new selections. This rule applies to normal chat and both cloud coding agents.
+// Superseded Opus models remain loadable for persisted conversations and runtime settings, but
+// are unavailable for new selections. This rule applies to normal chat and both cloud coding agents.
 export const AGENT_MODEL_PICKER_HIDDEN_IDS = [
   "anthropic/claude-opus-4.8",
+  "anthropic/claude-opus-5",
 ] as const satisfies readonly AgentModelId[];
 const HIDDEN_MODEL_PICKER_ID_SET = new Set<string>(AGENT_MODEL_PICKER_HIDDEN_IDS);
 
@@ -145,6 +147,7 @@ export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonn
 // the turn by name instead of silently answering on a different model.
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-5.5",
   "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
   "anthropic/claude-fable-5.1",
@@ -486,6 +489,19 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
       },
       exposure: "hidden",
     },
+  },
+  {
+    id: "anthropic/claude-opus-5.5",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Opus 5.5",
+    description: "Anthropic's leading model for long-running agentic coding and knowledge work.",
+    category: "Deep",
+    // Adaptive reasoning is always on, so sending a fixed thinking budget would be rejected.
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 2, cost: 3 },
   },
   {
     id: "anthropic/claude-fable-5.1",
