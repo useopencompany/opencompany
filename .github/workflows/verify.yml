@@ -253,8 +253,8 @@ jobs:
       # excluded: a `.turbo` entry carrying them cost a median 94s and a p90 of 262s to
       # restore, while the build it can skip runs in a median 73s. Restoring was slower
       # than rebuilding in 27 of 40 sampled runs, so the entry was a net loss on the
-      # gate's critical path. Lint, typecheck, and test artifacts stay cached because
-      # they are small enough to restore in ~16s.
+      # gate's critical path. The other jobs keep their Turbo caches: their artifacts are
+      # small enough to restore in ~16s, so those entries still pay for themselves.
       - name: Restore build dependency cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
