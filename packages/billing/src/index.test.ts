@@ -55,6 +55,7 @@ describe("calculateModelUsageCost", () => {
     ["anthropic/claude-sonnet-5", 22_050],
     ["anthropic/claude-opus-4.7", 36_750],
     ["anthropic/claude-opus-4.8", 36_750],
+    ["anthropic/claude-opus-5.5", 29_200],
     ["anthropic/claude-fable-5", 73_500],
     ["google/gemini-3-flash", 4_050],
     ["google/gemini-3.1-flash-lite-preview", 2_030],
@@ -266,7 +267,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-09-10.standard.1",
+        pricingVersion: "2026-09-23.standard.1",
       },
     });
   });
@@ -287,7 +288,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-09-10.standard.1",
+        pricingVersion: "2026-09-23.standard.1",
       },
     });
   });

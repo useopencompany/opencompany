@@ -75,11 +75,16 @@ describe("Codex model catalog", () => {
 });
 
 describe("Claude Code model catalog", () => {
-  it("accepts Opus 5 for sandbox execution with adaptive reasoning", () => {
-    expect(isClaudeCodeModelId("anthropic/claude-opus-5")).toBe(true);
-    expect(claudeCodeCliModelNameForModelId("anthropic/claude-opus-5")).toBe("claude-opus-5");
-    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-opus-5")).toBe(true);
-    expect(claudeCodeModelSupportsReasoningEffort("claude-opus-5")).toBe(true);
+  it("accepts Opus 5.5 for sandbox execution with adaptive reasoning", () => {
+    expect(isClaudeCodeModelId("anthropic/claude-opus-5.5")).toBe(true);
+    expect(claudeCodeCliModelNameForModelId("anthropic/claude-opus-5.5")).toBe("claude-opus-5-5");
+    expect(claudeCodeModelSupportsReasoningEffort("anthropic/claude-opus-5.5")).toBe(true);
+    expect(claudeCodeModelSupportsReasoningEffort("claude-opus-5-5")).toBe(true);
+    expect(getAgentModelRuntimeOptions("anthropic/claude-opus-5.5")).toEqual({
+      supportsReasoning: true,
+      providerOptions: { gateway: { caching: "auto" } },
+      reasoningExposure: "hidden",
+    });
   });
 
   it("maps Fable 5 to the Claude CLI and exposes adaptive reasoning", () => {
