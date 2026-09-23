@@ -59,7 +59,7 @@ function imagePolicy(modelId: string | undefined, detail: unknown) {
   // Match only verified families; don't silently apply one provider's rules to other models.
   if (
     modelId &&
-    /^openai\/(gpt-5\.4(?:-(?:mini|nano))?|gpt-5\.5|gpt-5\.6-(?:sol|terra|luna)|gpt-6-(?:astra|sol|luna))$/.test(
+    /^openai\/(gpt-5\.4(?:-(?:mini|nano))?|gpt-5\.5|gpt-5\.6-(?:sol|terra|luna)|gpt-6-astra)$/.test(
       modelId,
     )
   ) {
@@ -79,8 +79,7 @@ function imagePolicy(modelId: string | undefined, detail: unknown) {
     if (resolvedDetail === "high") {
       return {
         patchSize: 32,
-        // GPT-6 lifts the high-detail edge limit across the family; GPT-5.x still resizes to 2048.
-        maxEdge: modelId.startsWith("openai/gpt-6-") ? 65535 : 2048,
+        maxEdge: modelId === "openai/gpt-6-astra" ? 65535 : 2048,
         maxPatches: 2500,
         multiplier: 1.2,
         resizesToBudget: true,
