@@ -1408,6 +1408,57 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
+  it("uses the Codex preference when a Claude Ultracode chat starts background Codex", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_claude_ultracode",
+          title: "Claude Ultracode",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          codexComposerSettings: {
+            reasoningEffort: "ultracode",
+            planModeEnabled: false,
+            goalMode: null,
+          },
+          runtime: {
+            status: "running",
+            activeRunId: "run_claude_ultracode",
+            hasError: false,
+            updatedAt: new Date().toISOString(),
+          },
+          messages: [],
+        }}
+        codexConnected
+        claudeCodeConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
+    await user.type(textarea, "& @codex refactor the parser");
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledOnce());
+    expect(headlessChatMocks.startBackground.mock.calls[0]![0]).toMatchObject({
+      content: "refactor the parser",
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "medium" },
+      },
+    });
+  });
+
   it("starts a selected workflow from a running Codex chat without interrupting Codex", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -963,12 +963,12 @@ export function Surface({
   // model arriving after hydration) lands on that engine's own last-used level.
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
   const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
-  const codexReasoningEffort =
-    composerEngine === "claude_code" &&
-    requestedReasoningEffort === "ultracode" &&
-    !claudeCodeModelSupportsUltracode(claudeModel)
-      ? "xhigh"
-      : requestedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   // A running turn gates nothing: the message becomes a queued turn the user can steer into the
   // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
   // leave a note on. Background sends keep their own dispatch rules.
@@ -4003,12 +4003,12 @@ export function QuickChatComposer({
     : selectedEngine;
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
   const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
-  const codexReasoningEffort =
-    composerEngine === "claude_code" &&
-    requestedReasoningEffort === "ultracode" &&
-    !claudeCodeModelSupportsUltracode(claudeModel)
-      ? "xhigh"
-      : requestedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   const isEngineChat = composerEngine !== null;
   const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
@@ -6179,6 +6179,25 @@ function codexReasoningLabel(effort: CloudCodingReasoningEffort) {
   if (effort === "xhigh") return "XHigh";
   if (effort === "ultracode") return "Ultracode";
   return effort.charAt(0).toUpperCase() + effort.slice(1);
+}
+
+function effectiveComposerReasoningEffort(input: {
+  engine: EngineChatKind | null;
+  claudeModel: ClaudeChatModelId;
+  requested: CloudCodingReasoningEffort;
+  remembered: CloudCodingReasoningEffort;
+}): CloudCodingReasoningEffort {
+  if (input.engine === "codex" && !isCodexReasoningEffort(input.requested)) {
+    return input.remembered;
+  }
+  if (
+    input.engine === "claude_code" &&
+    input.requested === "ultracode" &&
+    !claudeCodeModelSupportsUltracode(input.claudeModel)
+  ) {
+    return "xhigh";
+  }
+  return input.requested;
 }
 
 function nextCodexReasoningEffort(
