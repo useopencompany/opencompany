@@ -4197,7 +4197,7 @@ describe("Surface chat streaming UI", () => {
           workflows: [
             {
               id: "morning-test",
-              name: "Morning Test",
+              name: "Daily Brief",
               description: "Run the morning checks.",
             },
           ],
@@ -4224,13 +4224,13 @@ describe("Surface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#");
-    await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
-    expect(textarea).toHaveValue("#morning-test ");
+    await user.click(await screen.findByRole("option", { name: /Daily Brief/i }));
+    expect(textarea).toHaveValue("#daily-brief ");
     const overlay = textarea.parentElement?.querySelector(
       '[data-testid="composer-mention-overlay"]',
     );
     expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
-    expect(overlay).toHaveTextContent("#morning-test");
+    expect(overlay).toHaveTextContent("#daily-brief");
     await user.type(textarea, "run today's checks with /");
     await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
     await user.type(textarea, "{Enter}");
@@ -4239,7 +4239,7 @@ describe("Surface chat streaming UI", () => {
     expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
       "morning-test",
       {
-        description: "#morning-test run today's checks with /smooth-shadow-ring",
+        description: "#daily-brief run today's checks with /smooth-shadow-ring",
         skillIds: ["smooth-shadow-ring"],
       },
       { scopeKey: "workspace_1" },

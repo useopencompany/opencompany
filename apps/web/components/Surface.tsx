@@ -7,6 +7,7 @@ import type {
   TaskStage,
   TaskStatus,
 } from "@opencompany/agent/task-runtime-types";
+import { workflowSlugFromName } from "@opencompany/agent/workflow-slug";
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
@@ -5490,7 +5491,7 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
-  if (mention.kind === "workflow") return `#${mention.id}`;
+  if (mention.kind === "workflow") return `#${workflowSlugFromName(mention.name ?? mention.id)}`;
   return `/${mention.name ?? mention.id}`;
 }
 
@@ -5645,10 +5646,13 @@ function workflowMentionsFromPastedText(input: {
   workflows: WorkflowCatalogItem[];
 }): ChatMention[] {
   const matches = input.workflows.flatMap((workflow) => {
-    if (!input.workflowIds.has(workflow.id)) return [];
+    const displayId = workflowSlugFromName(workflow.name);
+    const usesCurrentName = input.workflowIds.has(displayId);
+    if (!usesCurrentName && !input.workflowIds.has(workflow.id)) return [];
     const mention: ChatMention = {
       kind: "workflow",
       id: workflow.id,
+      ...(usesCurrentName ? { name: workflow.name } : {}),
     };
     return chatMentionIsVisible(input.pastedText, mention) &&
       chatMentionIsVisible(input.fullInput, mention)
@@ -5707,12 +5711,13 @@ function buildMentionOptions(input: {
         if (workflow.id === AD_HOC_TASK_ID) continue;
         const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
         if (query && !haystack.includes(query)) continue;
+        const token = `#${workflowSlugFromName(workflow.name)}`;
         options.push({
           kind: "workflow",
-          token: `#${workflow.id}`,
+          token,
           label: workflow.name,
           description: workflow.description,
-          mention: { kind: "workflow", id: workflow.id },
+          mention: { kind: "workflow", id: workflow.id, name: workflow.name },
         });
       }
     }
