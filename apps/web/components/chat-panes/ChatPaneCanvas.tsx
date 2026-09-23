@@ -167,7 +167,12 @@ function ChatPaneResizer({
   const beforeSize = sizes[seam.index] ?? 0;
   const pairTotal = beforeSize + (sizes[seam.index + 1] ?? 0);
 
-  const dragRef = useRef<{ origin: number; splitPx: number; start: number } | null>(null);
+  const dragRef = useRef<{
+    origin: number;
+    splitPx: number;
+    start: number;
+    applied: number;
+  } | null>(null);
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -186,6 +191,7 @@ function ChatPaneResizer({
         origin: horizontal ? event.clientX : event.clientY,
         splitPx,
         start: beforeSize,
+        applied: beforeSize,
       };
       event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
@@ -198,10 +204,17 @@ function ChatPaneResizer({
       const drag = dragRef.current;
       if (!drag) return;
       const moved = (horizontal ? event.clientX : event.clientY) - drag.origin;
-      const target = drag.start + (moved / drag.splitPx) * 100;
-      resizeSplitBoundary(seam.splitId, seam.index, target - beforeSize);
+      const rawTarget = drag.start + (moved / drag.splitPx) * 100;
+      const target = Math.max(MIN_PANE_PERCENT, Math.min(pairTotal - MIN_PANE_PERCENT, rawTarget));
+      const delta = target - drag.applied;
+      if (delta === 0) return;
+      drag.applied = target;
+      // Pointer moves are continuous events and React may batch several before
+      // rendering. Accumulating from the last applied target keeps queued
+      // updates additive instead of applying each move against stale props.
+      resizeSplitBoundary(seam.splitId, seam.index, delta);
     },
-    [beforeSize, horizontal, resizeSplitBoundary, seam.index, seam.splitId],
+    [horizontal, pairTotal, resizeSplitBoundary, seam.index, seam.splitId],
   );
 
   const endDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
