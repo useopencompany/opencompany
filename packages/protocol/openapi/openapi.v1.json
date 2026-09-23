@@ -5919,7 +5919,8 @@
               "low",
               "medium",
               "high",
-              "xhigh"
+              "xhigh",
+              "ultracode"
             ]
           },
           "planModeEnabled": {
@@ -6547,7 +6548,8 @@
                       "low",
                       "medium",
                       "high",
-                      "xhigh"
+                      "xhigh",
+                      "ultracode"
                     ]
                   }
                 },

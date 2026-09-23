@@ -10,11 +10,14 @@ import type {
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  claudeCodeModelSupportsUltracode,
+  claudeCodeReasoningEffortsForModel,
   getAgentModelDefinition,
   isAgentModelSelectable,
+  isCodexReasoningEffort,
   isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine } from "@opencompany/core";
 import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
@@ -330,14 +333,14 @@ type MentionOption =
 
 type CodexComposerSettings = CodexComposerSettingsView;
 type EngineComposerSettings = {
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled?: boolean;
   goalMode?: CodexComposerSettings["goalMode"];
 };
 type CodexComposerUiState = {
   // null means "no explicit choice for this chat", so the composer falls back to the user's
   // last-used level for the active engine. Only an effort the user actually picked is stored.
-  reasoningEffort: CodexReasoningEffort | null;
+  reasoningEffort: CloudCodingReasoningEffort | null;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
@@ -619,7 +622,7 @@ export function Surface({
   // The effort the user explicitly picked for the open chat. Null means "follow my last-used
   // level for this engine", resolved below once the composer's engine is known.
   const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
-    useState<CodexReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
+    useState<CloudCodingReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
     initialCodexComposerUiState.planModeEnabled,
   );
@@ -959,7 +962,13 @@ export function Surface({
   // Resolved every render rather than frozen at mount, so switching engines (or the remembered
   // model arriving after hydration) lands on that engine's own last-used level.
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
-  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   // A running turn gates nothing: the message becomes a queued turn the user can steer into the
   // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
   // leave a note on. Background sends keep their own dispatch rules.
@@ -3810,6 +3819,11 @@ export function Surface({
                                 : null
                           }
                           engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                          reasoningEfforts={
+                            composerEngine === "claude_code"
+                              ? claudeCodeReasoningEffortsForModel(claudeModel)
+                              : CODEX_REASONING_EFFORTS
+                          }
                           reasoningEffortAvailable={
                             composerEngine !== "claude_code" ||
                             claudeCodeModelSupportsReasoningEffort(claudeModel)
@@ -3950,7 +3964,7 @@ export function QuickChatComposer({
     claude_code: claudeModel,
   };
   const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
-    useState<CodexReasoningEffort | null>(null);
+    useState<CloudCodingReasoningEffort | null>(null);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
   const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
@@ -3988,7 +4002,13 @@ export function QuickChatComposer({
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
-  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   const isEngineChat = composerEngine !== null;
   const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
@@ -4800,6 +4820,11 @@ export function QuickChatComposer({
                       : null
                 }
                 engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                reasoningEfforts={
+                  composerEngine === "claude_code"
+                    ? claudeCodeReasoningEffortsForModel(claudeModel)
+                    : CODEX_REASONING_EFFORTS
+                }
                 reasoningEffortAvailable={
                   composerEngine !== "claude_code" ||
                   claudeCodeModelSupportsReasoningEffort(claudeModel)
@@ -5278,7 +5303,7 @@ function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
 function useRememberedReasoningEffort(
   userWorkosId: string,
   engine: EngineChatKind | null,
-): CodexReasoningEffort {
+): CloudCodingReasoningEffort {
   const effortEngine = engine ?? CODEX_PICKER_VALUE;
   return useSyncExternalStore(
     subscribeLastReasoningEffort,
@@ -5357,12 +5382,15 @@ function currentCodexComposerUiState(input: CodexComposerUiState): CodexComposer
 
 function buildCodexComposerSettings(input: {
   prompt: string;
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
 }): { ok: true; settings: CodexComposerSettings } | { ok: false; error: string } {
+  if (!isCodexReasoningEffort(input.reasoningEffort)) {
+    return { ok: false, error: "Ultracode is only available with Claude Code." };
+  }
   let goalMode: CodexComposerSettings["goalMode"] = null;
   if (input.goalModeEnabled) {
     const objective = (input.goalObjective.trim() || input.prompt).trim();
@@ -5413,6 +5441,9 @@ function canonicalMessageEngine(
         settings: { reasoningEffort: settings.reasoningEffort },
       };
     case "codex":
+      if (!isCodexReasoningEffort(settings.reasoningEffort)) {
+        throw new Error("Codex cannot run Claude Code's Ultracode mode.");
+      }
       return {
         type: "codex",
         schemaVersion: 1,
@@ -6009,6 +6040,7 @@ function SandboxIndicator() {
 function EngineComposerControls({
   model,
   engineLabel,
+  reasoningEfforts,
   reasoningEffortAvailable,
   reasoningEffort,
   planModeEnabled,
@@ -6027,8 +6059,9 @@ function EngineComposerControls({
 }: {
   model: EngineModelPickerModel | null;
   engineLabel: "Claude" | "Codex";
+  reasoningEfforts: readonly CloudCodingReasoningEffort[];
   reasoningEffortAvailable: boolean;
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   goalModeAvailable: boolean;
@@ -6037,7 +6070,7 @@ function EngineComposerControls({
   goalTokenBudget: string;
   disabled: boolean;
   modelDisabled: boolean;
-  onReasoningEffortChange: (reasoningEffort: CodexReasoningEffort) => void;
+  onReasoningEffortChange: (reasoningEffort: CloudCodingReasoningEffort) => void;
   onPlanModeEnabledChange: (enabled: boolean) => void;
   onGoalModeEnabledChange: (enabled: boolean) => void;
   onGoalObjectiveChange: (objective: string) => void;
@@ -6051,9 +6084,15 @@ function EngineComposerControls({
         <button
           type="button"
           aria-label={`${engineLabel} reasoning effort: ${reasoningLabel} (click to cycle)`}
-          title="Reasoning effort"
+          title={
+            reasoningEffort === "ultracode"
+              ? "XHigh reasoning with dynamic workflows"
+              : "Reasoning effort"
+          }
           disabled={disabled}
-          onClick={() => onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort))}
+          onClick={() =>
+            onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort, reasoningEfforts))
+          }
           className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ReasoningBars effort={reasoningEffort} size={12} />
@@ -6136,17 +6175,47 @@ function EngineComposerControls({
   );
 }
 
-function codexReasoningLabel(effort: CodexReasoningEffort) {
-  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+function codexReasoningLabel(effort: CloudCodingReasoningEffort) {
+  if (effort === "xhigh") return "XHigh";
+  if (effort === "ultracode") return "Ultracode";
+  return effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
-function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
-  const index = CODEX_REASONING_EFFORTS.indexOf(current);
-  return CODEX_REASONING_EFFORTS[(index + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
+function effectiveComposerReasoningEffort(input: {
+  engine: EngineChatKind | null;
+  claudeModel: ClaudeChatModelId;
+  requested: CloudCodingReasoningEffort;
+  remembered: CloudCodingReasoningEffort;
+}): CloudCodingReasoningEffort {
+  if (input.engine === "codex" && !isCodexReasoningEffort(input.requested)) {
+    return input.remembered;
+  }
+  if (
+    input.engine === "claude_code" &&
+    input.requested === "ultracode" &&
+    !claudeCodeModelSupportsUltracode(input.claudeModel)
+  ) {
+    return "xhigh";
+  }
+  return input.requested;
 }
 
-function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
-  const activeBars = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
+function nextCodexReasoningEffort(
+  current: CloudCodingReasoningEffort,
+  options: readonly CloudCodingReasoningEffort[],
+): CloudCodingReasoningEffort {
+  const index = options.indexOf(current);
+  return options[(index + 1) % options.length] ?? current;
+}
+
+function ReasoningBars({
+  effort,
+  size = 12,
+}: {
+  effort: CloudCodingReasoningEffort;
+  size?: number;
+}) {
+  const activeBars = effort === "ultracode" ? 4 : CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
   return (
     <svg
       width={size}

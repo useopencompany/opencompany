@@ -29,7 +29,7 @@ export const CLAUDE_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
   id: "claude_code",
   displayName: "Claude Code",
   command: buildClaudeAcpCommand,
-  prepareSession: ({ mcpServers }) => {
+  prepareSession: ({ mcpServers, reasoningEffort }) => {
     const coreMcpServers = mcpServers.filter((server) => server.name === ACP_TOOLS_MCP_SERVER_NAME);
     const deferredMcpServers = mcpServers.filter(
       (server) => server.name !== ACP_TOOLS_MCP_SERVER_NAME,
@@ -47,6 +47,7 @@ export const CLAUDE_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
             : {}),
           options: {
             maxTurns: 250,
+            settings: { ultracode: reasoningEffort === "ultracode" },
             // Claude's native Monitor tool depends on a long-lived SDK consumer. The runner
             // intentionally tears the ACP adapter down after each durable turn, so Monitor loses
             // its notifications and the sandbox is parked on the ordinary idle timeout. Hide the
@@ -69,7 +70,7 @@ export const CLAUDE_ACP_ENGINE_ADAPTER: AcpEngineAdapter = {
     model: "model",
     reasoningEffort: {
       id: "effort",
-      value: (effort) => (effort === "xhigh" ? "max" : effort),
+      value: (effort) => (effort === "ultracode" ? null : effort === "xhigh" ? "max" : effort),
     },
     permissionMode: {
       id: "mode",

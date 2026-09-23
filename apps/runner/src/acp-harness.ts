@@ -63,7 +63,7 @@ export type AcpEngineAdapter = {
   id: string;
   displayName: string;
   command: (workdir: string) => string;
-  prepareSession?: (input: { mcpServers: AcpMcpServer[] }) => {
+  prepareSession?: (input: { mcpServers: AcpMcpServer[]; reasoningEffort?: string | null }) => {
     mcpServers?: AcpMcpServer[];
     meta?: Record<string, unknown> | null;
   };
@@ -71,7 +71,7 @@ export type AcpEngineAdapter = {
     model?: string;
     reasoningEffort?: {
       id: string;
-      value: (effort: string) => string;
+      value: (effort: string) => string | null;
     };
     permissionMode?: {
       id: string;
@@ -216,7 +216,10 @@ export class AcpHarness implements Harness<AcpHarnessTurnInput, AcpHarnessTurnRe
       for (const request of input.extensionRequests ?? []) {
         await client.requestBeforeExecution(request.method, request.params);
       }
-      const preparedSession = input.adapter.prepareSession?.({ mcpServers: input.mcpServers });
+      const preparedSession = input.adapter.prepareSession?.({
+        mcpServers: input.mcpServers,
+        ...(input.reasoningEffort !== undefined ? { reasoningEffort: input.reasoningEffort } : {}),
+      });
       const sessionParams = {
         cwd: input.workdir,
         mcpServers: preparedSession?.mcpServers ?? input.mcpServers,

@@ -1,4 +1,4 @@
-import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 
 // Runtime and presentation vocabulary for retained opencompany Tasks. These are domain
 // contracts, not Drizzle row types; browser adapters and the runner can share them
@@ -80,7 +80,7 @@ export type HarnessWorkflowStep = {
   title: string;
   engine: HarnessEngine;
   model: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
@@ -116,7 +116,7 @@ export type HarnessSpec = {
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
-    reasoningEffort?: CodexReasoningEffort;
+    reasoningEffort?: CloudCodingReasoningEffort;
     goalMode?: { objective: string; tokenBudget?: number | null };
   };
 };

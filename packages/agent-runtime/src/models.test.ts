@@ -3,14 +3,19 @@ import {
   AGENT_MODEL_CATALOG,
   AVAILABLE_AGENT_MODEL_CATALOG,
   CLAUDE_CODE_AGENT_MODEL_IDS,
+  CLAUDE_CODE_REASONING_EFFORTS,
   CODEX_AGENT_MODEL_IDS,
   CODEX_DEFAULT_MODEL_ID,
   claudeCodeCliModelNameForModelId,
   claudeCodeModelSupportsReasoningEffort,
+  claudeCodeModelSupportsUltracode,
+  claudeCodeReasoningEffortsForModel,
   codexCliModelNameForModelId,
   getAgentModelRuntimeOptions,
   isClaudeCodeModelId,
+  isClaudeCodeReasoningEffort,
   isCodexModelId,
+  isCodexReasoningEffort,
   isCodexSubscriptionModel,
   resolveAvailableAgentModelId,
 } from "./models";
@@ -75,6 +80,16 @@ describe("Codex model catalog", () => {
 });
 
 describe("Claude Code model catalog", () => {
+  it("offers Ultracode only as a Claude Code reasoning mode", () => {
+    expect(CLAUDE_CODE_REASONING_EFFORTS).toEqual(["low", "medium", "high", "xhigh", "ultracode"]);
+    expect(isClaudeCodeReasoningEffort("ultracode")).toBe(true);
+    expect(isCodexReasoningEffort("ultracode")).toBe(false);
+    expect(claudeCodeModelSupportsUltracode("anthropic/claude-sonnet-5")).toBe(true);
+    expect(claudeCodeModelSupportsUltracode("claude-opus-5-5")).toBe(true);
+    expect(claudeCodeModelSupportsUltracode("anthropic/claude-fable-5.1")).toBe(false);
+    expect(claudeCodeReasoningEffortsForModel("claude-fable-5-1")).not.toContain("ultracode");
+  });
+
   it("accepts Opus 5.5 for sandbox execution with adaptive reasoning", () => {
     expect(isClaudeCodeModelId("anthropic/claude-opus-5.5")).toBe(true);
     expect(claudeCodeCliModelNameForModelId("anthropic/claude-opus-5.5")).toBe("claude-opus-5-5");

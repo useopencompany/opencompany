@@ -60,6 +60,8 @@ export type AgentModelId =
   | "openrouter/fusion";
 
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ClaudeCodeReasoningEffort = CodexReasoningEffort | "ultracode";
+export type CloudCodingReasoningEffort = ClaudeCodeReasoningEffort;
 
 export type AgentSkillFile = {
   path: string;

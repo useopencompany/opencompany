@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  claudeCodeModelSupportsUltracode,
+  isClaudeCodeReasoningEffort,
   isCodexReasoningEffort,
   isValidFiveFieldCron,
   nextCronRunAt,
@@ -368,9 +370,20 @@ export function validateWorkflowFields(input: {
       if (
         reasoningEffort !== undefined &&
         reasoningEffort !== "" &&
-        (typeof reasoningEffort !== "string" || !isCodexReasoningEffort(reasoningEffort))
+        (typeof reasoningEffort !== "string" ||
+          !(option.engine === "claude_code"
+            ? isClaudeCodeReasoningEffort(reasoningEffort)
+            : isCodexReasoningEffort(reasoningEffort)))
       ) {
         return "That workflow effort level is not available.";
+      }
+      if (
+        option.engine === "claude_code" &&
+        reasoningEffort === "ultracode" &&
+        runtimeModel &&
+        !claudeCodeModelSupportsUltracode(runtimeModel)
+      ) {
+        return "Ultracode is not available for that Claude Code model.";
       }
     }
   }

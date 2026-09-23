@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { StepRuntimePicker } from "./WorkflowModelControls";
+import { StepCloudRuntimeControls, StepRuntimePicker } from "./WorkflowModelControls";
 
 const state = vi.hoisted(() => ({
   sharedModelAccessEnabled: false,
@@ -89,5 +89,75 @@ describe("StepRuntimePicker", () => {
 
     expect(screen.getByRole("button", { name: "Runtime: Codex (sandbox)" })).toBeInTheDocument();
     expect(screen.getByTestId("workflow-sandbox-icon")).toBeInTheDocument();
+  });
+});
+
+describe("StepCloudRuntimeControls", () => {
+  it("offers Ultracode for Claude Code workflows", async () => {
+    const onChange = vi.fn();
+    render(
+      <StepCloudRuntimeControls
+        engine="claude_code"
+        step={{
+          id: "step_1",
+          title: "Inspect",
+          instructions: "Inspect the repository.",
+          model: "claude-code",
+          runtimeModel: "anthropic/claude-sonnet-5",
+          reasoningEffort: "high",
+        }}
+        disabled={false}
+        onChange={onChange}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Effort: High effort" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Ultracode/ }));
+
+    expect(onChange).toHaveBeenCalledWith({ reasoningEffort: "ultracode" });
+  });
+
+  it("does not offer Ultracode for Codex workflows", async () => {
+    render(
+      <StepCloudRuntimeControls
+        engine="codex"
+        step={{
+          id: "step_1",
+          title: "Inspect",
+          instructions: "Inspect the repository.",
+          model: "codex",
+          runtimeModel: "openai/gpt-5.6-sol",
+          reasoningEffort: "high",
+        }}
+        disabled={false}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Effort: High effort" }));
+
+    expect(screen.queryByRole("button", { name: /^Ultracode/ })).not.toBeInTheDocument();
+  });
+
+  it("does not offer Ultracode for Claude models without XHigh reasoning", async () => {
+    render(
+      <StepCloudRuntimeControls
+        engine="claude_code"
+        step={{
+          id: "step_1",
+          title: "Inspect",
+          instructions: "Inspect the repository.",
+          model: "claude-code",
+          runtimeModel: "anthropic/claude-fable-5.1",
+          reasoningEffort: "high",
+        }}
+        disabled={false}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Effort: High effort" }));
+
+    expect(screen.queryByRole("button", { name: /^Ultracode/ })).not.toBeInTheDocument();
   });
 });

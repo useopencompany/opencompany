@@ -28,7 +28,7 @@ export type ConversationRuntime = {
 };
 
 export type ConversationComposerSettings = {
-  reasoningEffort: "low" | "medium" | "high" | "xhigh";
+  reasoningEffort: "low" | "medium" | "high" | "xhigh" | "ultracode";
   planModeEnabled?: boolean;
   goalMode?: {
     objective: string;

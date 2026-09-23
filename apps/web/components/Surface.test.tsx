@@ -1408,6 +1408,57 @@ describe("Surface chat streaming UI", () => {
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
   });
 
+  it("uses the Codex preference when a Claude Ultracode chat starts background Codex", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_claude_ultracode",
+          title: "Claude Ultracode",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          codexComposerSettings: {
+            reasoningEffort: "ultracode",
+            planModeEnabled: false,
+            goalMode: null,
+          },
+          runtime: {
+            status: "running",
+            activeRunId: "run_claude_ultracode",
+            hasError: false,
+            updatedAt: new Date().toISOString(),
+          },
+          messages: [],
+        }}
+        codexConnected
+        claudeCodeConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
+    await user.type(textarea, "& @codex refactor the parser");
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledOnce());
+    expect(headlessChatMocks.startBackground.mock.calls[0]![0]).toMatchObject({
+      content: "refactor the parser",
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "medium" },
+      },
+    });
+  });
+
   it("starts a selected workflow from a running Codex chat without interrupting Codex", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2923,7 +2974,7 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("selects Opus 5.5 and submits per-turn reasoning effort", async () => {
+  it("selects Opus 5.5 and submits Ultracode", async () => {
     const label = "Claude Opus 5.5";
     const model = "anthropic/claude-opus-5.5";
     const user = userEvent.setup();
@@ -2972,6 +3023,12 @@ describe("Surface chat streaming UI", () => {
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Ultracode (click to cycle)" }),
+    ).toHaveAttribute("title", "XHigh reasoning with dynamic workflows");
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
@@ -2985,7 +3042,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "xhigh" },
+        settings: { reasoningEffort: "ultracode" },
       },
     });
   });
@@ -3024,6 +3081,15 @@ describe("Surface chat streaming UI", () => {
     expect(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
 
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
@@ -3036,7 +3102,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "high" },
+        settings: { reasoningEffort: "low" },
       },
     });
   });

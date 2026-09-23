@@ -1,6 +1,6 @@
 "use client";
 import { CLOUD_CODING_ENGINE_CONFIG, isAgentModelSelectable } from "@opencompany/agent-runtime";
-import type { AgentModelId } from "@opencompany/agent-runtime/types";
+import type { AgentModelId, CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 import {
   Command,
   CommandEmpty,
@@ -30,9 +30,9 @@ import {
   normalizeWorkflowReasoningEffort,
   normalizeWorkflowRuntimeModel,
   WORKFLOW_MODEL_OPTIONS,
-  WORKFLOW_REASONING_EFFORT_OPTIONS,
   type WorkflowCloudRuntime,
   workflowCloudModelOptions,
+  workflowReasoningEffortOptions,
   workflowRuntimeModelSupportsReasoningEffort,
 } from "@/lib/workflow-model-options";
 export type WorkflowStepPatch = Partial<Omit<WorkflowStep, "runtimeModel" | "reasoningEffort">> & {
@@ -264,6 +264,8 @@ export function StepCloudRuntimeControls({
       />
       {supportsEffort ? (
         <StepEffortPicker
+          engine={engine}
+          runtimeModel={runtimeModel}
           value={reasoningEffort ?? DEFAULT_WORKFLOW_REASONING_EFFORT}
           onChange={(nextEffort) => onChange({ reasoningEffort: nextEffort })}
           disabled={disabled}
@@ -329,26 +331,30 @@ const WORKFLOW_EFFORT_LABELS = {
   medium: { label: "Medium effort", hint: "Balanced" },
   high: { label: "High effort", hint: "Deeper" },
   xhigh: { label: "X-high effort", hint: "Maximum" },
+  ultracode: { label: "Ultracode", hint: "X-high with dynamic workflows" },
 } as const;
 
-const WORKFLOW_EFFORT_OPTIONS = WORKFLOW_REASONING_EFFORT_OPTIONS.map((value) => ({
-  value,
-  ...WORKFLOW_EFFORT_LABELS[value],
-}));
-
-type WorkflowEffort = (typeof WORKFLOW_EFFORT_OPTIONS)[number]["value"];
+type WorkflowEffort = CloudCodingReasoningEffort;
 
 function StepEffortPicker({
+  engine,
+  runtimeModel,
   value,
   onChange,
   disabled,
 }: {
+  engine: WorkflowCloudRuntime;
+  runtimeModel: string;
   value: WorkflowEffort;
   onChange: (value: WorkflowEffort) => void;
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const selectedOption = WORKFLOW_EFFORT_OPTIONS.find((option) => option.value === value);
+  const options = workflowReasoningEffortOptions(engine, runtimeModel).map((effort) => ({
+    value: effort,
+    ...WORKFLOW_EFFORT_LABELS[effort],
+  }));
+  const selectedOption = options.find((option) => option.value === value);
   const selectedLabel = selectedOption?.label ?? "High effort";
 
   return (
@@ -363,7 +369,7 @@ function StepEffortPicker({
         {disabled ? null : <ChevronDown size={11} strokeWidth={2} className="shrink-0" />}
       </PopoverTrigger>
       <PopoverContent align="start" sideOffset={8} className="w-[220px] bg-surface p-1 text-ink">
-        {WORKFLOW_EFFORT_OPTIONS.map((option) => (
+        {options.map((option) => (
           <ModelOption
             key={option.value}
             label={option.label}

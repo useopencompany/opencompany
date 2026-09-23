@@ -1,4 +1,9 @@
-import type { AgentModelId, CodexReasoningEffort, JsonValue } from "./types";
+import type {
+  AgentModelId,
+  ClaudeCodeReasoningEffort,
+  CodexReasoningEffort,
+  JsonValue,
+} from "./types";
 
 export type ModelProviderOptions = Record<string, Record<string, JsonValue>>;
 export type ReasoningExposure = "hidden" | "summary" | "raw";
@@ -104,6 +109,10 @@ export const CODEX_REASONING_EFFORTS = [
   "high",
   "xhigh",
 ] as const satisfies readonly CodexReasoningEffort[];
+export const CLAUDE_CODE_REASONING_EFFORTS = [
+  ...CODEX_REASONING_EFFORTS,
+  "ultracode",
+] as const satisfies readonly ClaudeCodeReasoningEffort[];
 
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
 const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
@@ -111,6 +120,7 @@ const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
   ...LEGACY_CODEX_RUNTIME_MODEL_IDS,
 ]);
 const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS);
+const CLAUDE_CODE_REASONING_EFFORT_SET = new Set<string>(CLAUDE_CODE_REASONING_EFFORTS);
 
 export function isCodexModelId(value: string): value is AgentModelId {
   return CODEX_MODEL_ID_SET.has(value);
@@ -134,6 +144,10 @@ export function isCodexReasoningEffort(value: string): value is CodexReasoningEf
   return CODEX_REASONING_EFFORT_SET.has(value);
 }
 
+export function isClaudeCodeReasoningEffort(value: string): value is ClaudeCodeReasoningEffort {
+  return CLAUDE_CODE_REASONING_EFFORT_SET.has(value);
+}
+
 export function codexCliModelNameForModelId(modelId: string): string | null {
   return CODEX_RUNTIME_MODEL_ID_SET.has(modelId) ? modelId.replace(/^openai\//, "") : null;
 }
@@ -155,6 +169,13 @@ export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-haiku-4.5",
 ] as const satisfies readonly AgentModelId[];
 
+const CLAUDE_CODE_ULTRACODE_MODEL_IDS = [
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-5.5",
+  "anthropic/claude-opus-5",
+  "anthropic/claude-opus-4.8",
+] as const satisfies readonly AgentModelId[];
+
 const CLAUDE_CODE_MODEL_ID_SET = new Set<string>(CLAUDE_CODE_AGENT_MODEL_IDS);
 
 export function isClaudeCodeModelId(value: string): value is AgentModelId {
@@ -174,6 +195,20 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
       !modelId.includes("haiku") &&
       (model === modelId || model === claudeCodeCliModelNameForModelId(modelId)),
   );
+}
+
+export function claudeCodeModelSupportsUltracode(model: string): boolean {
+  return CLAUDE_CODE_ULTRACODE_MODEL_IDS.some(
+    (modelId) => model === modelId || model === claudeCodeCliModelNameForModelId(modelId),
+  );
+}
+
+export function claudeCodeReasoningEffortsForModel(
+  model: string,
+): readonly ClaudeCodeReasoningEffort[] {
+  return claudeCodeModelSupportsUltracode(model)
+    ? CLAUDE_CODE_REASONING_EFFORTS
+    : CODEX_REASONING_EFFORTS;
 }
 
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
