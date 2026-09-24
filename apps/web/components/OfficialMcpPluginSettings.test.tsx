@@ -1984,7 +1984,7 @@ describe("Linear plugin settings", () => {
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
-  it("maps the personal Latitude connection onto the official plugin surface", () => {
+  it("maps the personal Latitude connection onto the official plugin surface", async () => {
     const latitudePlugin = {
       ...plugin,
       id: "plugin_latitude",
@@ -1992,7 +1992,7 @@ describe("Linear plugin settings", () => {
       manifest: { name: "latitude", description: "Investigate Latitude observability data." },
       source: { ...plugin.source, path: "latitude" },
     } satisfies PluginInstallationDto;
-    const html = renderToString(
+    render(
       <LatitudePluginDetail
         pluginState={{ status: "ready", plugin: latitudePlugin }}
         toolsState={defaultLatitudeToolsState()}
@@ -2000,10 +2000,22 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("Latitude workspace");
-    expect(html).toContain("Inspect Latitude workspace");
-    expect(html).toContain("Read traces and user data");
-    expect(html).toContain("Manage Latitude");
+    expect(screen.queryByText("No Latitude accounts are connected.")).not.toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Inspect Latitude workspace")).toBeInTheDocument();
+    expect(screen.getByText("Read traces and user data")).toBeInTheDocument();
+    expect(screen.getByText("Manage Latitude")).toBeInTheDocument();
+
+    await userEvent.click(
+      within(
+        screen.getByRole("group", { name: "Inspect Latitude workspace permission" }),
+      ).getByRole("button", { name: "Ask" }),
+    );
+    expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+      "gint_latitude",
+      "read",
+      "ask",
+    );
     expect(LATITUDE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );
