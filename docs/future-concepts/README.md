@@ -6,9 +6,9 @@ enduring decisions into an ADR when it is implemented.
 
 ## Current research
 
-- [Starter kits](./starter-kits.md): role-based defaults (skills, plugins, a workflow, and a
-  company agent) so a new workspace is useful from its first 30 seconds. Includes three UX
-  directions and a clickable prototype.
+- [Starter setup for technical founders](./starter-kits.md) connects GitHub, reads the repo to
+  suggest plugins, and adds `#build` and `#review-pr` workflows. The goal is that a new workspace is
+  useful from its first 30 seconds. Includes a clickable prototype.
 - [Native Slack identities for company agents](./slack-agent-provisioning.md) — verified customer-owned
   provisioning, one-time developer authorization, CLI/API boundaries, and the proposed web journey.
 
