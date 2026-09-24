@@ -544,7 +544,7 @@ describe("readGitHubUserRepositorySetupFiles", () => {
   });
 
   it("reads only the setup files of the most recently pushed repository", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/user/installations?")) return installationsPage.clone();
       if (url.includes("/repositories?")) {

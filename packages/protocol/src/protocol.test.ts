@@ -141,6 +141,7 @@ describe("headless protocol", () => {
       "/v1/onboarding",
       "/v1/onboarding/profile",
       "/v1/onboarding/workspace",
+      "/v1/onboarding/repository-scan",
       "/v1/onboarding/complete",
       "/v1/wikis",
       "/v1/wikis/{wikiId}",

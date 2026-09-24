@@ -114,7 +114,7 @@ describe("recommendRepositoryPlugins", () => {
       ],
       recommendedBy: "jev",
     });
-    const request = evaluator.mock.calls[0]![0] as { state: string };
+    const request = evaluator.mock.calls[0]![0] as unknown as { state: string };
     expect(request.state).not.toContain("re_live");
   });
 
