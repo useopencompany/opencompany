@@ -81,120 +81,93 @@ export function pluginAccountsFromState(
       accounts: permissionConnection ? [{ account: permissionConnection }] : [],
     };
   }
+  // These plugins' personal account rows are their event connections, not their tool connection,
+  // so the tool connection comes from the provider state instead.
   if (
     config.connectionProvider === "attio" ||
-    config.connectionProvider === "betterstack" ||
-    config.connectionProvider === "fathom" ||
-    config.connectionProvider === "github_user" ||
-    config.connectionProvider === "gmail" ||
-    config.connectionProvider === "google_admin" ||
-    config.connectionProvider === "google_calendar" ||
-    config.connectionProvider === "google_drive" ||
-    config.connectionProvider === "hubspot" ||
-    config.connectionProvider === "jamie" ||
-    config.connectionProvider === "neon" ||
-    config.connectionProvider === "notion" ||
-    config.connectionProvider === "supabase" ||
-    config.connectionProvider === "todoist" ||
-    config.connectionProvider === "resend" ||
-    config.connectionProvider === "posthog" ||
     config.connectionProvider === "convex" ||
-    config.connectionProvider === "render" ||
-    config.connectionProvider === "vercel" ||
-    config.connectionProvider === "signoz" ||
-    config.connectionProvider === "dash0" ||
-    config.connectionProvider === "slack" ||
-    config.connectionProvider === "stripe" ||
-    config.connectionProvider === "x_account"
+    config.connectionProvider === "posthog" ||
+    config.connectionProvider === "hubspot" ||
+    config.connectionProvider === "jamie"
   ) {
-    if (config.connectionProvider === "stripe") {
-      const account = state.personalAccounts.stripe[0] ?? null;
-      return { permissionConnection: account, accounts: account ? [{ account }] : [] };
-    }
-    // These plugins' personal account rows are their event connections, not their tool connection,
-    // so the tool connection comes from the provider state instead.
-    if (
-      config.connectionProvider === "attio" ||
-      config.connectionProvider === "convex" ||
-      config.connectionProvider === "posthog" ||
-      config.connectionProvider === "hubspot" ||
-      config.connectionProvider === "jamie"
-    ) {
-      const provider = config.connectionProvider;
-      const connection = state[provider];
-      const permissionConnection: IntegrationAccountView<typeof provider> | null =
-        connection.integrationId
-          ? {
-              integrationId: connection.integrationId,
-              provider,
-              status: connection.status === "not_connected" ? "disconnected" : connection.status,
-              connected: connection.connected,
-              accountEmail: null,
-              accountName: connection.accountName,
-              connectionLabel:
-                connection.accountName || `${PLUGIN_TOOL_ACCESS_LABEL[provider]} tool access`,
-              statusReason: connection.statusReason,
-              scopes: [],
-              capabilityModes: connection.capabilityModes,
-              toolModes: connection.toolModes,
-            }
-          : null;
-      return {
-        permissionConnection,
-        accounts: permissionConnection ? [{ account: permissionConnection }] : [],
-      };
-    }
-    const accounts = state.personalAccounts[config.connectionProvider].map((account) => ({
-      account:
-        config.connectionProvider === "google_drive" &&
-        account.status === "connected" &&
-        !googleDriveMcpScopesSatisfied(account.scopes)
-          ? {
-              ...account,
-              status: "needs_reauth" as const,
-              connected: false,
-              statusReason: GOOGLE_DRIVE_MCP_RECONNECT_REASON,
-            }
-          : account,
-    }));
-    const primaryIntegrationId =
-      config.connectionProvider === "gmail"
-        ? state.gmail.integrationId
-        : config.connectionProvider === "slack"
-          ? state.slack.integrationId
-          : config.connectionProvider === "google_calendar"
-            ? state.google_calendar.integrationId
-            : config.connectionProvider === "google_drive"
-              ? state.google_drive.integrationId
-              : config.connectionProvider === "x_account"
-                ? state.x_account.integrationId
-                : null;
+    const provider = config.connectionProvider;
+    const connection = state[provider];
+    const permissionConnection: IntegrationAccountView<typeof provider> | null =
+      connection.integrationId
+        ? {
+            integrationId: connection.integrationId,
+            provider,
+            status: connection.status === "not_connected" ? "disconnected" : connection.status,
+            connected: connection.connected,
+            accountEmail: null,
+            accountName: connection.accountName,
+            connectionLabel:
+              connection.accountName || `${PLUGIN_TOOL_ACCESS_LABEL[provider]} tool access`,
+            statusReason: connection.statusReason,
+            scopes: [],
+            capabilityModes: connection.capabilityModes,
+            toolModes: connection.toolModes,
+          }
+        : null;
     return {
-      accounts,
-      permissionConnection:
-        accounts.find(({ account }) => account.integrationId === primaryIntegrationId)?.account ??
-        accounts.find(({ account }) => account.connected)?.account ??
-        accounts[0]?.account ??
-        null,
+      permissionConnection,
+      accounts: permissionConnection ? [{ account: permissionConnection }] : [],
     };
   }
-  const permissionConnection: IntegrationAccountView<"linear"> | null = state.linear.integrationId
-    ? {
-        integrationId: state.linear.integrationId,
-        provider: "linear",
-        status: state.linear.status === "not_connected" ? "disconnected" : state.linear.status,
-        connected: state.linear.connected,
-        accountEmail: null,
-        accountName: state.linear.accountName,
-        connectionLabel: state.linear.accountName || "Linear tool access",
-        statusReason: state.linear.statusReason,
-        scopes: [],
-        capabilityModes: state.linear.capabilityModes,
-        toolModes: state.linear.toolModes,
-      }
-    : null;
+  if (config.connectionProvider === "linear") {
+    const permissionConnection: IntegrationAccountView<"linear"> | null = state.linear.integrationId
+      ? {
+          integrationId: state.linear.integrationId,
+          provider: "linear",
+          status: state.linear.status === "not_connected" ? "disconnected" : state.linear.status,
+          connected: state.linear.connected,
+          accountEmail: null,
+          accountName: state.linear.accountName,
+          connectionLabel: state.linear.accountName || "Linear tool access",
+          statusReason: state.linear.statusReason,
+          scopes: [],
+          capabilityModes: state.linear.capabilityModes,
+          toolModes: state.linear.toolModes,
+        }
+      : null;
+    return {
+      permissionConnection,
+      accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+    };
+  }
+
+  const provider = config.connectionProvider;
+  const accounts = state.personalAccounts[provider].map((account) => ({
+    account:
+      provider === "google_drive" &&
+      account.status === "connected" &&
+      !googleDriveMcpScopesSatisfied(account.scopes)
+        ? {
+            ...account,
+            status: "needs_reauth" as const,
+            connected: false,
+            statusReason: GOOGLE_DRIVE_MCP_RECONNECT_REASON,
+          }
+        : account,
+  }));
+  const primaryIntegrationId =
+    provider === "gmail"
+      ? state.gmail.integrationId
+      : provider === "slack"
+        ? state.slack.integrationId
+        : provider === "google_calendar"
+          ? state.google_calendar.integrationId
+          : provider === "google_drive"
+            ? state.google_drive.integrationId
+            : provider === "x_account"
+              ? state.x_account.integrationId
+              : null;
   return {
-    permissionConnection,
-    accounts: permissionConnection ? [{ account: permissionConnection }] : [],
+    accounts,
+    permissionConnection:
+      accounts.find(({ account }) => account.integrationId === primaryIntegrationId)?.account ??
+      accounts.find(({ account }) => account.connected)?.account ??
+      accounts[0]?.account ??
+      null,
   };
 }
