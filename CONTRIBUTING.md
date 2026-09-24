@@ -15,7 +15,10 @@ still matter.
 
 Keep pull requests focused. Explain the problem, the chosen boundary, user-visible behavior, tests,
 and anything reviewers cannot verify locally. UI changes need a browser check of the real route,
-including the primary flow and an obvious error or empty state.
+including the primary flow and an obvious error or empty state. Every UI or UX change must also
+include current screenshots or a short screen recording in the pull request so reviewers can assess
+the result without running the branch. Capture the real product and show the relevant states. This
+requirement applies equally to maintainer-authored and external pull requests.
 
 ## Commit Identity and Email Privacy
 
