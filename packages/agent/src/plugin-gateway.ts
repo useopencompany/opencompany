@@ -134,6 +134,7 @@ import {
   getSlackMcpIntegrationState,
   loadSlackMcpWorkerConnection,
   SLACK_MCP_ENDPOINT_URL,
+  slackMcpRuntimeEndpointUrl,
 } from "./integrations/slack-mcp";
 import {
   getStripeMcpIntegrationState,
@@ -577,6 +578,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "slack") {
+    loadConnection = (input) =>
+      loadSlackMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: slackMcpRuntimeEndpointUrl() };
   }
   const capabilities =
     record.pluginName === "x" ? xMcpCapabilities(record.capabilities) : record.capabilities;
