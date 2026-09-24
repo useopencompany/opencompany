@@ -89,12 +89,9 @@ function verifyApp(appPath) {
   check(Boolean(teamId), "APPLE_TEAM_ID is required to verify the signing team");
   check(signature.includes(`TeamIdentifier=${teamId}`), `${label}: not signed by team ${teamId}`);
   check(/flags=0x[0-9a-f]+\(runtime\)/.test(signature), `${label}: hardened runtime is off`);
-  check(
-    runCombined("spctl", ["--assess", "--type", "execute", "-vv", appPath]).includes(
-      "source=Notarized Developer ID",
-    ),
-    `${label}: Gatekeeper does not see a notarized Developer ID app`,
-  );
+  // Asserts Apple's notarization requirement directly instead of parsing spctl,
+  // whose output depends on whether Gatekeeper is enabled on the runner.
+  run("codesign", ["--verify", "--strict", "--test-requirement==notarized", appPath]);
   run("xcrun", ["stapler", "validate", appPath]);
 }
 

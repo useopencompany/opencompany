@@ -97,6 +97,9 @@ install version N, publish N+1, and confirm the Update button appears, the
 restart lands on N+1, and the session survives. Also check that quitting
 without clicking Update installs it.
 
+Copies installed from ToDesktop builds (0.1.x) check ToDesktop's feed, not
+GitHub Releases, so testers must reinstall 0.2.0 from the DMG once.
+
 To roll back, publish a higher version built from the last good commit.
 Updates only move forward.
 

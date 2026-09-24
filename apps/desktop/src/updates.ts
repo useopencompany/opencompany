@@ -36,6 +36,10 @@ function isAppFrame(event: IpcMainEvent | IpcMainInvokeEvent) {
 }
 
 function checkInBackground() {
+  // Once staged, the pending update installs on quit. Re-checking would make
+  // electron-updater hand the cached zip to Squirrel again and re-stage it,
+  // racing a restart. Newer releases are picked up after the next launch.
+  if (readyVersion) return;
   // Failures are reported through the updater's `error` event.
   autoUpdater.checkForUpdates().catch(() => {});
 }

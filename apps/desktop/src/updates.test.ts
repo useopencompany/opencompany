@@ -101,6 +101,16 @@ describe("background updates", () => {
     expect(mocks.updater.checkForUpdates).toHaveBeenCalledTimes(2);
   });
 
+  it("stops background checks once an update is staged", async () => {
+    mocks.updater.checkForUpdates.mockResolvedValue(null);
+    const { startAutoUpdates } = await loadUpdates();
+    startAutoUpdates();
+    stageUpdate("0.2.1");
+
+    await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+    expect(mocks.updater.checkForUpdates).not.toHaveBeenCalled();
+  });
+
   it("logs only the updater error code", async () => {
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { startAutoUpdates } = await loadUpdates();
