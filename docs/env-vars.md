@@ -19,6 +19,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials, Sentry artifact upload credential, and public mobile configuration |
+| `prod` `/desktop` | GitHub Actions | macOS Developer ID certificate and App Store Connect notarization key |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
