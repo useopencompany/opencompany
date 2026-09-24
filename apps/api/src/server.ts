@@ -80,6 +80,7 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createOnboardingRepositoryScanService } from "./onboarding-repository-scan";
 import { createPluginBillingService } from "./plugin-billing";
 import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
@@ -340,6 +341,12 @@ const app = createApiApp({
   identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
   onboardingEmails: createOnboardingEmailService({ db: database.db }),
+  onboardingRepositoryScan: createOnboardingRepositoryScanService({
+    db: database.db,
+    ...(process.env.VERCEL_AI_GATEWAY_API_KEY
+      ? { apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
+      : {}),
+  }),
   authenticate,
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),

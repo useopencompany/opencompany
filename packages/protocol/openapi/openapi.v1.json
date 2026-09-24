@@ -3837,6 +3837,142 @@
         ],
         "additionalProperties": false
       },
+      "OnboardingRepositoryScanEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OnboardingRepositoryScan"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingRepositoryScan": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_connected"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "no_repositories"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "scanned"
+                ]
+              },
+              "repository": {
+                "type": "object",
+                "properties": {
+                  "fullName": {
+                    "type": "string"
+                  },
+                  "private": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "fullName",
+                  "private"
+                ],
+                "additionalProperties": false
+              },
+              "repositories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20
+              },
+              "plugins": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "plugin": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 300
+                    }
+                  },
+                  "required": [
+                    "plugin",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 20
+              },
+              "recommendedBy": {
+                "type": "string",
+                "enum": [
+                  "jev",
+                  "rules"
+                ]
+              }
+            },
+            "required": [
+              "status",
+              "repository",
+              "repositories",
+              "plugins",
+              "recommendedBy"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ScanOnboardingRepositoryBody": {
+        "type": "object",
+        "properties": {
+          "repository": {
+            "$ref": "#/components/schemas/GitHubRepositoryFullName"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitHubRepositoryFullName": {
+        "type": "string",
+        "maxLength": 201,
+        "pattern": "^[A-Za-z0-9-]{1,39}\\/[A-Za-z0-9._-]{1,100}$"
+      },
       "FinishOnboardingBody": {
         "type": "object",
         "properties": {
@@ -16988,6 +17124,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OnboardingWorkspaceEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/onboarding/repository-scan": {
+      "post": {
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanOnboardingRepositoryBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Official plugins suggested from the setup files of the caller's most recently pushed, or chosen, GitHub repository.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingRepositoryScanEnvelope"
                 }
               }
             }

@@ -115,6 +115,7 @@ import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
+import type { OnboardingRepositoryScanService } from "./onboarding-repository-scan";
 import type { PluginBillingService } from "./plugin-billing";
 import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -240,6 +241,7 @@ export type CreateApiAppInput = {
   identity: IdentityService;
   onboarding: OnboardingService;
   onboardingEmails: OnboardingEmailService;
+  onboardingRepositoryScan: OnboardingRepositoryScanService;
   authenticate: ApiAuthenticator;
   identify: ApiIdentityVerifier;
   emailLifecycleInternalSecret?: string;
@@ -889,6 +891,16 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-workspace", 10);
       const workspace = await input.onboarding.saveWorkspace(identity, c.req.valid("json"));
       return c.json({ data: workspace, meta }, 200);
+    },
+    scanOnboardingRepository: async (c) => {
+      const identity = identityFrom(c);
+      // Each scan lists GitHub installations, reads a repository tree, and calls a model.
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-repository-scan", 20);
+      const { repository } = c.req.valid("json");
+      const scan = await input.onboardingRepositoryScan.scan(identity, {
+        ...(repository ? { repository } : {}),
+      });
+      return c.json({ data: scan, meta }, 200);
     },
     finishOnboarding: async (c) => {
       const identity = identityFrom(c);

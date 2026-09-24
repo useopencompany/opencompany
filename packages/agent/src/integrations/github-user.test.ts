@@ -30,6 +30,7 @@ import {
   isGitHubUserIntegrationConfigured,
   listGitHubUserRepositoryAccess,
   loadGitHubUserCredentialIdentity,
+  readGitHubUserRepositorySetupFiles,
   resolveGitHubUserInstallTarget,
   verifyGitHubUserIntegrationState,
 } from "./github-user";
@@ -503,5 +504,106 @@ describe("GitHub user integration", () => {
         status: "needs_reauth",
       }),
     );
+  });
+});
+
+describe("readGitHubUserRepositorySetupFiles", () => {
+  const installationsPage = Response.json({
+    total_count: 1,
+    installations: [
+      {
+        id: 123,
+        account: { id: 987, login: "acme", type: "Organization" },
+        repository_selection: "all",
+        permissions: { metadata: "read", contents: "write" },
+        suspended_at: null,
+      },
+    ],
+  });
+  const repository = (name: string, pushedAt: string, extra: Record<string, unknown> = {}) => ({
+    id: name.length,
+    name,
+    full_name: `acme/${name}`,
+    private: true,
+    html_url: `https://github.com/acme/${name}`,
+    default_branch: "main",
+    pushed_at: pushedAt,
+    archived: false,
+    ...extra,
+  });
+
+  beforeEach(() => {
+    mocks.loadCredential.mockResolvedValue({
+      ...storedCredential(),
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads only the setup files of the most recently pushed repository", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/user/installations?")) return installationsPage.clone();
+      if (url.includes("/repositories?")) {
+        return Response.json({
+          total_count: 3,
+          repositories: [
+            repository("marketing", "2026-09-01T00:00:00Z"),
+            repository("app", "2026-09-20T00:00:00Z"),
+            repository("legacy", "2026-09-23T00:00:00Z", { archived: true }),
+          ],
+        });
+      }
+      if (url.includes("/git/trees/main?recursive=1")) {
+        return Response.json({
+          tree: [
+            { path: "package.json", type: "blob", size: 120 },
+            { path: "src/index.ts", type: "blob", size: 900 },
+            { path: "render.yaml", type: "blob", size: 80 },
+            { path: "src", type: "tree" },
+          ],
+        });
+      }
+      if (url.endsWith("/contents/package.json?ref=main"))
+        return new Response('{"dependencies":{}}');
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await expect(
+      readGitHubUserRepositorySetupFiles({ ...connection, fetch: fetchMock as typeof fetch }),
+    ).resolves.toEqual({
+      repository: { fullName: "acme/app", private: true },
+      repositories: ["acme/app", "acme/marketing"],
+      paths: ["package.json", "src/index.ts", "render.yaml"],
+      files: [{ path: "package.json", text: '{"dependencies":{}}' }],
+    });
+    const contentCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("/contents/"));
+    expect(contentCalls).toHaveLength(1);
+    expect((contentCalls[0]?.[1]?.headers as Record<string, string>).Accept).toBe(
+      "application/vnd.github.raw+json",
+    );
+  });
+
+  it("treats a requested repository outside the member's installations as missing", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes("/user/installations?")
+        ? installationsPage.clone()
+        : Response.json({
+            total_count: 1,
+            repositories: [repository("app", "2026-09-20T00:00:00Z")],
+          }),
+    );
+
+    await expect(
+      readGitHubUserRepositorySetupFiles({
+        ...connection,
+        repository: "someone-else/private",
+        fetch: fetchMock as typeof fetch,
+      }),
+    ).resolves.toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("someone-else"))).toBe(false);
   });
 });

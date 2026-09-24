@@ -14,6 +14,7 @@ import type {
 } from "@opencompany/protocol/schemas";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { getAppUrl } from "../app-url";
+import { type RepositoryTreeEntry, selectRepositorySetupFiles } from "../repository-plugin-scan";
 import {
   ExpiringOAuthReauthRequired,
   getExpiringOAuthAccessToken,
@@ -444,6 +445,149 @@ export async function listGitHubUserInstallationRepositories(input: {
     fetch: fetcher,
     readPage: parseRepositoriesPage,
   });
+}
+
+export type GitHubUserRepositorySetupFiles = {
+  repository: { fullName: string; private: boolean };
+  // Most recently pushed first, so the onboarding picker can offer the alternatives.
+  repositories: string[];
+  paths: string[];
+  files: { path: string; text: string }[];
+};
+
+type ScanRepository = {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  pushedAt: number;
+};
+
+const SCAN_MAX_INSTALLATIONS = 10;
+const SCAN_MAX_REPOSITORY_CHOICES = 20;
+const SCAN_FILE_CONCURRENCY = 6;
+
+// Reads the setup files of one repository the member's own GitHub account can reach: the one they
+// picked, or their most recently pushed. Access is checked against the member's installations, so
+// a requested name outside them is treated as missing. Returns null when they have no repository.
+export async function readGitHubUserRepositorySetupFiles(input: {
+  userWorkosId: string;
+  integrationId?: string;
+  repository?: string;
+  db?: DbLike;
+  signal?: AbortSignal;
+  fetch?: typeof globalThis.fetch;
+}): Promise<GitHubUserRepositorySetupFiles | null> {
+  const connection = await resolveGitHubUserAccessConnection(input);
+  const accessToken = await getGitHubUserAccessToken(connection, {
+    ...(input.db ? { db: input.db } : {}),
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
+  const fetcher = input.fetch ?? globalThis.fetch;
+  const pageInput = {
+    accessToken,
+    fetch: fetcher,
+    ...(input.signal ? { signal: input.signal } : {}),
+  };
+  const installations = (
+    await fetchAllGitHubPages({
+      ...pageInput,
+      endpoint: `${GITHUB_API_ROOT}/user/installations`,
+      readPage: parseInstallationsPage,
+    })
+  )
+    .filter((installation) => !installation.suspendedAt)
+    .slice(0, SCAN_MAX_INSTALLATIONS);
+  const repositories = (
+    await Promise.all(
+      installations.map((installation) =>
+        fetchAllGitHubPages({
+          ...pageInput,
+          endpoint: `${GITHUB_API_ROOT}/user/installations/${encodeURIComponent(installation.id)}/repositories`,
+          readPage: parseScanRepositoriesPage,
+        }),
+      ),
+    )
+  )
+    .flat()
+    .filter((repository): repository is ScanRepository => repository !== null)
+    .sort((a, b) => b.pushedAt - a.pushedAt);
+  const requested = input.repository?.toLowerCase();
+  const repository = requested
+    ? repositories.find((candidate) => candidate.fullName.toLowerCase() === requested)
+    : repositories[0];
+  if (!repository) return null;
+
+  const repositoryPath = repository.fullName.split("/").map(encodeURIComponent).join("/");
+  const treeResponse = await fetcher(
+    `${GITHUB_API_ROOT}/repos/${repositoryPath}/git/trees/${encodeURIComponent(repository.defaultBranch)}?recursive=1`,
+    { headers: githubApiHeaders(accessToken), signal: input.signal ?? null },
+  );
+  // An empty repository has no tree yet; it simply has nothing to scan.
+  const tree = treeResponse.status === 409 ? [] : await readTree(treeResponse);
+  const setupFiles = selectRepositorySetupFiles(tree);
+  const files: GitHubUserRepositorySetupFiles["files"] = [];
+  for (let index = 0; index < setupFiles.length; index += SCAN_FILE_CONCURRENCY) {
+    const batch = await Promise.all(
+      setupFiles.slice(index, index + SCAN_FILE_CONCURRENCY).map(async (path) => {
+        const response = await fetcher(
+          `${GITHUB_API_ROOT}/repos/${repositoryPath}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(repository.defaultBranch)}`,
+          {
+            headers: {
+              ...githubApiHeaders(accessToken),
+              Accept: "application/vnd.github.raw+json",
+            },
+            signal: input.signal ?? null,
+          },
+        );
+        // A file can disappear between the tree read and this one; skip it rather than fail.
+        if (response.status === 404) return null;
+        await assertGitHubUserAccessResponse(response, "repository file read");
+        return { path, text: await response.text() };
+      }),
+    );
+    for (const file of batch) if (file) files.push(file);
+  }
+  return {
+    repository: { fullName: repository.fullName, private: repository.private },
+    repositories: repositories
+      .slice(0, SCAN_MAX_REPOSITORY_CHOICES)
+      .map(({ fullName }) => fullName),
+    paths: tree.map(({ path }) => path),
+    files,
+  };
+}
+
+async function readTree(response: Response): Promise<RepositoryTreeEntry[]> {
+  await assertGitHubUserAccessResponse(response, "repository tree read");
+  const value = await responseJson(response);
+  if (!Array.isArray(value.tree)) throw new Error("GitHub returned an invalid repository tree.");
+  return value.tree.flatMap((entry: unknown) => {
+    if (!isRecord(entry) || entry.type !== "blob") return [];
+    const path = readString(entry.path);
+    if (!path) return [];
+    return [{ path, size: readNonNegativeNumber(entry.size) }];
+  });
+}
+
+function parseScanRepositoriesPage(value: Record<string, unknown>) {
+  const totalCount = readNonNegativeNumber(value.total_count);
+  if (totalCount === null || !Array.isArray(value.repositories)) {
+    throw new Error("GitHub returned an invalid repositories response.");
+  }
+  return { totalCount, items: value.repositories.map(parseScanRepository) };
+}
+
+// Archived and never-pushed repositories are not worth scanning; they drop out as null.
+function parseScanRepository(value: unknown): ScanRepository | null {
+  if (!isRecord(value)) throw new Error("GitHub returned an invalid repository.");
+  const fullName = readString(value.full_name);
+  const defaultBranch = readString(value.default_branch);
+  if (!fullName || !defaultBranch || typeof value.private !== "boolean") {
+    throw new Error("GitHub returned an invalid repository.");
+  }
+  const pushedAt = Date.parse(readString(value.pushed_at) ?? "");
+  if (value.archived === true || !Number.isFinite(pushedAt)) return null;
+  return { fullName, private: value.private, defaultBranch, pushedAt };
 }
 
 // Shared by the action gateway now and the runner sandbox injection slice
