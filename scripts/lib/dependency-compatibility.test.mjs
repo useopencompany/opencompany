@@ -5,7 +5,6 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const rootRequire = createRequire(new URL("../../package.json", import.meta.url));
-const desktopRequire = createRequire(new URL("../../apps/desktop/package.json", import.meta.url));
 const telemetryRequire = createRequire(
   new URL("../../packages/telemetry/package.json", import.meta.url),
 );
@@ -27,19 +26,6 @@ async function fixtureServer(t, body) {
   await once(server, "listening");
   return `http://127.0.0.1:${server.address().port}/`;
 }
-
-test("desktop release tooling retains CommonJS package metadata lookup through patched Got", async (t) => {
-  const cliRequire = createRequire(desktopRequire.resolve("@todesktop/cli/package.json"));
-  const latestVersionRequire = createRequire(cliRequire.resolve("latest-version"));
-  const packageJson = latestVersionRequire("package-json");
-  const metadata = { name: "dependency-compatibility-fixture", version: "1.2.3" };
-  const registryUrl = await fixtureServer(t, {
-    "dist-tags": { latest: metadata.version },
-    versions: { [metadata.version]: metadata },
-  });
-
-  assert.deepEqual(await packageJson(metadata.name, { registryUrl }), metadata);
-});
 
 test("Vercel's patched Undici supports the release CLI's CommonJS fetch API", async (t) => {
   const { fetch } = vercelRequire("undici");

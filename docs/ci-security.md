@@ -54,6 +54,13 @@ forks](https://docs.github.com/en/code-security/concepts/code-scanning/setup-typ
 check contexts would leave an approved external pull request blocked on checks that GitHub never
 creates.
 
+The verifier's `Desktop package` job runs on a GitHub-hosted macOS runner under the same
+constraints. It builds the desktop shell unsigned and holds no signing credentials.
+
+`.github/workflows/release-desktop.yml` is a manual, `main`-only trusted path. It loads signing
+credentials in the protected `production` environment and uploads a draft GitHub release. It
+publishes that release only when the operator asks it to.
+
 `.github/workflows/release-production.yml` is a separate trusted path. It only accepts `push` to
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
 deployment/OIDC permission to the production release job.
@@ -156,11 +163,11 @@ script rather than in a commit message.
 Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
 These overrides update vulnerable transitive copies while preserving compatible major versions for
 other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;
-`package-json` moves to its compatible CommonJS v7 API to pick up patched Got v11; UUID v11 retains
-CommonJS exports for the Google clients; and Vercel's Undici v5 copies move to patched v6.
+UUID v11 retains CommonJS exports for the Google clients; and Vercel's Undici v5 copies move to
+patched v6.
 The Rolldown override keeps Vite's resolved bundler within its declared version range when the
 dependency graph is re-resolved. Compatibility tests check that range and the telemetry SDK's
-core dependency, along with the affected desktop and Vercel APIs.
+core dependency, along with the affected Vercel APIs.
 
 Keep the audit free of blanket ignores; the only permitted suppressions are the per-GHSA exceptions
 described above. When an upstream release removes a vulnerable pin, remove the corresponding

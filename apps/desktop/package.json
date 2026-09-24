@@ -1,6 +1,6 @@
 {
   "name": "@opencompany/desktop",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "description": "Thin Electron shell that wraps the production opencompany web app for macOS.",
   "homepage": "https://opencompany.ai",
@@ -13,18 +13,20 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src scripts",
-    "build:desktop": "bun run build:src && todesktop build",
-    "release": "bun run build:desktop"
-  },
-  "dependencies": {
-    "@todesktop/runtime": "2.1.4"
+    "package": "bun run build:src && electron-builder --mac --publish never",
+    "package:unsigned": "bun run build:src && electron-builder --mac --publish never -c.mac.identity=null -c.mac.notarize=false",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "devDependencies": {
-    "@todesktop/cli": "1.28.1",
+    "@electron/asar": "3.4.1",
     "@types/node": "^25.9.1",
     "electron": "44.2.0",
+    "electron-builder": "26.15.7",
+    "electron-updater": "6.8.9",
     "esbuild": "0.28.2",
+    "plist": "3.1.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "yaml": "^2.9.0"
   }
 }

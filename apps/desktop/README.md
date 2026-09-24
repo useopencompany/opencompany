@@ -3,12 +3,12 @@
 Thin Electron shell that wraps the production opencompany web app
 (`https://my.opencompany.chat`) as a downloadable macOS app. Product code keeps
 deploying via Vercel — the desktop app picks it up instantly. The shell itself
-updates rarely, via ToDesktop auto-update. Initial testing targets macOS arm64;
-enabled platform and architecture artifacts are controlled in ToDesktop.
+updates rarely: GitHub Actions builds, signs, and notarizes it, and installed
+apps update themselves from GitHub Releases. Builds cover Apple silicon and Intel.
 
 The shell bundles no Next.js and has **no `@opencompany/*` workspace deps** on
-purpose: ToDesktop builds it remotely from an uploaded, dependency-minimal
-package.
+purpose. esbuild bundles all runtime code, including `electron-updater`, into
+`dist/`, so the packaged app ships no `node_modules`.
 
 ## Layout
 
@@ -17,6 +17,8 @@ package.
 - `src/navigation.ts` — origin allowlist, external-link routing, offline fallback.
 - `src/auth.ts` — PKCE verifier + the Google system-browser sign-in handoff.
 - `src/menu.ts` — application menu (incl. Check for Updates and a dev-only paste-callback item).
+- `src/updates.ts` — background updates and the manual check.
+- `src/install-location.ts` — offers to move the app to /Applications, where updates can install.
 - `src/preload.ts` — the `window.opencompanyDesktop` contextBridge global + desktop document marker.
 - `src/urls.ts` — the wrapped app URL (`OPENCOMPANY_DESKTOP_APP_URL` override).
 - `assets/offline.html` — shown when the app URL can't load.
@@ -28,8 +30,9 @@ package.
 - `bun run dev:local` — build and run against `https://localhost:3443` (self-signed cert allowed).
 - `bun run build:src` — esbuild the main + preload bundles into `dist/`.
 - `bun run typecheck` / `bun run lint`.
-- `bun run build:desktop` — build the source, then create a signed ToDesktop build. This does not publish an update.
-- `bun run release` — compatibility alias for `build:desktop`; publishing remains a separate dashboard action.
+- `bun run package:unsigned` — build unsigned Apple silicon and Intel apps, zips, and DMGs into `release/`.
+- `bun run package` — the same, signed and notarized. Needs the credentials that CI loads.
+- `bun run verify:package` — check the bundle, sign-in URL scheme, and update feed in `release/`.
 
 ## Auth handoff
 
@@ -52,38 +55,53 @@ app is packaged.
 the standard macOS 824×824 rounded-square footprint on a transparent 1024×1024
 canvas, so it matches the optical size of other icons in the Dock.
 
-## Signed internal releases
+## Updates
 
-Use the existing ToDesktop app (`260820qy6fin4`) and bundle ID
-(`chat.opencompany.desktop`). Internal testers share the same update stream;
-publishing a release makes it available to every installed copy of this app.
-The shell loads production web content, not localhost. Web changes must deploy
-separately; rebuilding Electron does not deploy `apps/web`.
+Installed apps check for updates 10 seconds after launch, every hour, and
+after the Mac wakes. They use `electron-updater` with GitHub Releases on this
+repository and download new versions in the background. Squirrel.Mac then
+stages the update. Only after that does the web app's title bar show an
+**Update** button, which restarts into the new version. If the user never
+clicks it, the update installs the next time they quit. **Check for Updates…**
+in the app menu does the same check on demand.
 
-1. Configure the team's Developer ID Application certificate and notarization
-   credentials in ToDesktop. Never put the certificate or passwords in this repo.
-2. Use the repository's pinned Bun version and run `bun install --frozen-lockfile`.
-   Run desktop tests, typecheck, lint, and `build:src` before uploading.
-3. From `apps/desktop`, inspect `todesktop build --dry-run --files`. The upload
-   allowlist includes only package/config, built bundles, and assets, not env files.
-4. Run `bun run build:desktop`. Require successful signing and notarization,
-   then download the Mac artifact and install it in Applications. Do not remove
-   quarantine attributes to make an internal build pass.
-5. Verify Google handoff, quit/relaunch session persistence, chat/tasks, uploads,
-   external links, offline recovery, and normal launch on another Mac.
-6. Release the verified build from the ToDesktop dashboard. Keep release-token
-   approval enabled; building and releasing are intentionally separate actions.
-7. For the first release, build a second, higher package version with the same
-   identifiers and signing team. Release it, then update the installed first
-   version through **Check for Updates…**. Verify the version changes and the
-   user's session survives. Also cover deferring the restart until the next launch.
-   `todesktop smoke-test <build-id>` is an additional automated check, not a
-   replacement for this real two-version update test.
+The updater follows the release that GitHub marks as **Latest**, and reads
+`latest-mac.yml` and the matching zip from that exact tag. Draft releases are
+invisible to it. Do not mark any other kind of release in this repository as
+Latest, because installed apps would stop finding updates.
 
-ToDesktop checks on launch and every ten minutes. Its built-in restart prompt is
-used in the foreground and its notification in the background. Manual checks
-disable the menu item while running and report up-to-date and failure states.
+Squirrel.Mac cannot replace an app that runs from the mounted DMG or from a
+translocated Downloads copy. The app asks to move itself to /Applications on
+each launch until it lives there.
 
-References: [signing](https://www.todesktop.com/electron/docs/introduction/signing-application),
-[build/release CLI](https://www.todesktop.com/electron/docs/libraries/cli),
-[updater runtime](https://www.todesktop.com/electron/docs/libraries/runtime).
+## Releases
+
+Releases are built by `.github/workflows/release-desktop.yml` on a macOS runner.
+The shell loads production web content, so web changes deploy separately.
+Rebuilding Electron does not deploy `apps/web`.
+
+1. Bump `version` in `apps/desktop/package.json` and merge to `main`. The PR
+   gate packages the unsigned app, verifies it, and launches it on macOS.
+2. Run **Release desktop app** from `main` with **publish** off. The workflow
+   signs with the Developer ID certificate and notarizes with the App Store
+   Connect API key. It then checks the signature, Gatekeeper, the stapled
+   ticket, and the update feed, and uploads a draft `desktop-v<version>` release.
+3. Download the DMG from the draft, install it, and check Google sign-in,
+   quit/relaunch session persistence, voice dictation, and external links.
+4. Publish the draft and keep **Set as the latest release** checked. Every
+   installed app picks it up within an hour. Running the workflow with
+   **publish** on combines steps 2 and 4.
+
+Before the first public release, check the update path with two versions:
+install version N, publish N+1, and confirm the Update button appears, the
+restart lands on N+1, and the session survives. Also check that quitting
+without clicking Update installs it.
+
+Copies installed from ToDesktop builds (0.1.x) check ToDesktop's feed, not
+GitHub Releases, so testers must reinstall 0.2.0 from the DMG once.
+
+To roll back, publish a higher version built from the last good commit.
+Updates only move forward.
+
+Signing credentials live in Infisical `prod` `/desktop`. See
+[deployment](../../docs/deployment.md#desktop-releases).
