@@ -228,7 +228,8 @@ const composer = `<div class="composer-wrap"><div class="composer"><div class="f
   <div class="tools">${ic("at-sign", 15)}${ic("plus", 15)}${ic("mic", 15)}<span>Kimi K3 ${ic("chevron-down", 12)}</span></div></div></div>`;
 const chips = (align = "center") => `<div class="chips" style="justify-content:${align}">${STARTER_PROMPTS.map(([i, t]) => `<span class="chip">${ic(i)}${t}</span>`).join("")}</div>`;
 
-const SCREENS = {
+// Keyed by the URL hash, which is user input — a Map lookup can only return a screen we defined.
+const SCREENS = new Map(Object.entries({
   // ----- Direction A: Starts ready — the role they already pick decides the kit. No new step.
   "a-1": () => profileStep(5, "a-2"),
   "a-2": () => onboarding(4, 5, `<div class="check-badge">${ic("check", 22, 2.6)}</div>
@@ -277,7 +278,7 @@ const SCREENS = {
         <div class="grow"><div class="t">${g.title}</div><div class="items">${g.items}</div></div>${g.status === "ok" ? `<span class="pill ok">Ready</span>` : `<a class="btn outline sm">Connect ${g.status.split(",")[0]}</a>`}</div>`).join("")}</div>
       <div class="msg-agent"><p>Try one:</p></div>${chips("flex-start")}
     </div></div>${composer}` }),
-};
+}));
 
 const FLOWS = {
   a: { name: "A · Starts ready", screens: ["a-1", "a-2", "a-3"] },
@@ -300,9 +301,10 @@ function render() {
   const id = location.hash.slice(1) || "index";
   document.body.classList.toggle("shot", new URLSearchParams(location.search).has("shot"));
   const root = document.getElementById("root");
-  root.innerHTML = id === "index" || !SCREENS[id] ? index() : SCREENS[id]();
-  const flow = FLOWS[id[0]];
-  if (flow && SCREENS[id]) {
+  const screen = SCREENS.get(id);
+  root.innerHTML = screen ? screen() : index();
+  const flow = screen && FLOWS[id[0]];
+  if (flow && screen) {
     root.insertAdjacentHTML("beforeend", `<nav class="protobar"><a href="#index">All directions</a><span class="sep"></span><span>${flow.name}</span>
       ${flow.screens.map((s, k) => `<a href="#${s}" class="${s === id ? "cur" : ""}">${k + 1}</a>`).join("")}</nav>`);
   }
