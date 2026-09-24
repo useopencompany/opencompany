@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
 import { PluginConnectionCard } from "./PluginConnectionCard";
 
-const state = vi.hoisted(() => ({ connected: false }));
+const state = vi.hoisted(() => ({ connected: false, refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: state.refresh }),
+}));
 vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => ({ integrations: {} }),
 }));
@@ -15,6 +18,7 @@ vi.mock("@/lib/plugin-connection-state", () => ({
 
 afterEach(() => {
   state.connected = false;
+  state.refresh.mockReset();
   window.sessionStorage.clear();
 });
 
@@ -55,4 +59,20 @@ it("restores a pending connection after the chat remounts", async () => {
   state.connected = true;
   render(<PluginConnectionCard {...props} />);
   await waitFor(() => expect(onResume).toHaveBeenCalledOnce());
+});
+
+it("refreshes server-backed connection state when the user returns to chat", async () => {
+  render(
+    <PluginConnectionCard
+      pluginName="infisical"
+      status="not_connected"
+      messageId="assistant_server_snapshot"
+      onResume={vi.fn(async () => undefined)}
+    />,
+  );
+  await userEvent.click(screen.getByRole("link", { name: "Connect" }));
+
+  window.dispatchEvent(new Event("focus"));
+
+  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
 });

@@ -2,6 +2,7 @@
 
 import { cn } from "@opencompany/ui/lib/utils";
 import { ArrowUpRight, Check, LoaderCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import {
@@ -57,6 +58,7 @@ export function PluginConnectionCard({
   onResume?: ((pluginName: string, id: string) => Promise<void>) | undefined;
   readOnly?: boolean;
 }) {
+  const router = useRouter();
   const appData = useAppDataOptional();
   const config: OfficialMcpPluginMetadata | null = isOfficialMcpPluginName(pluginName)
     ? OFFICIAL_MCP_PLUGIN_METADATA[pluginName]
@@ -77,6 +79,16 @@ export function PluginConnectionCard({
     config && appData?.integrations
       ? pluginConnectionSatisfied(config, pluginAccountsFromState(appData.integrations, config))
       : false;
+
+  // Most personal connections arrive through the live integration projection. A few managed or
+  // server-selected connections only change in AppShell's server snapshot, so refresh that snapshot
+  // when the user returns from the connection tab.
+  useEffect(() => {
+    if (!pendingId || connected || readOnly) return;
+    const refreshConnectionState = () => router.refresh();
+    window.addEventListener("focus", refreshConnectionState);
+    return () => window.removeEventListener("focus", refreshConnectionState);
+  }, [connected, pendingId, readOnly, router]);
 
   useEffect(() => {
     if (

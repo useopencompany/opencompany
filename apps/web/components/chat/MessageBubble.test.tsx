@@ -19,7 +19,9 @@ const emptyTaskLookup: ChatTaskLookup = new Map();
 const presentationMocks = vi.hoisted(() => ({
   load: vi.fn(),
 }));
+const navigationMocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => navigationMocks }));
 vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => ({ user: { email: "louis@example.com" } }),
 }));
@@ -29,6 +31,7 @@ vi.mock("@/lib/headless-chat-presentations", () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  navigationMocks.refresh.mockReset();
   presentationMocks.load.mockReset();
 });
 
