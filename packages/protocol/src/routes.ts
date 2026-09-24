@@ -109,6 +109,7 @@ import {
   MessagePageSchema,
   MessagePresentationEnvelopeSchema,
   OnboardingCommandEnvelopeSchema,
+  OnboardingRepositoryScanEnvelopeSchema,
   OnboardingStateEnvelopeSchema,
   OnboardingWorkspaceEnvelopeSchema,
   PluginArchiveEnvelopeSchema,
@@ -143,6 +144,7 @@ import {
   SaveClaudeCodeTokenBodySchema,
   SaveOnboardingProfileBodySchema,
   SaveOnboardingWorkspaceBodySchema,
+  ScanOnboardingRepositoryBodySchema,
   SessionPullRequestListSchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
@@ -2798,6 +2800,27 @@ export const saveOnboardingWorkspaceRoute = createRoute({
   },
 });
 
+export const scanOnboardingRepositoryRoute = createRoute({
+  method: "post",
+  path: "/v1/onboarding/repository-scan",
+  tags: ["Onboarding"],
+  security: actorSecurity,
+  request: {
+    body: {
+      required: true,
+      content: { "application/json": { schema: ScanOnboardingRepositoryBodySchema } },
+    },
+  },
+  responses: {
+    200: {
+      description:
+        "Official plugins suggested from the setup files of the caller's most recently pushed, or chosen, GitHub repository.",
+      content: { "application/json": { schema: OnboardingRepositoryScanEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const finishOnboardingRoute = createRoute({
   method: "post",
   path: "/v1/onboarding/complete",
@@ -4074,6 +4097,7 @@ export type V1RouteHandlers = {
   getOnboardingState: RouteHandler<typeof getOnboardingStateRoute>;
   saveOnboardingProfile: RouteHandler<typeof saveOnboardingProfileRoute>;
   saveOnboardingWorkspace: RouteHandler<typeof saveOnboardingWorkspaceRoute>;
+  scanOnboardingRepository: RouteHandler<typeof scanOnboardingRepositoryRoute>;
   finishOnboarding: RouteHandler<typeof finishOnboardingRoute>;
   listWikis: RouteHandler<typeof listWikisRoute>;
   createWiki: RouteHandler<typeof createWikiRoute>;
@@ -4313,6 +4337,7 @@ export function createV1Router(
       .openapi(getOnboardingStateRoute, handlers.getOnboardingState)
       .openapi(saveOnboardingProfileRoute, handlers.saveOnboardingProfile)
       .openapi(saveOnboardingWorkspaceRoute, handlers.saveOnboardingWorkspace)
+      .openapi(scanOnboardingRepositoryRoute, handlers.scanOnboardingRepository)
       .openapi(finishOnboardingRoute, handlers.finishOnboarding)
       .openapi(listWikisRoute, handlers.listWikis)
       .openapi(createWikiRoute, handlers.createWiki)
@@ -5116,6 +5141,8 @@ const contractDocumentHandlers: V1RouteHandlers = {
       },
       200,
     ),
+  scanOnboardingRepository: (c) =>
+    c.json({ data: { status: "not_connected" as const }, meta }, 200),
   finishOnboarding: (c) => c.json({ data: { completed: true as const }, meta }, 200),
   listWikis: (c) => c.json({ data: [placeholderWiki], meta }, 200),
   createWiki: (c) => c.json({ data: placeholderWiki, meta }, 201),

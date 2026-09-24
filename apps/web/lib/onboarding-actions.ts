@@ -1,7 +1,7 @@
 "use server";
 
 import { newResourceId } from "@opencompany/core/resource-ids";
-import type { OnboardingStateDto } from "@opencompany/protocol";
+import type { OnboardingRepositoryScan, OnboardingStateDto } from "@opencompany/protocol";
 import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { currentIdentity } from "@/lib/auth";
@@ -165,5 +165,32 @@ export async function getOnboardingInstalledPluginsAction(): Promise<string[]> {
     return plugins.map((plugin) => plugin.name);
   } catch {
     return [];
+  }
+}
+
+export type OnboardingRepositoryScanResult =
+  | { ok: true; scan: OnboardingRepositoryScan }
+  | { ok: false; error: string };
+
+// Reads the founder's most recently pushed repository, or the one they picked, and returns the
+// plugins its setup files point at. The API re-checks that the repository is theirs.
+export async function scanOnboardingRepositoryAction(input: {
+  repository?: string;
+}): Promise<OnboardingRepositoryScanResult> {
+  const repository = typeof input?.repository === "string" ? input.repository.trim() : "";
+  try {
+    const response = await (await serverApiClient()).v1.onboarding["repository-scan"].$post({
+      json: repository ? { repository } : {},
+    });
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: await serverApiErrorMessage(response, "Could not read your repository."),
+      };
+    }
+    return { ok: true, scan: (await response.json()).data };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, error: "Could not read your repository. Please try again." };
   }
 }

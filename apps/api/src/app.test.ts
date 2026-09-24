@@ -343,6 +343,7 @@ describe("canonical Hono API", () => {
       identity: fakeIdentity(),
       onboarding: fakeOnboarding(),
       onboardingEmails: fakeOnboardingEmails(),
+      onboardingRepositoryScan: fakeOnboardingRepositoryScan(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -4654,6 +4655,7 @@ function testApp(
     identity: fakeIdentity(),
     onboarding: fakeOnboarding(),
     onboardingEmails: fakeOnboardingEmails(),
+    onboardingRepositoryScan: fakeOnboardingRepositoryScan(),
     authenticate: async () => ({ actor }),
     identify: async () => ({
       userId: actor.userId,
@@ -4862,6 +4864,16 @@ function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
     },
     finish: async () => {
       throw new Error("Unexpected onboarding completion.");
+    },
+  };
+}
+
+function fakeOnboardingRepositoryScan(): Parameters<
+  typeof createApiApp
+>[0]["onboardingRepositoryScan"] {
+  return {
+    scan: async () => {
+      throw new Error("Unexpected onboarding repository scan.");
     },
   };
 }

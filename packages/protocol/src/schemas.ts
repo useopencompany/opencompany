@@ -3246,6 +3246,43 @@ export const FinishOnboardingBodySchema = z
   .strict()
   .openapi("FinishOnboardingBody");
 
+// "owner/name", as GitHub spells a repository. The scan re-checks access, so this only bounds input.
+export const GitHubRepositoryFullNameSchema = z
+  .string()
+  .max(201)
+  .regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/)
+  .openapi("GitHubRepositoryFullName");
+
+export const ScanOnboardingRepositoryBodySchema = z
+  .object({ repository: GitHubRepositoryFullNameSchema.optional() })
+  .strict()
+  .openapi("ScanOnboardingRepositoryBody");
+
+export const OnboardingRepositoryScanSchema = z
+  .discriminatedUnion("status", [
+    z.object({ status: z.literal("not_connected") }).strict(),
+    z.object({ status: z.literal("no_repositories") }).strict(),
+    z
+      .object({
+        status: z.literal("scanned"),
+        repository: z.object({ fullName: z.string(), private: z.boolean() }).strict(),
+        repositories: z.array(z.string()).max(20),
+        plugins: z
+          .array(
+            z.object({ plugin: z.string().min(1).max(64), reason: z.string().max(300) }).strict(),
+          )
+          .max(20),
+        recommendedBy: z.enum(["jev", "rules"]),
+      })
+      .strict(),
+  ])
+  .openapi("OnboardingRepositoryScan");
+
+export const OnboardingRepositoryScanEnvelopeSchema = z
+  .object({ data: OnboardingRepositoryScanSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("OnboardingRepositoryScanEnvelope");
+
 export const OnboardingCommandEnvelopeSchema = z
   .object({
     data: z.object({ completed: z.literal(true) }).strict(),
@@ -4484,6 +4521,8 @@ export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
 export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
 export type OnboardingRole = z.infer<typeof OnboardingRoleSchema>;
 export type OnboardingStateDto = z.infer<typeof OnboardingStateSchema>;
+export type OnboardingRepositoryScan = z.infer<typeof OnboardingRepositoryScanSchema>;
+export type ScanOnboardingRepositoryBody = z.infer<typeof ScanOnboardingRepositoryBodySchema>;
 export type OnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
 export type OnboardingEmailClaimDto = {
   id: string;
