@@ -1,5 +1,6 @@
 import { authkit, handleAuthkitHeaders } from "@workos-inc/authkit-nextjs";
 import { type NextRequest, NextResponse } from "next/server";
+import { rememberOnboardingVersion } from "@/app/onboarding/onboarding-version";
 import { isInitialDocumentRequest, localHttpsRedirectUrl } from "@/lib/local-https-redirect";
 import { getWorkOSRedirectUri } from "@/lib/workos";
 
@@ -35,16 +36,19 @@ export default async function proxy(request: NextRequest) {
   });
 
   if (isUnauthenticatedPath(request.nextUrl.pathname) || session.user) {
-    return handleAuthkitHeaders(request, headers);
+    return rememberOnboardingVersion(request, handleAuthkitHeaders(request, headers));
   }
 
   if (!isInitialDocumentRequest(request)) {
     return handleAuthkitHeaders(request, headers);
   }
 
-  return handleAuthkitHeaders(request, headers, {
-    redirect: new URL("/signin", request.url).toString(),
-  });
+  return rememberOnboardingVersion(
+    request,
+    handleAuthkitHeaders(request, headers, {
+      redirect: new URL("/signin", request.url).toString(),
+    }),
+  );
 }
 
 export const config = {

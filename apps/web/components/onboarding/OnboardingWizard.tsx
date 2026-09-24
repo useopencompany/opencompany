@@ -145,6 +145,7 @@ export function OnboardingWizard({
   initialRole,
   initialCompanyUrl,
   initialReferral,
+  starterSetup = false,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -155,6 +156,8 @@ export function OnboardingWizard({
   initialRole: string | null;
   initialCompanyUrl: string;
   initialReferral: string | null;
+  // Opt-in (?version=2) technical founder setup; everyone else keeps the catalog step.
+  starterSetup?: boolean;
 }) {
   const router = useRouter();
   const steps = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
@@ -179,7 +182,8 @@ export function OnboardingWizard({
 
   const step = steps[stepIndex] ?? steps[0]!;
   const isLast = stepIndex === steps.length - 1;
-  const technical = variant === "owner" && role !== null && TECHNICAL_ROLES.has(role);
+  const technical =
+    starterSetup && variant === "owner" && role !== null && TECHNICAL_ROLES.has(role);
   const plugins = usePluginConnections({
     loadInstalled: activeWorkspaceId !== null && (step === "plugins" || step === "finish"),
   });

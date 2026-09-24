@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { ONBOARDING_VERSION_COOKIE, usesStarterSetup } from "@/app/onboarding/onboarding-version";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
 import { currentIdentity, currentUser } from "@/lib/auth";
@@ -9,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function OnboardingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ variant?: string }>;
+  searchParams: Promise<{ variant?: string; version?: string }>;
 }) {
   const identity = await currentIdentity();
   const name =
@@ -42,6 +43,11 @@ export default async function OnboardingPage({
   // A stale onboarding cookie must never skip past workspace creation.
   const initialStep = context ? requestedStep : Math.min(requestedStep, 1);
 
+  const starterSetup = usesStarterSetup({
+    version: params.version,
+    cookie: cookieStore.get(ONBOARDING_VERSION_COOKIE)?.value,
+  });
+
   return (
     <OnboardingWizard
       user={{
@@ -60,6 +66,7 @@ export default async function OnboardingPage({
       initialRole={onboarding?.role ?? null}
       initialCompanyUrl={onboarding?.contextUrls?.[0] ?? onboarding?.companyDomain ?? ""}
       initialReferral={onboarding?.referralSource ?? null}
+      starterSetup={starterSetup}
     />
   );
 }

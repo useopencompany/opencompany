@@ -204,6 +204,10 @@ read and connect Claude Code and Codex through the narrow `/v1/engine-auth/*` se
 Technical founders' plugins step instead calls `POST /v1/onboarding/repository-scan`, an
 identity-tier onboarding route that reads the setup files of their own most recently pushed GitHub
 repository and suggests plugins (see [ADR 0019](./adr/0019-technical-founder-onboarding.md)).
+That step is opt-in until it has been tested by hand: only owners who arrive through a `?version=2`
+link (for example `/signup?version=2`) get it. The proxy keeps the parameter in the
+`goat-onboarding-version` cookie for seven days across the WorkOS round-trip, and `?version=1`
+clears it.
 These exceptions apply only to browser sessions with an existing workspace membership; they retain
 Actor resolution, workspace permissions, origin checks, and rate limits. Ordinary product routes
 and bearer-token callers still require completed onboarding.
