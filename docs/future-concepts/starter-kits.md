@@ -1,126 +1,176 @@
-# Starter kits
+# Starter setup for technical founders
 
-Status: proposal. We still need to choose a direction. Clickable prototype:
-[`starter-kits/prototype.html`](./starter-kits/prototype.html) (open it in a browser; it has no build step).
+Status: proposal. The first version covers technical founders only. Clickable prototype:
+[`starter-kits/prototype.html`](./starter-kits/prototype.html). It opens straight in a browser with
+no build step.
 
 ## Problem
 
-A new workspace starts empty. Workspace creation seeds only the Company Wiki, and the first thing a
-new user sees is "What should we build next?" with nothing under it. The Skills, Workflows, and
-Agents pages then each show their own "No … yet" state. Users told us they want to start with
-useful defaults. A technical founder should arrive with a few skills, the right plugins, a workflow,
-and a company agent, and get to a first "aha" within about 30 seconds.
+A new workspace starts empty. Workspace creation seeds only the Company Wiki. The first screen a
+new user sees is "What should we build next?" with nothing beneath it.
 
-Much of what we need already exists:
+Users tell us they want useful defaults. A technical founder should arrive with:
 
-- Onboarding already asks for a **role** and a **company URL** (`OnboardingWizard.tsx`). The role
-  only changes suggested Wiki folders today (`onboardingFoldersForRole`), and nothing reads those.
-- `WORKFLOW_TEMPLATES` already contains finished, runnable workflows, such as the weekly shipping
-  digest.
-- YC Advise is a skills-only plugin and needs no connected account.
-- `queueOnboardingKickoff` can already auto-submit a first chat prompt, but nothing calls it.
+- the right tools connected, and
+- one obvious way to ship something,
+
+and get to a first "aha" within about 30 seconds.
+
+An earlier version of this proposal offered a general kit of skills, plugins, a workflow, and a
+company agent. That turned out to be too many concepts at once. This version keeps only two things:
+
+- **Plugins**, chosen from the user's own code.
+- **Two workflows** the user runs by hand.
 
 ## Principles
 
-1. **A kit is content, not a feature.** A kit installs ordinary skills, plugins, a workflow, and an
-   agent. There is no "template" object and no new page or setting. Undoing a kit means deleting
-   those things with the controls that already exist.
-2. **Don't ask twice.** We already know the role. Any new question has to earn its place.
-3. **Show it, then get out of the way.** The aha is seeing your workspace already full, followed
-   by one prompt that does real work.
-4. **Work before anything is connected.** Every kit item is created at once. Items that need a
-   connection are shown as "Connect GitHub" and are never hidden.
+1. **Use what they already have.** The repo already says what the company runs on. Read it instead
+   of asking.
+2. **Only real content.** The setup creates ordinary plugins and workflows. It adds no new
+   "template" object and no new page. Undoing it means deleting those items the normal way.
+3. **Every suggestion explains itself.** Each suggested plugin names the file that caused the
+   suggestion, for example `render.yaml`.
+4. **No new steps.** The setup replaces the existing plugins step. The owner flow stays at five
+   steps: profile, workspace, subscriptions, code, finish.
 
-## The kit (same in every direction)
+## The flow
 
-The technical founder kit:
+**1. Connect your code** (step 4, replacing "Give your agent some tools")
 
-| Kind | Contents | Works immediately? |
-| --- | --- | --- |
-| Skills | Write a PR description · Investor update · Customer call notes · YC office hours | Yes |
-| Plugins | GitHub · Linear · YC Advise | YC Advise yes; GitHub and Linear need a connection |
-| Workflow | Weekly shipping digest (existing template, Fridays 4pm) | Draft until GitHub and Slack are connected |
-| Agent | Chief of staff: answers the team from the Wiki, GitHub, and Linear | Yes, from the Wiki |
+- The step is a single "Connect GitHub" card.
+- A note says setup is read-only.
+- "Skip for now" keeps today's behavior.
 
-The home screen shows three starter prompts for the kit: "What shipped this week?", "Draft this
-month's investor update", and "Office hours: how should we price?".
+![Connect your code](../pr-assets/starter-kits/code-connect.png)
 
-The first version needs three kits, mapped from the eight existing roles:
+**2. Read the repo**
 
-- **Technical founder:** founder, product.
-- **Go-to-market founder:** sales, marketing.
-- **Operator:** operations, investing, consulting, research.
+- We pick the user's most recently pushed repo automatically. A "Pick another" link lets them
+  change it.
+- We read a handful of setup files and show each one as it is read.
+- This takes seconds and does not call a model.
 
-## Directions
+![Reading the repo](../pr-assets/starter-kits/code-scan.png)
 
-### A · Starts ready (recommended)
+**3. Suggested plugins**
 
-The role picked on step 1 decides the kit. The existing plugins step recommends that kit's
-plugins. The finish screen becomes "Acme is ready": a four-row list of what's in the workspace,
-with a **Change** link in case we guessed the kit wrong and a **Start empty instead** link. The user
-then lands on home with the counts filled in and the starter prompts showing.
+The screen has two short lists:
 
-- No new steps and no new concepts. The whole thing takes one screen that already exists.
-- The outcome is deterministic and instant, with no model call on the critical path.
-- Risk: a wrong guess from the role. The Change link and one-click deletes cover it.
+- **Found in your code:** GitHub, plus whatever the scan detected, each with the reason it was
+  suggested.
+- **For your team:** Linear, Slack, and Gmail. We suggest these to every technical founder.
 
-![Direction A: finish screen](../pr-assets/starter-kits/a-2.png)
-![Direction A: home](../pr-assets/starter-kits/a-3.png)
+Each row has a Connect button. Anything the user leaves unconnected stays suggested on the Plugins
+page.
 
-### B · Pick a starter
+![Suggested plugins](../pr-assets/starter-kits/code-suggest.png)
 
-This adds a "Pick a starting point" step after the profile step. It shows four cards, with the one
-matching the role marked as suggested, then a preview where the user can untick items.
+**4. Acme is ready**
 
-- The choice is explicit and so is the consent.
-- Risk: two more screens for a choice most people will accept as suggested. It also turns the kit
-  into a thing to shop for, which leads to demand for a gallery.
+The finish screen shows the two workflows and which plugins are connected.
 
-![Direction B: pick](../pr-assets/starter-kits/b-2.png)
-![Direction B: preview](../pr-assets/starter-kits/b-3.png)
+![Ready](../pr-assets/starter-kits/ready.png)
 
-### C · Set up in chat
+**5. Home**
 
-Onboarding stays as it is. The first chat opens with the agent, which has read the company URL and
-proposes the kit as a card with "Set it up". After the user accepts, the card turns into a checklist
-with Connect buttons and starter prompts.
+- Two starter prompts sit under the heading: `#build …` and `#review-pr …`.
+- Typing `#` opens the existing workflow menu, which now contains both workflows.
 
-- This is the strongest demo of the product itself: the agent doing work for you.
-- Risk: the first 30 seconds depend on a model run (latency, cost, failures), and the proposal
-  varies from one user to the next. "Not now" leaves the user as empty as they are today.
+![Home](../pr-assets/starter-kits/home.png)
+![Typing # in chat](../pr-assets/starter-kits/home-hash.png)
 
-![Direction C: proposal](../pr-assets/starter-kits/c-2.png)
-![Direction C: done](../pr-assets/starter-kits/c-3.png)
+## Plugin detection
 
-## Recommendation
+Detection is a fixed rule table, so the same repo always gets the same suggestions.
 
-**Ship A.** It is the simplest option that fully solves the problem. C's best idea, using the
-company URL to personalize, can come later as a first-chat follow-up on top of a workspace that is
-already full ("I read acme.dev, want me to tailor these skills?"). By then that prompt is a bonus
-and not a gate.
+- **Which files:** only manifests and config files: every `package.json` up to two directories
+  deep, `pyproject.toml`, `requirements*.txt`, `go.mod`, and `Gemfile`, plus the files named
+  below.
+- **How:** one recursive git-tree call, then fetching only the matching files.
+- **Which plugins:** only official plugins that can be connected today. A plugin with a
+  `connectionUnavailableReason`, such as Vercel, is not suggested.
 
-## What building A takes
+| Plugin | Suggested when the repo contains |
+| --- | --- |
+| PostHog | `posthog-js`, `posthog-node`, or `posthog` (Python) |
+| Render | `render.yaml` |
+| Stripe | `stripe` or `@stripe/*` |
+| Neon | `@neondatabase/serverless` |
+| Supabase | `@supabase/supabase-js` or `supabase/config.toml` |
+| Convex | the `convex` dependency or a `convex/` directory |
+| Resend | `resend` |
+| Better Stack | `@logtail/*` |
+| Infisical | `.infisical.json` |
+| Doppler | `doppler.yaml` |
 
-- **Kit definitions** live next to `WORKFLOW_TEMPLATES` in `apps/web`. They are typed data: skills
-  (name, description, instructions), official plugin names, workflow template ids, agent
-  (name, instructions), and starter prompts.
-- **Seeding** happens server-side in onboarding `finish`, because API auth only allows plugin calls
-  before onboarding is complete. It reuses the existing services:
-  - `SkillImportApplicationService.create` for skills.
-  - Plugin import for official plugins.
-  - `createWorkflow` + `updateWorkflow` for the workflow template.
-  - `CompanyAgentApplicationService` for the agent.
-- **Idempotency:** seeding must be safe to retry. It should skip items that already exist by name.
-- **Company agents are behind `companyAgentsEnabled`.** A kit that includes an agent must either
-  enable the flag for the workspace owner or leave the agent out until the beta ends.
-- **Home empty state** shows the kit's starter prompts. They disappear after the first chat.
-- **Analytics:** record the kit applied, "Start empty", "Change", and which starter prompt was sent.
-  This is how we find out whether the kit gets used.
+GitHub, Linear, Slack, and Gmail are always suggested for this setup.
+
+## The two workflows
+
+Both are ordinary manual workflows. Their names give the chat handles `#build` and `#review-pr`,
+through the existing `workflowSlugFromName`. The instructions name the scanned repo so the first run
+needs no configuration.
+
+**Build**: "Describe a change. It writes the code and opens a pull request."
+
+1. Read the repo's agent guides (`AGENTS.md` and `CLAUDE.md`) and the relevant code.
+2. Ask one question if the request is ambiguous. Otherwise implement it on a new branch.
+3. Run the repo's own checks.
+4. Open a pull request that explains the change and how it was verified.
+5. Never merge.
+
+**Review PR**: "Point it at a pull request. It reviews the diff and comments on GitHub."
+
+1. Take a pull request URL or number. If none is given, use the user's most recent open pull
+   request in the repo.
+2. Read the description and the full diff.
+3. Look for correctness, missing tests, and security issues.
+4. Leave one GitHub review with inline comments, ranked by severity.
+5. Never approve or merge.
+
+## What building it takes
+
+- **Setup definition:** the setup is typed data next to `WORKFLOW_TEMPLATES` in `apps/web`: the
+  always-suggested plugins, the detection table, the two workflows, and the starter prompts.
+- **Repo scan:** a new read-only onboarding endpoint.
+  - It uses the user's existing GitHub connection and the installation-repositories helper in
+    `packages/agent/src/integrations/github-user.ts`, plus read access to repo contents.
+  - The endpoint must be added to the short list of API calls allowed before onboarding finishes,
+    next to the existing plugin preview and import calls.
+  - It returns the plugin slug and the reason. It never returns file contents.
+- **Plugins:** connecting uses the same `installOfficialPlugin` path as the current plugins step.
+  Suggestions the user skips appear on the Plugins page.
+- **Workflows:** created in onboarding `finish` with the existing `createWorkflow` and
+  `updateWorkflow` calls, as the templates gallery already does. They must be safe to create
+  twice: skip any workflow that already exists by name.
+- **Home:** the empty state shows the two starter prompts until the first chat is sent.
+- **Analytics:** record the following, to learn whether the setup actually gets used:
+  - whether the user connected GitHub or skipped;
+  - how many plugins were suggested and how many connected;
+  - the first `#build` and `#review-pr` runs.
+
+## Left out on purpose
+
+- **Skills.** Skills are a third concept to explain on day one. Plugins and workflows cover the
+  first week.
+- **A company agent.** The natural next step is an engineering agent. Every four hours it would read
+  production logs (Render or Better Stack) and open a pull request for errors that are likely real.
+  We leave it out of the first version because it adds a new concept and a scheduled job. It is
+  also behind the `companyAgentsEnabled` beta flag.
+- **Other roles.** Go-to-market and operator setups can follow the same pattern later. They would
+  read the inbox and calendar instead of a repo. Until then, those roles keep today's plugins step.
+
+## Directions considered
+
+- **Pick a starter** was an explicit step with kit cards. We dropped it because the repo scan
+  personalizes better than a menu, with no extra choice to make.
+- **Set up in chat** had the agent propose a setup in the first chat. We dropped it because the first
+  30 seconds would depend on a model run. A later version could still use the first chat for a
+  follow-up, for example "want me to add an engineering agent that watches your logs?"
 
 ## Open questions
 
-- Should "Founder / CEO" map to the technical kit? It fits our current users, but a non-technical
-  founder would see GitHub first.
-- Should kit skills be company-scoped (shared with future teammates) or personal? The proposal is
-  company-scoped, because the kit describes the company's setup.
-- Should invited members, who skip the owner steps, see the starter prompts?
+- Should "Founder / CEO" get this setup, or only "Product / Engineering"? Proposal: both. A
+  founder who skips GitHub gets today's plugins step.
+- When the user has several active repos, should the scan cover all of them (at most 3) instead of
+  one?
