@@ -78,6 +78,7 @@ deployment, and health checks. Do not bypass preflight or branch protection.
   `render.yaml` owns the image, disk, region, and non-secret configuration.
 - Runner: Infisical `prod` `/runner`, synced to the runner Render service.
 - Mobile: Infisical `prod` `/mobile`, loaded by GitHub Actions for EAS builds.
+- Desktop: Infisical `prod` `/desktop`, loaded by GitHub Actions to sign and notarize the macOS app.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
 
@@ -148,6 +149,44 @@ temporary `apps/mobile/.env.sentry-build-plugin` file in the EAS upload archive.
 uses that file for Sentry uploads, but the workflow never writes the token to `apps/mobile/.env` or
 the application bundle. The cleanup step removes the file after the build, including failed runs.
 No EAS environment variable is required.
+
+## Desktop releases
+
+`.github/workflows/release-desktop.yml` builds the macOS shell in `apps/desktop` when someone runs
+it manually from `main`. It runs on a GitHub-hosted macOS runner in the protected `production`
+environment. It rejects a version that already has a `desktop-v<version>` release, then runs the
+desktop tests and packages Apple silicon and Intel builds with electron-builder. It signs them with
+the Developer ID certificate, notarizes them with an App Store Connect API key, and uploads the zips,
+DMGs, blockmaps, and `latest-mac.yml` to a draft GitHub release. `scripts/verify-package.mjs --signed`
+must pass before the upload. It checks the signing team, hardened runtime, Gatekeeper's notarized
+Developer ID assessment, the stapled ticket, the `opencompany://` sign-in scheme, and the
+update feed hashes.
+
+Installed apps update from the GitHub release marked **Latest**, so publishing the draft is the
+rollout. With the `publish` input, the workflow publishes the draft and marks it Latest right away.
+Draft releases are invisible to installed apps. Do not mark any other release in this repository as
+Latest. The release process and update behavior are described in
+[the desktop README](../apps/desktop/README.md#releases).
+
+The job reads these values from Infisical `prod` `/desktop`. The existing OIDC machine identity
+needs read access to that path:
+
+- `MACOS_CERTIFICATE_P12_BASE64`, a base64-encoded `.p12` export of the Developer ID Application
+  certificate and its private key
+- `MACOS_CERTIFICATE_PASSWORD`, the `.p12` export password
+- `APPLE_API_KEY_P8`, the complete App Store Connect API `.p8` private key used by `notarytool`
+- `APPLE_API_KEY_ID`
+- `APPLE_API_ISSUER`
+- `APPLE_TEAM_ID`, the team that owns the certificate. Updates only install between builds signed
+  by the same team.
+
+The workflow writes the notarization key to a mode-600 file in the runner's temporary directory and
+removes it after both successful and failed runs. electron-builder imports the certificate into a
+temporary keychain. No signing value is written to the repository or the app bundle.
+
+The PR gate's `Desktop package` job builds the same app unsigned when `apps/desktop`, the lockfile, or
+the root manifest changes. It verifies the bundle and update feed, then launches the app from
+`/Applications` on macOS.
 
 ## Migrations
 

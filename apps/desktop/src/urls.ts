@@ -7,3 +7,12 @@ export const APP_URL = (
 
 // Same-origin allowlist for in-window navigation. Anything else opens externally.
 export const APP_ORIGIN = new URL(APP_URL).origin;
+
+export function isAppOrigin(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return new URL(url).origin === APP_ORIGIN;
+  } catch {
+    return false;
+  }
+}

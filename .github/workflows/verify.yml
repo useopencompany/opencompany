@@ -328,6 +328,88 @@ jobs:
           path: ~/.bun/install/cache
           key: verify-build-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ inputs.head_sha }}
 
+  desktop-scope:
+    name: Desktop scope
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      affected: ${{ steps.scope.outputs.affected }}
+    steps:
+      - name: Checkout verification commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Detect desktop shell changes
+        id: scope
+        env:
+          REQUESTED_SCOPE: ${{ inputs.requested_scope }}
+        run: |
+          if [[ "$REQUESTED_SCOPE" == "full" ]] ||
+            ! git diff --quiet "$TURBO_SCM_BASE" "$TURBO_SCM_HEAD" -- apps/desktop bun.lock package.json; then
+            echo "affected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "affected=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Packages the macOS shell exactly as a release would, minus signing, so a
+  # broken bundle, sign-in scheme, or update feed fails here instead of in the
+  # credentialed release workflow.
+  desktop:
+    name: Desktop package
+    needs: desktop-scope
+    if: ${{ needs.desktop-scope.outputs.affected == 'true' }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout verification commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies from the lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Package the unsigned macOS app
+        working-directory: apps/desktop
+        run: bun run package:unsigned
+
+      - name: Verify the bundle and update feed
+        working-directory: apps/desktop
+        run: bun run verify:package
+
+      - name: Launch the packaged app from Applications
+        working-directory: apps/desktop
+        run: |
+          ditto release/mac-arm64/opencompany.app /Applications/opencompany.app
+          log="$RUNNER_TEMP/desktop-launch.log"
+          /Applications/opencompany.app/Contents/MacOS/opencompany >"$log" 2>&1 &
+          pid=$!
+          sleep 20
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "::error::The packaged app exited during launch."
+            cat "$log"
+            exit 1
+          fi
+          screencapture -x "$RUNNER_TEMP/desktop-launch.png" ||
+            echo "::warning::Screen capture is unavailable on this runner."
+          kill "$pid"
+
+      - name: Upload launch screenshot
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-launch
+          path: ${{ runner.temp }}/desktop-launch.png
+          if-no-files-found: ignore
+          retention-days: 7
+
   secrets:
     name: Secret scan
     runs-on: blacksmith-4vcpu-ubuntu-2404
