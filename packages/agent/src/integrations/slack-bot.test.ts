@@ -3,6 +3,7 @@ import {
   isSlackBotConfigured,
   SLACK_BOT_SCOPES,
   slackBotCanReact,
+  slackBotCanUploadFiles,
   slackBotDeliveryScopesSatisfied,
   slackBotScopesSatisfied,
 } from "./slack-bot";
@@ -63,5 +64,16 @@ describe("slackBotCanReact", () => {
     expect(slackBotCanReact(beforeReactions)).toBe(false);
     expect(slackBotDeliveryScopesSatisfied(beforeReactions)).toBe(true);
     expect(slackBotScopesSatisfied(beforeReactions)).toBe(false);
+  });
+});
+
+describe("slackBotCanUploadFiles", () => {
+  it("requests image uploads for new installs and keeps older ones delivering text", () => {
+    expect(slackBotCanUploadFiles([...SLACK_BOT_SCOPES])).toBe(true);
+
+    const beforeImages = SLACK_BOT_SCOPES.filter((scope) => scope !== "files:write");
+    expect(slackBotCanUploadFiles(beforeImages)).toBe(false);
+    expect(slackBotDeliveryScopesSatisfied(beforeImages)).toBe(true);
+    expect(slackBotScopesSatisfied(beforeImages)).toBe(false);
   });
 });

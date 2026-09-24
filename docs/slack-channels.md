@@ -75,6 +75,29 @@ archived, or closed work cannot silently restart. Human replies to a closed thre
 an explicit closed-thread response. Disconnecting permanently closes existing subscriptions;
 reconnecting enables new workflow posts.
 
+## Images in posts
+
+A post can carry up to four images under its text, in the same message and under the same
+identity. The run publishes each image as a chat artifact first, then passes the artifact IDs as
+`images`. Only PNG, JPEG, and WebP artifacts of 5 MB or less from the same session are accepted,
+matching chat attachments, so a run cannot post another session's files by guessing an ID. The
+delivery row pins each artifact's current version in `image_artifact_version_ids`, so republishing
+an image never changes a queued post.
+
+The worker uploads the files to Slack without a channel, which keeps them private to the bot, and
+then sends one `chat.postMessage` whose image blocks reference them by `slack_file` ID. Sharing
+the files straight into the thread with `files.completeUploadExternal` would post them as a
+separate file-share message: that message carries no delivery metadata for reconciliation and
+Slack returns no timestamp for thread replies to hang under. The post keeps the workflow's
+display name and avatar exactly as a text post does.
+
+Slack rejects a `slack_file` it has not finished processing with `invalid_blocks`, and publishes no
+readiness signal. That rejection means nothing was posted, so the worker waits 1, 2, 4, and 8
+seconds between attempts; this is the one case where a failed post is sent again. If Slack still
+refuses, or an upload fails, or an install lacks `files:write`, the message goes out once with a
+link to the task in place of the images. The send tool tells the run when its install cannot
+upload yet, so the run does not claim the images are in Slack.
+
 ## Thread progress reactions
 
 A reply can wait minutes for its answer, so the worker marks the inbound message itself: 👀 when it
@@ -119,8 +142,9 @@ Use the existing `OPENCOMPANY_SLACK_BOT_*` credentials. OAuth still uses
 `app_uninstalled`, and `tokens_revoked`, and turn on the App Home messages tab with
 “Allow users to send Slash commands and messages from the messages tab”. Required bot scopes:
 `chat:write`, `channels:read`, `channels:history`, and `users:read`. New installs additionally
-request `users:read.email`, `chat:write.customize`, `reactions:write`, and `im:history`; an install
-that predates any of them keeps delivering, and Channels settings asks an admin to reconnect.
+request `users:read.email`, `chat:write.customize`, `reactions:write`, `im:history`, and
+`files:write`; an install that predates any of them keeps delivering, and Channels settings asks an
+admin to reconnect. Without `files:write` posts link to the task instead of showing images.
 Without `chat:write.customize` a workflow's display name and avatar are dropped and the post uses
 the default bot identity rather than failing; without `reactions:write` thread replies get no
 progress reaction. Without `im:history` Slack never delivers a direct message at all, so the bot
@@ -153,6 +177,15 @@ Migration `0284_slack_thread_participants` updates the subscription policy defau
 Slack thread policy labels. It preserves subscriptions and queued events. Rollback can restore
 `workspace_member` policy labels alongside the previous worker. Previously ignored replies stay
 ignored; a new reply is needed to resume those threads.
+
+Migration `0312_channel_delivery_images` adds `image_artifact_version_ids` to
+`channel_deliveries`, defaulting to an empty array so existing rows deliver as before, and an
+application rollback can leave the column deployed. It also moves managed company-agent
+provisioning jobs back to `created` when their installation lacks `files:write`, so those apps
+reinstall themselves with the new manifest scope. Unlike `0309`, it leaves the installation
+connected: until the reinstall lands, that agent's posts link to the task for images. Agents
+connected through the legacy manual credential endpoint keep the link until an owner reinstalls
+the app with the current manifest.
 
 Migration `0297_slack_direct_message_sessions` is additive: it adds the `slack_direct_messages`
 inbox. An application rollback can leave the table deployed; queued rows stop being claimed and no
