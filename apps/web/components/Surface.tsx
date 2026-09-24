@@ -524,6 +524,7 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const restoreComposerFocusOnTabReturnRef = useRef(false);
   const pendingTaskCommentRef = useRef<{
     id: string;
     body: string;
@@ -1736,6 +1737,41 @@ export function Surface({
     return () =>
       window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
   }, [isActivePane]);
+
+  useEffect(() => {
+    if (!isActivePane || readOnly) return;
+    restoreComposerFocusOnTabReturnRef.current = document.visibilityState === "hidden";
+
+    const handleVisibilityChange = () => {
+      const composer = inputRef.current;
+      const composerElement = composer?.element;
+
+      if (document.visibilityState === "hidden") {
+        const activeElement = document.activeElement;
+        restoreComposerFocusOnTabReturnRef.current =
+          activeElement === composerElement ||
+          activeElement === document.body ||
+          activeElement === document.documentElement;
+        return;
+      }
+
+      if (!restoreComposerFocusOnTabReturnRef.current || !composer) return;
+      restoreComposerFocusOnTabReturnRef.current = false;
+      if (
+        composerElement?.getAttribute("aria-disabled") === "true" ||
+        composerElement?.getAttribute("aria-readonly") === "true"
+      ) {
+        return;
+      }
+      composer.focus({ preventScroll: true });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      restoreComposerFocusOnTabReturnRef.current = false;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isActivePane, readOnly]);
 
   useLayoutEffect(() => {
     if (mode !== "chat" || !chatSessionId) return;
