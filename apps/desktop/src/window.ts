@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import { applyNavigationPolicy } from "./navigation";
 import { APP_URL } from "./urls";
 
@@ -72,6 +72,20 @@ export function createMainWindow(): BrowserWindow {
   });
 
   applyNavigationPolicy(window);
+  // Electron silently cancels a close when the page's beforeunload handler
+  // objects (e.g. unsaved Skill edits), which would also swallow Quit and
+  // Restart to Update. Ask the user, as a browser would.
+  window.webContents.on("will-prevent-unload", (event) => {
+    const choice = dialog.showMessageBoxSync(window, {
+      type: "question",
+      buttons: ["Leave", "Stay"],
+      defaultId: 0,
+      cancelId: 1,
+      message: "Leave with unsaved changes?",
+      detail: "Changes you made may not be saved.",
+    });
+    if (choice === 0) event.preventDefault();
+  });
   window.on("resize", () => schedulePersist(window));
   window.on("move", () => schedulePersist(window));
 

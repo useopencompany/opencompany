@@ -6,6 +6,7 @@ const workflowDirectory = new URL("../../.github/workflows/", import.meta.url);
 const pullRequestWorkflowUrl = new URL("ci.yml", workflowDirectory);
 const verifyWorkflowUrl = new URL("verify.yml", workflowDirectory);
 const releaseWorkflowUrl = new URL("release-production.yml", workflowDirectory);
+const desktopReleaseWorkflowUrl = new URL("release-desktop.yml", workflowDirectory);
 
 test("every third-party workflow action is pinned to a full commit SHA", async () => {
   const workflowFiles = (await readdir(workflowDirectory)).filter((name) => name.endsWith(".yml"));
@@ -149,4 +150,25 @@ test("production verifies main before entering the privileged release job", asyn
   assert.doesNotMatch(workflow, /pull_request_target:/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /workflow_run:/u);
+});
+
+test("desktop releases are manual, main-only, and verified before publishing", async () => {
+  const workflow = await readFile(desktopReleaseWorkflowUrl, "utf8");
+
+  assert.match(workflow, /^on:\n\s+workflow_dispatch:/mu);
+  assert.match(workflow, /if: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /secret-path: \/desktop/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  for (const forbidden of [/pull_request/u, /workflow_run:/u, /push:/u]) {
+    assert.doesNotMatch(workflow, forbidden);
+  }
+
+  const verify = workflow.indexOf("node scripts/verify-package.mjs --signed");
+  const draft = workflow.indexOf("gh release create");
+  const publish = workflow.indexOf("--draft=false --latest");
+  assert.ok(verify !== -1 && verify < draft, "signed builds must be verified before upload");
+  assert.match(workflow, /gh release create[\s\S]*?--draft/u);
+  assert.ok(draft < publish, "publishing must follow the draft upload");
+  assert.match(workflow, /if: \$\{\{ inputs\.publish \}\}/u);
 });

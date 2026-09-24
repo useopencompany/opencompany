@@ -346,14 +346,13 @@ export const PROVIDER_CAPABILITIES: Partial<
     {
       id: "query",
       label: "Read private Slack",
-      description:
-        "Read private channels, direct messages, threads, canvases, files, and profiles.",
+      description: "Read private channels, direct messages, threads, files, and profiles.",
       defaultMode: "ask",
     },
     {
       id: "write",
       label: "Change Slack",
-      description: "Send or schedule messages, upload files, add reactions, and change canvases.",
+      description: "Send or schedule messages, upload files, add reactions, and create channels.",
       defaultMode: "ask",
     },
   ],

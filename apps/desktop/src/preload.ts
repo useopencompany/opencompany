@@ -18,4 +18,17 @@ contextBridge.exposeInMainWorld("opencompanyDesktop", {
   signInWithGoogle: (invitationToken?: string) =>
     ipcRenderer.send("desktop-auth:start-google", invitationToken),
   retryConnection: () => ipcRenderer.send("desktop-navigation:retry"),
+  // Calls the listener once an update is staged, including one staged before
+  // the page (re)loaded. Returns an unsubscribe function.
+  onUpdateReady: (listener: (version: string) => void) => {
+    const handleReady = (_event: unknown, version: string) => listener(version);
+    ipcRenderer.on("desktop-update:ready", handleReady);
+    void ipcRenderer.invoke("desktop-update:ready-version").then((version: string | null) => {
+      if (version) listener(version);
+    });
+    return () => {
+      ipcRenderer.removeListener("desktop-update:ready", handleReady);
+    };
+  },
+  restartToUpdate: () => ipcRenderer.send("desktop-update:restart"),
 });

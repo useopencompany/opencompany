@@ -6,6 +6,7 @@ export const SLACK_AGENT_SCOPES = [
   "channels:read",
   "channels:history",
   "files:read",
+  "files:write",
   "users:read",
   "users:read.email",
   "im:history",

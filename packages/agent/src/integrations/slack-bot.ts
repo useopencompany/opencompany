@@ -36,18 +36,19 @@ const SLACK_BOT_DELIVERY_SCOPES = [
   "users:read",
 ] as const;
 
-// Email attribution, the cosmetic per-workflow display name, thread progress reactions, and
-// reading the bot's own direct message threads are requested for new installs. Existing
-// installations can keep delivering while Settings asks an admin to reconnect and grant these
-// additive scopes; without them posts fall back to email-less attribution, the default bot
-// identity, and threads with no progress ack, and direct messages are not delivered to the
-// webhook at all.
+// Email attribution, the cosmetic per-workflow display name, thread progress reactions, reading
+// the bot's own direct message threads, and inline images are requested for new installs.
+// Existing installations can keep delivering while Settings asks an admin to reconnect and grant
+// these additive scopes; without them posts fall back to email-less attribution, the default bot
+// identity, threads with no progress ack, and a task link in place of images, and direct messages
+// are not delivered to the webhook at all.
 export const SLACK_BOT_SCOPES = [
   ...SLACK_BOT_DELIVERY_SCOPES,
   "users:read.email",
   "chat:write.customize",
   "reactions:write",
   "im:history",
+  "files:write",
 ] as const;
 
 // One Slack app has one bot user, so a workflow identity can only override the name and icon on
@@ -69,6 +70,12 @@ export function slackBotCanReact(grantedScopes: readonly string[]): boolean {
 // which is why Settings has to name it rather than leave it to be discovered.
 export function slackBotCanReadDirectMessages(grantedScopes: readonly string[]): boolean {
   return grantedScopes.includes("im:history");
+}
+
+// Images are uploaded to Slack before the post that shows them. An install without the scope still
+// delivers the text, with a link to the task where the images are.
+export function slackBotCanUploadFiles(grantedScopes: readonly string[]): boolean {
+  return grantedScopes.includes("files:write");
 }
 
 // Settings surfaces missing grants as a reconnect requirement.

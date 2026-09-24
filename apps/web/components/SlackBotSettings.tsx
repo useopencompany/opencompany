@@ -17,6 +17,7 @@ export type SlackBotSettingsData = {
   canCustomizeIdentity: boolean;
   canReact: boolean;
   canReadDirectMessages: boolean;
+  canPostImages: boolean;
   teamName: string | null;
   statusReason: string | null;
   setup: "connected" | "error" | null;
@@ -77,6 +78,7 @@ function missingCapabilityCopy(data: SlackBotSettingsData) {
     ...(data.canReadDirectMessages ? [] : ["messaging the bot does nothing"]),
     ...(data.canCustomizeIdentity ? [] : ["posts keep the default @opencompany identity"]),
     ...(data.canReact ? [] : ["thread replies get no progress reaction"]),
+    ...(data.canPostImages ? [] : ["posts link to the task instead of showing images"]),
   ];
   if (missing.length < 2) return missing.join("");
   return `${missing.slice(0, -1).join(", ")} and ${missing.at(-1)}`;

@@ -6265,6 +6265,12 @@ export const channelDeliveries = productSchema.table(
     // retroactively change a queued post. Empty values keep the default bot identity.
     botDisplayName: text("bot_display_name").notNull().default(""),
     botAvatarUrl: text("bot_avatar_url").notNull().default(""),
+    // Artifact versions pinned when the post is queued, so republishing an image cannot change a
+    // queued post. The worker uploads them to Slack and shows them under the text.
+    imageArtifactVersionIds: jsonb("image_artifact_version_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
     status: text("status").notNull().default("pending"),
     messageTs: text("message_ts"),
     leaseId: text("lease_id"),
@@ -6280,6 +6286,10 @@ export const channelDeliveries = productSchema.table(
     check(
       "channel_deliveries_status_check",
       sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+    check(
+      "channel_deliveries_images_check",
+      sql`jsonb_typeof(${table.imageArtifactVersionIds}) = 'array'`,
     ),
   ],
 );
