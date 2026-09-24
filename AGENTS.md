@@ -83,7 +83,9 @@ Use the repo’s existing tooling. Do not introduce a new test runner or fixture
 
 - Pure logic or utilities: add or update focused unit tests.
 - API routes, server actions, and data flows: exercise the real path when practical.
-- UI changes: verify in the browser against the running dev server, covering the main path and at least one obvious edge case.
+- UI changes: verify in the browser against the running dev server, covering the main path and at
+  least one obvious edge case. Include current screenshots or a short screen recording in the PR
+  for every UI or UX change, captured from the real product and showing the relevant states.
 - Refactors with intended no behavior change: run the existing relevant checks. Add a small characterization test if the touched behavior has no useful coverage.
 
 If something cannot be verified because of missing env, unavailable services, or absent fixtures, say exactly what blocked verification.
