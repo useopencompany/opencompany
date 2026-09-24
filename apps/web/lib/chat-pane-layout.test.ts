@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyChatDrop,
   applyRoutedChat,
+  CANVAS_EDGE_BAND_PX,
   CHAT_PANE_LAYOUT_VERSION,
   type ChatPaneLayout,
   type ChatPaneTree,
+  chatDropTargetAt,
   chatPaneGeometry,
   closePane,
   countPanes,
@@ -568,6 +571,154 @@ describe("chat pane layout", () => {
       const ids = listPanes(grown.root).map((pane) => pane.id);
       expect(new Set(ids).size).toBe(ids.length);
       expect(ids).toContain("pane-12");
+    });
+  });
+
+  describe("dropping a chat", () => {
+    const canvas = { width: 1200, height: 800 };
+    // Two chats side by side: a | b.
+    const sideBySide = () => splitPane(createChatPaneLayout("chat_a"), "pane-1", "right", "chat_b");
+    const targetAt = (layout: ChatPaneLayout, x: number, y: number, chatId: string) =>
+      chatDropTargetAt(layout, chatPaneGeometry(layout.root), { x, y }, canvas, chatId);
+
+    it("targets the nearest pane edge, and the middle third drops into the pane", () => {
+      const layout = sideBySide();
+      expect(targetAt(layout, 45, 50, "chat_c")).toEqual({
+        kind: "pane",
+        paneId: "pane-1",
+        zone: "right",
+      });
+      expect(targetAt(layout, 25, 20, "chat_c")).toEqual({
+        kind: "pane",
+        paneId: "pane-1",
+        zone: "top",
+      });
+      expect(targetAt(layout, 75, 50, "chat_c")).toEqual({
+        kind: "pane",
+        paneId: "pane-2",
+        zone: "center",
+      });
+    });
+
+    it("offers the canvas edge only where it builds something a pane split cannot", () => {
+      const layout = sideBySide();
+      const bandY = 100 - ((CANVAS_EDGE_BAND_PX - 4) / canvas.height) * 100;
+      // Below two side-by-side panes: a full-width row.
+      expect(targetAt(layout, 25, bandY, "chat_c")).toEqual({ kind: "canvas", edge: "bottom" });
+      // Beside a pane that is already full height, the pane's own split is the same move.
+      expect(targetAt(layout, 0.5, 50, "chat_c")).toEqual({
+        kind: "pane",
+        paneId: "pane-1",
+        zone: "left",
+      });
+      // A lone pane has no canvas edge distinct from its own.
+      expect(targetAt(createChatPaneLayout("chat_a"), 50, 99.9, "chat_c")).toEqual({
+        kind: "pane",
+        paneId: "pane-1",
+        zone: "bottom",
+      });
+    });
+
+    it("opens a full-width row beneath side-by-side panes", () => {
+      const next = applyChatDrop(sideBySide(), { kind: "canvas", edge: "bottom" }, "chat_c");
+      const root = splitOf(next.root);
+      expect(root.direction).toBe("column");
+      expect(root.children.map((child) => child.size)).toEqual([50, 50]);
+      expect(splitOf(root.children[0]?.node as ChatPaneTree).direction).toBe("row");
+      expect(next.focusedPaneId).toBe(paneIdFor(next, "chat_c"));
+      const landed = chatPaneGeometry(next.root).panes.find(
+        (rect) => rect.paneId === paneIdFor(next, "chat_c"),
+      );
+      expect(landed).toMatchObject({ left: 0, top: 50, width: 100, height: 50 });
+    });
+
+    it("joins a same-axis root split at the canvas edge without starving a pane", () => {
+      const layout = resizeSplit(sideBySide(), splitOf(sideBySide().root).id, 0, 30);
+      const next = applyChatDrop(layout, { kind: "canvas", edge: "left" }, "chat_c");
+      const root = splitOf(next.root);
+      expect(root.children).toHaveLength(3);
+      expect(listPanes(root)[0]?.chatId).toBe("chat_c");
+      for (const child of root.children)
+        expect(child.size).toBeGreaterThanOrEqual(MIN_PANE_PERCENT);
+      expectSizesSumTo100(next.root);
+    });
+
+    it("drops into the middle of an occupied pane in place of its chat", () => {
+      const next = applyChatDrop(
+        sideBySide(),
+        { kind: "pane", paneId: "pane-1", zone: "center" },
+        "chat_c",
+      );
+      expect(openPaneChatIds(next.root)).toEqual(["chat_c", "chat_b"]);
+      expect(next.focusedPaneId).toBe("pane-1");
+    });
+
+    it("moves an open chat instead of opening it twice, keeping its pane id", () => {
+      const layout = sideBySide();
+      const next = applyChatDrop(
+        layout,
+        { kind: "pane", paneId: "pane-1", zone: "left" },
+        "chat_b",
+      );
+      expect(openPaneChatIds(next.root)).toEqual(["chat_b", "chat_a"]);
+      // The same pane id means the canvas keeps that chat's Surface mounted.
+      expect(paneIdFor(next, "chat_b")).toBe(paneIdFor(layout, "chat_b"));
+      expect(next.focusedPaneId).toBe(paneIdFor(layout, "chat_b"));
+      expectSizesSumTo100(next.root);
+    });
+
+    it("swaps two panes when an open chat is dropped in the middle of another", () => {
+      const layout = sideBySide();
+      const next = applyChatDrop(
+        layout,
+        { kind: "pane", paneId: "pane-1", zone: "center" },
+        "chat_b",
+      );
+      expect(openPaneChatIds(next.root)).toEqual(["chat_b", "chat_a"]);
+      expect(paneIdFor(next, "chat_a")).toBe(paneIdFor(layout, "chat_a"));
+      expect(paneIdFor(next, "chat_b")).toBe(paneIdFor(layout, "chat_b"));
+    });
+
+    it("leaves the arrangement alone when a chat is dropped on its own pane", () => {
+      const layout = sideBySide();
+      const next = applyChatDrop(
+        layout,
+        { kind: "pane", paneId: "pane-2", zone: "center" },
+        "chat_b",
+      );
+      expect(next.root).toBe(layout.root);
+      // Its own pane is a single target, however close the pointer is to an edge.
+      expect(targetAt(layout, 99, 50, "chat_b")).toEqual({
+        kind: "pane",
+        paneId: "pane-2",
+        zone: "center",
+      });
+    });
+
+    it("still rearranges at the pane cap, but only takes over panes for new chats", () => {
+      let layout = createChatPaneLayout("chat_a");
+      for (const chatId of ["chat_b", "chat_c", "chat_d"]) {
+        layout = splitPane(layout, layout.focusedPaneId, "right", chatId);
+      }
+      expect(countPanes(layout.root)).toBe(MAX_CHAT_PANES);
+
+      // A new chat can only replace: every point in a pane is its center.
+      expect(targetAt(layout, 1, 50, "chat_e")).toMatchObject({ zone: "center" });
+      expect(applyChatDrop(layout, { kind: "canvas", edge: "bottom" }, "chat_e").root).toBe(
+        layout.root,
+      );
+
+      // An open chat can still move, because moving never adds a pane.
+      const moved = applyChatDrop(layout, { kind: "canvas", edge: "bottom" }, "chat_a");
+      expect(countPanes(moved.root)).toBe(MAX_CHAT_PANES);
+      const landed = chatPaneGeometry(moved.root).panes.find(
+        (rect) => rect.paneId === paneIdFor(moved, "chat_a"),
+      );
+      expect(landed).toMatchObject({ left: 0, width: 100 });
+    });
+
+    it("ignores a point outside every pane", () => {
+      expect(targetAt(sideBySide(), 120, 50, "chat_c")).toBeNull();
     });
   });
 });

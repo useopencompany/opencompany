@@ -12,9 +12,12 @@ import {
   useState,
 } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { conversationDragProps, type SidebarRowDragProps } from "@/components/SidebarProjects";
 import { useHydrated } from "@/components/useHydrated";
 import {
+  applyChatDrop,
   applyRoutedChat,
+  type ChatDropTarget,
   type ChatPaneLayout,
   closePane,
   countPanes,
@@ -45,13 +48,18 @@ type ChatPaneWorkspaceValue = {
   openChatIds: ReadonlySet<string>;
   /** The chat being dragged out of the sidebar, or null when no drag is in flight. */
   draggingChatId: string | null;
-  /** Bumped on every drag start so a pane can discard a stale hover preview. */
+  /** Bumped on every drag start so the canvas can discard a stale drop preview. */
   dragVersion: number;
   flashingPaneId: string | null;
-  beginChatDrag: (chatId: string) => void;
+  /**
+   * Makes an element drag `chatId`: into a sidebar Project to file it, or onto
+   * the canvas to open or move it. Announces the drag so the canvas can raise
+   * its drop surface.
+   */
+  chatDragProps: (chatId: string) => SidebarRowDragProps;
   endChatDrag: () => void;
-  /** Splits `paneId` toward `edge`; focuses and flashes instead when already open. */
-  dropChatIntoPane: (paneId: string, edge: PaneEdge | "center", chatId: string) => void;
+  /** Opens or moves `chatId` to `target`; see `applyChatDrop`. */
+  dropChat: (target: ChatDropTarget, chatId: string) => void;
   /** Keyboard/menu equivalent of dragging a chat to the focused pane's edge. */
   openChatBeside: (chatId: string, edge: PaneEdge) => void;
   focusPaneById: (paneId: string) => void;
@@ -215,28 +223,38 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
     }, FLASH_DURATION_MS);
   }, []);
 
-  const beginChatDrag = useCallback((chatId: string) => {
-    setDraggingChatId(chatId);
-    setDragVersion((version) => version + 1);
-  }, []);
-
   const endChatDrag = useCallback(() => setDraggingChatId(null), []);
 
-  const dropChatIntoPane = useCallback(
-    (paneId: string, edge: PaneEdge | "center", chatId: string) => {
+  // The state flip is deferred a tick because a synchronous re-render during
+  // dragstart cancels the drag in some browsers before the drag image is
+  // captured.
+  const chatDragProps = useCallback(
+    (chatId: string) =>
+      conversationDragProps(chatId, {
+        onDragStart: () => {
+          setTimeout(() => {
+            setDraggingChatId(chatId);
+            setDragVersion((version) => version + 1);
+          }, 0);
+        },
+        onDragEnd: endChatDrag,
+      }),
+    [endChatDrag],
+  );
+
+  const dropChat = useCallback(
+    (target: ChatDropTarget, chatId: string) => {
       // A drop payload is user input. Only conversations the chat surface owns
       // can render in a pane, so anything else (a Task row, a stale drag) is
       // ignored rather than opening a pane that could never load.
       if (!knownChatIds.has(chatId)) return;
       update((current) => {
-        const existingPaneId = findPaneIdByChatId(current.root, chatId);
-        if (existingPaneId) {
-          // Never two panes of the same chat: point at the one already open.
-          flashPane(existingPaneId);
-          return focusPane(current, existingPaneId);
-        }
-        if (edge === "center") return focusPane(setPaneChat(current, paneId, chatId), paneId);
-        return splitPane(current, paneId, edge, chatId);
+        const next = applyChatDrop(current, target, chatId);
+        // Dropping a chat back where it already is changes nothing, so point
+        // at it instead of leaving the drop looking ignored.
+        const openPaneId = findPaneIdByChatId(current.root, chatId);
+        if (openPaneId && next.root === current.root) flashPane(openPaneId);
+        return next;
       });
     },
     [flashPane, knownChatIds, update],
@@ -302,9 +320,9 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
       draggingChatId,
       dragVersion,
       flashingPaneId,
-      beginChatDrag,
+      chatDragProps,
       endChatDrag,
-      dropChatIntoPane,
+      dropChat,
       openChatBeside,
       focusPaneById,
       closePaneById,
@@ -319,9 +337,9 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
       draggingChatId,
       dragVersion,
       flashingPaneId,
-      beginChatDrag,
+      chatDragProps,
       endChatDrag,
-      dropChatIntoPane,
+      dropChat,
       openChatBeside,
       focusPaneById,
       closePaneById,
