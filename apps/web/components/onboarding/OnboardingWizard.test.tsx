@@ -294,6 +294,7 @@ describe("OnboardingWizard", () => {
         initialWorkspaceId="workspace_1"
         initialWorkspaceName="Acme"
         initialRole="founder"
+        starterSetup
       />,
     );
 
@@ -360,6 +361,7 @@ describe("OnboardingWizard", () => {
         initialWorkspaceId="workspace_1"
         initialWorkspaceName="Acme"
         initialRole="product"
+        starterSetup
       />,
     );
 
@@ -367,6 +369,23 @@ describe("OnboardingWizard", () => {
     await user.click(screen.getByRole("button", { name: "Finish onboarding" }));
     await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
     expect(mocks.createStarterWorkflows).toHaveBeenCalledWith("acme/app");
+  });
+
+  it("keeps the catalog plugins step for founders who did not opt into version 2", async () => {
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        initialStep={3}
+        initialWorkspaceId="workspace_1"
+        initialRole="founder"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Give your agent some tools" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Connect your code")).not.toBeInTheDocument();
+    expect(mocks.scanOnboardingRepositoryAction).not.toHaveBeenCalled();
   });
 
   it("consumes a same-tab connection result when browser storage is unavailable", async () => {
