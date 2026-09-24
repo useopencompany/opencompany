@@ -54,9 +54,6 @@ forks](https://docs.github.com/en/code-security/concepts/code-scanning/setup-typ
 check contexts would leave an approved external pull request blocked on checks that GitHub never
 creates.
 
-The verifier's `Desktop package` job runs on a GitHub-hosted macOS runner under the same
-constraints. It builds the desktop shell unsigned and holds no signing credentials.
-
 `.github/workflows/release-desktop.yml` is a manual, `main`-only trusted path. It loads signing
 credentials in the protected `production` environment and uploads a draft GitHub release. It
 publishes that release only when the operator asks it to.

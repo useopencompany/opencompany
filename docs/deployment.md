@@ -184,9 +184,10 @@ The workflow writes the notarization key to a mode-600 file in the runner's temp
 removes it after both successful and failed runs. electron-builder imports the certificate into a
 temporary keychain. No signing value is written to the repository or the app bundle.
 
-The PR gate's `Desktop package` job builds the same app unsigned when `apps/desktop`, the lockfile, or
-the root manifest changes. It verifies the bundle and update feed, then launches the app from
-`/Applications` on macOS.
+No macOS build runs on pull requests or `main` pushes, which keeps macOS runner costs to deliberate
+releases. The PR gate still runs the desktop unit tests, typecheck, and lint. Packaging changes are
+verified locally with `bun run package:unsigned` and `bun run verify:package` on a Mac, and every
+release re-verifies the signed output before uploading it.
 
 ## Migrations
 

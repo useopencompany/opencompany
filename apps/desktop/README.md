@@ -81,7 +81,9 @@ The shell loads production web content, so web changes deploy separately.
 Rebuilding Electron does not deploy `apps/web`.
 
 1. Bump `version` in `apps/desktop/package.json` and merge to `main`. The PR
-   gate packages the unsigned app, verifies it, and launches it on macOS.
+   gate runs the desktop unit tests, typecheck, and lint. To keep macOS runner
+   costs down it does not package the app; run `bun run package:unsigned` and
+   `bun run verify:package` on a Mac when you change packaging.
 2. Run **Release desktop app** from `main` with **publish** off. The workflow
    signs with the Developer ID certificate and notarizes with the App Store
    Connect API key. It then checks the signature, Gatekeeper, the stapled
