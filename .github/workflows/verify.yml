@@ -397,18 +397,7 @@ jobs:
             cat "$log"
             exit 1
           fi
-          screencapture -x "$RUNNER_TEMP/desktop-launch.png" ||
-            echo "::warning::Screen capture is unavailable on this runner."
           kill "$pid"
-
-      - name: Upload launch screenshot
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: desktop-launch
-          path: ${{ runner.temp }}/desktop-launch.png
-          if-no-files-found: ignore
-          retention-days: 7
 
   secrets:
     name: Secret scan
