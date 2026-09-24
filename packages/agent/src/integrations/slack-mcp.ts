@@ -1,10 +1,25 @@
-import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import type { RemoteMcpConnectionState } from "../actions/remote-mcp";
 import { createRemoteMcpStaticBearerAuthProvider } from "./remote-mcp-static-bearer";
 import { loadSlackIntegration } from "./slack";
+import { createSlackMcpTicket, type SlackMcpOperation } from "./slack-mcp-ticket";
 import { slackMcpScopesSatisfied } from "./slack-scopes";
 
 export const SLACK_MCP_ENDPOINT_URL = "https://mcp.slack.com/mcp";
+export const SLACK_MCP_RUNTIME_ENDPOINT_URL = "https://api.opencompany.chat/mcp/plugins/slack";
+
+export function slackMcpRuntimeEndpointUrl() {
+  const configuredOrigin = process.env.OPENCOMPANY_API_ORIGIN?.trim();
+  if (!configuredOrigin) return SLACK_MCP_RUNTIME_ENDPOINT_URL;
+  try {
+    const origin = new URL(configuredOrigin);
+    if (origin.protocol !== "https:" && origin.hostname !== "localhost") {
+      return SLACK_MCP_RUNTIME_ENDPOINT_URL;
+    }
+    return new URL("/mcp/plugins/slack", origin).toString();
+  } catch {
+    return SLACK_MCP_RUNTIME_ENDPOINT_URL;
+  }
+}
 
 export async function getSlackMcpIntegrationState(
   identity: string | { userWorkosId: string },
@@ -29,6 +44,9 @@ export async function getSlackMcpIntegrationState(
 
 export async function loadSlackMcpWorkerConnection(input: {
   userWorkosId: string;
+  workspaceId: string;
+  registrationId: string;
+  operation: SlackMcpOperation;
   onAuthorizationRequired: () => never;
 }) {
   const row = await loadSlackIntegration({ userWorkosId: input.userWorkosId });
@@ -37,32 +55,25 @@ export async function loadSlackMcpWorkerConnection(input: {
     return { ok: false, reason: "needs_reauth" } as const;
   }
 
-  const credential = await loadIntegrationCredential({
-    userWorkosId: row.userWorkosId,
-    integrationId: row.id,
-    provider: "slack",
-    kind: "oauth_token",
-  });
-  const accessToken = credential?.payload.access_token;
-  if (typeof accessToken !== "string" || !accessToken.trim()) {
-    return { ok: false, reason: "needs_reauth" } as const;
+  const internalSecret = process.env.API_INTERNAL_TOKEN?.trim();
+  if (!internalSecret) {
+    throw new Error("Slack MCP is not configured: API_INTERNAL_TOKEN is missing.");
   }
+  const { ticket } = createSlackMcpTicket({
+    userWorkosId: input.userWorkosId,
+    workspaceId: input.workspaceId,
+    integrationId: row.id,
+    registrationId: input.registrationId,
+    operation: input.operation,
+    secret: internalSecret,
+  });
 
   return {
     ok: true,
     integrationId: row.id,
     authProvider: createRemoteMcpStaticBearerAuthProvider({
-      accessToken: accessToken.trim(),
-      onAuthorizationRequired: async () => {
-        await markIntegrationStatus({
-          userWorkosId: row.userWorkosId,
-          integrationId: row.id,
-          provider: "slack",
-          status: "needs_reauth",
-          statusReason: "Slack rejected the connected account credential.",
-        });
-        return input.onAuthorizationRequired();
-      },
+      accessToken: ticket,
+      onAuthorizationRequired: async () => input.onAuthorizationRequired(),
     }),
   } as const;
 }
