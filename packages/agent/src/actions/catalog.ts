@@ -71,7 +71,11 @@ export async function resolveActionCatalog(
     remoteMcpRegistrations
       .filter((registration) => !providers.some((provider) => provider.id === registration.source))
       .map(async (registration): Promise<ActionSourceDescriptor | null> => {
-        if (registration.connectionProvider === "custom_mcp") return null;
+        if (
+          registration.connectionProvider === "custom_mcp" ||
+          registration.connectionAvailable === false
+        )
+          return null;
         try {
           const state = await registration.getState(input);
           if (state.connected) return null;

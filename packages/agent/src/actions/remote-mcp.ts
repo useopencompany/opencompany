@@ -59,6 +59,7 @@ export type RemoteMcpOperation =
 
 export type RemoteMcpGatewayRegistration = {
   approvalContext?: string;
+  connectionAvailable?: boolean;
   pluginName: string;
   source: ActionSourceId;
   connectionProvider: ActionProviderId;

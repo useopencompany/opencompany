@@ -115,6 +115,28 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     },
   );
 
+  it("keeps a plugin without an available connection flow out of discovery", async () => {
+    const getState = vi.fn();
+    const registration = {
+      source: "plugin:vercel:vercel",
+      pluginName: "vercel",
+      connectionProvider: "vercel",
+      connectionAvailable: false,
+      label: "Vercel",
+      description: "Vercel tools",
+      getState,
+    } as unknown as RemoteMcpGatewayRegistration;
+
+    const result = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [registration] },
+    );
+
+    expect(result.providers).toEqual([]);
+    expect(result.actions).toEqual([]);
+    expect(getState).not.toHaveBeenCalled();
+  });
+
   it("does not expose GitHub actions when the official plugin is absent", async () => {
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },

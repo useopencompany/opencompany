@@ -1395,6 +1395,7 @@ describe("plugin gateway registration cache", () => {
       expect.objectContaining({
         source: "plugin:vercel:vercel",
         connectionProvider: "vercel",
+        connectionAvailable: false,
         getState: mocks.getVercelState,
         loadConnection: mocks.loadVercelConnection,
       }),
