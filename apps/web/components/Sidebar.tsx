@@ -547,18 +547,9 @@ function SidebarWorkList() {
   };
 
   // A chat row drags into a Project to file it, or onto the chat canvas to open
-  // it in a pane. The pane workspace is told about the drag so every pane can
-  // raise its drop surface, and the state flip is deferred a tick because a
-  // synchronous re-render during dragstart cancels the drag in some browsers
-  // before the drag image is captured.
+  // it in a pane.
   const chatRowDragProps = (conversationId: string): SidebarRowDragProps =>
-    conversationDragProps(conversationId, {
-      onDragStart: () => {
-        if (!panes) return;
-        setTimeout(() => panes.beginChatDrag(conversationId), 0);
-      },
-      onDragEnd: () => panes?.endChatDrag(),
-    });
+    panes ? panes.chatDragProps(conversationId) : conversationDragProps(conversationId);
 
   // A Task row only files into a Project. The chat canvas renders conversations
   // the chat surface owns, so a Task drag never announces itself to the panes

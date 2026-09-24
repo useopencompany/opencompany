@@ -1,48 +1,12 @@
 "use client";
 
 import { X } from "lucide-react";
-import { type DragEvent, useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
 import { useChatPaneWorkspace } from "@/components/chat-panes/ChatPaneWorkspace";
-import { draggedConversationId, isConversationDrag } from "@/components/SidebarProjects";
 import { Surface } from "@/components/Surface";
-import type { ChatPaneNode, PaneEdge } from "@/lib/chat-pane-layout";
+import type { ChatPaneNode } from "@/lib/chat-pane-layout";
 import type { ChatSessionView } from "@/lib/chat-ui";
 import { DEFAULT_MODEL } from "@/lib/model-options";
-
-/** Edges split the pane; `center` fills an empty pane without splitting it. */
-type DropZone = PaneEdge | "center";
-
-/**
- * The preview covers exactly the region the incoming chat will occupy, so what
- * the user sees before releasing is what they get after.
- */
-const PREVIEW_CLASSES: Record<DropZone, string> = {
-  left: "inset-y-0 left-0 w-1/2",
-  right: "inset-y-0 right-0 w-1/2",
-  top: "inset-x-0 top-0 h-1/2",
-  bottom: "inset-x-0 bottom-0 h-1/2",
-  center: "inset-0",
-};
-
-/**
- * Nearest-edge hit detection in pane-normalized coordinates, so the four drop
- * regions meet at the diagonals whatever the pane's aspect ratio. A tall narrow
- * pane and a short wide one both split where the user expects.
- */
-function zoneFromPointer(event: DragEvent<HTMLElement>, splittable: boolean): DropZone {
-  if (!splittable) return "center";
-  const rect = event.currentTarget.getBoundingClientRect();
-  const x = (event.clientX - rect.left) / Math.max(1, rect.width);
-  const y = (event.clientY - rect.top) / Math.max(1, rect.height);
-  const distances: [DropZone, number][] = [
-    ["left", x],
-    ["right", 1 - x],
-    ["top", y],
-    ["bottom", 1 - y],
-  ];
-  return distances.reduce((best, entry) => (entry[1] < best[1] ? entry : best))[0];
-}
 
 export function ChatPane({
   pane,
@@ -62,20 +26,14 @@ export function ChatPane({
 }) {
   const data = useAppData();
   const {
-    canSplit,
+    chatDragProps,
     draggingChatId,
-    dragVersion,
-    endChatDrag,
     flashingPaneId,
     focusPaneById,
     closePaneById,
-    dropChatIntoPane,
     resolvePaneChatId,
     setPaneChatId,
   } = useChatPaneWorkspace();
-
-  const [hover, setHover] = useState<{ dragVersion: number; zone: DropZone } | null>(null);
-  const hoverZone = draggingChatId && hover?.dragVersion === dragVersion ? hover.zone : null;
 
   const chatSummary = pane.chatId
     ? (data.recentChats.find((chat) => chat.id === pane.chatId) ??
@@ -105,34 +63,11 @@ export function ChatPane({
           }
         : null;
 
-  // A pane holding a chat splits; an empty one is filled in place. At the pane
-  // cap an occupied pane can still be taken over, which keeps every pane a
-  // valid drop target instead of dead-ending the drag.
-  const splittable = Boolean(pane.chatId) && canSplit;
-
-  const handleDragOver = (event: DragEvent<HTMLElement>) => {
-    if (!isConversationDrag(event)) return;
-    // preventDefault is what marks this surface as a valid drop target.
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-    const zone = zoneFromPointer(event, splittable);
-    setHover((current) =>
-      current?.dragVersion === dragVersion && current.zone === zone
-        ? current
-        : { dragVersion, zone },
-    );
-  };
-
-  const handleDrop = (event: DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    const zone = zoneFromPointer(event, splittable);
-    setHover(null);
-    endChatDrag();
-    const chatId = draggedConversationId(event);
-    if (chatId) dropChatIntoPane(pane.id, zone, chatId);
-  };
-
   const title = initialChat?.title ?? chatSummary?.title ?? null;
+  // A chat whose first turn has not landed has no conversation to file or
+  // move yet, the same rule the sidebar applies to its optimistic rows.
+  const draggableChatId =
+    pane.chatId && data.openChats.some((chat) => chat.id === pane.chatId) ? pane.chatId : null;
 
   return (
     <section
@@ -141,7 +76,11 @@ export function ChatPane({
       data-focused={focused ? "true" : undefined}
       onPointerDownCapture={() => focusPaneById(pane.id)}
       onFocusCapture={() => focusPaneById(pane.id)}
-      className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas ${
+      className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-canvas transition-opacity duration-150 ${
+        // A chat already on screen recedes while it is dragged, so it reads as
+        // about to move rather than about to open a second time.
+        pane.chatId && draggingChatId === pane.chatId ? "opacity-50" : ""
+      } ${
         flashingPaneId === pane.id
           ? "ring-2 ring-ink/40 ring-inset"
           : showHeader && focused
@@ -157,8 +96,13 @@ export function ChatPane({
             focused ? "bg-canvas" : "bg-surface-subtle"
           }`}
         >
+          {/* The title is the handle for rearranging panes: it drags the same
+              chat payload as a sidebar row, so it can also be filed into a
+              Project from here. */}
           <span
-            className={`min-w-0 truncate text-[12.5px] ${
+            {...(draggableChatId ? chatDragProps(draggableChatId) : {})}
+            title={draggableChatId ? "Drag to move this pane" : undefined}
+            className={`min-w-0 truncate text-[12.5px] ${draggableChatId ? "cursor-grab active:cursor-grabbing" : ""} ${
               focused ? "font-medium text-ink" : "text-ink-subtle"
             }`}
           >
@@ -203,26 +147,6 @@ export function ChatPane({
           resolvePaneChatId(optimisticId, durableId)
         }
       />
-
-      {draggingChatId ? (
-        // Above the pane's own sticky chrome (which reaches z-40) so a drag can
-        // always reach the drop surface, and only mounted while dragging so it
-        // never intercepts ordinary clicks.
-        <div className="pointer-events-none absolute inset-0 z-50">
-          {hoverZone ? (
-            <div
-              className={`absolute rounded-sm bg-ink/10 ring-2 ring-ink/35 ring-inset ${PREVIEW_CLASSES[hoverZone]}`}
-            />
-          ) : null}
-          <div
-            data-chat-pane-dropzone={pane.id}
-            onDragOver={handleDragOver}
-            onDragLeave={() => setHover(null)}
-            onDrop={handleDrop}
-            className="pointer-events-auto absolute inset-0"
-          />
-        </div>
-      ) : null}
     </section>
   );
 }

@@ -564,6 +564,7 @@ describe("Surface chat streaming UI", () => {
   afterEach(() => {
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
+    setDocumentVisibility("visible");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -2500,6 +2501,42 @@ describe("Surface chat streaming UI", () => {
     );
 
     expect(composer).toHaveFocus();
+  });
+
+  it("focuses the composer when the browser tab becomes visible again", () => {
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    const composer = screen.getByPlaceholderText("Ask a question or describe a task...");
+
+    composer.focus();
+    act(() => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    composer.blur();
+
+    act(() => {
+      setDocumentVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(composer).toHaveFocus();
+  });
+
+  it("keeps focus on another control when returning to the browser tab", () => {
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    const otherControl = document.createElement("button");
+    document.body.append(otherControl);
+    otherControl.focus();
+
+    act(() => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      setDocumentVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(otherControl).toHaveFocus();
+    otherControl.remove();
   });
 
   it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
@@ -6813,6 +6850,13 @@ describe("Surface chat streaming UI", () => {
     });
   });
 });
+
+function setDocumentVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+}
 
 function taskView(overrides: Partial<TaskView> = {}): TaskView {
   const now = currentTimestamp();

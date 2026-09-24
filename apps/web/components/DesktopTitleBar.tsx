@@ -18,6 +18,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAppData } from "@/components/AppDataProvider";
+import { DesktopUpdateButton } from "@/components/DesktopUpdateButton";
 import { HOME_NAVIGATION_EVENT } from "@/lib/chat-navigation";
 
 const SETTINGS_TITLES: Record<string, string> = {
@@ -124,6 +125,7 @@ export function DesktopTitleBar({
       </div>
 
       <div className="desktop-no-drag ml-auto flex items-center gap-1">
+        <DesktopUpdateButton />
         <button
           type="button"
           aria-label="New chat"

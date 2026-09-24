@@ -1,9 +1,6 @@
-// Slack's hosted MCP server only accepts the user scopes advertised by its
-// protected-resource metadata. This list also distinguishes official plugin
-// grants from the narrower tokens created by the retired ingestion flow.
+// User scopes required by opencompany's Slack tools. This list also distinguishes
+// plugin grants from the narrower tokens created by the retired ingestion flow.
 export const SLACK_MCP_USER_SCOPES = [
-  "canvases:read",
-  "canvases:write",
   "channels:history",
   "channels:read",
   "channels:write",
@@ -17,8 +14,6 @@ export const SLACK_MCP_USER_SCOPES = [
   "im:history",
   "im:read",
   "im:write",
-  "lists:read",
-  "lists:write",
   "mpim:history",
   "mpim:read",
   "mpim:write",
@@ -35,7 +30,7 @@ export const SLACK_MCP_USER_SCOPES = [
 ] as const;
 
 export const SLACK_MCP_RECONNECT_REASON =
-  "Reconnect Slack to grant the permissions required by the official plugin.";
+  "Reconnect Slack to grant the permissions required by the Slack plugin.";
 
 export function slackMcpScopesSatisfied(scopes: readonly string[]): boolean {
   const granted = new Set(scopes);

@@ -4,6 +4,7 @@ import {
   slackBotCanCustomizeIdentity,
   slackBotCanReact,
   slackBotCanReadDirectMessages,
+  slackBotCanUploadFiles,
   slackBotScopesSatisfied,
 } from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -29,6 +30,7 @@ export type SlackBotWorkspaceSettings = {
   canCustomizeIdentity: boolean;
   canReact: boolean;
   canReadDirectMessages: boolean;
+  canPostImages: boolean;
   teamName: string | null;
   statusReason: string | null;
 };
@@ -105,6 +107,11 @@ export function createSlackBotSettingsService(input: {
           integration &&
             integration.status === "connected" &&
             slackBotCanReadDirectMessages(integration.scopes),
+        ),
+        canPostImages: Boolean(
+          integration &&
+            integration.status === "connected" &&
+            slackBotCanUploadFiles(integration.scopes),
         ),
         teamName: actor.role === "admin" ? (integration?.connectionLabel ?? null) : null,
         statusReason:

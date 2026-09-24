@@ -137,7 +137,6 @@
     "esbuild@~0.18.20": "0.25.12",
     "js-yaml@^4": "4.3.2",
     "minimatch@^10": "10.2.6",
-    "package-json@^6": "7.0.0",
     "path-to-regexp@^6": "6.3.0",
     "path-to-regexp@^8": "8.4.2",
     "postcss": "$postcss",

@@ -103,6 +103,30 @@ describe("coding transcript tool presentations", () => {
     ).toMatchObject({ label: "Slack bot", detail: "Thread reply" });
   });
 
+  it("counts the images a Slack post carries", () => {
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_images",
+        state: "input-available",
+        input: {
+          text: "Two screens. One button each.",
+          messageKey: "onboarding",
+          images: ["artifact_1", "artifact_2"],
+        },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "Thread reply · 2 images" });
+
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_image",
+        state: "input-available",
+        input: { channel: "#product", text: "Chart.", messageKey: "chart", images: ["artifact_1"] },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "#product · 1 image" });
+  });
+
   it("never exposes internal coding tool names when richer fields are absent", () => {
     const command = toolCallViewFromPart({
       type: `tool-${CODEX_COMMAND_TOOL_NAME}`,

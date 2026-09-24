@@ -1,0 +1,46 @@
+# macOS packaging, signing, notarization, and the auto-update feed.
+# CI: .github/workflows/release-desktop.yml. Release process: README.md.
+appId: chat.opencompany.desktop
+productName: opencompany
+copyright: Copyright © opencompany
+directories:
+  output: release
+  buildResources: build
+# Everything the shell needs is bundled into dist/ by scripts/build.mjs.
+files:
+  - package.json
+  - dist/**
+  - assets/**
+beforeBuild: scripts/before-build.cjs
+protocols:
+  - name: opencompany
+    schemes:
+      - opencompany
+mac:
+  category: public.app-category.productivity
+  icon: assets/icon.png
+  artifactName: opencompany-${version}-mac-${arch}.${ext}
+  target:
+    # The zip is the update payload; the DMG is the first-install download.
+    - target: zip
+      arch: [arm64, x64]
+    - target: dmg
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
+  extendInfo:
+    # macOS terminates a hardened app that requests the microphone without this.
+    NSMicrophoneUsageDescription: opencompany uses the microphone for voice dictation in the composer.
+dmg:
+  # Stable name so /releases/latest/download/opencompany-mac-arm64.dmg always
+  # points at the newest published build.
+  artifactName: opencompany-mac-${arch}.${ext}
+# Written into the app as app-update.yml. The updater reads the release GitHub
+# marks as Latest and installs the zip from exactly that tag.
+publish:
+  provider: github
+  owner: useopencompany
+  repo: opencompany
+  releaseType: release

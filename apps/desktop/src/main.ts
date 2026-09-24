@@ -1,18 +1,9 @@
-import todesktop from "@todesktop/runtime";
-
-// Must run before anything else in the app lifecycle so the runtime can wire up
-// auto-update and crash reporting.
-todesktop.init({
-  updateReadyAction: {
-    showInstallAndRestartPrompt: "whenInForeground",
-    showNotification: "whenInBackground",
-  },
-});
-
 import { app, type BrowserWindow, Menu } from "electron";
 import { handleAuthDeepLink, registerDesktopAuth } from "./auth";
+import { offerMoveToApplications } from "./install-location";
 import { buildApplicationMenu } from "./menu";
 import { registerDesktopNavigation } from "./navigation";
+import { startAutoUpdates } from "./updates";
 import { APP_URL } from "./urls";
 import { createMainWindow } from "./window";
 
@@ -54,13 +45,15 @@ if (!app.requestSingleInstanceLock()) {
     mainWindow.focus();
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     // Marks the desktop session server-side and feeds preload's version arg.
     app.userAgentFallback = `${app.userAgentFallback} opencompanyDesktop/${app.getVersion()}`;
 
     Menu.setApplicationMenu(buildApplicationMenu(getWindow));
     registerDesktopAuth();
     registerDesktopNavigation(getWindow);
+    if (await offerMoveToApplications()) return;
+    startAutoUpdates();
 
     mainWindow = createMainWindow();
     mainWindow.on("closed", () => {

@@ -1,14 +1,15 @@
 import { build } from "esbuild";
 
 // Bundle the Electron main and preload entry points to CommonJS in dist/.
-// `electron` and `@todesktop/runtime` stay external so they resolve from
-// node_modules at runtime (ToDesktop installs them on its remote builders).
+// Only `electron` stays external. electron-updater is bundled so the packaged
+// app ships no node_modules and electron-builder has no dependency tree to
+// collect from the Bun workspace.
 const shared = {
   bundle: true,
   platform: "node",
   format: "cjs",
   target: "node20",
-  external: ["electron", "@todesktop/runtime"],
+  external: ["electron"],
   logLevel: "info",
 };
 

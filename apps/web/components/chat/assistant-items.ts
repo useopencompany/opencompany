@@ -551,9 +551,12 @@ export function toolDetail(name: string, part: Record<string, unknown> & { type:
     // The destination is what a reader checks; the message body is already in the transcript.
     if (!isRecord(part.input)) return formatToolInput(part.input);
     const channel = readString(part.input.channel);
+    const imageCount = Array.isArray(part.input.images) ? part.input.images.length : 0;
     // No channel means a reply, which lands in the thread of an earlier post or of the Slack
     // message that started this run. Naming the thread beats dumping the message body here.
-    return channel ? truncateToolPreview(channel) : "Thread reply";
+    const destination = channel ? truncateToolPreview(channel) : "Thread reply";
+    if (imageCount === 0) return destination;
+    return `${destination} · ${imageCount} ${imageCount === 1 ? "image" : "images"}`;
   }
   if (name === USE_ACTION_TOOL_NAME) {
     return actionToolDetail(part);

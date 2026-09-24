@@ -12,6 +12,11 @@ declare global {
       signInWithGoogle: (invitationToken?: string) => void;
       // Asks the shell to reload its configured app URL from the offline page.
       retryConnection: () => void;
+      // Update bridge, absent in shells older than 0.2.0. The listener fires
+      // once an update is staged; the return value unsubscribes.
+      onUpdateReady?: (listener: (version: string) => void) => () => void;
+      // Quits, installs the staged update, and relaunches.
+      restartToUpdate?: () => void;
     };
   }
 }
