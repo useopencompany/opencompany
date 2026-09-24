@@ -1,10 +1,13 @@
 import { createHash } from "node:crypto";
+import { validateChatAttachment } from "@opencompany/core";
 import { getDb } from "@opencompany/db/client";
 import { loadIntegrationCredential, markIntegrationStatus } from "@opencompany/db/integrations";
 import { type SubscriptionExecute, subscriptionRows } from "@opencompany/db/session-subscriptions";
 import { sql } from "drizzle-orm";
 import { slackApiRequest } from "./slack";
-import { slackBotDeliveryScopesSatisfied } from "./slack-bot";
+import { slackBotCanUploadFiles, slackBotDeliveryScopesSatisfied } from "./slack-bot";
+
+export const SLACK_POST_MAX_IMAGES = 4;
 
 export const SLACK_CHANNEL_TOOL_DESCRIPTION = [
   "Send a message as the opencompany Slack bot: the shared workspace bot, not any member's personal Slack plugin. This is the tool for instructions that ask to post, send, or share something in Slack with the opencompany Slack bot, and it should only be used when they ask.",
@@ -12,6 +15,7 @@ export const SLACK_CHANNEL_TOOL_DESCRIPTION = [
   'The channel message is one or two sentences: what you are doing, and what you want back. Nothing else - no findings, no constraints, no options, no recommendation, no code. Write it as you would say it out loud. Good: "I\'ve started to work on adding avatar upload support for slack bot channels and need your input on how we best build this." Bad: a bold headline followed by the technical constraint, a code path, and a numbered list of decisions.',
   "Ask the actual question in that message's thread, by calling this tool again with replyToMessageKey set to the first message's messageKey. Keep it to what you would ask a busy CTO for advice: the choice in plain words, which way you lean, and what you need from them. A few sentences. Do not rebuild the reasoning, the alternatives you ruled out, or what you found in the code - anyone who wants that opens the session, and replying in the thread continues it. If the reply reads like a design doc, it is too long.",
   "For a Slack follow-up, omit channel and the message goes to the originating thread. Otherwise channel is required to start a thread and must be a public channel the bot has joined; that message subscribes its thread to this same workflow session for 30 days. A replyToMessageKey reply inherits the channel of the message it answers.",
+  "To show images in the message, publish each image file first and pass the returned artifact IDs as images. Use them when a picture says it better than words, like a screenshot or a chart.",
   "Reuse a messageKey to retry the same intended message; give every new message its own key.",
 ].join("\n");
 export const SLACK_CHANNEL_INPUT_SCHEMA = {
@@ -37,6 +41,12 @@ export const SLACK_CHANNEL_INPUT_SCHEMA = {
       type: "string" as const,
       description: "Stable identifier for this intended message, reused on retries.",
     },
+    images: {
+      type: "array" as const,
+      maxItems: SLACK_POST_MAX_IMAGES,
+      items: { type: "string" as const },
+      description: `Optional. Up to ${SLACK_POST_MAX_IMAGES} artifact IDs of PNG, JPEG, or WebP images (5 MB each) published in this session. They appear under the text in the same message.`,
+    },
   },
   required: ["text", "messageKey"],
 };
@@ -45,6 +55,7 @@ export type SlackChannelPost = {
   text: string;
   messageKey: string;
   replyToMessageKey?: string;
+  images?: string[];
 };
 export type ChannelInstallation = {
   id: string;
@@ -101,6 +112,17 @@ export async function postWorkflowSlackMessage(
   ) {
     throw new Error("Provide text (1–3500 characters) and a stable messageKey (1–100 characters).");
   }
+  const imageIds = post.images ?? [];
+  if (
+    !Array.isArray(imageIds) ||
+    imageIds.length > SLACK_POST_MAX_IMAGES ||
+    imageIds.some((id) => typeof id !== "string" || !id.trim()) ||
+    new Set(imageIds).size !== imageIds.length
+  ) {
+    throw new Error(
+      `Provide images as up to ${SLACK_POST_MAX_IMAGES} distinct artifact IDs from this session.`,
+    );
+  }
   // workflow_id is the workspace-scoped slug. Match the live workflow that existed when this Task
   // was created so an archived Task cannot inherit a replacement workflow's Slack authority. A
   // Task opened from a Slack direct message has no workflow; its open thread subscription is what
@@ -154,6 +176,19 @@ export async function postWorkflowSlackMessage(
   if (!slackBotDeliveryScopesSatisfied(target.scopes))
     throw new Error("Reconnect Slack in Channels settings to grant required scopes.");
   const text = post.text.trim();
+  const images = JSON.stringify(
+    await resolvePostImages(execute, {
+      workspaceId: target.workspaceId,
+      sessionId: target.sessionId,
+      artifactIds: imageIds,
+    }),
+  );
+  // The worker links to the task when the install cannot upload, so the post still goes out. The
+  // run is told, so it can say so instead of claiming the images are in Slack.
+  const imageNote =
+    imageIds.length > 0 && !slackBotCanUploadFiles(target.scopes)
+      ? " This Slack install cannot upload images yet, so the message links to the task for them. An admin can reconnect Slack to show images inline."
+      : "";
   if (target.subscriptionEventId !== null) {
     if (!target.followUpChannelId || !target.followUpThreadTs) {
       throw new Error("The originating Slack thread is unavailable.");
@@ -177,12 +212,13 @@ export async function postWorkflowSlackMessage(
         FOR SHARE OF event, run
       ), delivery AS MATERIALIZED (
         INSERT INTO goat.channel_deliveries
-          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name, bot_avatar_url)
+          (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_ts, text, bot_display_name, bot_avatar_url, image_artifact_version_ids)
         SELECT ${deliveryId}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId},
-          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
+          ${target.followUpChannelId}, ${target.followUpThreadTs}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}, ${images}::jsonb
         FROM active
         ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
         WHERE channel_deliveries.text = EXCLUDED.text
+          AND channel_deliveries.image_artifact_version_ids = EXCLUDED.image_artifact_version_ids
           AND channel_deliveries.channel_id = EXCLUDED.channel_id
           AND channel_deliveries.thread_ts IS NOT DISTINCT FROM EXCLUDED.thread_ts
         RETURNING id, status
@@ -202,7 +238,7 @@ export async function postWorkflowSlackMessage(
     return {
       deliveryId,
       status: result.status,
-      message: "Queued for durable delivery to the originating Slack thread.",
+      message: `Queued for durable delivery to the originating Slack thread.${imageNote}`,
     };
   }
   const deliveryKey = (key: string) =>
@@ -239,13 +275,14 @@ export async function postWorkflowSlackMessage(
       WITH connected AS MATERIALIZED (
         SELECT id FROM goat.integrations WHERE id = ${target.id} AND status = 'connected' AND external_id = ${target.teamId} FOR SHARE
       )
-      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_parent_id, text, bot_display_name, bot_avatar_url)
-      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${parent?.id ?? null}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}
+      INSERT INTO goat.channel_deliveries (id, workspace_id, session_id, integration_id, team_id, channel_id, thread_parent_id, text, bot_display_name, bot_avatar_url, image_artifact_version_ids)
+      SELECT ${id}, ${target.workspaceId}, ${target.sessionId}, ${target.id}, ${target.teamId}, ${channelId}, ${parent?.id ?? null}, ${text}, ${target.botDisplayName}, ${target.botAvatarUrl}, ${images}::jsonb
       FROM connected
       WHERE EXISTS (SELECT 1 FROM goat.codex_chat_turns WHERE id = ${input.runId} AND status = 'running' AND lease_id = ${target.leaseId} AND lease_expires_at > now())
       ON CONFLICT (id) DO UPDATE SET id = EXCLUDED.id
       WHERE channel_deliveries.text = EXCLUDED.text AND channel_deliveries.channel_id = EXCLUDED.channel_id
         AND channel_deliveries.thread_parent_id IS NOT DISTINCT FROM EXCLUDED.thread_parent_id
+        AND channel_deliveries.image_artifact_version_ids = EXCLUDED.image_artifact_version_ids
       RETURNING id, status
     `),
     )[0];
@@ -254,14 +291,65 @@ export async function postWorkflowSlackMessage(
     return {
       deliveryId: id,
       status: result.status,
-      message: parent
-        ? "Queued for durable delivery as a reply in that message's Slack thread."
-        : "Queued for durable delivery. The thread will continue this session once posted.",
+      message: `${
+        parent
+          ? "Queued for durable delivery as a reply in that message's Slack thread."
+          : "Queued for durable delivery. The thread will continue this session once posted."
+      }${imageNote}`,
     };
   } catch (error) {
     await markChannelError(target, error);
     throw error;
   }
+}
+
+// Pins each image to the artifact's current version, so the post shows what the run saw when it
+// queued it. Only images published in this session are eligible: a run cannot post another
+// session's files by guessing an ID.
+async function resolvePostImages(
+  execute: SubscriptionExecute,
+  input: { workspaceId: string; sessionId: string; artifactIds: string[] },
+): Promise<string[]> {
+  if (input.artifactIds.length === 0) return [];
+  const rows = subscriptionRows<{
+    artifactId: string;
+    versionId: string;
+    filename: string;
+    mediaType: string;
+    sizeBytes: number;
+  }>(
+    await execute(sql`
+    SELECT artifact.id AS "artifactId", version.id AS "versionId", version.filename,
+      version.media_type AS "mediaType", version.size_bytes AS "sizeBytes"
+    FROM goat.chat_artifacts artifact
+    JOIN goat.chat_artifact_versions version ON version.artifact_id = artifact.id
+      AND version.version = artifact.current_version
+    WHERE artifact.id IN (${sql.join(
+      input.artifactIds.map((id) => sql`${id}`),
+      sql`, `,
+    )})
+      AND artifact.workspace_id = ${input.workspaceId}
+      AND artifact.chat_session_id = ${input.sessionId}
+      AND artifact.archived_at IS NULL
+  `),
+  );
+  return input.artifactIds.map((artifactId) => {
+    const row = rows.find((candidate) => candidate.artifactId === artifactId);
+    if (!row)
+      throw new Error(
+        `No published file in this session has the artifact ID "${artifactId}". Publish the image first and pass the artifactId it returns.`,
+      );
+    const validation = validateChatAttachment({
+      filename: row.filename,
+      mediaType: row.mediaType,
+      sizeBytes: Number(row.sizeBytes),
+    });
+    if (!validation.ok || validation.format !== "image")
+      throw new Error(
+        `"${row.filename}" cannot be shown in Slack. Use a PNG, JPEG, or WebP image of 5 MB or less.`,
+      );
+    return row.versionId;
+  });
 }
 
 type SlackChannel = {

@@ -7,6 +7,7 @@ describe("dedicated Slack agents", () => {
     expect(initial.settings).not.toHaveProperty("event_subscriptions");
     expect(initial.oauth_config.scopes.bot).toContain("app_mentions:read");
     expect(initial.oauth_config.scopes.bot).toContain("files:read");
+    expect(initial.oauth_config.scopes.bot).toContain("files:write");
     expect(initial.oauth_config.scopes.bot).not.toContain("chat:write.customize");
     expect(
       slackAgentManifest({ name: "Support", eventsUrl: "https://api.example.com/events" }).settings

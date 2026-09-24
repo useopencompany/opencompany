@@ -1,7 +1,14 @@
 import { get } from "@vercel/blob";
 
-export async function downloadChatAttachment(blobUrl: string): Promise<Buffer> {
-  const result = await get(blobUrl, { access: "private", useCache: false });
+export async function downloadChatAttachment(
+  blobUrl: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<Buffer> {
+  const result = await get(blobUrl, {
+    access: "private",
+    useCache: false,
+    ...(options.signal ? { abortSignal: options.signal } : {}),
+  });
   if (!result || result.statusCode !== 200 || !result.stream) {
     throw new Error("Attachment blob is unavailable.");
   }
