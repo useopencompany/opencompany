@@ -145,11 +145,12 @@ export async function executeActionHostGatewayService(input: {
   const denyHeadlessApproval = run.policy === "headless" && !context.durableTaskApprovals;
   try {
     const serviceCatalog = {
-      sources: catalog.providers.map(({ id, kind, label, description }) => ({
+      sources: catalog.providers.map(({ id, kind, label, description, connection }) => ({
         id,
         kind: kind ?? "integration",
         label,
         description,
+        ...(connection ? { connection } : {}),
       })),
       actions: catalog.actions.map((action) => ({
         id: action.id,

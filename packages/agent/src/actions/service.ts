@@ -57,11 +57,12 @@ export async function serveActionRequest(input: {
     if (!sourceId) {
       return {
         ok: true,
-        sources: input.catalog.sources.map(({ id, kind, label, description }) => ({
+        sources: input.catalog.sources.map(({ id, kind, label, description, connection }) => ({
           id,
           kind: kind ?? "integration",
           label,
           description,
+          ...(connection ? { connection } : {}),
         })),
       };
     }
@@ -85,6 +86,7 @@ export async function serveActionRequest(input: {
         kind: source.kind ?? "integration",
         label: source.label,
         description: source.description,
+        ...(source.connection ? { connection: source.connection } : {}),
       },
       actions: input.catalog.actions
         .filter((action) => action.source === source.id)

@@ -13,6 +13,7 @@ import {
   getOrderedAssistantItems,
 } from "./assistant-items";
 import type { HistoricalPresentationDetailController } from "./HistoricalPresentationDetail";
+import { PluginConnectionCard } from "./PluginConnectionCard";
 import { ReasoningItem } from "./ReasoningItem";
 import { SteeringItem } from "./SteeringItem";
 import { TaskCard } from "./TaskCard";
@@ -35,6 +36,7 @@ export function MessageBubble({
   onCodexAction,
   allowCodexPlanActions = false,
   onActionApproval,
+  onPluginConnectionResume,
   allowActionApproval = false,
   readOnly = false,
   isTaskSession = false,
@@ -50,6 +52,7 @@ export function MessageBubble({
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions?: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  onPluginConnectionResume?: ((pluginName: string, id: string) => Promise<void>) | undefined;
   allowActionApproval?: boolean;
   readOnly?: boolean;
   isTaskSession?: boolean;
@@ -70,6 +73,7 @@ export function MessageBubble({
       onCodexAction={onCodexAction}
       allowCodexPlanActions={allowCodexPlanActions}
       onActionApproval={onActionApproval}
+      onPluginConnectionResume={onPluginConnectionResume}
       allowActionApproval={allowActionApproval}
       readOnly={readOnly}
       isTaskSession={isTaskSession}
@@ -88,6 +92,7 @@ function AssistantTurn({
   onCodexAction,
   allowCodexPlanActions,
   onActionApproval,
+  onPluginConnectionResume,
   allowActionApproval,
   readOnly,
   isTaskSession,
@@ -102,6 +107,7 @@ function AssistantTurn({
   onCodexAction?: ((action: CodexToolAction) => Promise<void>) | undefined;
   allowCodexPlanActions: boolean;
   onActionApproval?: ((request: ActionApprovalRequest) => Promise<void>) | undefined;
+  onPluginConnectionResume?: ((pluginName: string, id: string) => Promise<void>) | undefined;
   allowActionApproval: boolean;
   readOnly: boolean;
   isTaskSession: boolean;
@@ -207,6 +213,18 @@ function AssistantTurn({
     if (item.type === "workflow") {
       return <WorkflowToolCard key={item.key} output={item.output} />;
     }
+    if (item.type === "plugin-connection") {
+      return (
+        <PluginConnectionCard
+          key={item.key}
+          pluginName={item.pluginName}
+          status={item.status}
+          messageId={message.id}
+          onResume={onPluginConnectionResume}
+          readOnly={readOnly || nested}
+        />
+      );
+    }
     if (item.type === "subagent") {
       return (
         <SubagentRow
@@ -306,6 +324,7 @@ function compactAssistantTrace(items: AssistantRenderItem[]): CompactedAssistant
       item.type === "artifact" ||
       item.type === "task" ||
       item.type === "workflow" ||
+      item.type === "plugin-connection" ||
       item.type === "steering"
     ) {
       visibleItems.push(item);

@@ -250,6 +250,7 @@ import {
   addOptimisticChatSummary,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { resumeAfterPluginConnection } from "@/lib/plugin-connection-continuation";
 import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
@@ -3360,6 +3361,46 @@ export function Surface({
                       onCodexAction={handleCodexToolAction}
                       allowCodexPlanActions={message.id === latestAssistantMessageId}
                       onActionApproval={handleActionApproval}
+                      onPluginConnectionResume={
+                        message.id === latestAssistantMessageId
+                          ? async (pluginName, id) => {
+                              if (activeTaskConversation) {
+                                await resumeAfterPluginConnection({
+                                  pluginName,
+                                  attemptId: id,
+                                  target: {
+                                    kind: "task",
+                                    taskId: activeTaskConversation.taskId,
+                                    workspaceId,
+                                  },
+                                });
+                                router.refresh();
+                                return;
+                              }
+                              if (!chatSessionId || persistedChatSessionId !== chatSessionId) {
+                                throw new Error("The chat session is no longer available.");
+                              }
+                              const engine = activeEngineChat?.engine;
+                              const messageEngine: MessageEngine = engine
+                                ? canonicalMessageEngine(engine, {
+                                    reasoningEffort: codexReasoningEffort,
+                                    planModeEnabled: false,
+                                    goalMode: null,
+                                  })
+                                : { type: "opencompany", schemaVersion: 1 };
+                              await resumeAfterPluginConnection({
+                                pluginName,
+                                attemptId: id,
+                                target: {
+                                  kind: "chat",
+                                  conversationId: chatSessionId,
+                                  model: String(engine ? engineChatModel[engine] : chatModel),
+                                  engine: messageEngine,
+                                },
+                              });
+                            }
+                          : undefined
+                      }
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
                       turnActive={message.id === activeAssistantMessageId}

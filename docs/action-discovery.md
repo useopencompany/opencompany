@@ -5,13 +5,19 @@ contract v5. The model sees these operations:
 
 | Operation | Result |
 | --- | --- |
-| `list_actions({})` | All currently available sources, as before. |
-| `list_actions({source})` | Every available action in catalog order, with its exact ID, source, permission mode, and a whitespace-normalized description preview of at most 160 characters. Longer previews end in `…`. No parameter schemas. |
+| `list_actions({})` | Connected sources and installed plugins whose account is missing or needs reconnection. The latter carry `connection: { pluginName, status }` and no actions. |
+| `list_actions({source})` | Every available action in catalog order, with its exact ID, source, permission mode, and a whitespace-normalized description preview of at most 160 characters. Longer previews end in `…`. No parameter schemas. For a disconnected installed plugin, returns the source connection status and an empty action list. |
 | `describe_actions({actions: [id, ...]})` | Complete current descriptors for one to five exact IDs, including full descriptions and parameter schemas, plus explicit `not_found` IDs. Repeated IDs are deduplicated after validating the batch size. |
 | `use_action({action, params})` | The existing execution path, with availability checks, approval, deduplication, provider retry limits, and the 32-admission turn budget. |
 
 Listing and description read the existing policy-filtered catalog. They do not execute providers,
 refresh remote MCP discovery snapshots, require approval, or consume the execution budget.
+When an assistant needs a disconnected plugin, it lists that specific source and stops. Chat
+renders its connection card outside the folded tool trace. Starting the connection from that card
+records a local continuation attempt; once the live account state becomes healthy, the client
+queues one idempotent follow-up in the same Task or chat Conversation. The original run is not
+resumed in place: the follow-up starts a new turn with the prior request in its conversation
+history.
 Successful description records each found action's source as discovered. Unknown or unavailable
 IDs do not admit a source. Description does not grant execution permission.
 

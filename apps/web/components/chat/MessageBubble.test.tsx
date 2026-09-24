@@ -32,6 +32,35 @@ afterEach(() => {
   presentationMocks.load.mockReset();
 });
 
+it("keeps a disconnected plugin card visible beside the assistant's final reply", () => {
+  const message: ChatUiMessage = {
+    id: "assistant_plugin_connection",
+    role: "assistant",
+    parts: [
+      {
+        type: "tool-list_actions",
+        toolCallId: "list_stripe",
+        state: "output-available",
+        input: { source: "plugin:stripe:stripe" },
+        output: {
+          ok: true,
+          source: {
+            id: "plugin:stripe:stripe",
+            label: "Stripe",
+            description: "Stripe tools",
+            connection: { pluginName: "stripe", status: "needs_reauth" },
+          },
+          actions: [],
+        },
+      },
+      { type: "text", text: "Reconnect Stripe and I can continue." },
+    ],
+  };
+  render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+  expect(screen.getByRole("link", { name: "Reconnect" })).toBeVisible();
+  expect(screen.getByText("Reconnect Stripe and I can continue.")).toBeVisible();
+});
+
 it.each(
   (["accept", "decline"] as const).flatMap((decision) =>
     [false, true].map((summary) => ({ decision, summary })),

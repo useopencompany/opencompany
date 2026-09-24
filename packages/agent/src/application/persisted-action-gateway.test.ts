@@ -44,6 +44,38 @@ const interactiveContext = {
 };
 
 describe("executeActionGateway", () => {
+  it("preserves a disconnected plugin through policy and gateway discovery", async () => {
+    const gateway = createActionGateway({
+      actionsKilled: () => false,
+      loadContext: async () => interactiveContext,
+      recordSourceDiscovery: async () => undefined,
+      resolveCatalog: async () => ({
+        providers: [
+          {
+            id: "plugin:stripe:stripe",
+            kind: "integration",
+            unavailable: true,
+            label: "Stripe",
+            description: "Stripe tools",
+            connection: { pluginName: "stripe", status: "needs_reauth" },
+          },
+        ],
+        actions: [],
+      }),
+    });
+    const signal = new AbortController().signal;
+    await expect(gateway({ request: listRequest(), signal })).resolves.toMatchObject({
+      ok: true,
+      sources: [{ connection: { pluginName: "stripe", status: "needs_reauth" } }],
+    });
+    await expect(
+      gateway({ request: listRequest("plugin:stripe:stripe"), signal }),
+    ).resolves.toMatchObject({
+      ok: true,
+      source: { connection: { pluginName: "stripe", status: "needs_reauth" } },
+      actions: [],
+    });
+  });
   it.each(["foregroundInteractive", "headless"] as const)(
     "passes a private-chat destination only for %s discovery",
     async (policy) => {

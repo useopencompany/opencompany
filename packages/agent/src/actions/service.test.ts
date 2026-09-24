@@ -20,6 +20,44 @@ const catalog: ActionServiceCatalog = {
 };
 
 describe("serveActionRequest", () => {
+  it("returns connection metadata for both source discovery views", async () => {
+    const disconnected: ActionServiceCatalog = {
+      sources: [
+        {
+          id: "plugin:stripe:stripe",
+          label: "Stripe",
+          description: "Stripe tools",
+          connection: { pluginName: "stripe", status: "needs_reauth" },
+        },
+      ],
+      actions: [],
+    };
+    const governance = createInMemoryActionTurnGovernance();
+    const execute = vi.fn();
+    const request = { sessionId: "session_1", turnId: "turn_1", operation: "list" as const };
+    const all = await serveActionRequest({
+      request,
+      catalog: disconnected,
+      governance,
+      execute,
+    });
+    const source = await serveActionRequest({
+      request: { ...request, source: "plugin:stripe:stripe" },
+      catalog: disconnected,
+      governance,
+      execute,
+    });
+    expect(all).toMatchObject({
+      ok: true,
+      sources: [{ connection: { pluginName: "stripe", status: "needs_reauth" } }],
+    });
+    expect(source).toMatchObject({
+      ok: true,
+      source: { connection: { pluginName: "stripe", status: "needs_reauth" } },
+      actions: [],
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
   it("owns discovery, retry-safe identity, and the shared call budget", async () => {
     expect(ACTION_MAX_CALLS_PER_TURN).toBe(32);
     const governance = createInMemoryActionTurnGovernance();
