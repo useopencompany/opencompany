@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { BillingPanel, type BillingPanelData } from "./BillingPanel";
 
@@ -50,6 +51,42 @@ const base: BillingPanelData = {
 };
 
 describe("BillingPanel", () => {
+  it("server-renders localized values independently of the server timezone", () => {
+    const data: BillingPanelData = {
+      ...base,
+      recentActivity: [
+        {
+          activityId: "top-up-entry",
+          source: "stripe_topup",
+          amountUsdMicros: 20_000_000,
+          providerCostUsdMicros: 0,
+          platformFeeUsdMicros: 0,
+          capabilityAction: null,
+          isAutoRefill: false,
+          createdAt: "2026-09-24T12:37:42.000Z",
+        },
+      ],
+    };
+    const originalTimezone = process.env.TZ;
+
+    try {
+      process.env.TZ = "UTC";
+      const utcHtml = renderToString(
+        <BillingPanel data={data} checkoutResult="success" topupResult={null} />,
+      );
+      process.env.TZ = "Asia/Calcutta";
+      const indiaHtml = renderToString(
+        <BillingPanel data={data} checkoutResult="success" topupResult={null} />,
+      );
+
+      expect(indiaHtml).toBe(utcHtml);
+      expect(utcHtml).toContain("Sep 24, 12:37 PM");
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
   it("shows sandbox usage in monthly spend and ledger activity", () => {
     render(
       <BillingPanel
