@@ -1,6 +1,12 @@
 import { Sandbox, SandboxNotFoundError } from "e2b";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createOrConnectSandbox, killSandbox, type SandboxHandle } from "./sandbox";
+import {
+  armSandboxIdleTimeout,
+  armSandboxIdleTimeoutById,
+  createOrConnectSandbox,
+  killSandbox,
+  type SandboxHandle,
+} from "./sandbox";
 import { registerSandboxBilling } from "./sandbox-billing";
 import { billSandboxBeforeTransition } from "./sandbox-billing-worker";
 
@@ -83,5 +89,30 @@ describe("sandbox billing lifecycle wiring", () => {
     expect(vi.mocked(billSandboxBeforeTransition).mock.invocationCallOrder[0]).toBeLessThan(
       kill.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("pauses a settled task sandbox immediately and preserves its session", async () => {
+    const sandbox = {
+      getInfo: vi.fn(async () => ({ state: "running", lifecycle: { onTimeout: "pause" } })),
+      pause: vi.fn(async () => undefined),
+      setTimeout: vi.fn(async () => undefined),
+    } as unknown as SandboxHandle;
+
+    await expect(armSandboxIdleTimeout(sandbox, 0)).resolves.toBe(true);
+    expect(sandbox.pause).toHaveBeenCalledOnce();
+    expect(sandbox.setTimeout).not.toHaveBeenCalled();
+  });
+
+  it("pauses an orphaned settled task sandbox without resuming it", async () => {
+    vi.spyOn(Sandbox, "getInfo").mockResolvedValue({
+      state: "running",
+      lifecycle: { onTimeout: "pause" },
+    } as Awaited<ReturnType<typeof Sandbox.getInfo>>);
+    const pause = vi.spyOn(Sandbox, "pause").mockResolvedValue(true);
+    const timeout = vi.spyOn(Sandbox, "setTimeout").mockResolvedValue(undefined);
+
+    await expect(armSandboxIdleTimeoutById("task-sandbox", 0)).resolves.toBe(true);
+    expect(pause).toHaveBeenCalledWith("task-sandbox", expect.any(Object));
+    expect(timeout).not.toHaveBeenCalled();
   });
 });

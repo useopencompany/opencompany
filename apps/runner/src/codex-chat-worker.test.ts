@@ -527,7 +527,7 @@ describe("terminal opencompany Codex sandbox reconciliation", () => {
     expect(sqlText(dbMock.execute.mock.calls[1]?.[0])).toContain("sandbox_timeout_armed_at");
   });
 
-  it("caps terminal task sandbox reconciliation at 5 minutes", async () => {
+  it("pauses terminal task sandboxes during reconciliation", async () => {
     vi.clearAllMocks();
     dbMock.execute
       .mockResolvedValueOnce({
@@ -550,7 +550,7 @@ describe("terminal opencompany Codex sandbox reconciliation", () => {
     expect(sqlText(dbMock.execute.mock.calls[0]?.[0])).toContain(
       "INNER JOIN goat.chat_sessions AS chat",
     );
-    expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 300_000);
+    expect(sandboxMocks.armSandboxIdleTimeoutById).toHaveBeenCalledWith("sbx_1", 0);
   });
 
   it("restores the active timeout when a new turn wins the reconciliation race", async () => {

@@ -1070,7 +1070,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     );
   });
 
-  it("caps finished durable task sandbox parking at 5 minutes", async () => {
+  it("pauses finished durable task sandboxes immediately", async () => {
     const sandbox = fakeSandbox("sbx_existing");
     sandboxMocks.createOrConnectSandbox.mockResolvedValueOnce(sandbox);
     const harnessSpec = harnessSpecForClaudeTask();
@@ -1090,7 +1090,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     expect(sandboxMocks.createOrConnectSandbox).toHaveBeenCalledWith(
       expect.objectContaining({ idleTimeoutMs: 30 * 60 * 1000 }),
     );
-    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 300_000);
+    expect(sandboxMocks.armSandboxIdleTimeout).toHaveBeenCalledWith(sandbox, 0);
     expect(sandboxMocks.armSandboxActiveTimeoutById).not.toHaveBeenCalled();
   });
 

@@ -364,7 +364,8 @@ function elapsedMs(startedAt: number) {
 export async function armSandboxIdleTimeout(sandbox: SandboxHandle, idleTimeoutMs: number) {
   try {
     const info = await sandbox.getInfo({ requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
-    if (info.lifecycle?.onTimeout !== "pause") {
+    if (info.state === "paused") return true;
+    if (idleTimeoutMs === 0 || info.lifecycle?.onTimeout !== "pause") {
       await sandbox.pause({ requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
       return true;
     }
@@ -394,7 +395,7 @@ export async function armSandboxIdleTimeoutById(sandboxId: string, idleTimeoutMs
       requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS,
     });
     if (info.state === "paused") return true;
-    if (info.lifecycle?.onTimeout !== "pause") {
+    if (idleTimeoutMs === 0 || info.lifecycle?.onTimeout !== "pause") {
       await Sandbox.pause(sandboxId, { requestTimeoutMs: SANDBOX_REQUEST_TIMEOUT_MS });
       return true;
     }

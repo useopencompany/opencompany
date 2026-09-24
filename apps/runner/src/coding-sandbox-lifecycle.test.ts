@@ -27,7 +27,7 @@ describe("settledCodingSandboxIdleTimeoutMs", () => {
     ).toBe(30 * 60 * 1000);
   });
 
-  it("caps finished task sandboxes at five minutes", () => {
+  it("pauses finished task sandboxes immediately", () => {
     expect(
       settledCodingSandboxIdleTimeoutMs({
         configuredIdleTimeoutMs: 30 * 60 * 1000,
@@ -36,13 +36,13 @@ describe("settledCodingSandboxIdleTimeoutMs", () => {
     ).toBe(FINISHED_TASK_SANDBOX_IDLE_TIMEOUT_MS);
   });
 
-  it("does not extend a shorter configured task timeout", () => {
+  it("pauses finished task sandboxes even with a shorter configured timeout", () => {
     expect(
       settledCodingSandboxIdleTimeoutMs({
         configuredIdleTimeoutMs: 60_000,
         taskSession: true,
       }),
-    ).toBe(60_000);
+    ).toBe(0);
   });
 });
 
