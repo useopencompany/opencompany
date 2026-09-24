@@ -8,6 +8,7 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import { ChatDropOverlay } from "@/components/chat-panes/ChatDropOverlay";
 import { ChatPane } from "@/components/chat-panes/ChatPane";
 import { useChatPaneWorkspace } from "@/components/chat-panes/ChatPaneWorkspace";
 import {
@@ -55,7 +56,7 @@ export function ChatPaneCanvas({
   newChatProjectId?: string | null;
   newChatProjectName?: string | null;
 }) {
-  const { layout, focusPaneById } = useChatPaneWorkspace();
+  const { layout, focusPaneById, draggingChatId, dragVersion } = useChatPaneWorkspace();
   const canvasRef = useRef<HTMLDivElement>(null);
   const splitCapable = useSyncExternalStore(
     subscribeSplitCapable,
@@ -145,6 +146,17 @@ export function ChatPaneCanvas({
                 canvasRef={canvasRef}
               />
             ))}
+
+        {draggingChatId ? (
+          <ChatDropOverlay
+            // A fresh overlay per drag, so a preview can never outlive its drag
+            // even if the browser skipped the previous dragend.
+            key={dragVersion}
+            chatId={draggingChatId}
+            narrow={narrow}
+            focusedPaneId={focusedPaneId}
+          />
+        ) : null}
       </div>
     </div>
   );
@@ -231,6 +243,7 @@ function ChatPaneResizer({
       tabIndex={0}
       aria-orientation={horizontal ? "vertical" : "horizontal"}
       aria-label={horizontal ? "Resize panes horizontally" : "Resize panes vertically"}
+      title="Drag to resize, double-click to even out"
       aria-valuemin={Math.round(MIN_PANE_PERCENT)}
       aria-valuemax={Math.round(pairTotal - MIN_PANE_PERCENT)}
       aria-valuenow={Math.round(beforeSize)}
@@ -238,6 +251,10 @@ function ChatPaneResizer({
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      // The familiar shortcut for evening out two panes after a lopsided drag.
+      onDoubleClick={() =>
+        resizeSplitBoundary(seam.splitId, seam.index, pairTotal / 2 - beforeSize)
+      }
       onKeyDown={(event) => {
         const decrease = horizontal ? "ArrowLeft" : "ArrowUp";
         const increase = horizontal ? "ArrowRight" : "ArrowDown";
