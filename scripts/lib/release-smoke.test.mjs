@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { expectedReleaseFor } from "./release-smoke.mjs";
+import { expectedReleaseFor, webHealthTargets } from "./release-smoke.mjs";
 
 test("uses a surface-specific expected release", () => {
   assert.equal(
@@ -40,4 +40,51 @@ test("preserves the global expected release for existing callers", () => {
 test("rejects unknown smoke-check surfaces", () => {
   assert.throws(() => expectedReleaseFor("marketing", {}), /Unknown smoke-check surface/);
   assert.throws(() => expectedReleaseFor("goat", {}), /Unknown smoke-check surface/);
+});
+
+test("checks both the immutable web deployment and the production domain", () => {
+  assert.deepEqual(
+    webHealthTargets({
+      webUrl: "https://my.opencompany.chat/",
+      deploymentUrl: "https://opencompany-web-abc.vercel.app/",
+    }),
+    [
+      {
+        label: "web deployment",
+        url: "https://opencompany-web-abc.vercel.app/api/healthz",
+        useVercelCli: true,
+      },
+      {
+        label: "web production domain",
+        url: "https://my.opencompany.chat/api/healthz",
+        useVercelCli: false,
+      },
+    ],
+  );
+});
+
+test("checks the production domain when no immutable deployment is provided", () => {
+  assert.deepEqual(webHealthTargets({ webUrl: "https://my.opencompany.chat" }), [
+    {
+      label: "web production domain",
+      url: "https://my.opencompany.chat/api/healthz",
+      useVercelCli: false,
+    },
+  ]);
+});
+
+test("does not check the same web target twice", () => {
+  assert.deepEqual(
+    webHealthTargets({
+      webUrl: "https://opencompany-web-abc.vercel.app",
+      deploymentUrl: "https://opencompany-web-abc.vercel.app",
+    }),
+    [
+      {
+        label: "web deployment",
+        url: "https://opencompany-web-abc.vercel.app/api/healthz",
+        useVercelCli: true,
+      },
+    ],
+  );
 });
