@@ -211,6 +211,225 @@ function orderedPair(
 }
 
 /**
+ * Puts `pane` along an outer edge of the whole workspace, spanning every pane
+ * on that side — a full-width row beneath two chats side by side, say.
+ *
+ * When the root already splits along that axis the pane joins it as one more
+ * sibling and the others give up space in proportion; otherwise the whole
+ * existing arrangement becomes one half of a new split.
+ */
+function insertAtCanvasEdge(
+  root: ChatPaneTree,
+  pane: ChatPaneNode,
+  edge: PaneEdge,
+  newSplitId: string,
+): ChatPaneTree {
+  const direction = EDGE_DIRECTION[edge];
+  const before = EDGE_INSERTS_BEFORE[edge];
+
+  if (isPane(root) || root.direction !== direction) {
+    return {
+      kind: "split",
+      id: newSplitId,
+      direction,
+      children: orderedPair({ node: pane, size: 50 }, { node: root, size: 50 }, before),
+    };
+  }
+
+  const count = root.children.length + 1;
+  const incoming: ChatSplitChild = { node: pane, size: 100 / count };
+  const scaled = root.children.map((child) => ({
+    ...child,
+    size: (child.size * (count - 1)) / count,
+  }));
+  const children = before ? [incoming, ...scaled] : [...scaled, incoming];
+  // Same rule as a same-axis pane split: never mint a pane too narrow to use.
+  if (children.some((child) => child.size < MIN_PANE_PERCENT)) {
+    return { ...root, children: children.map((child) => ({ ...child, size: 100 / count })) };
+  }
+  return { ...root, children };
+}
+
+// --- Dropping a chat --------------------------------------------------------
+
+/**
+ * Where a dragged chat will land.
+ *
+ * A `pane` target splits that pane toward an edge, or with `center` shows the
+ * chat in the pane itself. A `canvas` target opens a pane along an outer edge
+ * of the whole workspace, spanning every pane on that side.
+ */
+export type ChatDropTarget =
+  | { kind: "pane"; paneId: string; zone: PaneEdge | "center" }
+  | { kind: "canvas"; edge: PaneEdge };
+
+/**
+ * The layout after dropping `chatId` on `target`.
+ *
+ * The drop preview renders this same result, so what the reader sees while
+ * dragging is exactly what they get on release.
+ *
+ * A chat that is already open is moved rather than opened twice, and its pane
+ * keeps its id, so the canvas keeps its Surface mounted — transcript, scroll
+ * position and any running turn — while it changes place. Moving never adds a
+ * pane, so it still works at the pane cap. Opening a new chat that would
+ * exceed the cap returns the layout unchanged.
+ */
+export function applyChatDrop(
+  layout: ChatPaneLayout,
+  target: ChatDropTarget,
+  chatId: string,
+): ChatPaneLayout {
+  const openPaneId = findPaneIdByChatId(layout.root, chatId);
+  if (openPaneId) return moveOpenPane(layout, openPaneId, target);
+
+  if (target.kind === "pane") {
+    return target.zone === "center"
+      ? focusPane(setPaneChat(layout, target.paneId, chatId), target.paneId)
+      : splitPane(layout, target.paneId, target.zone, chatId);
+  }
+
+  if (countPanes(layout.root) >= MAX_CHAT_PANES) return layout;
+  const newPane: ChatPaneNode = { kind: "pane", id: `pane-${layout.nextNodeId}`, chatId };
+  return {
+    ...layout,
+    root: insertAtCanvasEdge(layout.root, newPane, target.edge, `split-${layout.nextNodeId + 1}`),
+    focusedPaneId: newPane.id,
+    nextNodeId: layout.nextNodeId + 2,
+  };
+}
+
+function moveOpenPane(
+  layout: ChatPaneLayout,
+  paneId: string,
+  target: ChatDropTarget,
+): ChatPaneLayout {
+  const pane = findPane(layout.root, paneId);
+  if (!pane) return layout;
+
+  if (target.kind === "pane" && target.paneId === paneId) return focusPane(layout, paneId);
+
+  const newSplitId = `split-${layout.nextNodeId}`;
+  let root: ChatPaneTree;
+  if (target.kind === "canvas") {
+    const rest = removePane(layout.root, paneId);
+    if (!rest) return layout;
+    root = insertAtCanvasEdge(rest, pane, target.edge, newSplitId);
+  } else if (target.zone === "center") {
+    // Dropped onto another pane: the two trade places.
+    const other = findPane(layout.root, target.paneId);
+    if (!other) return layout;
+    root = mapPanes(layout.root, (node) =>
+      node.id === paneId ? other : node.id === other.id ? pane : node,
+    );
+  } else {
+    const rest = removePane(layout.root, paneId);
+    if (!rest) return layout;
+    root = insertBeside(rest, target.paneId, pane, {
+      direction: EDGE_DIRECTION[target.zone],
+      before: EDGE_INSERTS_BEFORE[target.zone],
+      newSplitId,
+    });
+  }
+  return { ...layout, root, focusedPaneId: paneId, nextNodeId: layout.nextNodeId + 1 };
+}
+
+/**
+ * The band along the workspace's outer edge, in pixels, that targets the whole
+ * canvas rather than the pane beneath the pointer. Narrow enough to stay out of
+ * the way of an ordinary pane split, wide enough to hit on purpose.
+ */
+export const CANVAS_EDGE_BAND_PX = 28;
+
+/**
+ * Half the side of the box in the middle of a pane that drops the chat into
+ * the pane itself, in pane-normalized units: the middle third each way.
+ */
+const PANE_CENTER_HALF_EXTENT = 1 / 6;
+
+/**
+ * Resolves the drop target under a pointer.
+ *
+ * `point` is in canvas percentages, like the geometry; `canvasSize` is the
+ * canvas in pixels, which the edge band is measured in.
+ *
+ * Pane edges are found by nearest edge in pane-normalized coordinates, so the
+ * four regions meet at the diagonals whatever the pane's aspect ratio. Only
+ * targets that change something are offered: a canvas edge only where it
+ * differs from splitting the pane beneath it, and splits only while there is
+ * room for another pane (moving an open chat never needs room).
+ */
+export function chatDropTargetAt(
+  layout: ChatPaneLayout,
+  geometry: PaneGeometry,
+  point: { x: number; y: number },
+  canvasSize: { width: number; height: number },
+  chatId: string,
+): ChatDropTarget | null {
+  const rect = geometry.panes.find(
+    (candidate) =>
+      point.x >= candidate.left &&
+      point.x <= candidate.left + candidate.width &&
+      point.y >= candidate.top &&
+      point.y <= candidate.top + candidate.height,
+  );
+  const pane = rect ? findPane(layout.root, rect.paneId) : null;
+  if (!rect || !pane) return null;
+
+  const openPaneId = findPaneIdByChatId(layout.root, chatId);
+  const paneCount = countPanes(layout.root);
+  const canPlace = openPaneId !== null || paneCount < MAX_CHAT_PANES;
+
+  if (canPlace && paneCount > 1) {
+    const edge = canvasEdgeAt(point, canvasSize);
+    if (edge && !spansCanvasEdge(rect, edge)) return { kind: "canvas", edge };
+  }
+
+  // An empty pane is filled in place, the chat's own pane is already where it
+  // is, and at the cap an occupied pane can still be taken over — so every
+  // pane stays a valid target instead of dead-ending the drag.
+  if (!pane.chatId || pane.id === openPaneId || !canPlace) {
+    return { kind: "pane", paneId: pane.id, zone: "center" };
+  }
+
+  const x = (point.x - rect.left) / Math.max(Number.EPSILON, rect.width);
+  const y = (point.y - rect.top) / Math.max(Number.EPSILON, rect.height);
+  if (Math.abs(x - 0.5) < PANE_CENTER_HALF_EXTENT && Math.abs(y - 0.5) < PANE_CENTER_HALF_EXTENT) {
+    return { kind: "pane", paneId: pane.id, zone: "center" };
+  }
+  const distances: [PaneEdge, number][] = [
+    ["left", x],
+    ["right", 1 - x],
+    ["top", y],
+    ["bottom", 1 - y],
+  ];
+  const zone = distances.reduce((best, entry) => (entry[1] < best[1] ? entry : best))[0];
+  return { kind: "pane", paneId: pane.id, zone };
+}
+
+function canvasEdgeAt(
+  point: { x: number; y: number },
+  canvasSize: { width: number; height: number },
+): PaneEdge | null {
+  const bandX = (CANVAS_EDGE_BAND_PX / Math.max(1, canvasSize.width)) * 100;
+  const bandY = (CANVAS_EDGE_BAND_PX / Math.max(1, canvasSize.height)) * 100;
+  if (point.x <= bandX) return "left";
+  if (point.x >= 100 - bandX) return "right";
+  if (point.y <= bandY) return "top";
+  if (point.y >= 100 - bandY) return "bottom";
+  return null;
+}
+
+/**
+ * A pane that already runs the full length of an edge would build the same
+ * arrangement from its own edge split, so the canvas target adds nothing there.
+ */
+function spansCanvasEdge(rect: PaneRect, edge: PaneEdge) {
+  const FULL = 100 - 1e-6;
+  return EDGE_DIRECTION[edge] === "row" ? rect.height >= FULL : rect.width >= FULL;
+}
+
+/**
  * Removes a pane. Its space goes back to its siblings in proportion, and a
  * split left with a single child collapses into that child.
  *
@@ -487,9 +706,9 @@ export function restoreOntoMountedPane(
   // is not already in the tree the swap is one-way, which can retire the id
   // `nextNodeId` was counting from — so the counter is recomputed rather than
   // trusted, or a later split could mint an id a renamed pane already holds.
-  const root = renamePanes(base.root, (paneId) =>
-    paneId === targetPaneId ? mountedPaneId : paneId === mountedPaneId ? targetPaneId : paneId,
-  );
+  const rename = (paneId: string) =>
+    paneId === targetPaneId ? mountedPaneId : paneId === mountedPaneId ? targetPaneId : paneId;
+  const root = mapPanes(base.root, (pane) => ({ ...pane, id: rename(pane.id) }));
   // The focused pane owns the URL, so focus follows the routed chat.
   return {
     ...base,
@@ -499,11 +718,11 @@ export function restoreOntoMountedPane(
   };
 }
 
-function renamePanes(node: ChatPaneTree, rename: (paneId: string) => string): ChatPaneTree {
-  if (isPane(node)) return { ...node, id: rename(node.id) };
+function mapPanes(node: ChatPaneTree, update: (pane: ChatPaneNode) => ChatPaneNode): ChatPaneTree {
+  if (isPane(node)) return update(node);
   return {
     ...node,
-    children: node.children.map((child) => ({ ...child, node: renamePanes(child.node, rename) })),
+    children: node.children.map((child) => ({ ...child, node: mapPanes(child.node, update) })),
   };
 }
 

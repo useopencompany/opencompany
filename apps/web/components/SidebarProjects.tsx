@@ -494,7 +494,16 @@ function ProjectFolder({
             event.dataTransfer.dropEffect = "move";
             setDropTarget(true);
           }}
-          onDragLeave={() => setDropTarget(false)}
+          onDragLeave={(event) => {
+            // Crossing onto the folder's own name or menu button is not leaving it, and treating
+            // it as such made the highlight flicker under the pointer.
+            if (
+              event.relatedTarget instanceof Node &&
+              event.currentTarget.contains(event.relatedTarget)
+            )
+              return;
+            setDropTarget(false);
+          }}
           onDrop={(event) => {
             setDropTarget(false);
             const conversationId = draggedConversationId(event);
