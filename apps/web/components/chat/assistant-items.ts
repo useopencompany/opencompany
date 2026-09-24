@@ -22,6 +22,7 @@ import {
   CODEX_SUBAGENT_TOOL_NAME,
   CODEX_WEB_SEARCH_TOOL_NAME,
   LEGACY_SLACK_BOT_TOOL_NAME,
+  LIST_ACTIONS_TOOL_NAME,
   SLACK_BOT_TOOL_NAME,
   START_TASK_TOOL_NAME,
   START_TASK_TOOL_PART_TYPE,
@@ -37,6 +38,7 @@ import {
   WEB_SEARCH_TOOL_NAME,
 } from "@/lib/chat-ui";
 import { codingToolPresentation } from "@/lib/coding-tool-presentation";
+import { isOfficialMcpPluginName } from "@/lib/official-plugins";
 import { type WorkflowCardOutput, workflowCardOutputFromTool } from "./workflow-tool-output";
 
 // Recurring Tasks were removed, but their tool calls are still in saved transcripts. These names
@@ -52,12 +54,20 @@ export type AssistantRenderItem =
   | { type: "task"; key: string; task: ChatTaskCardView }
   | { type: "artifact"; key: string; artifact: PublishedChatArtifact }
   | { type: "workflow"; key: string; output: WorkflowCardOutput }
+  | {
+      type: "plugin-connection";
+      key: string;
+      pluginName: string;
+      status: "not_connected" | "needs_reauth";
+    }
   | { type: "tool"; key: string; tool: ToolCallView }
   | { type: "subagent"; key: string; subagent: SubagentRenderView };
 
 // What the user first saw the engine produce. Steering is the user's own message echoed into the
 // turn, not engine output, so it never satisfies time-to-first-output.
-export type AssistantVisibleOutputKind = Exclude<AssistantRenderItem["type"], "steering"> | "error";
+export type AssistantVisibleOutputKind =
+  | Exclude<AssistantRenderItem["type"], "steering" | "plugin-connection">
+  | "error";
 
 // A Claude Code Task call: the tool header plus the subagent's own nested trace, already
 // resolved into render items so the UI can render them under an expandable subagent row.
@@ -138,7 +148,7 @@ export function firstVisibleAssistantOutputKind(
   const firstItem = getOrderedAssistantItems(message, taskLookup, options).find(
     (item) => item.type !== "steering",
   );
-  if (firstItem) return firstItem.type as AssistantVisibleOutputKind;
+  if (firstItem) return firstItem.type === "plugin-connection" ? "tool" : firstItem.type;
   return message.metadata?.error ? "error" : null;
 }
 
@@ -236,6 +246,15 @@ function collectRenderItems(
       });
       continue;
     }
+    const connection = pluginConnectionFromTool(tool);
+    if (connection) {
+      items.push({
+        type: "plugin-connection",
+        key: `${keyPrefix}plugin-connection-${index}`,
+        ...connection,
+      });
+      continue;
+    }
     items.push({
       type: "tool",
       key: `${keyPrefix}tool-${index}`,
@@ -246,6 +265,23 @@ function collectRenderItems(
   flushText(`${keyPrefix}text-end`);
 
   return deduplicateTaskItems(items);
+}
+
+function pluginConnectionFromTool(
+  tool: ToolCallView,
+): { pluginName: string; status: "not_connected" | "needs_reauth" } | null {
+  if (tool.name !== LIST_ACTIONS_TOOL_NAME || !isRecord(tool.output) || tool.output.ok !== true)
+    return null;
+  const source = tool.output.source;
+  if (!isRecord(source) || !isRecord(source.connection)) return null;
+  const { pluginName, status } = source.connection;
+  if (
+    typeof pluginName !== "string" ||
+    !isOfficialMcpPluginName(pluginName) ||
+    (status !== "not_connected" && status !== "needs_reauth")
+  )
+    return null;
+  return { pluginName, status };
 }
 
 function deduplicateTaskItems(items: AssistantRenderItem[]) {

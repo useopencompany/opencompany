@@ -331,6 +331,7 @@ const providerBindings = {
   vercel: {
     provider: "vercel",
     endpointUrl: VERCEL_MCP_ENDPOINT_URL,
+    connectionAvailable: false,
     getState: getVercelIntegrationState,
     loadConnection: loadVercelMcpWorkerConnection,
   },
@@ -589,6 +590,9 @@ function bindRegistration(
     pluginName: record.pluginName,
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
+    ...("connectionAvailable" in binding && binding.connectionAvailable === false
+      ? { connectionAvailable: false }
+      : {}),
     label: displayName(record.pluginName),
     description: record.pluginDescription,
     server,

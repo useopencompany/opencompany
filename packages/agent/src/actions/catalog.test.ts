@@ -81,6 +81,62 @@ describe("resolveActionCatalog plugin reconciliation", () => {
     });
   });
 
+  it.each(["not_connected", "needs_reauth"] as const)(
+    "keeps an installed Stripe plugin visible when its account is %s",
+    async (status) => {
+      const registration = {
+        source: "plugin:stripe:stripe",
+        pluginName: "stripe",
+        connectionProvider: "stripe",
+        label: "Stripe",
+        description: "Stripe tools",
+        getState: vi.fn(async () => ({
+          connected: false,
+          integrationId: "integration_1",
+          status,
+          capabilityModes: {},
+          toolModes: {},
+        })),
+      } as unknown as RemoteMcpGatewayRegistration;
+      const result = await resolveActionCatalog(
+        { userWorkosId: "user_1", workspaceId: "workspace_1" },
+        { remoteMcpRegistrations: [registration] },
+      );
+
+      expect(result.providers).toContainEqual({
+        id: "plugin:stripe:stripe",
+        kind: "integration",
+        unavailable: true,
+        label: "Stripe",
+        description: "Stripe tools",
+        connection: { pluginName: "stripe", status },
+      });
+      expect(result.actions).toEqual([]);
+    },
+  );
+
+  it("keeps a plugin without an available connection flow out of discovery", async () => {
+    const getState = vi.fn();
+    const registration = {
+      source: "plugin:vercel:vercel",
+      pluginName: "vercel",
+      connectionProvider: "vercel",
+      connectionAvailable: false,
+      label: "Vercel",
+      description: "Vercel tools",
+      getState,
+    } as unknown as RemoteMcpGatewayRegistration;
+
+    const result = await resolveActionCatalog(
+      { userWorkosId: "user_1", workspaceId: "workspace_1" },
+      { remoteMcpRegistrations: [registration] },
+    );
+
+    expect(result.providers).toEqual([]);
+    expect(result.actions).toEqual([]);
+    expect(getState).not.toHaveBeenCalled();
+  });
+
   it("does not expose GitHub actions when the official plugin is absent", async () => {
     const catalog = await resolveActionCatalog(
       { userWorkosId: "user_1", workspaceId: "workspace_1" },
