@@ -16,9 +16,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - copy or share an assistant's reply from the iphone app. attach heic photos from photos or files; the app converts them to jpeg before uploading (#1978) — @louis.
 
+<!-- Hold #2013 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
+
+- start a workflow or company agent when someone opens a github issue or pull request. an admin connects github under plugins → company, then the trigger's owner selects a repository they can access. events from bots are skipped (#2013) — @louis.
+
+<!-- Hold #2021 here until a signed macOS release and a real update between published versions are confirmed. Desktop releases are manual (#2028). -->
+
+- the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
+
 ### Fixed
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+
+## [1.35.0] - 2026-09-24
+
+### Added
+- workflows and company agents can now post up to four images in a slack reply, under their own name and avatar. older slack connections may need to reconnect to allow uploads; until then, replies link to the task (#2025) — @louis.
+- drag chats into a new arrangement and preview the full layout before you drop. use pane titles to move or swap open chats, or drop at the workspace edge to make a full-width row or full-height column. double-click a divider to make its two panes equal (#2024) — @louis.
+
+### Changed
+- connect or reconnect a plugin from a card in chat when its account is missing or expired. after you finish connecting, the chat or task continues with your earlier request (#2027) — @louis.
+- return to the browser tab and start typing in the chat composer without clicking it first (#2023) — @louis.
+
+### Fixed
+- connected slack plugins can use their tools again, including search and messaging (#2026) — @louis.
+- latitude now shows its connected account and lets you change its tool permissions. those changes apply to latitude, even when you also have linear connected (#2029) — @louis.
+- using connected tools in parallel no longer fails because their first requests arrive at the same time (#2011) — @louis.
 
 ## [1.34.0] - 2026-09-23
 
