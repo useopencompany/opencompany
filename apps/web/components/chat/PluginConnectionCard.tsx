@@ -2,7 +2,7 @@
 
 import { cn } from "@opencompany/ui/lib/utils";
 import { ArrowUpRight, Check, LoaderCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useAppDataOptional } from "@/components/AppDataProvider";
 import {
   isOfficialMcpPluginName,
@@ -12,7 +12,37 @@ import {
 import { pluginAccountsFromState, pluginConnectionSatisfied } from "@/lib/plugin-connection-state";
 import { actionSourceMark } from "@/lib/service-marks";
 
-type PendingConnection = { id: string };
+const PENDING_CONNECTION_CHANGED = "opencompany-plugin-connection-pending";
+
+function subscribeToPendingConnection(listener: () => void) {
+  window.addEventListener(PENDING_CONNECTION_CHANGED, listener);
+  window.addEventListener("storage", listener);
+  return () => {
+    window.removeEventListener(PENDING_CONNECTION_CHANGED, listener);
+    window.removeEventListener("storage", listener);
+  };
+}
+
+function pendingConnectionId(key: string): string | null {
+  try {
+    const stored = window.sessionStorage.getItem(key);
+    if (!stored) return null;
+    const parsed: unknown = JSON.parse(stored);
+    return parsed && typeof parsed === "object" && "id" in parsed && typeof parsed.id === "string"
+      ? parsed.id
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function noPendingConnection() {
+  return null;
+}
+
+function notifyPendingConnectionChanged() {
+  window.dispatchEvent(new Event(PENDING_CONNECTION_CHANGED));
+}
 
 export function PluginConnectionCard({
   pluginName,
@@ -32,7 +62,13 @@ export function PluginConnectionCard({
     ? OFFICIAL_MCP_PLUGIN_METADATA[pluginName]
     : null;
   const key = `plugin-connection-resume:${messageId}:${pluginName}`;
-  const [pending, setPending] = useState<PendingConnection | null>(null);
+  const storedPendingId = useSyncExternalStore(
+    subscribeToPendingConnection,
+    useCallback(() => pendingConnectionId(key), [key]),
+    noPendingConnection,
+  );
+  const [fallbackPendingId, setFallbackPendingId] = useState<string | null>(null);
+  const pendingId = fallbackPendingId ?? storedPendingId;
   const [resumeError, setResumeError] = useState(false);
   const resuming = useRef(false);
   const attemptedId = useRef<string | null>(null);
@@ -43,45 +79,33 @@ export function PluginConnectionCard({
       : false;
 
   useEffect(() => {
-    try {
-      const stored = window.sessionStorage.getItem(key);
-      if (stored) {
-        const parsed: unknown = JSON.parse(stored);
-        if (parsed && typeof parsed === "object" && "id" in parsed && typeof parsed.id === "string")
-          setPending({ id: parsed.id });
-      }
-    } catch {
-      // Storage can be unavailable in private browsing; the connection link still works.
-    }
-  }, [key]);
-
-  useEffect(() => {
     if (
       !connected ||
-      !pending ||
+      !pendingId ||
       !onResume ||
       readOnly ||
       resuming.current ||
-      attemptedId.current === `${pending.id}:${retryCount}`
+      attemptedId.current === `${pendingId}:${retryCount}`
     )
       return;
-    attemptedId.current = `${pending.id}:${retryCount}`;
+    attemptedId.current = `${pendingId}:${retryCount}`;
     resuming.current = true;
-    void onResume(pluginName, pending.id)
+    void onResume(pluginName, pendingId)
       .then(() => {
         try {
           window.sessionStorage.removeItem(key);
+          notifyPendingConnectionChanged();
         } catch {
           // The command already succeeded; storage failure must not offer a duplicate retry.
         }
-        setPending(null);
+        setFallbackPendingId(null);
         setResumeError(false);
       })
       .catch(() => setResumeError(true))
       .finally(() => {
         resuming.current = false;
       });
-  }, [connected, key, onResume, pending, pluginName, readOnly, retryCount]);
+  }, [connected, key, onResume, pendingId, pluginName, readOnly, retryCount]);
 
   if (!config || config.connectionUnavailableReason) return null;
   const label = config.accountLabel ?? config.label;
@@ -90,13 +114,14 @@ export function PluginConnectionCard({
   const connectLabel = status === "needs_reauth" ? "Reconnect" : "Connect";
   const beginConnection = () => {
     if (readOnly || !onResume) return;
-    const next = { id: crypto.randomUUID() };
+    const id = crypto.randomUUID();
     try {
-      window.sessionStorage.setItem(key, JSON.stringify(next));
+      window.sessionStorage.setItem(key, JSON.stringify({ id }));
+      notifyPendingConnectionChanged();
     } catch {
       // Keep the pending attempt in component state when storage is unavailable.
     }
-    setPending(next);
+    setFallbackPendingId(id);
     setResumeError(false);
   };
 
@@ -116,7 +141,7 @@ export function PluginConnectionCard({
           {resumeError
             ? "Connected. Could not resume automatically."
             : connected
-              ? pending
+              ? pendingId
                 ? "Connected · resuming…"
                 : "Connected"
               : status === "needs_reauth"
@@ -125,7 +150,7 @@ export function PluginConnectionCard({
         </div>
       </div>
       {connected ? (
-        resumeError && pending ? (
+        resumeError && pendingId ? (
           <button
             type="button"
             onClick={() => setRetryCount((count) => count + 1)}
@@ -133,7 +158,7 @@ export function PluginConnectionCard({
           >
             Retry
           </button>
-        ) : pending ? (
+        ) : pendingId ? (
           <LoaderCircle size={15} className="shrink-0 animate-spin text-ink-muted" />
         ) : (
           <Check size={15} className="shrink-0 text-ink-muted" />

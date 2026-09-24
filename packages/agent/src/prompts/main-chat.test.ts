@@ -55,7 +55,9 @@ describe("createProductChatSystemPrompt integrations", () => {
       connectedIntegrations: CONNECTED_INTEGRATIONS,
       legacyActionDiscovery: true,
     });
-    expect(prompt).toContain("Use list_actions to discover sources and full action definitions");
+    expect(prompt).toContain(
+      "Use list_actions to discover installed sources and full action definitions",
+    );
     expect(prompt).not.toContain("describe_actions");
     expect(prompt).not.toContain("compact");
   });
