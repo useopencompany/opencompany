@@ -341,6 +341,34 @@ describe("OnboardingWizard", () => {
     expect(mocks.createStarterWorkflows).toHaveBeenCalledWith("acme/app");
   });
 
+  it("recovers the scanned repository when a technical founder refreshes on the finish step", async () => {
+    const user = userEvent.setup();
+    mocks.scanOnboardingRepositoryAction.mockResolvedValue({
+      ok: true,
+      scan: {
+        status: "scanned",
+        repository: { fullName: "acme/app", private: true },
+        repositories: ["acme/app"],
+        plugins: [],
+        recommendedBy: "jev",
+      },
+    });
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        initialStep={4}
+        initialWorkspaceId="workspace_1"
+        initialWorkspaceName="Acme"
+        initialRole="product"
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Acme is ready" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Finish onboarding" }));
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
+    expect(mocks.createStarterWorkflows).toHaveBeenCalledWith("acme/app");
+  });
+
   it("consumes a same-tab connection result when browser storage is unavailable", async () => {
     window.history.replaceState(
       {},

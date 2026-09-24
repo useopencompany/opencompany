@@ -38,6 +38,7 @@ import {
   finishOnboardingAction,
   saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction,
+  scanOnboardingRepositoryAction,
 } from "@/lib/onboarding-actions";
 import {
   isOnboardingRole,
@@ -182,6 +183,20 @@ export function OnboardingWizard({
   const plugins = usePluginConnections({
     loadInstalled: activeWorkspaceId !== null && (step === "plugins" || step === "finish"),
   });
+  // A refresh on the finish step loses the repository the code step read; read it again so the
+  // starter workflows are still created for it.
+  useEffect(() => {
+    if (step !== "finish" || !technical || repository) return;
+    let active = true;
+    void scanOnboardingRepositoryAction({}).then((result) => {
+      if (active && result.ok && result.scan.status === "scanned") {
+        setRepository(result.scan.repository.fullName);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [repository, step, technical]);
   const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
     ? "idle"
