@@ -101,6 +101,31 @@ describe("slackPostBlocks", () => {
   });
 });
 
+describe("slackPostBlocks text splitting", () => {
+  const sections = (text: string) =>
+    slackPostBlocks(text, [])
+      .filter((block) => block.type === "section")
+      .map((block) => (block as { text: { text: string } }).text.text);
+
+  it("breaks at a word boundary instead of mid-word", () => {
+    const text = `${"word ".repeat(700)}tail`;
+    const [first, second] = sections(text);
+    expect(first?.length).toBeLessThanOrEqual(3000);
+    expect(first?.endsWith("word")).toBe(true);
+    expect(`${first} ${second}`).toBe(text);
+  });
+
+  it("never splits a Slack link or an emoji across sections", () => {
+    const link = "<https://app.example.com/tasks/t1|See the task>";
+    const linked = sections(`${"a".repeat(2990)}${link}`);
+    expect(linked).toEqual(["a".repeat(2990), link]);
+
+    const emoji = sections(`${"a".repeat(2999)}😀${"b".repeat(10)}`);
+    expect(emoji[0]).toBe("a".repeat(2999));
+    expect(emoji[1]?.startsWith("😀")).toBe(true);
+  });
+});
+
 describe("image fallbacks", () => {
   it("only treats Slack's block rejection as a file that is still processing", () => {
     expect(

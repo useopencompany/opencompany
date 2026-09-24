@@ -103,8 +103,8 @@ export type SlackChannelWorkerDependencies = {
   request: typeof slackApiRequest;
   validateChannel: typeof resolvePublicChannel;
   materializeAttachments: SlackImageAttachmentMaterializer;
-  uploadImages?: typeof uploadSlackPostImages;
-  wait?: (ms: number) => Promise<unknown>;
+  uploadImages: typeof uploadSlackPostImages;
+  wait: (ms: number) => Promise<unknown>;
 };
 const defaults = (): SlackChannelWorkerDependencies => ({
   db: getDb(),
@@ -560,9 +560,11 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     )[0];
     if (!row) return null;
     // Persist the resolved thread so a reconciliation after a crash reads the thread, not the channel.
-    // Uploading images and waiting for Slack to process them needs a longer lease than a text post.
+    // A pending row stays pending under this lease until its post is attempted: preflight work such
+    // as uploading images must not leave a crashed, never-posted delivery looking uncertain.
     await tx.execute(
-      sql`UPDATE goat.channel_deliveries SET status = 'sending', thread_ts = ${row.threadTs}, lease_id = ${leaseId},
+      sql`UPDATE goat.channel_deliveries SET status = CASE WHEN status = 'pending' THEN 'pending' ELSE 'sending' END,
+        thread_ts = ${row.threadTs}, lease_id = ${leaseId},
         lease_expires_at = now() + ${row.imageCount > 0 ? sql`interval '5 minutes'` : sql`interval '2 minutes'`} WHERE id = ${row.id}`,
     );
     return { ...row, leaseId };
@@ -588,6 +590,12 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
                 : null,
             )
           : delivery.text;
+      const sending = subscriptionRows<{ id: string }>(
+        await execute(sql`UPDATE goat.channel_deliveries SET status = 'sending', lease_expires_at = now() + interval '2 minutes'
+          WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'pending' RETURNING id`),
+      );
+      // Canceled, or claimed by another worker after this lease ran out: that row is theirs now.
+      if (sending.length === 0) return true;
       postAttempted = true;
       const post = (withImages: boolean) =>
         deps.request<{ ts?: string }>({
@@ -620,7 +628,7 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
       let response: { ts?: string } | null = null;
       if (images.length > 0) {
         for (const delay of [0, ...SLACK_IMAGE_READY_DELAYS_MS]) {
-          if (delay) await (deps.wait ?? sleep)(delay);
+          if (delay) await deps.wait(delay);
           try {
             response = await post(true);
             break;
@@ -665,7 +673,7 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     } else {
       // No external write was attempted; retrying this preflight is safe.
       await execute(sql`UPDATE goat.channel_deliveries SET status = 'pending', lease_expires_at = now() + interval '1 minute'
-        WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'sending'`);
+        WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'pending'`);
     }
     await markChannelError(delivery.installation, error);
     logger.warn("Slack Channel delivery requires reconciliation", { delivery_id: delivery.id });
@@ -687,10 +695,7 @@ async function uploadDeliveryImages(
   )
     return [];
   try {
-    return await (deps.uploadImages ?? uploadSlackPostImages)(
-      { token, images: delivery.images },
-      { request: deps.request },
-    );
+    return await deps.uploadImages({ token, images: delivery.images }, { request: deps.request });
   } catch (error) {
     logger.warn("Slack image upload failed; posting a task link instead", {
       delivery_id: delivery.id,

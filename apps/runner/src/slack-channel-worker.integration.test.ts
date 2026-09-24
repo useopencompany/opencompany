@@ -204,6 +204,8 @@ beforeEach(async () => {
           },
     ) as unknown as SlackChannelWorkerDependencies["request"],
     materializeAttachments: testAttachmentMaterializer(),
+    uploadImages: vi.fn(async () => []),
+    wait: vi.fn(async () => undefined),
   };
   await pg.exec(`
     INSERT INTO goat.users (workos_user_id, email) VALUES ('owner', 'owner@example.com'), ('member', 'member@example.com');
@@ -1264,6 +1266,38 @@ describe("Slack posts with images", () => {
       (await pg.query("SELECT status FROM goat.channel_deliveries WHERE message_ts = '300.001'"))
         .rows,
     ).toEqual([{ status: "sent" }]);
+  });
+
+  it("keeps a delivery pending while it uploads, so a crash mid-upload is retried rather than stranded", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    const queued = await post(["artifact_welcome"]);
+    deps.uploadImages = vi.fn(async () => {
+      const [row] = (
+        await pg.query<{ status: string }>(
+          "SELECT status FROM goat.channel_deliveries WHERE id = $1",
+          [queued.deliveryId],
+        )
+      ).rows;
+      expect(row?.status).toBe("pending");
+      // Canceled while uploading: the post must not go out.
+      await pg.query("UPDATE goat.channel_deliveries SET status = 'canceled' WHERE id = $1", [
+        queued.deliveryId,
+      ]);
+      return [{ fileId: "F1", title: "Welcome screen" }];
+    });
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(postMessages()).toEqual([]);
+    expect(
+      (
+        await pg.query("SELECT status FROM goat.channel_deliveries WHERE id = $1", [
+          queued.deliveryId,
+        ])
+      ).rows,
+    ).toEqual([{ status: "canceled" }]);
   });
 
   it("links to the task when the upload fails, without retrying the images", async () => {

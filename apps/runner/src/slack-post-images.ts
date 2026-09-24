@@ -10,7 +10,7 @@ export type SlackPostImage = { fileId: string; title: string };
 
 type Dependencies = {
   request: typeof slackApiRequest;
-  download: (pathname: string) => Promise<Buffer>;
+  download: (pathname: string, options: { signal: AbortSignal }) => Promise<Buffer>;
   fetch: typeof fetch;
 };
 
@@ -32,25 +32,26 @@ export async function uploadSlackPostImages(
   deps: Pick<Dependencies, "request"> & Partial<Dependencies>,
 ): Promise<SlackPostImage[]> {
   const { request, download, fetch: upload } = { ...defaults, ...deps };
-  const uploaded: SlackPostImage[] = [];
-  for (const image of input.images) {
-    const bytes = await download(image.blobPathname);
-    const ticket = await request<{ upload_url?: string; file_id?: string }>({
-      token: input.token,
-      method: "files.getUploadURLExternal",
-      signal: AbortSignal.timeout(10_000),
-      form: { filename: image.filename, length: String(bytes.byteLength) },
-    });
-    if (typeof ticket.upload_url !== "string" || typeof ticket.file_id !== "string")
-      throw new Error("Slack returned no upload URL for the image.");
-    const response = await upload(ticket.upload_url, {
-      method: "POST",
-      body: new Uint8Array(bytes),
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) throw new Error(`Slack image upload failed with ${response.status}.`);
-    uploaded.push({ fileId: ticket.file_id, title: image.title });
-  }
+  const uploaded = await Promise.all(
+    input.images.map(async (image): Promise<SlackPostImage> => {
+      const bytes = await download(image.blobPathname, { signal: AbortSignal.timeout(30_000) });
+      const ticket = await request<{ upload_url?: string; file_id?: string }>({
+        token: input.token,
+        method: "files.getUploadURLExternal",
+        signal: AbortSignal.timeout(10_000),
+        form: { filename: image.filename, length: String(bytes.byteLength) },
+      });
+      if (typeof ticket.upload_url !== "string" || typeof ticket.file_id !== "string")
+        throw new Error("Slack returned no upload URL for the image.");
+      const response = await upload(ticket.upload_url, {
+        method: "POST",
+        body: new Uint8Array(bytes),
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (!response.ok) throw new Error(`Slack image upload failed with ${response.status}.`);
+      return { fileId: ticket.file_id, title: image.title };
+    }),
+  );
   if (uploaded.length > 0)
     await request({
       token: input.token,
@@ -64,14 +65,11 @@ export async function uploadSlackPostImages(
 }
 
 export function slackPostBlocks(text: string, images: SlackPostImage[]) {
-  const sections = [];
-  for (let offset = 0; offset < text.length; offset += SECTION_TEXT_LIMIT)
-    sections.push({
-      type: "section",
-      text: { type: "mrkdwn", text: text.slice(offset, offset + SECTION_TEXT_LIMIT) },
-    });
   return [
-    ...sections,
+    ...splitSectionText(text).map((chunk) => ({
+      type: "section",
+      text: { type: "mrkdwn", text: chunk },
+    })),
     ...images.map((image) => ({
       type: "image",
       slack_file: { id: image.fileId },
@@ -79,6 +77,26 @@ export function slackPostBlocks(text: string, images: SlackPostImage[]) {
       title: { type: "plain_text", text: image.title.slice(0, 2000) },
     })),
   ];
+}
+
+// Breaks at a line or word boundary, never inside a <url|label> link or a surrogate pair, so each
+// section still renders the mrkdwn it was written with.
+function splitSectionText(text: string): string[] {
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > SECTION_TEXT_LIMIT) {
+    const window = rest.slice(0, SECTION_TEXT_LIMIT);
+    let cut = window.lastIndexOf("\n");
+    if (cut < SECTION_TEXT_LIMIT / 2) cut = window.lastIndexOf(" ");
+    if (cut < SECTION_TEXT_LIMIT / 2) cut = SECTION_TEXT_LIMIT;
+    const openLink = window.lastIndexOf("<", cut);
+    if (openLink > window.lastIndexOf(">", cut) && openLink > 0) cut = openLink;
+    if (/[\uD800-\uDBFF]/.test(rest.charAt(cut - 1))) cut -= 1;
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^[ \n]/, "");
+  }
+  chunks.push(rest);
+  return chunks;
 }
 
 export function isSlackFileNotReady(error: unknown) {
