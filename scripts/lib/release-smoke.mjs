@@ -16,3 +16,21 @@ export function expectedReleaseFor(surface, env = process.env) {
 
   return env.EXPECTED_RELEASE?.trim() || "";
 }
+
+export function webHealthTargets({ webUrl = "", deploymentUrl = "" }) {
+  const targets = [];
+  if (deploymentUrl) {
+    targets.push({
+      label: "web deployment",
+      url: `${deploymentUrl.replace(/\/+$/, "")}/api/healthz`,
+      useVercelCli: true,
+    });
+  }
+  if (webUrl) {
+    const url = `${webUrl.replace(/\/+$/, "")}/api/healthz`;
+    if (!targets.some((target) => target.url === url)) {
+      targets.push({ label: "web production domain", url, useVercelCli: false });
+    }
+  }
+  return targets;
+}
