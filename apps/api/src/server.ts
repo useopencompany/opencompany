@@ -11,6 +11,7 @@ import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { imessageConfig } from "@opencompany/agent/integrations/imessage";
+import { createSlackMcpService } from "@opencompany/agent/integrations/slack-mcp-server";
 import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
@@ -310,6 +311,10 @@ const app = createApiApp({
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
         googleDriveMcp: createGoogleDriveMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
+        slackMcp: createSlackMcpService({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),

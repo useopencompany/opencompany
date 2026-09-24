@@ -21,6 +21,7 @@ import type { GoogleAdminMcpService } from "@opencompany/agent/integrations/goog
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
+import type { SlackMcpService } from "@opencompany/agent/integrations/slack-mcp-server";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -232,6 +233,7 @@ export type CreateApiAppInput = {
   googleCalendarMcp?: GoogleCalendarMcpService;
   convexMcp?: ConvexMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
+  slackMcp?: SlackMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -2941,6 +2943,9 @@ export function createApiApp(input: CreateApiAppInput) {
   }
   if (input.googleDriveMcp) {
     app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
+  }
+  if (input.slackMcp) {
+    app.post("/mcp/plugins/slack", (c) => input.slackMcp!.handle(c.req.raw));
   }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
