@@ -1,5 +1,6 @@
 import type { Actor } from "@opencompany/core";
 import { loadBillingOverview } from "@opencompany/db/billing";
+import { PRO_STRIPE_PRODUCT_KEY } from "@opencompany/db/billing-constants";
 import { createPendingCheckoutRecord, markCheckoutRecordOpen } from "@opencompany/db/credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBillingApplicationService } from "./application-service";
@@ -131,13 +132,13 @@ describe("opencompany billing application service", () => {
       expect.objectContaining({
         mode: "subscription",
         metadata: {
-          billingProduct: "goat_pro",
+          billingProduct: PRO_STRIPE_PRODUCT_KEY,
           workspaceId: "workspace_1",
           userWorkosId: "user_1",
         },
         subscription_data: {
           metadata: {
-            billingProduct: "goat_pro",
+            billingProduct: PRO_STRIPE_PRODUCT_KEY,
             workspaceId: "workspace_1",
             userWorkosId: "user_1",
           },

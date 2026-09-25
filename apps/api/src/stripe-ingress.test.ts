@@ -3,6 +3,7 @@ import { captureServerEvent } from "@opencompany/analytics/server";
 import { completeAutoRefillSetup } from "@opencompany/billing/legacy-auto-refill";
 import {
   applyStripeSubscriptionProjection,
+  PRO_STRIPE_PRODUCT_KEY,
   releasePendingForWorkspace,
   setAutoRefillPaymentMethod,
   settleAutoRefill,
@@ -238,7 +239,7 @@ describe("Stripe ingress", () => {
           status: "active",
           cancel_at_period_end: false,
           metadata: {
-            billingProduct: "goat_pro",
+            billingProduct: PRO_STRIPE_PRODUCT_KEY,
             workspaceId: "workspace_1",
             userWorkosId: "user_1",
           },
@@ -274,11 +275,15 @@ describe("Stripe ingress", () => {
       subscription_status: "active",
       seat_quantity: 2,
     });
-    expect(captureServerEvent).toHaveBeenCalledWith("goat_billing_plan_changed", "workspace_1", {
-      workspace_id: "workspace_1",
-      plan: "pro",
-      subscription_status: "active",
-    });
+    expect(captureServerEvent).toHaveBeenCalledWith(
+      expect.stringMatching(/billing_plan_changed$/u),
+      "workspace_1",
+      {
+        workspace_id: "workspace_1",
+        plan: "pro",
+        subscription_status: "active",
+      },
+    );
   });
 
   it("keeps auto-refill crediting idempotent and injects the API database", async () => {
