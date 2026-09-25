@@ -96,6 +96,7 @@ import {
   CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
   ContextCompactionCapacityError,
+  ContextCompactionEmptySummaryError,
   compactProductChatContextIfNeeded,
 } from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
@@ -1683,8 +1684,13 @@ export function errorMessage(error: unknown) {
 export function isReplaySafeProductChatInfrastructureFailure(
   error: unknown,
   projection: ProductChatProjection,
-): error is APICallError | StreamProviderError | KimiToolCallLeakError {
+): error is
+  | APICallError
+  | StreamProviderError
+  | KimiToolCallLeakError
+  | ContextCompactionEmptySummaryError {
   const retryableProviderFailure =
+    error instanceof ContextCompactionEmptySummaryError ||
     error instanceof KimiToolCallLeakError ||
     (APICallError.isInstance(error)
       ? error.isRetryable ||
@@ -1705,9 +1711,16 @@ export function isReplaySafeProductChatInfrastructureFailure(
 }
 
 export function productChatInfrastructureFailureDiagnostic(
-  error: APICallError | StreamProviderError | KimiToolCallLeakError,
+  error:
+    | APICallError
+    | StreamProviderError
+    | KimiToolCallLeakError
+    | ContextCompactionEmptySummaryError,
 ) {
-  if (error instanceof KimiToolCallLeakError) {
+  if (
+    error instanceof KimiToolCallLeakError ||
+    error instanceof ContextCompactionEmptySummaryError
+  ) {
     return `[run_turn] ${error.name}: ${error.message}`;
   }
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);

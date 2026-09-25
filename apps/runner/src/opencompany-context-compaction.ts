@@ -53,6 +53,13 @@ export class ContextCompactionCapacityError extends Error {
   }
 }
 
+export class ContextCompactionEmptySummaryError extends Error {
+  constructor() {
+    super("opencompany context compaction returned an empty summary.");
+    this.name = "ContextCompactionEmptySummaryError";
+  }
+}
+
 export function contextWindowTokensForModel(modelId: string) {
   return (
     AGENT_MODEL_CATALOG.find((candidate) => candidate.id === modelId)?.contextWindowTokens ??
@@ -399,7 +406,7 @@ async function summarizeHistory(input: {
       throw new Error("The rolling checkpoint exceeds the summary input budget.");
     const result = await input.summarize(messages);
     summary = result.text.trim();
-    if (!summary) throw new Error("opencompany context compaction returned an empty summary.");
+    if (!summary) throw new ContextCompactionEmptySummaryError();
     batch = [];
   };
   for (const unit of units) {
@@ -411,7 +418,7 @@ async function summarizeHistory(input: {
     batch.push(unit);
   }
   if (batch.length) await flush();
-  if (!summary) throw new Error("opencompany context compaction returned an empty summary.");
+  if (!summary) throw new ContextCompactionEmptySummaryError();
   return { text: summary };
 }
 
