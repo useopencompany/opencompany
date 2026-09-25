@@ -15,6 +15,7 @@ import {
   CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
   ContextCompactionCapacityError,
+  ContextCompactionEmptySummaryError,
   compactProductChatContextIfNeeded,
   contextCompactionThreshold,
   contextWindowTokensForModel,
@@ -606,6 +607,30 @@ describe("opencompany context compaction", () => {
     expect(summarize).toHaveBeenCalledTimes(2);
     expect(persist).not.toHaveBeenCalled();
     expect(JSON.stringify(rows)).toBe(original);
+  });
+
+  it("identifies an empty provider checkpoint as a retryable compaction failure", async () => {
+    const rows = conversation(3, 100_000);
+    rows.push(storedMessage({ id: "current", role: "user", content: "Continue" }));
+    const summarize = vi.fn(async () => ({ text: "   " }));
+    const persist = vi.fn();
+
+    await expect(
+      compactProductChatContextIfNeeded({
+        storedMessages: rows,
+        currentUserMessageId: "current",
+        modelId: "openai/gpt-5.5",
+        contextWindowTokens: 50_000,
+        system: "system",
+        tools: {},
+        previousState: null,
+        toModelMessages,
+        summarize,
+        persist,
+      }),
+    ).rejects.toBeInstanceOf(ContextCompactionEmptySummaryError);
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it.each([0, 3])(

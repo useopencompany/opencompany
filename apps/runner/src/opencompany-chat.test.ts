@@ -31,6 +31,7 @@ import {
   ProductChatInterruptedError,
   type ProductChatProjection,
 } from "./opencompany-chat-projector";
+import { ContextCompactionEmptySummaryError } from "./opencompany-context-compaction";
 import { createSubagentTraceChannel } from "./opencompany-subagent";
 
 // Contract-level guard: this fixture is typed against the AI SDK's own
@@ -754,6 +755,14 @@ describe("opencompany chat infrastructure recovery", () => {
   it("retries a retryable provider error reported after streaming starts", () => {
     expect(
       isReplaySafeProductChatInfrastructureFailure(retryableStreamProviderFailure(), {
+        parts: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("retries an empty context checkpoint before any tool executes", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(new ContextCompactionEmptySummaryError(), {
         parts: [],
       }),
     ).toBe(true);
