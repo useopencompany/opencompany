@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
 
+## [1.35.1] - 2026-09-25
+
+### Fixed
+- long chats are less likely to end with an empty reply when the assistant summarizes earlier messages to make room. if the summary comes back blank, the chat retries automatically (#2032, #2035) — @louis.
+- the billing page now opens reliably after checkout, even when your browser uses a different timezone or number format. dates and amounts still adjust to your local settings (#2031) — @louis.
+
 ## [1.35.0] - 2026-09-24
 
 ### Added
