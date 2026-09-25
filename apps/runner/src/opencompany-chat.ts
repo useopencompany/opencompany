@@ -60,6 +60,7 @@ import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
   createGatewayAttribution,
   type GatewayAttribution,
+  type GatewayProviderOptions,
   gatewayProviderOptions,
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
@@ -130,6 +131,22 @@ const logger = createLogger({
 
 export function productChatGatewayProviderOptions(attribution: GatewayAttribution) {
   return gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
+}
+
+export function productChatContextCompactionProviderOptions(input: {
+  provider: "gateway" | "codex-backend";
+  providerOptions: GatewayProviderOptions;
+}): GatewayProviderOptions {
+  if (input.provider !== "codex-backend") return input.providerOptions;
+  return {
+    ...input.providerOptions,
+    openai: {
+      ...(input.providerOptions.openai ?? {}),
+      // Provider-specific reasoning settings override AI SDK's top-level `reasoning` option.
+      reasoningEffort: "none",
+      reasoningSummary: null,
+    },
+  };
 }
 
 function isTextExtractableAttachment(attachment: Pick<ChatMessageAttachment, "kind">) {
@@ -290,6 +307,10 @@ export async function runProductChatTurn(input: {
     });
     const providerOptions =
       modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution);
+    const contextCompactionProviderOptions = productChatContextCompactionProviderOptions({
+      provider: modelResolution.provider,
+      providerOptions,
+    });
     const previousCompaction = await loadProductChatContextCompaction(session.chatSessionId);
     let context;
     try {
@@ -311,9 +332,12 @@ export async function runProductChatTurn(input: {
             model: modelResolution.model,
             system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
             messages,
+            // A checkpoint only needs faithful compression. Reasoning shares this output budget,
+            // so a reasoning model can otherwise spend every token before emitting summary text.
+            reasoning: "none",
             maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
             abortSignal: generationController.signal,
-            providerOptions,
+            providerOptions: contextCompactionProviderOptions,
           });
           await projector.recordStepUsage({
             stepIndex: auxiliaryUsageStepIndex--,

@@ -25,6 +25,7 @@ import {
   hasHostedTurnCredits,
   isReplaySafeProductChatInfrastructureFailure,
   opencompanyModelMessagesFromStored,
+  productChatContextCompactionProviderOptions,
   productChatGatewayProviderOptions,
 } from "./opencompany-chat";
 import {
@@ -67,7 +68,7 @@ vi.mock("@opencompany/db/credits", async (importOriginal) => ({
   hasPositiveCreditBalance: vi.fn(),
 }));
 
-describe("opencompany chat Gateway options", () => {
+describe("opencompany chat provider options", () => {
   it("enables automatic prompt caching while preserving attribution", () => {
     const attribution = createGatewayAttribution({
       userWorkosId: "user_123",
@@ -81,6 +82,29 @@ describe("opencompany chat Gateway options", () => {
         caching: "auto",
         user: attribution.user,
         tags: ["app:goat", "env:test", "feature:chat", "chat:chat_session_123"],
+      },
+    });
+  });
+
+  it("disables provider-specific reasoning for Codex-backed context checkpoints", () => {
+    expect(
+      productChatContextCompactionProviderOptions({
+        provider: "codex-backend",
+        providerOptions: {
+          openai: {
+            store: false,
+            include: ["reasoning.encrypted_content"],
+            reasoningEffort: "medium",
+            reasoningSummary: "auto",
+          },
+        },
+      }),
+    ).toEqual({
+      openai: {
+        store: false,
+        include: ["reasoning.encrypted_content"],
+        reasoningEffort: "none",
+        reasoningSummary: null,
       },
     });
   });
