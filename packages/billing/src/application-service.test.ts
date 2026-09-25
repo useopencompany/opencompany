@@ -107,6 +107,45 @@ describe("opencompany billing application service", () => {
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(checkoutCreate).not.toHaveBeenCalled();
   });
+
+  it("links a Pro subscription checkout to the upgrading user", async () => {
+    vi.mocked(loadBillingOverview).mockResolvedValue({
+      billing: { plan: "hobby", stripeCustomerId: "cus_1", stripeSubscriptionId: null },
+      memberCount: 2,
+    } as never);
+    const subscriptionsList = vi.fn().mockResolvedValue({ data: [] });
+    const service = createBillingApplicationService({
+      db: commandDb(),
+      stripe: {
+        checkout: { sessions: { create: checkoutCreate } },
+        subscriptions: { list: subscriptionsList },
+      } as never,
+      appUrl: "https://app.example.test",
+    });
+
+    await expect(
+      service.createProCheckout(actor, { idempotencyKey: "upgrade-1" }),
+    ).resolves.toEqual({ redirectUrl: "https://checkout.stripe.test/session" });
+
+    expect(checkoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "subscription",
+        metadata: {
+          billingProduct: "goat_pro",
+          workspaceId: "workspace_1",
+          userWorkosId: "user_1",
+        },
+        subscription_data: {
+          metadata: {
+            billingProduct: "goat_pro",
+            workspaceId: "workspace_1",
+            userWorkosId: "user_1",
+          },
+        },
+      }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^goat-pro-/u) }),
+    );
+  });
 });
 
 function commandDb() {

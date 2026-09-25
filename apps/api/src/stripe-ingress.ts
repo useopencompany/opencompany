@@ -246,11 +246,20 @@ async function handleSubscriptionEvent(
     { db },
   );
   if (projection.applied && projection.planChanged) {
-    await captureServerEvent("goat_billing_plan_changed", workspaceId, {
-      workspace_id: workspaceId,
-      plan: projection.plan,
-      subscription_status: subscription.status,
-    });
+    const distinctId = subscription.metadata.userWorkosId?.trim() || workspaceId;
+    await Promise.all([
+      captureProductServerEvent("billing_plan_changed", distinctId, {
+        workspace_id: workspaceId,
+        plan: projection.plan,
+        subscription_status: subscription.status,
+        seat_quantity: projection.seatQuantity,
+      }),
+      captureServerEvent("goat_billing_plan_changed", workspaceId, {
+        workspace_id: workspaceId,
+        plan: projection.plan,
+        subscription_status: subscription.status,
+      }),
+    ]);
   }
 }
 
