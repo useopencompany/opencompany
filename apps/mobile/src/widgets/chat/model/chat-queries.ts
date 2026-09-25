@@ -7,6 +7,8 @@ const root = (partition: ChatPartition) =>
 export const chatQueryKeys = {
   conversations: (partition: ChatPartition) => [...root(partition), "conversations"] as const,
   messages: (partition: ChatPartition, id: string) => [...root(partition), "messages", id] as const,
+  pendingMessage: (partition: ChatPartition, id: string) =>
+    [...root(partition), "messages", id, "pending"] as const,
   draft: (partition: ChatPartition, id: string) => [...root(partition), "draft", id] as const,
   run: (partition: ChatPartition, id: string) => [...root(partition), "run", id] as const,
 };

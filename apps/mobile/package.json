@@ -22,6 +22,7 @@
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.1",
+    "expo-haptics": "~57.0.3",
     "expo-image": "~57.0.2",
     "expo-image-manipulator": "~57.0.19",
     "expo-image-picker": "~57.0.12",
@@ -73,7 +74,6 @@
     "expo:doctor": "bunx expo-doctor@latest",
     "env:pull:development": "umask 077 && infisical export --output-file=./.env --env=dev --path=/mobile && chmod 600 ./.env",
     "build:ios:simulator": "infisical run --env=dev --path=/mobile -- eas build --local -p ios --profile development-simulator --output ./build/sim.tar.gz",
-    "build:ios:production": "EXPO_NO_CAPABILITY_SYNC=1 infisical run --env=prod --path=/mobile -- eas build -p ios --profile production --auto-submit",
     "build:ios:production:local": "infisical run --env=prod --path=/mobile -- bash ./scripts/build-ios-production-local.sh"
   },
   "private": true

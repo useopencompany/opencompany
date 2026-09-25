@@ -98,8 +98,6 @@ interface ChatComposerContextValue {
   isReady: boolean;
   activateConversation: (conversationId: string) => void;
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
-  clearAfterSend: () => void;
-  flushDraft: () => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   selectModel: (id: ChatModelId) => void;
   setValue: (value: string) => void;
@@ -173,15 +171,6 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     analytics.capture("attachment_removed");
     await queryClient.invalidateQueries({ queryKey, exact: true });
   };
-  const flushDraft = async (): Promise<void> => {
-    if (!partition) return;
-    const current = queryClient.getQueryData<StoredDraft>(queryKey) ?? emptyDraft;
-    await saveDraftMutation.mutateAsync({ partition, draft: current });
-  };
-  const clearAfterSend = () => {
-    if (!partition) return;
-    void queryClient.invalidateQueries({ queryKey, exact: true });
-  };
   return (
     <ChatComposerContext
       value={{
@@ -193,8 +182,6 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         activateConversation: setConversationId,
         addAttachments,
         removeAttachment,
-        flushDraft,
-        clearAfterSend,
         selectModel: (modelId) => {
           editDraft({ modelId });
           analytics.capture("chat_model_selected", { model_id: modelId });

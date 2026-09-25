@@ -47,7 +47,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <View
               className="absolute inset-x-5 min-h-14"
               pointerEvents="box-none"
-              style={{ top: safeAreaInsets.top + 8 }}
+              style={{ top: safeAreaInsets.top + 64 }}
             >
               <Toast
                 key={visibleToast.id}

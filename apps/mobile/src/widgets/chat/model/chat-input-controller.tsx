@@ -1,13 +1,6 @@
-import {
-  createContext,
-  type ReactNode,
-  type RefObject,
-  use,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
-import { KeyboardController, KeyboardEvents } from "react-native-keyboard-controller";
+import { createContext, type ReactNode, type RefObject, use, useRef, useState } from "react";
+import { KeyboardController, useKeyboardHandler } from "react-native-keyboard-controller";
+import { type SharedValue, useSharedValue } from "react-native-reanimated";
 
 export type KeyboardOwner = "composer" | "sidebar" | null;
 
@@ -23,6 +16,8 @@ interface ChatInputControllerValue {
   dismissSearchRequestId: number;
   focusRequestId: number;
   keyboardOwner: KeyboardOwner;
+  keyboardHeight: SharedValue<number>;
+  keyboardProgress: SharedValue<number>;
   consumeComposerFocusRequest: (requestId: number) => boolean;
   dismissComposer: () => Promise<void>;
   dismissSearch: () => Promise<void>;
@@ -40,13 +35,28 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
   const [dismissSearchRequestId, setDismissSearchRequestId] = useState(0);
   const [focusRequestId, setFocusRequestId] = useState(0);
   const [keyboardOwner, setKeyboardOwner] = useState<KeyboardOwner>(null);
+  const keyboardHeight = useSharedValue(0);
+  const keyboardProgress = useSharedValue(0);
 
-  useEffect(() => {
-    const subscription = KeyboardEvents.addListener("keyboardDidHide", () => {
-      setKeyboardOwner(null);
-    });
-    return () => subscription.remove();
-  }, []);
+  // iOS's provider values jump to the destination in onStart. Track the actual
+  // frames instead, including interactive dismissal, without a JS render per frame.
+  useKeyboardHandler({
+    onMove: (event) => {
+      "worklet";
+      keyboardHeight.set(event.height);
+      keyboardProgress.set(event.progress);
+    },
+    onInteractive: (event) => {
+      "worklet";
+      keyboardHeight.set(event.height);
+      keyboardProgress.set(event.progress);
+    },
+    onEnd: (event) => {
+      "worklet";
+      keyboardHeight.set(event.height);
+      keyboardProgress.set(event.progress);
+    },
+  });
 
   const dismissComposer = async () => {
     composerInputRef.current?.blur();
@@ -61,6 +71,8 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
         dismissSearchRequestId,
         focusRequestId,
         keyboardOwner,
+        keyboardHeight,
+        keyboardProgress,
         consumeComposerFocusRequest: (requestId) => {
           if (requestId <= consumedFocusRequestRef.current) return false;
           consumedFocusRequestRef.current = requestId;

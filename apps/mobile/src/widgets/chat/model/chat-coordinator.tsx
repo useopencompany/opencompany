@@ -1,11 +1,10 @@
 import type { ResolveApprovalBody } from "@opencompany/protocol/schemas";
 import * as Network from "expo-network";
 import { router } from "expo-router";
-import { createContext, type ReactNode, use, useEffect, useState } from "react";
+import { createContext, type ReactNode, use, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { until } from "until-async";
 import { useAuth } from "@/features/auth";
-import { analytics, captureError } from "@/shared/lib/analytics";
+import { analytics } from "@/shared/lib/analytics";
 import { queryClient } from "@/shared/lib/query-client";
 import { useToast } from "@/shared/ui/toast";
 import type { ConnectivityState } from "./chat";
@@ -15,9 +14,10 @@ import { createChatSession } from "./chat-session";
 import {
   type ChatPartition,
   queueApprovalCommand,
-  queueMessageFromDraft,
   queueStopCommand,
+  type StoredDraft,
 } from "./chat-store";
+import { type PendingDraftSend, useDraftSend } from "./use-draft-send";
 
 export { chatQueryKeys } from "./chat-queries";
 
@@ -25,8 +25,10 @@ interface ChatCoordinatorValue {
   partition: ChatPartition | null;
   connectivity: ConnectivityState;
   setVisibleConversation: (id: string | null) => void;
-  sendDraft: (id: string) => Promise<{ conversationId: string; userMessageId: string }>;
-  stopRun: (id: string, runId: string) => Promise<void>;
+  pendingSends: Record<string, PendingDraftSend>;
+  stoppingConversations: ReadonlySet<string>;
+  sendDraft: (draft: StoredDraft) => Promise<{ conversationId: string; userMessageId: string }>;
+  stopRun: (id: string) => Promise<void>;
   resolveApproval: (
     id: string,
     runId: string,
@@ -46,9 +48,10 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   const { api, user, workspace } = useAuth();
   const { showErrorToast } = useToast();
   const [connectivity, setConnectivity] = useState<ConnectivityState>("online");
-  const [online, setOnline] = useState(false);
+  const [online, setOnline] = useState<boolean | null>(null);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
   const [visibleId, setVisibleId] = useState<string | null>(null);
+  const visibleIdRef = useRef<string | null>(null);
   const makeSession = () =>
     user && workspace
       ? createChatSession({
@@ -67,6 +70,10 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     return () => current?.dispose();
   }, [generation]);
   const partition = session?.partition ?? null;
+  const draftSend = useDraftSend(partition);
+  const [stoppingConversations, setStoppingConversations] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
 
   useEffect(
     () =>
@@ -108,18 +115,15 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   }, [session, visibleId]);
 
   const sendDraft = async (
-    id: string,
+    draft: StoredDraft,
   ): Promise<{ conversationId: string; userMessageId: string }> => {
+    const queued = await draftSend.sendDraft(draft);
     if (!partition) throw new Error("Choose a workspace before sending a message.");
-    const [queueError, queued] = await until(() => queueMessageFromDraft(partition, id));
-    if (queueError) {
-      captureError("message_send_failed", queueError, { is_new_chat: id === "new" });
-      throw queueError;
-    }
-    analytics.capture("message_sent", { is_new_chat: id === "new" });
-    await invalidateConversation(partition, queued.conversationId);
-    await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
-    if (id !== queued.conversationId)
+    void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
+    if (
+      draft.conversationId !== queued.conversationId &&
+      visibleIdRef.current === draft.conversationId
+    )
       router.replace({
         pathname: "/chats/[chatId]",
         params: {
@@ -130,12 +134,25 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     session?.drain();
     return { conversationId: queued.conversationId, userMessageId: queued.clientMessageId };
   };
-  const stopRun = async (id: string, runId: string): Promise<void> => {
+  const stopRun = async (id: string): Promise<void> => {
     if (!partition) return;
-    await queueStopCommand(partition, id, runId);
-    analytics.capture("run_stopped");
-    await invalidateConversation(partition, id);
-    session?.drain();
+    const pending = draftSend.pendingRef.current.get(id);
+    const conversationId = pending?.conversationId ?? id;
+    setStoppingConversations((current) => new Set([...current, id, conversationId]));
+    try {
+      if (pending) await pending.persisted;
+      await queueStopCommand(partition, conversationId);
+      analytics.capture("run_stopped");
+      await invalidateConversation(partition, conversationId);
+      session?.drain();
+    } finally {
+      setStoppingConversations((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        next.delete(conversationId);
+        return next;
+      });
+    }
   };
   const resolveApproval = async (
     id: string,
@@ -153,8 +170,13 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     <ChatCoordinatorContext
       value={{
         partition,
-        connectivity: online ? connectivity : "offline",
-        setVisibleConversation: setVisibleId,
+        connectivity: online === false ? "offline" : connectivity,
+        pendingSends: draftSend.pendingSends,
+        stoppingConversations,
+        setVisibleConversation: (id) => {
+          visibleIdRef.current = id;
+          setVisibleId(id);
+        },
         sendDraft,
         stopRun,
         resolveApproval,

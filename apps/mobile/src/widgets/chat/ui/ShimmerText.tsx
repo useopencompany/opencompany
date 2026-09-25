@@ -59,12 +59,17 @@ export function ShimmerText({
   );
   const { lines, lineHeight, baseline, height } = useMemo(() => {
     const metrics = font.getMetrics();
-    const computedLineHeight = Math.ceil(metrics.descent - metrics.ascent);
     const wrapped = wrapText(text, font, width, maxLines);
+    const bounds = wrapped.map((line) => font.measureText(line));
+    const ascent = Math.ceil(Math.max(-metrics.ascent, ...bounds.map((rect) => -rect.y)));
+    const descent = Math.ceil(
+      Math.max(metrics.descent, ...bounds.map((rect) => rect.y + rect.height)),
+    );
+    const computedLineHeight = ascent + descent + 2;
     return {
       lines: wrapped,
       lineHeight: computedLineHeight,
-      baseline: Math.ceil(-metrics.ascent),
+      baseline: ascent + 1,
       height: wrapped.length * computedLineHeight,
     };
   }, [font, maxLines, text, width]);
