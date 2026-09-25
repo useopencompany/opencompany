@@ -1,5 +1,6 @@
 import type { Actor } from "@opencompany/core";
 import { loadBillingOverview } from "@opencompany/db/billing";
+import { PRO_STRIPE_PRODUCT_KEY } from "@opencompany/db/billing-constants";
 import { createPendingCheckoutRecord, markCheckoutRecordOpen } from "@opencompany/db/credits";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBillingApplicationService } from "./application-service";
@@ -106,6 +107,45 @@ describe("opencompany billing application service", () => {
       ),
     ).rejects.toMatchObject({ code: "forbidden" });
     expect(checkoutCreate).not.toHaveBeenCalled();
+  });
+
+  it("links a Pro subscription checkout to the upgrading user", async () => {
+    vi.mocked(loadBillingOverview).mockResolvedValue({
+      billing: { plan: "hobby", stripeCustomerId: "cus_1", stripeSubscriptionId: null },
+      memberCount: 2,
+    } as never);
+    const subscriptionsList = vi.fn().mockResolvedValue({ data: [] });
+    const service = createBillingApplicationService({
+      db: commandDb(),
+      stripe: {
+        checkout: { sessions: { create: checkoutCreate } },
+        subscriptions: { list: subscriptionsList },
+      } as never,
+      appUrl: "https://app.example.test",
+    });
+
+    await expect(
+      service.createProCheckout(actor, { idempotencyKey: "upgrade-1" }),
+    ).resolves.toEqual({ redirectUrl: "https://checkout.stripe.test/session" });
+
+    expect(checkoutCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "subscription",
+        metadata: {
+          billingProduct: PRO_STRIPE_PRODUCT_KEY,
+          workspaceId: "workspace_1",
+          userWorkosId: "user_1",
+        },
+        subscription_data: {
+          metadata: {
+            billingProduct: PRO_STRIPE_PRODUCT_KEY,
+            workspaceId: "workspace_1",
+            userWorkosId: "user_1",
+          },
+        },
+      }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^goat-pro-/u) }),
+    );
   });
 });
 

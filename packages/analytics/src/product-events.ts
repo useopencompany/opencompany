@@ -193,6 +193,12 @@ export type ProductAnalyticsEventPropertiesByName = {
     amount_usd: number;
     balance_cents: number;
   };
+  billing_plan_changed: {
+    workspace_id: string;
+    plan: "hobby" | "pro";
+    subscription_status: string;
+    seat_quantity: number;
+  };
   model_spend_recorded: {
     user_id: string;
     workspace_id?: string;
@@ -423,6 +429,11 @@ export const productAnalyticsEvents = {
     name: "billing_topup_completed",
     description: "A manual or automatic billing top-up credited an opencompany workspace.",
     safeProperties: ["workspace_id", "topup_type", "amount_cents", "amount_usd", "balance_cents"],
+  },
+  billing_plan_changed: {
+    name: "billing_plan_changed",
+    description: "A Stripe subscription event changed an opencompany workspace's plan.",
+    safeProperties: ["workspace_id", "plan", "subscription_status", "seat_quantity"],
   },
   model_spend_recorded: {
     name: "model_spend_recorded",

@@ -430,11 +430,13 @@ export function createBillingApplicationService(input: {
             metadata: {
               billingProduct: PRO_STRIPE_PRODUCT_KEY,
               workspaceId: actor.workspaceId,
+              userWorkosId: actor.userId,
             },
             subscription_data: {
               metadata: {
                 billingProduct: PRO_STRIPE_PRODUCT_KEY,
                 workspaceId: actor.workspaceId,
+                userWorkosId: actor.userId,
               },
             },
           },
