@@ -1,4 +1,4 @@
-import ExpoModulesCore
+internal import ExpoModulesCore
 import UIKit
 
 final class NativeSidebarHeaderView: ExpoView, UISearchControllerDelegate, UISearchResultsUpdating {
