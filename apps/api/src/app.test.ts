@@ -286,6 +286,21 @@ describe("canonical Hono API", () => {
     expect((await app.request("/mcp/plugins/google-drive", { method: "GET" })).status).toBe(404);
   });
 
+  it("mounts the first-party Slack MCP at its package endpoint", async () => {
+    const handle = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const app = testApp(fakeRepository(), { slackMcp: { handle } });
+    const response = await app.request("/mcp/plugins/slack", {
+      method: "POST",
+      headers: { authorization: "Bearer narrow-ticket" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(handle).toHaveBeenCalledOnce();
+    expect(handle.mock.calls[0]?.[0].headers.get("authorization")).toBe("Bearer narrow-ticket");
+    expect((await app.request("/mcp/plugins/slack", { method: "GET" })).status).toBe(404);
+  });
+
   it("reports the deployed API release for expected-SHA health gates", async () => {
     const previousRelease = process.env.RENDER_GIT_COMMIT;
     process.env.RENDER_GIT_COMMIT = "api-release-sha";
@@ -343,6 +358,7 @@ describe("canonical Hono API", () => {
       identity: fakeIdentity(),
       onboarding: fakeOnboarding(),
       onboardingEmails: fakeOnboardingEmails(),
+      onboardingRepositoryScan: fakeOnboardingRepositoryScan(),
       authenticate: async () => {
         throw new ApiError(401, "authentication_required", "Authentication required.");
       },
@@ -4654,6 +4670,7 @@ function testApp(
     identity: fakeIdentity(),
     onboarding: fakeOnboarding(),
     onboardingEmails: fakeOnboardingEmails(),
+    onboardingRepositoryScan: fakeOnboardingRepositoryScan(),
     authenticate: async () => ({ actor }),
     identify: async () => ({
       userId: actor.userId,
@@ -4862,6 +4879,16 @@ function fakeOnboarding(): Parameters<typeof createApiApp>[0]["onboarding"] {
     },
     finish: async () => {
       throw new Error("Unexpected onboarding completion.");
+    },
+  };
+}
+
+function fakeOnboardingRepositoryScan(): Parameters<
+  typeof createApiApp
+>[0]["onboardingRepositoryScan"] {
+  return {
+    scan: async () => {
+      throw new Error("Unexpected onboarding repository scan.");
     },
   };
 }

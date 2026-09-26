@@ -116,6 +116,10 @@ export type ActionSourceDescriptor = {
   kind?: "integration" | "managed";
   label: string;
   description: string;
+  connection?: {
+    pluginName: string;
+    status: "not_connected" | "needs_reauth";
+  };
 };
 
 export type CapabilityTurnState = {

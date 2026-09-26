@@ -5,15 +5,22 @@ import {
   CODEX_AGENT_MODEL_IDS,
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  claudeCodeModelSupportsUltracode,
+  claudeCodeReasoningEffortsForModel,
   getAgentModelDefinition,
   isAgentModelSelectable,
   isClaudeCodeModelId,
+  isClaudeCodeReasoningEffort,
   isCodexModelId,
   isCodexReasoningEffort,
   isCodexSubscriptionModel,
   OPENCOMPANY_CHAT_MODEL_IDS,
 } from "@opencompany/agent-runtime";
-import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type {
+  AgentModelId,
+  CloudCodingReasoningEffort,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import type { HarnessEngine } from "@opencompany/db/product-schema";
 
 type WorkflowModelConfig<Token extends string = string> = {
@@ -115,6 +122,15 @@ export const DEFAULT_WORKFLOW_MODEL_TOKEN: WorkflowModelToken = "kimi-k2.6";
 export const DEFAULT_WORKFLOW_REASONING_EFFORT: CodexReasoningEffort = "high";
 export const WORKFLOW_REASONING_EFFORT_OPTIONS = CODEX_REASONING_EFFORTS;
 
+export function workflowReasoningEffortOptions(
+  engine: WorkflowCloudRuntime,
+  runtimeModel: string,
+): readonly CloudCodingReasoningEffort[] {
+  return engine === "claude_code"
+    ? claudeCodeReasoningEffortsForModel(runtimeModel)
+    : CODEX_REASONING_EFFORTS;
+}
+
 const WORKFLOW_MODEL_TOKEN_SET = new Set<string>(
   WORKFLOW_MODEL_OPTIONS.map((option) => option.token),
 );
@@ -149,7 +165,7 @@ export function workflowModelSelection(input: {
 }): {
   engine: HarnessEngine;
   model: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
 } {
   const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === input.model);
   if (!option) {
@@ -175,7 +191,7 @@ export function workflowModelSelection(input: {
 export function workflowStepSettings(input: WorkflowStepSettingsInput): {
   model: string;
   runtimeModel?: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
 } {
   const model = input.model.trim().toLowerCase();
   if (!isWorkflowModelToken(model)) return { model };
@@ -242,11 +258,19 @@ export function normalizeWorkflowReasoningEffort(
   engine: WorkflowCloudRuntime,
   runtimeModel: string,
   value: unknown,
-): CodexReasoningEffort | undefined {
+): CloudCodingReasoningEffort | undefined {
   if (!workflowRuntimeModelSupportsReasoningEffort(engine, runtimeModel)) return undefined;
-  return typeof value === "string" && isCodexReasoningEffort(value)
-    ? value
-    : DEFAULT_WORKFLOW_REASONING_EFFORT;
+  if (typeof value === "string") {
+    if (
+      engine === "claude_code" &&
+      isClaudeCodeReasoningEffort(value) &&
+      (value !== "ultracode" || claudeCodeModelSupportsUltracode(runtimeModel))
+    ) {
+      return value;
+    }
+    if (engine === "codex" && isCodexReasoningEffort(value)) return value;
+  }
+  return DEFAULT_WORKFLOW_REASONING_EFFORT;
 }
 
 function requireAgentModelDefinition(modelId: AgentModelId) {

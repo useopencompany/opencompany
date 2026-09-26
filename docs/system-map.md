@@ -46,12 +46,15 @@ MCP `create_pull_request` tool or from `gh pr create` output, never from assista
 `goat.session_pull_requests`, keyed on `chat_sessions` so both kinds of row read the same table.
 `GET /v1/session-pull-requests` returns those links, refreshing any non-terminal PR against GitHub
 behind a 60s TTL with the caller's own user token; merged and closed are final and never re-read.
-There is no GitHub webhook ingress, and this feature does not add one.
+This feature reads GitHub on demand; the company GitHub plugin's webhook ingress
+(`/webhooks/github`, ADR 0018) only routes workflow events.
 
 Claude Code coding chats and Workflow steps share the model catalog in
-`packages/agent-runtime/src/models.ts`. Claude Opus 5 is available as
-`anthropic/claude-opus-5`, mapped to `claude-opus-5` for sandbox execution, with reasoning-effort
-controls and a 1M-token context window. Claude Sonnet 5 remains the default.
+`packages/agent-runtime/src/models.ts`. Claude Opus 5.5 is available in normal chat through AI
+Gateway and in Claude Code coding chats as `anthropic/claude-opus-5.5`, mapped to
+`claude-opus-5-5` for sandbox execution, with reasoning-effort controls and a 1M-token context
+window. Superseded Opus models remain loadable for saved sessions but are hidden from new
+selections. Claude Sonnet 5 remains the Claude Code default.
 
 ## Tasks and Workflows
 
@@ -198,6 +201,13 @@ The onboarding plugin step permits browser sessions with workspace membership to
 (`GET /v1/plugins`), preview imports (`POST /v1/plugins/imports/preview`), and install them
 (`POST /v1/plugins/imports`) before onboarding completes. The preceding subscription step can also
 read and connect Claude Code and Codex through the narrow `/v1/engine-auth/*` setup routes it uses.
+Technical founders' plugins step instead calls `POST /v1/onboarding/repository-scan`, an
+identity-tier onboarding route that reads the setup files of their own most recently pushed GitHub
+repository and suggests plugins (see [ADR 0019](./adr/0019-technical-founder-onboarding.md)).
+That step is opt-in until it has been tested by hand: only owners who arrive through a `?version=2`
+link (for example `/signup?version=2`) get it. The proxy keeps the parameter in the
+`goat-onboarding-version` cookie for seven days across the WorkOS round-trip, and `?version=1`
+clears it.
 These exceptions apply only to browser sessions with an existing workspace membership; they retain
 Actor resolution, workspace permissions, origin checks, and rate limits. Ordinary product routes
 and bearer-token callers still require completed onboarding.

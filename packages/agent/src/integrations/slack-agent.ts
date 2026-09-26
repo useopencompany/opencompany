@@ -1,13 +1,25 @@
+import { CHAT_ATTACHMENTS_PER_MESSAGE, validateChatAttachment } from "@opencompany/core";
+
 export const SLACK_AGENT_SCOPES = [
   "app_mentions:read",
   "chat:write",
   "channels:read",
   "channels:history",
+  "files:read",
+  "files:write",
   "users:read",
   "users:read.email",
   "im:history",
   "reactions:write",
 ] as const;
+
+export type SlackAgentFile = {
+  id: string;
+  name: string;
+  mediaType: string;
+  sizeBytes: number;
+  urlPrivateDownload: string;
+};
 
 export function slackAgentManifest(input: { name: string; eventsUrl?: string }) {
   return {
@@ -42,13 +54,19 @@ export function slackAgentManifest(input: { name: string; eventsUrl?: string }) 
   };
 }
 
-// Deliberately accept only ordinary human text. The message timestamp deduplicates
+// Deliberately accept only ordinary human messages. The message timestamp deduplicates
 // app_mention and message.channels deliveries of the same mention.
 export function slackAgentMessage(event: Record<string, unknown>, botUserId: string) {
-  if (event.bot_id || event.subtype || event.hidden || event.files || event.user === botUserId)
+  if (
+    event.bot_id ||
+    (event.subtype && event.subtype !== "file_share") ||
+    event.hidden ||
+    event.user === botUserId
+  )
     return null;
   if (event.type !== "app_mention" && event.type !== "message") return null;
   const { channel, user, ts, text, thread_ts: threadTs } = event;
+  const files = slackAgentFiles(event.files);
   if (
     typeof channel !== "string" ||
     !/^[CD][A-Z0-9]+$/.test(channel) ||
@@ -57,8 +75,8 @@ export function slackAgentMessage(event: Record<string, unknown>, botUserId: str
     typeof ts !== "string" ||
     !/^\d+\.\d+$/.test(ts) ||
     typeof text !== "string" ||
-    !text.trim() ||
     text.length > 12000 ||
+    (!text.trim() && files.length === 0) ||
     (threadTs !== undefined && (typeof threadTs !== "string" || !/^\d+\.\d+$/.test(threadTs)))
   )
     return null;
@@ -72,6 +90,54 @@ export function slackAgentMessage(event: Record<string, unknown>, botUserId: str
     messageTs: ts,
     threadTs: typeof threadTs === "string" ? threadTs : ts,
     text: text.trim(),
+    files,
     canStart: mention || dm,
   };
+}
+
+function slackAgentFiles(value: unknown): SlackAgentFile[] {
+  if (!Array.isArray(value)) return [];
+  const files: SlackAgentFile[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value) {
+    if (files.length >= CHAT_ATTACHMENTS_PER_MESSAGE) break;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const file = candidate as Record<string, unknown>;
+    if (
+      typeof file.id !== "string" ||
+      !/^[A-Z0-9]+$/.test(file.id) ||
+      file.id.length > 255 ||
+      seen.has(file.id) ||
+      typeof file.name !== "string" ||
+      !file.name.trim() ||
+      file.name.length > 200 ||
+      typeof file.mimetype !== "string" ||
+      typeof file.size !== "number" ||
+      typeof file.url_private_download !== "string" ||
+      file.url_private_download.length > 4096
+    )
+      continue;
+    const validation = validateChatAttachment({
+      filename: file.name,
+      mediaType: file.mimetype,
+      sizeBytes: file.size,
+    });
+    if (!validation.ok || validation.format !== "image") continue;
+    let downloadUrl: URL;
+    try {
+      downloadUrl = new URL(file.url_private_download);
+    } catch {
+      continue;
+    }
+    if (downloadUrl.protocol !== "https:") continue;
+    seen.add(file.id);
+    files.push({
+      id: file.id,
+      name: file.name.trim(),
+      mediaType: validation.mediaType,
+      sizeBytes: file.size,
+      urlPrivateDownload: downloadUrl.toString(),
+    });
+  }
+  return files;
 }

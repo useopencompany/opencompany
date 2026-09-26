@@ -1,6 +1,6 @@
 import path from "node:path";
 import { type BrowserWindow, ipcMain, shell } from "electron";
-import { APP_ORIGIN, APP_URL } from "./urls";
+import { APP_URL, isAppOrigin } from "./urls";
 
 // ERR_ABORTED — emitted for canceled/superseded loads (e.g. redirects). Not a
 // real failure, so it must not trigger the offline page.
@@ -11,14 +11,6 @@ function protocolOf(url: string): string {
     return new URL(url).protocol;
   } catch {
     return "";
-  }
-}
-
-function isAppOrigin(url: string): boolean {
-  try {
-    return new URL(url).origin === APP_ORIGIN;
-  } catch {
-    return false;
   }
 }
 

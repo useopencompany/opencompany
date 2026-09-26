@@ -228,8 +228,8 @@ export function createCompanyAgentSlackService(input: {
       const message = slackAgentMessage(body.event, String(credential?.payload.bot_user_id));
       if (!message || row.status !== "connected") return Response.json({ ok: true, ignored: true });
       await input.db.execute(sql`
-        INSERT INTO goat.slack_agent_messages (integration_id, event_id, channel_id, thread_ts, message_ts, slack_user_id, text)
-        SELECT ${row.id}, ${body.event_id}, ${message.channelId}, ${message.threadTs}, ${message.messageTs}, ${message.slackUserId}, ${message.text}
+        INSERT INTO goat.slack_agent_messages (integration_id, event_id, channel_id, thread_ts, message_ts, slack_user_id, text, files)
+        SELECT ${row.id}, ${body.event_id}, ${message.channelId}, ${message.threadTs}, ${message.messageTs}, ${message.slackUserId}, ${message.text}, ${JSON.stringify(message.files)}::jsonb
         WHERE EXISTS (SELECT 1 FROM goat.workflows WHERE id = ${agentId} AND status = 'active' AND archived_at IS NULL AND slack_channel_enabled)
           AND (${message.canStart} OR EXISTS (SELECT 1 FROM goat.session_subscriptions WHERE integration_id = ${row.id}
             AND source_key->>'channelId' = ${message.channelId} AND source_key->>'threadTs' = ${message.threadTs}))

@@ -203,6 +203,7 @@ vi.mock("./integrations/latitude-mcp", () => ({
 }));
 vi.mock("./integrations/slack-mcp", () => ({
   SLACK_MCP_ENDPOINT_URL: "https://mcp.slack.com/mcp",
+  slackMcpRuntimeEndpointUrl: () => "https://api.opencompany.chat/mcp/plugins/slack",
   getSlackMcpIntegrationState: mocks.getSlackState,
   loadSlackMcpWorkerConnection: mocks.loadSlackConnection,
 }));
@@ -1394,6 +1395,7 @@ describe("plugin gateway registration cache", () => {
       expect.objectContaining({
         source: "plugin:vercel:vercel",
         connectionProvider: "vercel",
+        connectionAvailable: false,
         getState: mocks.getVercelState,
         loadConnection: mocks.loadVercelConnection,
       }),
@@ -1416,7 +1418,7 @@ describe("plugin gateway registration cache", () => {
     await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([]);
   });
 
-  it("binds Slack credentials only to Slack's exact hosted MCP endpoint", async () => {
+  it("accepts Slack's package endpoint and routes execution to our API", async () => {
     const slackRecord = record({
       pluginName: "slack",
       pluginLabel: "slack",
@@ -1440,14 +1442,29 @@ describe("plugin gateway registration cache", () => {
     });
     mocks.listRegistrations.mockResolvedValueOnce([slackRecord]);
 
-    await expect(resolvePluginGatewayRegistrations(identity, { db, now })).resolves.toEqual([
+    const [registration] = await resolvePluginGatewayRegistrations(identity, { db, now });
+    expect(registration).toEqual(
       expect.objectContaining({
         source: "plugin:slack:slack",
         connectionProvider: "slack",
         getState: mocks.getSlackState,
-        loadConnection: mocks.loadSlackConnection,
+        loadConnection: expect.any(Function),
+        server: expect.objectContaining({
+          url: "https://api.opencompany.chat/mcp/plugins/slack",
+        }),
       }),
-    ]);
+    );
+    await registration?.loadConnection({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      operation: { type: "tools/list" },
+      onAuthorizationRequired: () => {
+        throw new Error("authorization required");
+      },
+    });
+    expect(mocks.loadSlackConnection).toHaveBeenCalledWith(
+      expect.objectContaining({ registrationId: slackRecord.id }),
+    );
 
     mocks.listRegistrations.mockResolvedValueOnce([
       {

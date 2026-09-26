@@ -6,6 +6,7 @@ import { OnboardingWizard } from "./OnboardingWizard";
 
 const mocks = vi.hoisted(() => ({
   captureProductEvent: vi.fn(),
+  createStarterWorkflows: vi.fn(),
   finishOnboardingAction: vi.fn(),
   getOnboardingInstalledPluginsAction: vi.fn(),
   getOnboardingSubscriptionsAction: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   saveOnboardingProfileAction: vi.fn(),
   saveOnboardingWorkspaceAction: vi.fn(),
+  scanOnboardingRepositoryAction: vi.fn(),
   startCodexDeviceAuth: vi.fn(),
 }));
 
@@ -32,6 +34,12 @@ vi.mock("@/lib/onboarding-actions", () => ({
   getOnboardingSubscriptionsAction: mocks.getOnboardingSubscriptionsAction,
   saveOnboardingProfileAction: mocks.saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction: mocks.saveOnboardingWorkspaceAction,
+  scanOnboardingRepositoryAction: mocks.scanOnboardingRepositoryAction,
+}));
+
+vi.mock("@/lib/starter-workflows", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/starter-workflows")>()),
+  createStarterWorkflows: mocks.createStarterWorkflows,
 }));
 
 vi.mock("@/lib/onboarding-kickoff", () => ({
@@ -62,6 +70,7 @@ vi.mock("@/lib/official-plugin-catalog", async () => {
       gmail: stub("gmail", "Gmail", "gmail"),
       slack: stub("slack", "Slack", "slack"),
       notion: stub("notion", "Notion", "notion"),
+      posthog: stub("posthog", "PostHog", "posthog"),
     },
   };
 });
@@ -99,6 +108,11 @@ describe("OnboardingWizard", () => {
     });
     mocks.getOnboardingInstalledPluginsAction.mockResolvedValue([]);
     mocks.installOfficialPlugin.mockResolvedValue({ name: "github" });
+    mocks.createStarterWorkflows.mockResolvedValue(undefined);
+    mocks.scanOnboardingRepositoryAction.mockResolvedValue({
+      ok: true,
+      scan: { status: "not_connected" },
+    });
     mocks.pollCodexDeviceAuth.mockReset();
     mocks.startCodexDeviceAuth.mockReset();
   });
@@ -110,7 +124,7 @@ describe("OnboardingWizard", () => {
     expect(screen.getByRole("heading", { name: "Welcome, Ada" })).toBeInTheDocument();
     expect(screen.getByText("Step 1 of 5")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Founder \/ CEO/u }));
+    await user.click(screen.getByRole("button", { name: /Sales \/ GTM/u }));
     await user.type(screen.getByLabelText(/Company URL/u), "acme.com");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
@@ -118,7 +132,7 @@ describe("OnboardingWizard", () => {
       await screen.findByRole("heading", { name: "Create your workspace" }),
     ).toBeInTheDocument();
     expect(mocks.saveOnboardingProfileAction).toHaveBeenCalledWith({
-      role: "founder",
+      role: "sales",
       companyUrl: "acme.com",
     });
     // The workspace URL screen is gone; the slug is derived from the name.
@@ -243,6 +257,14 @@ describe("OnboardingWizard", () => {
       expect(githubRow).not.toBeNull();
       await user.click(within(githubRow as HTMLElement).getByRole("button", { name: "Connect" }));
 
+      // Nothing opens until the founder has seen what the agent may do with the account.
+      const dialog = await screen.findByRole("dialog", { name: "Connect GitHub as you" });
+      expect(open).not.toHaveBeenCalled();
+      expect(within(dialog).getByText("Read GitHub")).toBeInTheDocument();
+      expect(within(dialog).getByText("Manage GitHub")).toBeInTheDocument();
+      expect(within(dialog).getByText("waits for your approval in chat")).toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Continue to GitHub as you" }));
+
       expect(open).toHaveBeenCalledWith(
         "/api/integrations/github/start?returnTo=%2Fonboarding%2Fconnected",
         "_blank",
@@ -261,6 +283,109 @@ describe("OnboardingWizard", () => {
     } finally {
       open.mockRestore();
     }
+  });
+
+  it("reads a technical founder's repository and starts them with #build and #review-pr", async () => {
+    const user = userEvent.setup();
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        initialStep={3}
+        initialWorkspaceId="workspace_1"
+        initialWorkspaceName="Acme"
+        initialRole="founder"
+        starterSetup
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Connect your code" })).toBeInTheDocument();
+    expect(screen.queryByText("Give your agent some tools")).not.toBeInTheDocument();
+
+    mocks.getOnboardingInstalledPluginsAction.mockResolvedValue(["github"]);
+    mocks.scanOnboardingRepositoryAction.mockResolvedValue({
+      ok: true,
+      scan: {
+        status: "scanned",
+        repository: { fullName: "acme/app", private: true },
+        repositories: ["acme/app"],
+        plugins: [{ plugin: "posthog", reason: "posthog-js in package.json" }],
+        recommendedBy: "jev",
+      },
+    });
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          origin: window.location.origin,
+          data: {
+            type: "goat-onboarding-connection",
+            provider: "github_user",
+            status: "connected",
+            reason: null,
+          },
+        }),
+      );
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Here's what Acme runs on" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("posthog-js in package.json")).toBeInTheDocument();
+    expect(screen.getByText("For your team")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("heading", { name: "Acme is ready" })).toBeInTheDocument();
+    expect(screen.getByText("#build")).toBeInTheDocument();
+    expect(screen.getByText("#review-pr")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Finish onboarding" }));
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
+    expect(mocks.createStarterWorkflows).toHaveBeenCalledWith("acme/app");
+  });
+
+  it("recovers the scanned repository when a technical founder refreshes on the finish step", async () => {
+    const user = userEvent.setup();
+    mocks.scanOnboardingRepositoryAction.mockResolvedValue({
+      ok: true,
+      scan: {
+        status: "scanned",
+        repository: { fullName: "acme/app", private: true },
+        repositories: ["acme/app"],
+        plugins: [],
+        recommendedBy: "jev",
+      },
+    });
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        initialStep={4}
+        initialWorkspaceId="workspace_1"
+        initialWorkspaceName="Acme"
+        initialRole="product"
+        starterSetup
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Acme is ready" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Finish onboarding" }));
+    await waitFor(() => expect(mocks.push).toHaveBeenCalledWith("/"));
+    expect(mocks.createStarterWorkflows).toHaveBeenCalledWith("acme/app");
+  });
+
+  it("keeps the catalog plugins step for founders who did not opt into version 2", async () => {
+    render(
+      <OnboardingWizard
+        {...OWNER_PROPS}
+        initialStep={3}
+        initialWorkspaceId="workspace_1"
+        initialRole="founder"
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Give your agent some tools" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Connect your code")).not.toBeInTheDocument();
+    expect(mocks.scanOnboardingRepositoryAction).not.toHaveBeenCalled();
   });
 
   it("consumes a same-tab connection result when browser storage is unavailable", async () => {

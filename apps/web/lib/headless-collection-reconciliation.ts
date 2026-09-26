@@ -1,6 +1,6 @@
 "use client";
 
-import { captureException } from "@opencompany/observability";
+import { captureException, createLogger } from "@opencompany/observability";
 import { TimeoutWaitingForTxIdError } from "@tanstack/electric-db-collection";
 import type { CollectionStatus } from "@tanstack/react-db";
 
@@ -8,6 +8,11 @@ type TransactionAwareCollection = {
   status?: CollectionStatus;
   utils: { awaitTxId(transactionId: number, timeoutMs?: number): Promise<unknown> };
 };
+
+const logger = createLogger({
+  service: "opencompany-web",
+  runtime: "headless-collection-reconciliation",
+});
 
 // TanStack DB collections only start their Electric shape once something subscribes to them. A
 // collection nobody is looking at stays `idle`, so its transaction ids can never arrive and waiting
@@ -31,11 +36,23 @@ export async function reconcileCommittedProjection(wait: Promise<unknown>) {
     await wait;
   } catch (error) {
     if (error instanceof TimeoutWaitingForTxIdError) {
-      captureException(error, {
+      logger.warn("Committed projection reconciliation timed out", {
         event: "opencompany.read_model_reconciliation_timeout",
+        error,
       });
       return;
     }
     throw error;
   }
+}
+
+// A committed command must not keep the UI waiting for the eventually consistent Electric read
+// model. Keep observing the projection so unexpected failures remain visible without delaying the
+// authoritative command response.
+export function observeCommittedProjection(wait: Promise<unknown>) {
+  void reconcileCommittedProjection(wait).catch((error) => {
+    captureException(error, {
+      event: "opencompany.read_model_reconciliation_failed",
+    });
+  });
 }

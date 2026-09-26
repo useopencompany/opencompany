@@ -38,6 +38,9 @@ describe("image context budgets", () => {
     expect(estimateImageContextTokens(image(4000, 4000, "low"), "openai/gpt-5.5")).toBe(308);
     expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-5.4-mini")).toBe(3000);
     expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-5.6-sol")).toBe(18750);
+    // OpenAI documents image support for Sol and Luna, but not their sizing/tokenization policy.
+    expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-6-sol")).toBe(40000);
+    expect(estimateImageContextTokens(image(4000, 4000), "openai/gpt-6-luna")).toBe(40000);
   });
 
   it("rejects the documented non-resizing patch limit instead of undercounting", () => {
@@ -53,7 +56,7 @@ describe("image context budgets", () => {
     [1920, 1080, 2691],
     [3840, 2160, 4784],
   ])("matches Claude's documented high-resolution example %ix%i", (width, height, tokens) => {
-    expect(estimateImageContextTokens(image(width, height), "anthropic/claude-opus-5")).toBe(
+    expect(estimateImageContextTokens(image(width, height), "anthropic/claude-opus-5.5")).toBe(
       tokens,
     );
   });

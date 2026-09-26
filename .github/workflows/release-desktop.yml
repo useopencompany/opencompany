@@ -1,0 +1,157 @@
+name: Release desktop app
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to every installed app now. Leave off to create a draft release for testing.
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release:
+    name: Build, sign, and notarize macOS app
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: production
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      CI: true
+      DO_NOT_TRACK: "1"
+      GH_TOKEN: ${{ github.token }}
+      INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
+      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
+      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
+    steps:
+      - name: Require desktop releases to run from main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Desktop releases must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - name: Checkout release commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies from the lockfile
+        run: bun install --frozen-lockfile
+
+      - name: Require an unreleased version
+        id: version
+        run: |
+          version="$(node -p 'require("./apps/desktop/package.json").version')"
+          tag="desktop-v${version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::${tag} already exists. Bump apps/desktop/package.json before releasing."
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Test the desktop shell
+        working-directory: apps/desktop
+        run: |
+          bun run typecheck
+          bun run test
+
+      - name: Fetch desktop signing secrets from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: oidc
+          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /desktop
+
+      # electron-builder skips notarization with only a warning when credentials
+      # are missing, so require every value before building.
+      - name: Check desktop signing env
+        run: |
+          required=(
+            MACOS_CERTIFICATE_P12_BASE64
+            MACOS_CERTIFICATE_PASSWORD
+            APPLE_API_KEY_P8
+            APPLE_API_KEY_ID
+            APPLE_API_ISSUER
+            APPLE_TEAM_ID
+          )
+          missing=()
+          for variable_name in "${required[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then missing+=("$variable_name"); fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::Missing required desktop signing variables: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Write notarization key
+        run: |
+          key_path="$RUNNER_TEMP/notarization-key.p8"
+          umask 077
+          printf '%s\n' "$APPLE_API_KEY_P8" > "$key_path"
+          {
+            echo "APPLE_API_KEY=$key_path"
+            echo "APPLE_API_KEY_P8="
+          } >> "$GITHUB_ENV"
+
+      - name: Build, sign, and notarize
+        working-directory: apps/desktop
+        run: |
+          # electron-builder imports the certificate into a temporary keychain.
+          CSC_LINK="$MACOS_CERTIFICATE_P12_BASE64" \
+          CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD" \
+            bun run package
+
+      - name: Verify signature, notarization, and update feed
+        working-directory: apps/desktop
+        run: node scripts/verify-package.mjs --signed
+
+      - name: Create draft GitHub release
+        working-directory: apps/desktop/release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          notes="$(cat <<EOF
+          Download **opencompany-mac-arm64.dmg** for Apple silicon or **opencompany-mac-x64.dmg** for Intel Macs.
+
+          Installed apps update themselves once this release is published as Latest.
+          EOF
+          )"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "opencompany for Mac ${VERSION}" \
+            --notes "$notes" \
+            latest-mac.yml \
+            ./*.zip ./*.zip.blockmap \
+            ./*.dmg ./*.dmg.blockmap
+
+      # Installed apps follow the release GitHub marks as Latest, so publishing
+      # is the rollout. Drafts stay invisible to the updater.
+      - name: Publish release to installed apps
+        if: ${{ inputs.publish }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+      - name: Remove temporary signing files
+        if: ${{ always() }}
+        run: rm -f "$RUNNER_TEMP/notarization-key.p8"

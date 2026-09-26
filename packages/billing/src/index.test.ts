@@ -46,6 +46,8 @@ describe("calculateModelUsageCost", () => {
 
   it.each([
     ["openai/gpt-6-astra", 73_500],
+    ["openai/gpt-6-sol", 14_700],
+    ["openai/gpt-6-luna", 735],
     ["openai/gpt-5.6-sol", 41_750],
     ["openai/gpt-5.6-terra", 20_875],
     ["openai/gpt-5.6-luna", 8_350],
@@ -55,6 +57,7 @@ describe("calculateModelUsageCost", () => {
     ["anthropic/claude-sonnet-5", 22_050],
     ["anthropic/claude-opus-4.7", 36_750],
     ["anthropic/claude-opus-4.8", 36_750],
+    ["anthropic/claude-opus-5.5", 29_200],
     ["anthropic/claude-fable-5", 73_500],
     ["google/gemini-3-flash", 4_050],
     ["google/gemini-3.1-flash-lite-preview", 2_030],
@@ -127,6 +130,28 @@ describe("calculateModelUsageCost", () => {
 
     expect(cost.providerCostUsdMicros).toBe(27_500);
     expect(cost.costBasis.longContextApplied).toBe(true);
+  });
+
+  it("applies GPT-6 Sol long-context pricing above 272K input tokens", () => {
+    const cost = calculateModelUsageCost({
+      modelName: "openai/gpt-6-sol",
+      inputTokens: 272_001,
+      inputNoCacheTokens: 1_000,
+      inputCacheReadTokens: 1_000,
+      inputCacheWriteTokens: 1_000,
+      outputTokens: 1_000,
+    });
+
+    expect(cost.providerCostUsdMicros).toBe(24_400);
+    expect(cost.costBasis).toMatchObject({
+      longContextApplied: true,
+      ratesUsdMicrosPerMillion: {
+        inputNoCache: 4_000_000,
+        inputCacheRead: 400_000,
+        inputCacheWrite: 5_000_000,
+        output: 15_000_000,
+      },
+    });
   });
 
   it("applies GPT-6 Astra long-context pricing above 272K input tokens", () => {
@@ -266,7 +291,7 @@ describe("fees and hosted tools", () => {
       providerCostUsdMicros: 11_565,
       costBasis: {
         costSource: "platform_model_pricing",
-        pricingVersion: "2026-09-10.standard.1",
+        pricingVersion: "2026-09-23.standard.2",
       },
     });
   });
@@ -287,7 +312,7 @@ describe("fees and hosted tools", () => {
       totalCostUsdMicros: 1_000_000,
       costBasis: {
         costSource: "broker_metered",
-        pricingVersion: "2026-09-10.standard.1",
+        pricingVersion: "2026-09-23.standard.2",
       },
     });
   });

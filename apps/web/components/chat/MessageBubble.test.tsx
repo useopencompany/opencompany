@@ -19,7 +19,9 @@ const emptyTaskLookup: ChatTaskLookup = new Map();
 const presentationMocks = vi.hoisted(() => ({
   load: vi.fn(),
 }));
+const navigationMocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 
+vi.mock("next/navigation", () => ({ useRouter: () => navigationMocks }));
 vi.mock("@/components/AppDataProvider", () => ({
   useAppDataOptional: () => ({ user: { email: "louis@example.com" } }),
 }));
@@ -29,7 +31,37 @@ vi.mock("@/lib/headless-chat-presentations", () => ({
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  navigationMocks.refresh.mockReset();
   presentationMocks.load.mockReset();
+});
+
+it("keeps a disconnected plugin card visible beside the assistant's final reply", () => {
+  const message: ChatUiMessage = {
+    id: "assistant_plugin_connection",
+    role: "assistant",
+    parts: [
+      {
+        type: "tool-list_actions",
+        toolCallId: "list_stripe",
+        state: "output-available",
+        input: { source: "plugin:stripe:stripe" },
+        output: {
+          ok: true,
+          source: {
+            id: "plugin:stripe:stripe",
+            label: "Stripe",
+            description: "Stripe tools",
+            connection: { pluginName: "stripe", status: "needs_reauth" },
+          },
+          actions: [],
+        },
+      },
+      { type: "text", text: "Reconnect Stripe and I can continue." },
+    ],
+  };
+  render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+  expect(screen.getByRole("link", { name: "Reconnect" })).toBeVisible();
+  expect(screen.getByText("Reconnect Stripe and I can continue.")).toBeVisible();
 });
 
 it.each(

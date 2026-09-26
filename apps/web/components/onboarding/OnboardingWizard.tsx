@@ -11,6 +11,8 @@ import {
   Briefcase,
   Check,
   Code2,
+  GitPullRequest,
+  Hammer,
   LineChart,
   Megaphone,
   MessagesSquare,
@@ -23,12 +25,20 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { ONBOARDING_STEP_COOKIE } from "@/app/onboarding/step-cookie";
+import { OnboardingCodeStep } from "@/components/onboarding/OnboardingCodeStep";
 import { OnboardingPluginsStep } from "@/components/onboarding/OnboardingPluginsStep";
 import { OnboardingSubscriptionsStep } from "@/components/onboarding/OnboardingSubscriptionsStep";
+import {
+  connectsAfterOnboarding,
+  type PluginConnections,
+  usePluginConnections,
+} from "@/components/onboarding/plugin-connections";
+import { OFFICIAL_MCP_PLUGINS, type OfficialMcpPluginConfig } from "@/lib/official-plugin-catalog";
 import {
   finishOnboardingAction,
   saveOnboardingProfileAction,
   saveOnboardingWorkspaceAction,
+  scanOnboardingRepositoryAction,
 } from "@/lib/onboarding-actions";
 import {
   isOnboardingRole,
@@ -36,6 +46,7 @@ import {
   ONBOARDING_COMPANY_URL_MAX_LENGTH,
   type OnboardingRole,
 } from "@/lib/onboarding-profile";
+import { createStarterWorkflows, STARTER_WORKFLOWS } from "@/lib/starter-workflows";
 
 type OnboardingUser = {
   workosUserId: string;
@@ -55,6 +66,10 @@ const OWNER_STEPS: StepKey[] = ["profile", "workspace", "subscriptions", "plugin
 // welcome and their own subscription. Plugins are workspace-level and stay with
 // the admin.
 const MEMBER_STEPS: StepKey[] = ["welcome", "subscriptions", "finish"];
+
+// Technical founders get a code-first plugins step (connect GitHub, read the repo, suggest the
+// plugins it uses) and start with #build and #review-pr. Every other role keeps the catalog step.
+const TECHNICAL_ROLES = new Set<OnboardingRole>(["founder", "product"]);
 
 // Steps that are complete by definition: the user may continue without doing
 // anything, and the primary button says so.
@@ -130,6 +145,7 @@ export function OnboardingWizard({
   initialRole,
   initialCompanyUrl,
   initialReferral,
+  starterSetup = false,
 }: {
   user: OnboardingUser;
   currentWorkspaceName: string;
@@ -140,6 +156,8 @@ export function OnboardingWizard({
   initialRole: string | null;
   initialCompanyUrl: string;
   initialReferral: string | null;
+  // Opt-in (?version=2) technical founder setup; everyone else keeps the catalog step.
+  starterSetup?: boolean;
 }) {
   const router = useRouter();
   const steps = variant === "member" ? MEMBER_STEPS : OWNER_STEPS;
@@ -156,13 +174,33 @@ export function OnboardingWizard({
   // Drives the optional steps' primary button: "Skip for now" until something is
   // actually set up, "Continue" once it is.
   const [connectedSubscriptions, setConnectedSubscriptions] = useState(0);
-  const [installedPlugins, setInstalledPlugins] = useState(0);
+  // The repository the code step read; the starter workflows are written for it.
+  const [repository, setRepository] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const analyticsStartedRef = useRef(false);
   const analyticsStepsViewedRef = useRef(new Set<StepKey>());
 
   const step = steps[stepIndex] ?? steps[0]!;
   const isLast = stepIndex === steps.length - 1;
+  const technical =
+    starterSetup && variant === "owner" && role !== null && TECHNICAL_ROLES.has(role);
+  const plugins = usePluginConnections({
+    loadInstalled: activeWorkspaceId !== null && (step === "plugins" || step === "finish"),
+  });
+  // A refresh on the finish step loses the repository the code step read; read it again so the
+  // starter workflows are still created for it.
+  useEffect(() => {
+    if (step !== "finish" || !technical || repository) return;
+    let active = true;
+    void scanOnboardingRepositoryAction({}).then((result) => {
+      if (active && result.ok && result.scan.status === "scanned") {
+        setRepository(result.scan.repository.fullName);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [repository, step, technical]);
   const normalizedCompanyUrl = normalizeOnboardingCompanyUrl(companyUrl);
   const companyUrlStatus: CompanyUrlStatus = !companyUrl.trim()
     ? "idle"
@@ -215,7 +253,17 @@ export function OnboardingWizard({
     }
     if (step === "finish") {
       const r = await finishOnboardingAction({ referralSource: referral });
-      return r.ok || toastFail(r.error);
+      if (!r.ok) return toastFail(r.error);
+      if (technical && repository) {
+        // Onboarding is already complete here, so a failure must not keep the founder out of
+        // their workspace; say what is missing instead.
+        await createStarterWorkflows(repository).catch((cause: unknown) => {
+          toast.error(
+            `Couldn't add #build and #review-pr. ${cause instanceof Error ? cause.message : "Please try again from Workflows."}`,
+          );
+        });
+      }
+      return true;
     }
     return true;
   };
@@ -250,7 +298,7 @@ export function OnboardingWizard({
 
   const optionalStepIsEmpty =
     (step === "subscriptions" && connectedSubscriptions === 0) ||
-    (step === "plugins" && installedPlugins === 0);
+    (step === "plugins" && plugins.installed.size === 0 && plugins.connected.size === 0);
   const primaryLabel = isPending
     ? "Saving…"
     : isLast
@@ -293,17 +341,27 @@ export function OnboardingWizard({
           {step === "subscriptions" && (
             <OnboardingSubscriptionsStep onConnectedCountChange={setConnectedSubscriptions} />
           )}
-          {step === "plugins" && (
-            <OnboardingPluginsStep onInstalledCountChange={setInstalledPlugins} />
-          )}
+          {step === "plugins" &&
+            (technical ? (
+              <OnboardingCodeStep
+                workspaceName={workspaceName}
+                plugins={plugins}
+                onRepositoryChange={setRepository}
+              />
+            ) : (
+              <OnboardingPluginsStep plugins={plugins} />
+            ))}
           {step === "finish" && (
             <FinishStep
               workspaceName={variant === "member" ? currentWorkspaceName : workspaceName}
               referral={referral}
               onSelect={setReferral}
               showReferral={variant === "owner"}
+              setup={technical ? { repository, plugins } : null}
             />
           )}
+
+          {plugins.dialog}
 
           {/* Nav — sits right under the content */}
           <div className="mt-9 flex items-center justify-between">
@@ -592,12 +650,22 @@ function FinishStep({
   referral,
   onSelect,
   showReferral,
+  setup,
 }: {
   workspaceName: string;
   referral: string | null;
   onSelect: (v: string) => void;
   showReferral: boolean;
+  // A technical founder's starter setup: the workflows for the repository they connected and the
+  // plugins they added along the way.
+  setup: { repository: string | null; plugins: PluginConnections } | null;
 }) {
+  const added = setup
+    ? Object.values(OFFICIAL_MCP_PLUGINS as Record<string, OfficialMcpPluginConfig>).filter(
+        (config) => setup.plugins.installed.has(config.name),
+      )
+    : [];
+  const repository = setup?.repository ?? null;
   return (
     <div>
       <div className="flex flex-col gap-3">
@@ -606,16 +674,89 @@ function FinishStep({
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink">
-            You&apos;re all set
+            {repository ? `${workspaceName || "Your workspace"} is ready` : "You're all set"}
           </h1>
           <p className="text-[14px] leading-6 text-ink-muted">
-            {workspaceName ? `${workspaceName} is ready.` : "Your Wiki is ready."}{" "}
-            {showReferral
-              ? "You can connect more plugins or import company context anytime from Settings."
-              : "You can start exploring the company Wiki now."}
+            {repository ? (
+              <>
+                Two workflows for <span className="font-mono text-ink">{repository}</span>. Type{" "}
+                <span className="font-mono">#</span> in any chat to run one.
+              </>
+            ) : (
+              <>
+                {workspaceName ? `${workspaceName} is ready.` : "Your Wiki is ready."}{" "}
+                {showReferral
+                  ? "You can connect more plugins or import company context anytime from Settings."
+                  : "You can start exploring the company Wiki now."}
+              </>
+            )}
           </p>
         </div>
       </div>
+
+      {repository ? (
+        <div className="mt-7 flex flex-col gap-2.5">
+          <span className="text-[12px] font-medium text-ink">Workflows</span>
+          <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            {STARTER_WORKFLOWS.map((workflow) => {
+              const Icon = workflow.handle === "build" ? Hammer : GitPullRequest;
+              return (
+                <div
+                  key={workflow.handle}
+                  className="flex items-center gap-3 px-3.5 py-3 [&+&]:border-t [&+&]:border-border"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface-muted text-ink-muted">
+                    <Icon size={17} strokeWidth={1.9} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[13px] font-semibold text-ink">
+                      #{workflow.handle}
+                    </div>
+                    <div className="text-[12px] leading-5 text-ink-subtle">
+                      {workflow.description}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {added.length > 0 ? (
+        <div className="mt-6 flex flex-col gap-2.5">
+          <span className="text-[12px] font-medium text-ink">Plugins</span>
+          <div className="overflow-hidden rounded-xl border border-border bg-surface">
+            {added.map((config) => {
+              const connected = setup?.plugins.connected.has(config.connectionProvider) ?? false;
+              return (
+                <div
+                  key={config.name}
+                  className="flex items-center gap-3 px-3.5 py-2.5 [&+&]:border-t [&+&]:border-border"
+                >
+                  <span
+                    className={`flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 ${config.iconClassName}`}
+                  >
+                    <config.Icon className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                    {config.label}
+                  </span>
+                  <span
+                    className={`shrink-0 text-[12px] ${connected ? "font-medium text-success" : "text-ink-subtle"}`}
+                  >
+                    {connected
+                      ? "Connected"
+                      : connectsAfterOnboarding(config)
+                        ? "Add the key in Plugins"
+                        : "Finish connecting in Plugins"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {!showReferral ? null : (
         <div className="mt-7 flex flex-col gap-3">

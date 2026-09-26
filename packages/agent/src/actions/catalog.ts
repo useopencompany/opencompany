@@ -38,9 +38,10 @@ export function isChatActionsKilled(): boolean {
   return process.env.OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH === "true";
 }
 
-// Resolves the user's connected providers into a flat action catalog. A
-// provider that is not personally installed, disconnected — or whose resolver throws — is simply absent;
-// one broken provider never takes down the others. Managed (Monid) capabilities
+// Resolves the user's providers into a flat action catalog. Installed plugins
+// without a usable connection remain visible as sources with no actions, so
+// the model and chat can explain the missing account rather than guessing.
+// One broken provider never takes down the others. Managed (Monid) capabilities
 // are merged in only when the composition root injects their shared resolver.
 export async function resolveActionCatalog(
   input: {
@@ -65,6 +66,37 @@ export async function resolveActionCatalog(
   );
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,
+  );
+  const unavailableConnections = await Promise.all(
+    remoteMcpRegistrations
+      .filter((registration) => !providers.some((provider) => provider.id === registration.source))
+      .map(async (registration): Promise<ActionSourceDescriptor | null> => {
+        if (
+          registration.connectionProvider === "custom_mcp" ||
+          registration.connectionAvailable === false
+        )
+          return null;
+        try {
+          const state = await registration.getState(input);
+          if (state.connected) return null;
+          return {
+            id: registration.source,
+            kind: "integration",
+            unavailable: true,
+            label: registration.label,
+            description: registration.description,
+            connection: {
+              pluginName: registration.pluginName,
+              status:
+                state.status === "needs_reauth" || state.status === "sync_failed"
+                  ? "needs_reauth"
+                  : "not_connected",
+            },
+          };
+        } catch {
+          return null;
+        }
+      }),
   );
   const managed = deps.resolveManagedCapabilities
     ? await deps
@@ -91,6 +123,9 @@ export async function resolveActionCatalog(
           label,
           description,
         }),
+      ),
+      ...unavailableConnections.filter(
+        (source): source is ActionSourceDescriptor => source !== null,
       ),
       ...reconciledManaged.sources,
       ...remoteMcpRegistrations

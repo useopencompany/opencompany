@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
+import { getAppUrl } from "@opencompany/agent/app-url";
 import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
 import { slackApiRequest } from "@opencompany/agent/integrations/slack";
 import {
   slackBotCanCustomizeIdentity,
   slackBotCanReact,
+  slackBotCanUploadFiles,
 } from "@opencompany/agent/integrations/slack-bot";
 import {
   type ChannelInstallation,
@@ -12,7 +15,8 @@ import {
   resolvePublicChannel,
 } from "@opencompany/agent/integrations/slack-channel";
 import { processNextSlackProvisioning } from "@opencompany/agent/integrations/slack-provisioning";
-import { TASK_WRITE_PERMISSION } from "@opencompany/core";
+import { type Actor, TASK_WRITE_PERMISSION } from "@opencompany/core";
+import { PostgresChatAttachmentRepository } from "@opencompany/db/chat-repository";
 import {
   completeChannelDelivery,
   type SlackThreadReply,
@@ -26,6 +30,19 @@ import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 import { processNextSlackAgentMessage } from "./slack-agent-worker";
 import { processNextSlackDirectMessage } from "./slack-direct-message-worker";
+import {
+  materializeSlackImageAttachments,
+  type SlackImageAttachmentMaterializer,
+} from "./slack-message-attachments";
+import {
+  isSlackFileNotReady,
+  SLACK_IMAGE_READY_DELAYS_MS,
+  type SlackPostImageSource,
+  slackImageLinkText,
+  slackPostBlocks,
+  uploadSlackPostImages,
+} from "./slack-post-images";
+import { resolveSlackWorkspaceMember } from "./slack-workspace-member";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "slack-channel" });
 const CLOSED_REPLY = "This thread is closed. Open the task in opencompany to continue the work.";
@@ -85,12 +102,18 @@ export type SlackChannelWorkerDependencies = {
   credential: typeof channelBotCredential;
   request: typeof slackApiRequest;
   validateChannel: typeof resolvePublicChannel;
+  materializeAttachments: SlackImageAttachmentMaterializer;
+  uploadImages: typeof uploadSlackPostImages;
+  wait: (ms: number) => Promise<unknown>;
 };
 const defaults = (): SlackChannelWorkerDependencies => ({
   db: getDb(),
   credential: channelBotCredential,
   request: slackApiRequest,
   validateChannel: resolvePublicChannel,
+  materializeAttachments: materializeSlackImageAttachments,
+  uploadImages: uploadSlackPostImages,
+  wait: sleep,
 });
 
 export async function processNextSubscriptionEvent(deps = defaults()): Promise<boolean> {
@@ -205,13 +228,16 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
       }
       if (event.installation.companyAgentId) {
         const email = user.user.profile?.email?.trim().toLowerCase() ?? "";
-        const member = subscriptionRows(
-          await tx.execute(sql`
-          SELECT 1 FROM goat.workspace_members member JOIN goat.users account ON account.workos_user_id = member.user_workos_id
-          WHERE member.workspace_id = ${event.workspaceId} AND lower(account.email) = ${email} AND ${email} <> ''
-        `),
-        );
-        if (user.user.team_id !== event.installation.teamId || member.length === 0) {
+        const member =
+          user.user.team_id === event.installation.teamId
+            ? await resolveSlackWorkspaceMember(tx.execute.bind(tx), {
+                workspaceId: event.workspaceId,
+                teamId: event.installation.teamId,
+                slackUserId: event.payload.slackUserId,
+                email,
+              })
+            : undefined;
+        if (!member) {
           await ignoreEvent(tx.execute.bind(tx), event.id);
           return true;
         }
@@ -238,16 +264,27 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
         await queueReply(tx.execute.bind(tx), event, deliveryId, CLOSED_REPLY);
         return true;
       }
+      const actor: Actor = {
+        userId: owner.userId,
+        workspaceId: event.workspaceId,
+        role: owner.role,
+        permissions: [TASK_WRITE_PERMISSION],
+        authenticationMethod: "service",
+      };
+      const attachmentIds = await deps.materializeAttachments({
+        execute: tx.execute.bind(tx),
+        actor,
+        token,
+        messageKey: `${event.installation.id}:${event.payload.channelId}:${event.payload.messageTs}`,
+        files: event.payload.files ?? [],
+      });
       // Task, runtime, Messages and Run commit with the inbox cursor. A worker crash cannot
       // turn the same event into another Run. The existing runner owns the fenced Run lease.
-      const result = await new PostgresTaskRepository(tx.execute.bind(tx)).createTaskCommentAndRun({
-        actor: {
-          userId: owner.userId,
-          workspaceId: event.workspaceId,
-          role: owner.role,
-          permissions: [TASK_WRITE_PERMISSION],
-          authenticationMethod: "service",
-        },
+      const execute = tx.execute.bind(tx);
+      const result = await new PostgresTaskRepository(execute, {
+        resolveAttachments: (input) => new PostgresChatAttachmentRepository(execute).resolve(input),
+      }).createTaskCommentAndRun({
+        actor,
         taskId: event.taskId,
         command: {
           id: `subscription_event_${event.id}`,
@@ -259,6 +296,7 @@ export async function processNextSubscriptionEvent(deps = defaults()): Promise<b
             botUserId,
             thread,
           }),
+          ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
         },
       });
       if (!result) throw new Error("The subscribed task could not be resumed.");
@@ -472,6 +510,9 @@ type Delivery = {
   text: string;
   botDisplayName: string;
   botAvatarUrl: string;
+  images: SlackPostImageSource[];
+  imageCount: number;
+  taskId: string | null;
   status: string;
   createdAt: Date;
   leaseId: string;
@@ -496,6 +537,13 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
       SELECT delivery.id, delivery.channel_id AS "channelId",
         COALESCE(delivery.thread_ts, parent.message_ts) AS "threadTs", delivery.text,
         delivery.bot_display_name AS "botDisplayName", delivery.bot_avatar_url AS "botAvatarUrl",
+        jsonb_array_length(delivery.image_artifact_version_ids) AS "imageCount",
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('title', version.title, 'filename', version.filename,
+            'blobPathname', version.blob_pathname) ORDER BY pinned.position)
+          FROM jsonb_array_elements_text(delivery.image_artifact_version_ids) WITH ORDINALITY AS pinned(id, position)
+          JOIN goat.chat_artifact_versions version ON version.id = pinned.id), '[]'::jsonb) AS images,
+        (SELECT task.id FROM goat.tasks task WHERE task.session_id = delivery.session_id
+          ORDER BY task.created_at LIMIT 1) AS "taskId",
         delivery.status, delivery.created_at AS "createdAt",
         jsonb_build_object('id', integration.id, 'workspaceId', integration.workspace_id,
           'userWorkosId', integration.user_workos_id, 'teamId', integration.external_id, 'scopes', integration.scopes, 'companyAgentId', integration.company_agent_id) AS installation
@@ -512,8 +560,12 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     )[0];
     if (!row) return null;
     // Persist the resolved thread so a reconciliation after a crash reads the thread, not the channel.
+    // A pending row stays pending under this lease until its post is attempted: preflight work such
+    // as uploading images must not leave a crashed, never-posted delivery looking uncertain.
     await tx.execute(
-      sql`UPDATE goat.channel_deliveries SET status = 'sending', thread_ts = ${row.threadTs}, lease_id = ${leaseId}, lease_expires_at = now() + interval '2 minutes' WHERE id = ${row.id}`,
+      sql`UPDATE goat.channel_deliveries SET status = CASE WHEN status = 'pending' THEN 'pending' ELSE 'sending' END,
+        thread_ts = ${row.threadTs}, lease_id = ${leaseId},
+        lease_expires_at = now() + ${row.imageCount > 0 ? sql`interval '5 minutes'` : sql`interval '2 minutes'`} WHERE id = ${row.id}`,
     );
     return { ...row, leaseId };
   });
@@ -528,31 +580,68 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     await validateDeliverableChannel(deps, token, delivery.channelId);
     let messageTs: string | null = null;
     if (delivery.status === "pending") {
+      const images = await uploadDeliveryImages(deps, token, delivery);
+      const linkText =
+        delivery.imageCount > 0
+          ? slackImageLinkText(
+              delivery.text,
+              delivery.taskId
+                ? `${getAppUrl()}/tasks/${encodeURIComponent(delivery.taskId)}`
+                : null,
+            )
+          : delivery.text;
+      const sending = subscriptionRows<{ id: string }>(
+        await execute(sql`UPDATE goat.channel_deliveries SET status = 'sending', lease_expires_at = now() + interval '2 minutes'
+          WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'pending' RETURNING id`),
+      );
+      // Canceled, or claimed by another worker after this lease ran out: that row is theirs now.
+      if (sending.length === 0) return true;
       postAttempted = true;
-      const response = await deps.request<{ ts?: string }>({
-        token,
-        method: "chat.postMessage",
-        signal: AbortSignal.timeout(15_000),
-        form: {
-          channel: delivery.channelId,
-          text: delivery.text,
-          ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
-          // An install that predates chat:write.customize keeps posting under the default bot
-          // identity: a cosmetic name is never worth failing the delivery over.
-          ...(canCustomizeIdentity
-            ? {
-                ...(delivery.botDisplayName ? { username: delivery.botDisplayName } : {}),
-                ...(delivery.botAvatarUrl ? { icon_url: delivery.botAvatarUrl } : {}),
-              }
-            : {}),
-          metadata: JSON.stringify({
-            event_type: "opencompany_delivery",
-            event_payload: { delivery_id: delivery.id },
-          }),
-          unfurl_links: "false",
-          unfurl_media: "false",
-        },
-      });
+      const post = (withImages: boolean) =>
+        deps.request<{ ts?: string }>({
+          token,
+          method: "chat.postMessage",
+          signal: AbortSignal.timeout(15_000),
+          form: {
+            channel: delivery.channelId,
+            text: withImages ? delivery.text : linkText,
+            ...(withImages
+              ? { blocks: JSON.stringify(slackPostBlocks(delivery.text, images)) }
+              : {}),
+            ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
+            // An install that predates chat:write.customize keeps posting under the default bot
+            // identity: a cosmetic name is never worth failing the delivery over.
+            ...(canCustomizeIdentity
+              ? {
+                  ...(delivery.botDisplayName ? { username: delivery.botDisplayName } : {}),
+                  ...(delivery.botAvatarUrl ? { icon_url: delivery.botAvatarUrl } : {}),
+                }
+              : {}),
+            metadata: JSON.stringify({
+              event_type: "opencompany_delivery",
+              event_payload: { delivery_id: delivery.id },
+            }),
+            unfurl_links: "false",
+            unfurl_media: "false",
+          },
+        });
+      let response: { ts?: string } | null = null;
+      if (images.length > 0) {
+        for (const delay of [0, ...SLACK_IMAGE_READY_DELAYS_MS]) {
+          if (delay) await deps.wait(delay);
+          try {
+            response = await post(true);
+            break;
+          } catch (error) {
+            if (!isSlackFileNotReady(error)) throw error;
+          }
+        }
+        if (!response)
+          logger.warn("Slack never accepted the uploaded images; posting a task link instead", {
+            delivery_id: delivery.id,
+          });
+      }
+      response ??= await post(false);
       messageTs = typeof response.ts === "string" ? response.ts : null;
       if (!messageTs)
         throw new Error("Slack returned no message timestamp; delivery outcome is uncertain.");
@@ -584,12 +673,36 @@ export async function processNextChannelDelivery(deps = defaults()): Promise<boo
     } else {
       // No external write was attempted; retrying this preflight is safe.
       await execute(sql`UPDATE goat.channel_deliveries SET status = 'pending', lease_expires_at = now() + interval '1 minute'
-        WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'sending'`);
+        WHERE id = ${delivery.id} AND lease_id = ${delivery.leaseId} AND status = 'pending'`);
     }
     await markChannelError(delivery.installation, error);
     logger.warn("Slack Channel delivery requires reconciliation", { delivery_id: delivery.id });
   }
   return true;
+}
+// The message is what the run owes the thread; its images are a bonus. Files stay private until a
+// post references them, so a failed upload leaves nothing visible, and the post goes out with a
+// task link instead of retrying on an image that may never become available.
+async function uploadDeliveryImages(
+  deps: SlackChannelWorkerDependencies,
+  token: string,
+  delivery: Delivery,
+) {
+  if (
+    delivery.imageCount === 0 ||
+    delivery.images.length !== delivery.imageCount ||
+    !slackBotCanUploadFiles(delivery.installation.scopes)
+  )
+    return [];
+  try {
+    return await deps.uploadImages({ token, images: delivery.images }, { request: deps.request });
+  } catch (error) {
+    logger.warn("Slack image upload failed; posting a task link instead", {
+      delivery_id: delivery.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  }
 }
 async function uncertainDelivery(execute: SubscriptionExecute, delivery: Delivery, error: string) {
   await execute(sql`UPDATE goat.channel_deliveries SET status = 'uncertain', error = ${error}, lease_expires_at = now() + interval '15 minutes'

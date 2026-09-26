@@ -1,5 +1,8 @@
 import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type {
+  CloudCodingReasoningEffort,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import type { CodexChatTurnSettings } from "@opencompany/db/product-schema";
 
 export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "xhigh";
@@ -24,7 +27,7 @@ type NormalizedCodexChatSettings = {
 };
 
 export type CodexComposerSettingsView = {
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled: boolean;
   goalMode: CodexGoalMode | null;
 };

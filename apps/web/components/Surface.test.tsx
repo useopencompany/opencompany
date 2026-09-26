@@ -564,6 +564,7 @@ describe("Surface chat streaming UI", () => {
   afterEach(() => {
     clearAllLocalChatStates();
     clearAllOptimisticChatSummaries();
+    setDocumentVisibility("visible");
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1406,6 +1407,57 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
     expect(historyMock.replaceState).not.toHaveBeenCalled();
     await waitFor(() => expect(routerMock.refresh).toHaveBeenCalledTimes(1));
+  });
+
+  it("uses the Codex preference when a Claude Ultracode chat starts background Codex", async () => {
+    const user = userEvent.setup();
+    persistLastReasoningEffort("user_1", "codex", "medium");
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_claude_ultracode",
+          title: "Claude Ultracode",
+          model: CLAUDE_CHAT_DEFAULT_MODEL_ID,
+          engine: "claude_code",
+          codexComposerSettings: {
+            reasoningEffort: "ultracode",
+            planModeEnabled: false,
+            goalMode: null,
+          },
+          runtime: {
+            status: "running",
+            activeRunId: "run_claude_ultracode",
+            hasError: false,
+            updatedAt: new Date().toISOString(),
+          },
+          messages: [],
+        }}
+        codexConnected
+        claudeCodeConnected
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Queue a follow-up...");
+    await user.type(textarea, "& @codex refactor the parser");
+
+    expect(
+      screen.getByRole("button", { name: "Codex reasoning effort: Medium (click to cycle)" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(headlessChatMocks.startBackground).toHaveBeenCalledOnce());
+    expect(headlessChatMocks.startBackground.mock.calls[0]![0]).toMatchObject({
+      content: "refactor the parser",
+      engine: {
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "medium" },
+      },
+    });
   });
 
   it("starts a selected workflow from a running Codex chat without interrupting Codex", async () => {
@@ -2451,6 +2503,42 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toHaveFocus();
   });
 
+  it("focuses the composer when the browser tab becomes visible again", () => {
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    const composer = screen.getByPlaceholderText("Ask a question or describe a task...");
+
+    composer.focus();
+    act(() => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    composer.blur();
+
+    act(() => {
+      setDocumentVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(composer).toHaveFocus();
+  });
+
+  it("keeps focus on another control when returning to the browser tab", () => {
+    render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
+    const otherControl = document.createElement("button");
+    document.body.append(otherControl);
+    otherControl.focus();
+
+    act(() => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      setDocumentVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(otherControl).toHaveFocus();
+    otherControl.remove();
+  });
+
   it("does not reopen a new chat when its response arrives after Home was clicked", async () => {
     const user = userEvent.setup();
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
@@ -2525,8 +2613,10 @@ describe("Surface chat streaming UI", () => {
     await user.click(modelPicker);
 
     expect(screen.queryByText("Capability / Speed / Cost")).not.toBeInTheDocument();
+    expect(screen.getByText("Claude Opus 5.5")).toBeInTheDocument();
     expect(screen.getAllByText("Claude Sonnet 5").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("Claude Opus 4.8")).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude Opus 5", { exact: true })).not.toBeInTheDocument();
     expect(screen.queryByText("GPT 6 Astra")).not.toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Sol")).toBeInTheDocument();
     expect(screen.getByText("GPT 5.6 Terra")).toBeInTheDocument();
@@ -2538,12 +2628,12 @@ describe("Surface chat streaming UI", () => {
     expect(screen.queryByText("GPT 5.4 Mini")).not.toBeInTheDocument();
     expect(screen.queryByText("Local Codex")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Qwen 3.8 Max"));
+    await user.click(screen.getByText("Claude Opus 5.5"));
     await user.type(screen.getByPlaceholderText("Ask a question or describe a task..."), "Compare");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(chatMock.preparedRequestBodies[0]).toMatchObject({
-      model: "alibaba/qwen3.8-max",
+      model: "anthropic/claude-opus-5.5",
     });
   });
 
@@ -2921,9 +3011,9 @@ describe("Surface chat streaming UI", () => {
     );
   });
 
-  it("selects Opus 5 and submits per-turn reasoning effort", async () => {
-    const label = "Claude Opus 5";
-    const model = "anthropic/claude-opus-5";
+  it("selects Opus 5.5 and submits Ultracode", async () => {
+    const label = "Claude Opus 5.5";
+    const model = "anthropic/claude-opus-5.5";
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(
@@ -2965,10 +3055,17 @@ describe("Surface chat streaming UI", () => {
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Claude model: Claude Haiku 4.5" }));
     expect(screen.queryByRole("option", { name: /Claude Opus 4\.8/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Claude Opus 5", { exact: true })).not.toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: new RegExp(label) }));
     await user.click(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Ultracode (click to cycle)" }),
+    ).toHaveAttribute("title", "XHigh reasoning with dynamic workflows");
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
       "Inspect this repository",
@@ -2982,7 +3079,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "xhigh" },
+        settings: { reasoningEffort: "ultracode" },
       },
     });
   });
@@ -3021,6 +3118,15 @@ describe("Surface chat streaming UI", () => {
     expect(
       screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: High (click to cycle)" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Claude reasoning effort: XHigh (click to cycle)" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "Claude reasoning effort: Low (click to cycle)" }),
+    ).toBeInTheDocument();
 
     await user.type(
       screen.getByPlaceholderText("Ask a question or describe a task..."),
@@ -3033,7 +3139,7 @@ describe("Surface chat streaming UI", () => {
       engine: {
         type: "claude_code",
         schemaVersion: 1,
-        settings: { reasoningEffort: "high" },
+        settings: { reasoningEffort: "low" },
       },
     });
   });
@@ -3552,7 +3658,7 @@ describe("Surface chat streaming UI", () => {
         tasks={[]}
         defaultModel={DEFAULT_MODEL}
         initialChat={{
-          id: "goat_chat_1",
+          id: "conversation_1",
           title: "Chat",
           model: DEFAULT_MODEL,
           messages: [
@@ -4128,7 +4234,7 @@ describe("Surface chat streaming UI", () => {
           workflows: [
             {
               id: "morning-test",
-              name: "Morning Test",
+              name: "Daily Brief",
               description: "Run the morning checks.",
             },
           ],
@@ -4137,6 +4243,69 @@ describe("Surface chat streaming UI", () => {
       return Response.json({});
     });
     vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_1",
+          title: "Existing chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+        workspaceId="workspace_1"
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await user.click(await screen.findByRole("option", { name: /Daily Brief/i }));
+    expect(textarea).toHaveValue("#daily-brief ");
+    const overlay = textarea.parentElement?.querySelector(
+      '[data-testid="composer-mention-overlay"]',
+    );
+    expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
+    expect(overlay).toHaveTextContent("#daily-brief");
+    await user.type(textarea, "run today's checks with /");
+    await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
+    await user.type(textarea, "{Enter}");
+
+    await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
+    expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
+      "morning-test",
+      {
+        description: "#daily-brief run today's checks with /smooth-shadow-ring",
+        skillIds: ["smooth-shadow-ring"],
+      },
+      { scopeKey: "workspace_1" },
+    );
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+    expect(historyMock.replaceState).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
+    await waitFor(() => expect(textarea).toHaveFocus());
+    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a workflow named Task distinct from the ad-hoc task command", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === "/api/workflows"
+          ? Response.json({
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Task",
+                  description: "Run the saved workflow.",
+                },
+              ],
+            })
+          : Response.json({}),
+      ),
+    );
 
     render(
       <Surface
@@ -4155,31 +4324,74 @@ describe("Surface chat streaming UI", () => {
 
     const textarea = screen.getByPlaceholderText("Reply...");
     await user.type(textarea, "#");
-    await user.click(await screen.findByRole("option", { name: /Morning Test/i }));
+    await user.click(await screen.findByText("#morning-test"));
     expect(textarea).toHaveValue("#morning-test ");
-    const overlay = textarea.parentElement?.querySelector(
-      '[data-testid="composer-mention-overlay"]',
-    );
-    expect(overlay?.querySelectorAll('[data-opencompany-chat-mention="workflow"]')).toHaveLength(1);
-    expect(overlay).toHaveTextContent("#morning-test");
-    await user.type(textarea, "run today's checks with /");
-    await user.click(await screen.findByRole("option", { name: /smooth-shadow-ring/i }));
-    await user.type(textarea, "{Enter}");
+    await user.type(textarea, "run it{Enter}");
 
     await waitFor(() => expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalled());
     expect(automationCommandMocks.invokeWorkflow).toHaveBeenCalledWith(
       "morning-test",
-      {
-        description: "#morning-test run today's checks with /smooth-shadow-ring",
-        skillIds: ["smooth-shadow-ring"],
-      },
+      expect.objectContaining({ description: "#morning-test run it" }),
       { scopeKey: "workspace_1" },
     );
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
-    expect(historyMock.replaceState).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText("Reply...")).toHaveValue("");
-    await waitFor(() => expect(textarea).toHaveFocus());
-    expect(routerMock.refresh).toHaveBeenCalledTimes(1);
+    expect(taskCommandMocks.create).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ambiguous pasted workflow handle as plain text", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input) === "/api/workflows"
+          ? Response.json({
+              workflows: [
+                {
+                  id: "morning-test",
+                  name: "Daily Brief",
+                  description: "Run the morning checks.",
+                },
+                {
+                  id: "daily-brief",
+                  name: "Afternoon Brief",
+                  description: "Run the afternoon checks.",
+                },
+              ],
+            })
+          : Response.json({}),
+      ),
+    );
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "goat_chat_1",
+          title: "Existing chat",
+          model: DEFAULT_MODEL,
+          messages: [],
+        }}
+        workspaceId="workspace_1"
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "#");
+    await screen.findByRole("option", { name: /Daily Brief/i });
+    await user.clear(textarea);
+
+    const pastedText = "#daily-brief prepare the update";
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        getData: (format: string) => (format === "text/plain" ? pastedText : ""),
+      },
+    });
+
+    expect(textarea).toHaveValue(pastedText);
+    expect(
+      textarea.parentElement?.querySelectorAll('[data-opencompany-chat-mention="workflow"]'),
+    ).toHaveLength(0);
   });
 
   it.each([false, true])(
@@ -6638,6 +6850,13 @@ describe("Surface chat streaming UI", () => {
     });
   });
 });
+
+function setDocumentVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => state,
+  });
+}
 
 function taskView(overrides: Partial<TaskView> = {}): TaskView {
   const now = currentTimestamp();

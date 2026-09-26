@@ -134,6 +134,7 @@ import {
   getSlackMcpIntegrationState,
   loadSlackMcpWorkerConnection,
   SLACK_MCP_ENDPOINT_URL,
+  slackMcpRuntimeEndpointUrl,
 } from "./integrations/slack-mcp";
 import {
   getStripeMcpIntegrationState,
@@ -330,6 +331,7 @@ const providerBindings = {
   vercel: {
     provider: "vercel",
     endpointUrl: VERCEL_MCP_ENDPOINT_URL,
+    connectionAvailable: false,
     getState: getVercelIntegrationState,
     loadConnection: loadVercelMcpWorkerConnection,
   },
@@ -577,6 +579,10 @@ function bindRegistration(
     loadConnection = (input) =>
       loadGmailMcpWorkerConnection({ ...input, registrationId: record.id });
     server = { ...record.server, url: gmailMcpRuntimeEndpointUrl() };
+  } else if (record.pluginName === "slack") {
+    loadConnection = (input) =>
+      loadSlackMcpWorkerConnection({ ...input, registrationId: record.id });
+    server = { ...record.server, url: slackMcpRuntimeEndpointUrl() };
   }
   const capabilities =
     record.pluginName === "x" ? xMcpCapabilities(record.capabilities) : record.capabilities;
@@ -584,6 +590,9 @@ function bindRegistration(
     pluginName: record.pluginName,
     source: `plugin:${record.pluginName}:${record.server.name}`,
     connectionProvider: binding.provider,
+    ...("connectionAvailable" in binding && binding.connectionAvailable === false
+      ? { connectionAvailable: false }
+      : {}),
     label: displayName(record.pluginName),
     description: record.pluginDescription,
     server,

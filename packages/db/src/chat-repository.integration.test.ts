@@ -776,6 +776,21 @@ describe("Postgres Chat repositories", () => {
     await expect(service.listConversations(actor())).resolves.toMatchObject({
       conversations: [{ id: created.conversationId, composerSettings: expected }],
     });
+
+    const claude = await service.createMessage(actor(), {
+      idempotencyKey: "composer-settings-ultracode",
+      content: "Use Ultracode.",
+      engine: "claude_code",
+      model: "claude-sonnet-5",
+      settings: { reasoningEffort: "ultracode" },
+    });
+    await expect(service.getConversation(actor(), claude.conversationId)).resolves.toMatchObject({
+      composerSettings: {
+        reasoningEffort: "ultracode",
+        planModeEnabled: false,
+        goalMode: null,
+      },
+    });
   });
 
   it("normalizes JSON null attachment text and rejects non-object JSON at the database boundary", async () => {

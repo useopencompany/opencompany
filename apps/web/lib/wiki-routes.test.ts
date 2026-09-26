@@ -52,8 +52,9 @@ describe("wikiPagePathFromPathname", () => {
 
 describe("reserved slugs", () => {
   // A wiki slugged like a static segment would be permanently unreachable, so the guard in
-  // packages/db and the segments this module knows about have to describe the same set.
-  it("match the slugs the database refuses to allocate", () => {
-    expect([...WIKI_STATIC_SEGMENTS].toSorted()).toEqual([...RESERVED_WIKI_SLUGS].toSorted());
+  // packages/db has to include every segment this module knows about. The database may reserve
+  // additional slugs for non-route reasons, such as the agent tool's default-wiki alias.
+  it("are included in the slugs the database refuses to allocate", () => {
+    expect([...WIKI_STATIC_SEGMENTS].every((slug) => RESERVED_WIKI_SLUGS.has(slug))).toBe(true);
   });
 });

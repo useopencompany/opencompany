@@ -77,5 +77,6 @@ describe("sanitizeChatTitle", () => {
         }),
       }),
     );
+    expect(vi.mocked(generateText).mock.calls.at(-1)?.[0]).not.toHaveProperty("temperature");
   });
 });

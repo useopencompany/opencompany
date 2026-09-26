@@ -8,6 +8,7 @@ import {
 } from "@opencompany/db/session-subscriptions";
 import { snapshotPGliteSchema } from "@opencompany/db/test-schema-snapshot";
 import { TASK_TEST_BASE_SCHEMA } from "@opencompany/db/test-task-schema";
+import { sql } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/pglite";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +26,7 @@ import {
   type SlackDirectMessageWorkerDependencies,
   slackDirectMessagePrompt,
 } from "./slack-direct-message-worker";
+import type { SlackImageAttachmentMaterializer } from "./slack-message-attachments";
 
 vi.mock("@opencompany/db/integrations", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -48,6 +50,13 @@ const reply = {
   slackUserId: "U1",
   text: "What are the DB implications?",
 };
+const slackImage = {
+  id: "F1",
+  name: "bug.png",
+  mediaType: "image/png",
+  sizeBytes: 4,
+  urlPrivateDownload: "https://files.slack.com/files-pri/T1-F1/bug.png",
+};
 const ACTIVE_RUN = `
   UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","users:read.email"]';
   INSERT INTO goat.chat_messages (id, session_id, role, content, task_id) VALUES ('initial_user','session','user','Investigate','task'), ('initial_assistant','session','assistant','','task');
@@ -60,6 +69,7 @@ beforeAll(async () => {
   restore = await snapshotPGliteSchema(async (db) => {
     await db.exec(TASK_TEST_BASE_SCHEMA);
     for (const name of [
+      "0196_goat_chat_artifacts",
       "0198_goat_headless_chat_foundation",
       "0199_goat_chat_attachment_uploads",
       "0200_goat_chat_run_pausing",
@@ -80,7 +90,7 @@ beforeAll(async () => {
     }
     await db.exec(`ALTER TABLE goat.users ADD COLUMN email text;
       CREATE TABLE goat.plugins (id text PRIMARY KEY, workspace_id text, owner_user_id text, status text);
-      CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb);
+      CREATE TABLE goat.integrations (id text PRIMARY KEY, workspace_id text, user_workos_id text, provider text, external_id text, status text, scopes jsonb, status_reason text, updated_at timestamptz DEFAULT now());
       CREATE UNIQUE INDEX goat_integrations_workspace_provider_external_idx ON goat.integrations(workspace_id, provider, external_id) WHERE workspace_id IS NOT NULL;
       CREATE UNIQUE INDEX goat_integrations_slack_bot_workspace_idx ON goat.integrations(workspace_id, provider) WHERE workspace_id IS NOT NULL AND provider = 'slack_bot';
       CREATE TABLE goat.workflows (
@@ -153,6 +163,18 @@ beforeAll(async () => {
         "utf8",
       ),
     );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0309_slack_agent_images.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+    await db.exec(
+      await readFile(
+        new URL("../../../drizzle/0312_channel_delivery_images.sql", import.meta.url),
+        "utf8",
+      ),
+    );
   });
 }, 60_000);
 beforeEach(async () => {
@@ -181,6 +203,9 @@ beforeEach(async () => {
             ],
           },
     ) as unknown as SlackChannelWorkerDependencies["request"],
+    materializeAttachments: testAttachmentMaterializer(),
+    uploadImages: vi.fn(async () => []),
+    wait: vi.fn(async () => undefined),
   };
   await pg.exec(`
     INSERT INTO goat.users (workos_user_id, email) VALUES ('owner', 'owner@example.com'), ('member', 'member@example.com');
@@ -316,6 +341,30 @@ describe("dedicated company agent conversations", () => {
     ).toEqual([{ sequence: 0 }, { sequence: 1 }]);
   });
 
+  it("attaches Slack images to the company agent's first message", async () => {
+    const agentDeps = await setupAgents();
+    await pg.exec(`
+      UPDATE goat.slack_agent_messages
+      SET files = '[{"id":"F1","name":"bug.png","mediaType":"image/png","sizeBytes":4,"urlPrivateDownload":"https://files.slack.com/files-pri/T1-F1/bug.png"}]'
+      WHERE integration_id = 'agent-install1';
+      UPDATE goat.slack_agent_messages SET status = 'ignored' WHERE integration_id = 'agent-install2';
+    `);
+
+    expect(await processNextSlackAgentMessage(agentDeps)).toBe(true);
+    expect(agentDeps.materializeAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [slackImage] }),
+    );
+    expect(
+      (
+        await pg.query(
+          `SELECT message.attachments FROM goat.chat_messages message
+           JOIN goat.tasks task ON task.session_id = message.session_id
+           WHERE task.agent_id = 'agent1' AND message.role = 'user'`,
+        )
+      ).rows,
+    ).toEqual([{ attachments: [expect.objectContaining({ id: "attachment_test_f1" })] }]);
+  });
+
   it("does not create an owner-authorized run for an unmatched sender or an inactive owner", async () => {
     const agentDeps = await setupAgents();
     await pg.exec("DELETE FROM goat.workspace_members WHERE user_workos_id = 'member'");
@@ -359,6 +408,22 @@ describe("dedicated company agent conversations", () => {
 });
 
 describe("durable Slack subscriptions", () => {
+  it("attaches Slack images to a follow-up run", async () => {
+    await enqueueSlackThreadReply(execute, { ...reply, files: [slackImage] });
+
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(deps.materializeAttachments).toHaveBeenCalledWith(
+      expect.objectContaining({ files: [slackImage] }),
+    );
+    expect(
+      (
+        await pg.query(
+          "SELECT attachments FROM goat.chat_messages WHERE role = 'user' AND attachments <> '[]'::jsonb",
+        )
+      ).rows,
+    ).toEqual([{ attachments: [expect.objectContaining({ id: "attachment_test_f1" })] }]);
+  });
+
   it("upgrades existing thread policies without losing the subscription or other settings", async () => {
     await pg.exec(
       `UPDATE goat.session_subscriptions SET policy = '{"authorization":"workspace_member","queue":"serial","custom":true}'`,
@@ -743,6 +808,37 @@ describe("durable Slack subscriptions", () => {
         .rows,
     ).toEqual([{ status: "running", resumed: true }]);
   });
+  it("uses the provisioned Slack identity when a company agent reply has a different email", async () => {
+    await pg.exec(`
+      UPDATE goat.integrations SET company_agent_id = 'workflow-id', slack_app_id = 'A1'
+      WHERE id = 'install';
+      UPDATE goat.workflows SET kind = 'agent' WHERE id = 'workflow-id';
+      UPDATE goat.session_subscriptions
+      SET source_key = source_key || '{"integrationId":"install"}'::jsonb;
+      INSERT INTO goat.slack_provisioning_connections
+        (workspace_id, team_id, team_name, authorized_by, slack_user_id, encrypted_payload)
+      VALUES ('workspace', 'T1', 'Test Slack', 'owner', 'U1', '{}');
+    `);
+    deps.request = vi.fn(async ({ method }: { method: string }) =>
+      method === "users.info"
+        ? {
+            user: {
+              id: "U1",
+              team_id: "T1",
+              profile: { real_name: "Owner Person", email: "different@example.com" },
+            },
+          }
+        : { messages: [] },
+    ) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await enqueueSlackThreadReply(execute, { ...reply, integrationId: "install" });
+
+    expect(await processNextSubscriptionEvent(deps)).toBe(true);
+    expect(
+      (await pg.query("SELECT status, run_id IS NOT NULL AS resumed FROM goat.subscription_events"))
+        .rows,
+    ).toEqual([{ status: "running", resumed: true }]);
+  });
   it("does not copy a completed assistant turn into Slack when the reply tool was not used", async () => {
     await enqueueSlackThreadReply(execute, reply);
     await processNextSubscriptionEvent(deps);
@@ -983,6 +1079,268 @@ describe("durable Slack subscriptions", () => {
       { status: "uncertain" },
     ]);
     expect(await processNextChannelDelivery(deps)).toBe(false);
+  });
+});
+
+function testAttachmentMaterializer(): SlackImageAttachmentMaterializer {
+  return vi.fn(async ({ execute: run, actor, files }) => {
+    const ids: string[] = [];
+    for (const file of files) {
+      const id = `attachment_test_${file.id.toLowerCase()}`;
+      await run(sql`
+        INSERT INTO goat.chat_attachment_uploads (
+          id, user_workos_id, workspace_id, format, media_type, filename, size_bytes,
+          blob_pathname, blob_url, extracted_text, expires_at
+        ) VALUES (
+          ${id}, ${actor.userId}, ${actor.workspaceId}, 'image', ${file.mediaType}, ${file.name},
+          ${file.sizeBytes}, ${`test/${id}`}, ${`https://blob.test/${id}`}, NULL,
+          now() + interval '1 day'
+        )
+      `);
+      ids.push(id);
+    }
+    return ids;
+  });
+}
+
+describe("Slack posts with images", () => {
+  const SHA = "a".repeat(64);
+  const ARTIFACTS = `
+    INSERT INTO goat.chat_sessions (id, user_workos_id, title, model, engine, kind) VALUES ('other_session', 'owner', 'Other', 'test/model', 'codex', 'task');
+    INSERT INTO goat.chat_artifacts (id, workspace_id, user_workos_id, chat_session_id, title, current_version) VALUES
+      ('artifact_welcome', 'workspace', 'owner', 'session', 'Welcome screen', 2),
+      ('artifact_connect', 'workspace', 'owner', 'session', 'Connect Slack screen', 1),
+      ('artifact_notes', 'workspace', 'owner', 'session', 'Notes', 1),
+      ('artifact_elsewhere', 'workspace', 'owner', 'other_session', 'Elsewhere', 1);
+    INSERT INTO goat.chat_artifact_versions (id, artifact_id, version, title, filename, media_type, size_bytes, content_sha256, blob_pathname, source_engine, source_tool_call_id) VALUES
+      ('welcome_v1', 'artifact_welcome', 1, 'Welcome screen', 'welcome.png', 'image/png', 10, '${SHA}', 'blob/welcome-v1.png', 'codex', 'call_1'),
+      ('welcome_v2', 'artifact_welcome', 2, 'Welcome screen', 'welcome.png', 'image/png', 10, '${SHA}', 'blob/welcome-v2.png', 'codex', 'call_2'),
+      ('connect_v1', 'artifact_connect', 1, 'Connect Slack screen', 'connect.jpg', 'image/jpeg', 10, '${SHA}', 'blob/connect.jpg', 'codex', 'call_3'),
+      ('notes_v1', 'artifact_notes', 1, 'Notes', 'notes.md', 'text/markdown', 10, '${SHA}', 'blob/notes.md', 'codex', 'call_4'),
+      ('elsewhere_v1', 'artifact_elsewhere', 1, 'Elsewhere', 'elsewhere.png', 'image/png', 10, '${SHA}', 'blob/elsewhere.png', 'codex', 'call_5');
+  `;
+  const UPLOADING_INSTALL = `UPDATE goat.integrations SET scopes = '["chat:write","channels:read","channels:history","users:read","files:write"]';`;
+  const post = (images: string[], messageKey = "onboarding") =>
+    postWorkflowSlackMessage(
+      {
+        runId: "initial_run",
+        actorId: "owner",
+        post: { channel: "C1", text: "Two screens. One button each.", messageKey, images },
+      },
+      execute,
+    );
+  const postMessages = () =>
+    vi
+      .mocked(deps.request)
+      .mock.calls.map(([call]) => call)
+      .filter((call) => call.method === "chat.postMessage");
+
+  beforeEach(async () => {
+    await pg.exec(ACTIVE_RUN);
+    await pg.exec(ARTIFACTS);
+    // Only the queued post is under test; the fixture root is already sent.
+    await pg.exec("UPDATE goat.channel_deliveries SET status = 'sent' WHERE id = 'root'");
+    deps.wait = vi.fn(async () => undefined);
+  });
+
+  it("pins each image to the version the run saw and keeps their order", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    const queued = await post(["artifact_connect", "artifact_welcome"]);
+    expect(queued.message).not.toContain("cannot upload");
+    expect(
+      (
+        await pg.query(
+          "SELECT image_artifact_version_ids FROM goat.channel_deliveries WHERE id = $1",
+          [queued.deliveryId],
+        )
+      ).rows,
+    ).toEqual([{ image_artifact_version_ids: ["connect_v1", "welcome_v2"] }]);
+    // Replaying the same key with other images is a different message, not a retry.
+    await expect(post(["artifact_welcome"])).rejects.toThrow("messageKey");
+  });
+
+  it("rejects images that are not this session's published PNG, JPEG, or WebP files", async () => {
+    await expect(post(["artifact_elsewhere"])).rejects.toThrow("No published file in this session");
+    await expect(post(["artifact_missing"])).rejects.toThrow("No published file in this session");
+    await expect(post(["artifact_notes"])).rejects.toThrow("PNG, JPEG, or WebP");
+    await expect(post(["artifact_welcome", "artifact_connect", "a3", "a4", "a5"])).rejects.toThrow(
+      "up to 4",
+    );
+    await expect(post(["artifact_welcome", "artifact_welcome"])).rejects.toThrow("distinct");
+    expect(
+      (await pg.query("SELECT id FROM goat.channel_deliveries WHERE id <> 'root'")).rows,
+    ).toEqual([]);
+  });
+
+  it("uploads the images, then shows them under the text in one post", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    await post(["artifact_welcome", "artifact_connect"]);
+    deps.uploadImages = vi.fn(async () => [
+      { fileId: "F1", title: "Welcome screen" },
+      { fileId: "F2", title: "Connect Slack screen" },
+    ]);
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(deps.uploadImages).toHaveBeenCalledWith(
+      {
+        token: "test-token",
+        images: [
+          { title: "Welcome screen", filename: "welcome.png", blobPathname: "blob/welcome-v2.png" },
+          {
+            title: "Connect Slack screen",
+            filename: "connect.jpg",
+            blobPathname: "blob/connect.jpg",
+          },
+        ],
+      },
+      { request: deps.request },
+    );
+    const [message] = postMessages();
+    expect(message?.form?.text).toBe("Two screens. One button each.");
+    expect(JSON.parse(message?.form?.blocks ?? "[]")).toEqual([
+      { type: "section", text: { type: "mrkdwn", text: "Two screens. One button each." } },
+      {
+        type: "image",
+        slack_file: { id: "F1" },
+        alt_text: "Welcome screen",
+        title: { type: "plain_text", text: "Welcome screen" },
+      },
+      {
+        type: "image",
+        slack_file: { id: "F2" },
+        alt_text: "Connect Slack screen",
+        title: { type: "plain_text", text: "Connect Slack screen" },
+      },
+    ]);
+    expect(
+      (await pg.query("SELECT status FROM goat.channel_deliveries WHERE message_ts = '300.001'"))
+        .rows,
+    ).toEqual([{ status: "sent" }]);
+  });
+
+  it("waits for Slack to finish processing the files instead of failing the post", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    await post(["artifact_welcome"]);
+    deps.uploadImages = vi.fn(async () => [{ fileId: "F1", title: "Welcome screen" }]);
+    let attempts = 0;
+    deps.request = vi.fn(async ({ method }: { method: string }) => {
+      if (method !== "chat.postMessage") return {};
+      attempts += 1;
+      if (attempts < 3) throw new Error("Slack API chat.postMessage returned invalid_blocks.");
+      return { ts: "300.001" };
+    }) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await processNextChannelDelivery(deps);
+    expect(deps.wait).toHaveBeenNthCalledWith(1, 1_000);
+    expect(deps.wait).toHaveBeenNthCalledWith(2, 2_000);
+    expect(postMessages()).toHaveLength(3);
+    expect(postMessages().every((call) => call.form?.blocks)).toBe(true);
+    expect(
+      (await pg.query("SELECT status FROM goat.channel_deliveries WHERE message_ts = '300.001'"))
+        .rows,
+    ).toEqual([{ status: "sent" }]);
+  });
+
+  it("still delivers the message, with a task link, when Slack never accepts the images", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    await post(["artifact_welcome"]);
+    deps.uploadImages = vi.fn(async () => [{ fileId: "F1", title: "Welcome screen" }]);
+    deps.request = vi.fn(
+      async ({ method, form }: { method: string; form?: { blocks?: string } }) => {
+        if (method === "chat.postMessage" && form?.blocks)
+          throw new Error("Slack API chat.postMessage returned invalid_blocks.");
+        return { ts: "300.001" };
+      },
+    ) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await processNextChannelDelivery(deps);
+    const last = postMessages().at(-1);
+    expect(last?.form?.blocks).toBeUndefined();
+    expect(last?.form?.text).toMatch(
+      /^Two screens\. One button each\.\n\n<https?:\/\/[^|]+\/tasks\/task\|See the images in opencompany>$/,
+    );
+    expect(
+      (await pg.query("SELECT status FROM goat.channel_deliveries WHERE message_ts = '300.001'"))
+        .rows,
+    ).toEqual([{ status: "sent" }]);
+  });
+
+  it("keeps a delivery pending while it uploads, so a crash mid-upload is retried rather than stranded", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    const queued = await post(["artifact_welcome"]);
+    deps.uploadImages = vi.fn(async () => {
+      const [row] = (
+        await pg.query<{ status: string }>(
+          "SELECT status FROM goat.channel_deliveries WHERE id = $1",
+          [queued.deliveryId],
+        )
+      ).rows;
+      expect(row?.status).toBe("pending");
+      // Canceled while uploading: the post must not go out.
+      await pg.query("UPDATE goat.channel_deliveries SET status = 'canceled' WHERE id = $1", [
+        queued.deliveryId,
+      ]);
+      return [{ fileId: "F1", title: "Welcome screen" }];
+    });
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    expect(await processNextChannelDelivery(deps)).toBe(true);
+    expect(postMessages()).toEqual([]);
+    expect(
+      (
+        await pg.query("SELECT status FROM goat.channel_deliveries WHERE id = $1", [
+          queued.deliveryId,
+        ])
+      ).rows,
+    ).toEqual([{ status: "canceled" }]);
+  });
+
+  it("links to the task when the upload fails, without retrying the images", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    await post(["artifact_welcome"]);
+    deps.uploadImages = vi.fn(async () => {
+      throw new Error("Attachment blob is unavailable.");
+    });
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await processNextChannelDelivery(deps);
+    expect(postMessages()).toHaveLength(1);
+    expect(postMessages()[0]?.form?.text).toContain("|See the images in opencompany>");
+    expect(postMessages()[0]?.form?.blocks).toBeUndefined();
+  });
+
+  it("tells the run, and links to the task, when the install cannot upload files yet", async () => {
+    const queued = await post(["artifact_welcome"]);
+    expect(queued.message).toContain("cannot upload images yet");
+    deps.uploadImages = vi.fn(async () => []);
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await processNextChannelDelivery(deps);
+    expect(deps.uploadImages).not.toHaveBeenCalled();
+    expect(postMessages()[0]?.form?.text).toContain("/tasks/task|See the images in opencompany>");
+  });
+
+  it("posts text-only messages exactly as before", async () => {
+    await pg.exec(UPLOADING_INSTALL);
+    await post([]);
+    deps.uploadImages = vi.fn(async () => []);
+    deps.request = vi.fn(async () => ({
+      ts: "300.001",
+    })) as unknown as SlackChannelWorkerDependencies["request"];
+
+    await processNextChannelDelivery(deps);
+    expect(deps.uploadImages).not.toHaveBeenCalled();
+    expect(postMessages()[0]?.form).toMatchObject({ text: "Two screens. One button each." });
+    expect(postMessages()[0]?.form?.blocks).toBeUndefined();
   });
 });
 

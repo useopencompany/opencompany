@@ -1,4 +1,9 @@
-import type { AgentModelId, CodexReasoningEffort, JsonValue } from "./types";
+import type {
+  AgentModelId,
+  ClaudeCodeReasoningEffort,
+  CodexReasoningEffort,
+  JsonValue,
+} from "./types";
 
 export type ModelProviderOptions = Record<string, Record<string, JsonValue>>;
 export type ReasoningExposure = "hidden" | "summary" | "raw";
@@ -47,8 +52,11 @@ export const GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS = {
 // here, beside the model definitions, so adding or retiring a model updates every model picker.
 export const OPENCOMPANY_CHAT_DEFAULT_MODEL_ID: AgentModelId = "moonshotai/kimi-k3";
 export const OPENCOMPANY_CHAT_MODEL_IDS = [
+  "anthropic/claude-opus-5.5",
   "anthropic/claude-sonnet-5",
   "anthropic/claude-opus-4.8",
+  "openai/gpt-6-sol",
+  "openai/gpt-6-luna",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.5",
@@ -61,10 +69,11 @@ export const OPENCOMPANY_CHAT_MODEL_IDS = [
   "zai/glm-5.2",
 ] as const satisfies readonly AgentModelId[];
 
-// Opus 4.8 remains loadable for persisted conversations and runtime settings, but is unavailable
-// for new selections. This rule applies to normal chat and both cloud coding agents.
+// Superseded Opus models remain loadable for persisted conversations and runtime settings, but
+// are unavailable for new selections. This rule applies to normal chat and both cloud coding agents.
 export const AGENT_MODEL_PICKER_HIDDEN_IDS = [
   "anthropic/claude-opus-4.8",
+  "anthropic/claude-opus-5",
 ] as const satisfies readonly AgentModelId[];
 const HIDDEN_MODEL_PICKER_ID_SET = new Set<string>(AGENT_MODEL_PICKER_HIDDEN_IDS);
 
@@ -75,6 +84,8 @@ export function isAgentModelSelectable(modelId: string): boolean {
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-6-astra",
+  "openai/gpt-6-sol",
+  "openai/gpt-6-luna",
   "openai/gpt-5.6-sol",
   "openai/gpt-5.6-terra",
   "openai/gpt-5.6-luna",
@@ -102,6 +113,10 @@ export const CODEX_REASONING_EFFORTS = [
   "high",
   "xhigh",
 ] as const satisfies readonly CodexReasoningEffort[];
+export const CLAUDE_CODE_REASONING_EFFORTS = [
+  ...CODEX_REASONING_EFFORTS,
+  "ultracode",
+] as const satisfies readonly ClaudeCodeReasoningEffort[];
 
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
 const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
@@ -109,6 +124,7 @@ const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([
   ...LEGACY_CODEX_RUNTIME_MODEL_IDS,
 ]);
 const CODEX_REASONING_EFFORT_SET = new Set<string>(CODEX_REASONING_EFFORTS);
+const CLAUDE_CODE_REASONING_EFFORT_SET = new Set<string>(CLAUDE_CODE_REASONING_EFFORTS);
 
 export function isCodexModelId(value: string): value is AgentModelId {
   return CODEX_MODEL_ID_SET.has(value);
@@ -132,6 +148,10 @@ export function isCodexReasoningEffort(value: string): value is CodexReasoningEf
   return CODEX_REASONING_EFFORT_SET.has(value);
 }
 
+export function isClaudeCodeReasoningEffort(value: string): value is ClaudeCodeReasoningEffort {
+  return CLAUDE_CODE_REASONING_EFFORT_SET.has(value);
+}
+
 export function codexCliModelNameForModelId(modelId: string): string | null {
   return CODEX_RUNTIME_MODEL_ID_SET.has(modelId) ? modelId.replace(/^openai\//, "") : null;
 }
@@ -145,11 +165,19 @@ export const CLAUDE_CODE_DEFAULT_MODEL_ID: AgentModelId = "anthropic/claude-sonn
 // the turn by name instead of silently answering on a different model.
 export const CLAUDE_CODE_AGENT_MODEL_IDS = [
   "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-5.5",
   "anthropic/claude-opus-5",
   "anthropic/claude-opus-4.8",
   "anthropic/claude-fable-5.1",
   "anthropic/claude-fable-5",
   "anthropic/claude-haiku-4.5",
+] as const satisfies readonly AgentModelId[];
+
+const CLAUDE_CODE_ULTRACODE_MODEL_IDS = [
+  "anthropic/claude-sonnet-5",
+  "anthropic/claude-opus-5.5",
+  "anthropic/claude-opus-5",
+  "anthropic/claude-opus-4.8",
 ] as const satisfies readonly AgentModelId[];
 
 const CLAUDE_CODE_MODEL_ID_SET = new Set<string>(CLAUDE_CODE_AGENT_MODEL_IDS);
@@ -171,6 +199,20 @@ export function claudeCodeModelSupportsReasoningEffort(model: string): boolean {
       !modelId.includes("haiku") &&
       (model === modelId || model === claudeCodeCliModelNameForModelId(modelId)),
   );
+}
+
+export function claudeCodeModelSupportsUltracode(model: string): boolean {
+  return CLAUDE_CODE_ULTRACODE_MODEL_IDS.some(
+    (modelId) => model === modelId || model === claudeCodeCliModelNameForModelId(modelId),
+  );
+}
+
+export function claudeCodeReasoningEffortsForModel(
+  model: string,
+): readonly ClaudeCodeReasoningEffort[] {
+  return claudeCodeModelSupportsUltracode(model)
+    ? CLAUDE_CODE_REASONING_EFFORTS
+    : CODEX_REASONING_EFFORTS;
 }
 
 // Ratings were seeded from public data on 2026-06-03 (Artificial Analysis
@@ -196,6 +238,48 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
     supportsImages: true,
     supportsPdf: false,
     ratings: { capability: 3, speed: 1, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-6-sol",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Sol",
+    description: "OpenAI's GPT-6 reasoning model for complex coding and agentic workflows.",
+    category: "Deep",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 3, speed: 2, cost: 3 },
+    reasoning: {
+      providerOptions: {
+        openai: {
+          reasoningEffort: "medium",
+          reasoningSummary: "concise",
+        },
+      },
+      exposure: "summary",
+    },
+  },
+  {
+    id: "openai/gpt-6-luna",
+    type: "model",
+    contextWindowTokens: 1_050_000,
+    label: "GPT 6 Luna",
+    description: "Efficient GPT-6 reasoning model for focused, high-volume work.",
+    category: "Fast",
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: false,
+    ratings: { capability: 2, speed: 3, cost: 1 },
     reasoning: {
       providerOptions: {
         openai: {
@@ -486,6 +570,19 @@ export const AGENT_MODEL_CATALOG: AgentModelDefinition[] = [
       },
       exposure: "hidden",
     },
+  },
+  {
+    id: "anthropic/claude-opus-5.5",
+    type: "model",
+    contextWindowTokens: 1_000_000,
+    label: "Claude Opus 5.5",
+    description: "Anthropic's leading model for long-running agentic coding and knowledge work.",
+    category: "Deep",
+    // Adaptive reasoning is always on, so sending a fixed thinking budget would be rejected.
+    supportsReasoning: true,
+    supportsImages: true,
+    supportsPdf: true,
+    ratings: { capability: 3, speed: 2, cost: 3 },
   },
   {
     id: "anthropic/claude-fable-5.1",

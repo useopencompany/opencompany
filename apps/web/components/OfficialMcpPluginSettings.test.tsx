@@ -1621,6 +1621,36 @@ describe("Linear plugin settings", () => {
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
+  it("server-renders discovery timestamps independently of the server timezone", () => {
+    const originalTimezone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      const utcHtml = renderToString(
+        <LinearPluginDetail
+          pluginState={{ status: "ready", plugin }}
+          toolsState={toolsState}
+          canEdit
+        />,
+      );
+      process.env.TZ = "Asia/Calcutta";
+      const indiaHtml = renderToString(
+        <LinearPluginDetail
+          pluginState={{ status: "ready", plugin }}
+          toolsState={toolsState}
+          canEdit
+        />,
+      );
+
+      expect(indiaHtml).toBe(utcHtml);
+      expect(utcHtml).toContain(
+        '<time dateTime="2026-08-26T12:00:00.000Z">Aug 26, 2026, 12:00 PM</time>',
+      );
+    } finally {
+      if (originalTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
+  });
+
   it("gives Doppler standard package controls and a connection-aware status without the inspector", () => {
     const dopplerPlugin = { ...plugin, name: "doppler", remoteMcpServers: [], events: [] };
     const settings = { status: null, statusReason: null, accountName: null, lastValidatedAt: null };
@@ -1954,7 +1984,7 @@ describe("Linear plugin settings", () => {
     expect(useLiveQuery).not.toHaveBeenCalled();
   });
 
-  it("maps the personal Latitude connection onto the official plugin surface", () => {
+  it("maps the personal Latitude connection onto the official plugin surface", async () => {
     const latitudePlugin = {
       ...plugin,
       id: "plugin_latitude",
@@ -1962,7 +1992,7 @@ describe("Linear plugin settings", () => {
       manifest: { name: "latitude", description: "Investigate Latitude observability data." },
       source: { ...plugin.source, path: "latitude" },
     } satisfies PluginInstallationDto;
-    const html = renderToString(
+    render(
       <LatitudePluginDetail
         pluginState={{ status: "ready", plugin: latitudePlugin }}
         toolsState={defaultLatitudeToolsState()}
@@ -1970,10 +2000,22 @@ describe("Linear plugin settings", () => {
       />,
     );
 
-    expect(html).toContain("Latitude workspace");
-    expect(html).toContain("Inspect Latitude workspace");
-    expect(html).toContain("Read traces and user data");
-    expect(html).toContain("Manage Latitude");
+    expect(screen.queryByText("No Latitude accounts are connected.")).not.toBeInTheDocument();
+    expect(screen.getByText("Connected")).toBeInTheDocument();
+    expect(screen.getByText("Inspect Latitude workspace")).toBeInTheDocument();
+    expect(screen.getByText("Read traces and user data")).toBeInTheDocument();
+    expect(screen.getByText("Manage Latitude")).toBeInTheDocument();
+
+    await userEvent.click(
+      within(
+        screen.getByRole("group", { name: "Inspect Latitude workspace permission" }),
+      ).getByRole("button", { name: "Ask" }),
+    );
+    expect(accountActions.setIntegrationCapabilityModeAction).toHaveBeenCalledWith(
+      "gint_latitude",
+      "read",
+      "ask",
+    );
     expect(LATITUDE_PLUGIN_SOURCE).toBe(
       "https://github.com/useopencompany/plugins/tree/56855e7d53ee3544520ec1fdef84d9e2f5ae6896/latitude",
     );

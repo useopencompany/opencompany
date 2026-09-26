@@ -6,8 +6,59 @@ import {
   CODEX_WEB_SEARCH_TOOL_NAME,
 } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
-import { SLACK_BOT_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
-import { toolCallViewFromPart } from "./assistant-items";
+import { type ChatUiMessage, SLACK_BOT_TOOL_NAME, USE_ACTION_TOOL_NAME } from "@/lib/chat-ui";
+import { getOrderedAssistantItems, toolCallViewFromPart } from "./assistant-items";
+
+it("turns only a source-specific disconnected plugin discovery into a card", () => {
+  const message: ChatUiMessage = {
+    id: "assistant_1",
+    role: "assistant",
+    parts: [
+      {
+        type: "tool-list_actions",
+        toolCallId: "list_all",
+        state: "output-available",
+        input: {},
+        output: {
+          ok: true,
+          sources: [
+            {
+              id: "plugin:stripe:stripe",
+              label: "Stripe",
+              description: "Stripe tools",
+              connection: { pluginName: "stripe", status: "needs_reauth" },
+            },
+          ],
+        },
+      },
+      {
+        type: "tool-list_actions",
+        toolCallId: "list_stripe",
+        state: "output-available",
+        input: { source: "plugin:stripe:stripe" },
+        output: {
+          ok: true,
+          source: {
+            id: "plugin:stripe:stripe",
+            label: "Stripe",
+            description: "Stripe tools",
+            connection: { pluginName: "stripe", status: "needs_reauth" },
+          },
+          actions: [],
+        },
+      },
+    ],
+  };
+  const items = getOrderedAssistantItems(message, new Map());
+  expect(items.filter((item) => item.type === "plugin-connection")).toEqual([
+    {
+      type: "plugin-connection",
+      key: "plugin-connection-1",
+      pluginName: "stripe",
+      status: "needs_reauth",
+    },
+  ]);
+});
 
 describe("coding transcript tool presentations", () => {
   it("uses command descriptions and removes shell invocation wrappers", () => {
@@ -50,6 +101,30 @@ describe("coding transcript tool presentations", () => {
         },
       }),
     ).toMatchObject({ label: "Slack bot", detail: "Thread reply" });
+  });
+
+  it("counts the images a Slack post carries", () => {
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_images",
+        state: "input-available",
+        input: {
+          text: "Two screens. One button each.",
+          messageKey: "onboarding",
+          images: ["artifact_1", "artifact_2"],
+        },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "Thread reply · 2 images" });
+
+    expect(
+      toolCallViewFromPart({
+        type: `tool-${SLACK_BOT_TOOL_NAME}`,
+        toolCallId: "slack_image",
+        state: "input-available",
+        input: { channel: "#product", text: "Chart.", messageKey: "chart", images: ["artifact_1"] },
+      }),
+    ).toMatchObject({ label: "Slack bot", detail: "#product · 1 image" });
   });
 
   it("never exposes internal coding tool names when richer fields are absent", () => {

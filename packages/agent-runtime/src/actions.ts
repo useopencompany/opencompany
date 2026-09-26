@@ -60,7 +60,7 @@ export const LEGACY_ACTION_TOOL_CONTRACT = {
     name: "list_actions",
     title: "List integration actions",
     description:
-      "Discover the concrete actions currently available from connected integrations and enabled managed capabilities. Omit source first to list available sources, then pass one exact source id to inspect its actions. Connected integrations mostly expose reads, while some policies also expose writes; managed capabilities are metered and never mutate connected third-party accounts, though some can create internal chat artifacts. Discovery is mandatory before the first use_action call for a source. The result contains exact action ids, descriptions, permission modes, and authoritative JSON parameter schemas; copy parameter names and types exactly instead of guessing or renaming them.",
+      "Discover installed integration sources and enabled managed capabilities. Sources with a connection status have no actions until the user connects or reconnects the account. Omit source first to list sources, then pass one exact source id to inspect its actions or connection status. If a needed source needs a connection, inspect it by source id so chat can show the connection card, explain the pause, and stop rather than using another account. Connected integrations mostly expose reads, while some policies also expose writes; managed capabilities are metered and never mutate connected third-party accounts, though some can create internal chat artifacts. Discovery is mandatory before the first use_action call for a source. The result contains exact action ids, descriptions, permission modes, and authoritative JSON parameter schemas; copy parameter names and types exactly instead of guessing or renaming them.",
     inputSchema: {
       type: "object",
       properties: {
@@ -120,10 +120,10 @@ export function supportsCompactActionDiscovery(version: string): boolean {
 }
 
 export const ACTION_DISCOVERY_INSTRUCTIONS =
-  "Use list_actions to discover sources and compact action inventories. When describe_actions is available, request one to five exact action IDs for their complete definitions before executing if those definitions are not already visible in the conversation. A known exact ID can go directly to describe_actions. Reuse visible definitions, including full-schema listings from older turns; do not retrieve them again just because a new turn started. Compact inventories are not definitions: never infer parameters from an action name or preview. Retrieve the full definition of each selected action before use_action, unless that exact action's complete schema is already visible. Description is not execution approval.";
+  "Use list_actions to discover sources and compact action inventories, including installed plugins without a working connection. A source with connection status needs the user's account connection before its actions can run; if that source is needed, call list_actions with its exact source id to show the in-chat connection card, then explain the pause and stop. When describe_actions is available, request one to five exact action IDs for their complete definitions before executing if those definitions are not already visible in the conversation. A known exact ID can go directly to describe_actions. Reuse visible definitions, including full-schema listings from older turns; do not retrieve them again just because a new turn started. Compact inventories are not definitions: never infer parameters from an action name or preview. Retrieve the full definition of each selected action before use_action, unless that exact action's complete schema is already visible. Description is not execution approval.";
 
 export const LEGACY_ACTION_DISCOVERY_INSTRUCTIONS =
-  "Use list_actions to discover sources and full action definitions. Before executing, list the relevant source unless its complete definitions are already visible in the conversation. Reuse visible full-schema listings on later turns. Copy exact parameter names and types from the complete schema before use_action.";
+  "Use list_actions to discover sources and full action definitions, including installed plugins without a working connection. A source with connection status needs the user's account connection before its actions can run; if that source is needed, call list_actions with its exact source id to show the in-chat connection card, then explain the pause and stop. Before executing, list the relevant source unless its complete definitions are already visible in the conversation. Reuse visible full-schema listings on later turns. Copy exact parameter names and types from the complete schema before use_action.";
 
 export function actionDiscoveryInstructionsForContract(version: string): string {
   return supportsCompactActionDiscovery(version)
@@ -135,7 +135,7 @@ export const ACTION_TOOL_CONTRACT = {
   list: {
     ...LEGACY_ACTION_TOOL_CONTRACT.list,
     description:
-      "Discover available connected integrations and enabled managed capabilities. Omit source to list sources, then pass an exact source id for all its available action IDs, short description previews, and permission modes. Action inventories omit parameter schemas; call describe_actions for selected complete definitions before use_action unless already visible in the conversation. Managed capabilities are metered. Neither listing nor description executes a provider action or consumes the execution budget.",
+      "Discover installed integration sources and enabled managed capabilities. Sources with connection status have no actions until the user connects or reconnects; inspect a needed source by exact id to show its in-chat connection card, then pause. Omit source to list sources, then pass an exact source id for available action IDs, short description previews, and permission modes. Action inventories omit parameter schemas; call describe_actions for selected complete definitions before use_action unless already visible in the conversation. Managed capabilities are metered. Neither listing nor description executes a provider action or consumes the execution budget.",
   },
   describe: {
     name: "describe_actions",
@@ -202,6 +202,10 @@ export type ActionSource = {
   kind?: "integration" | "managed";
   label: string;
   description: string;
+  connection?: {
+    pluginName: string;
+    status: "not_connected" | "needs_reauth";
+  };
 };
 
 export type ActionDescriptor = {

@@ -38,6 +38,7 @@ export type RemoteMcpCapabilityDefinition = {
 export type RemoteMcpConnectionState = {
   connected: boolean;
   integrationId: string | null;
+  status?: string;
   capabilityModes: Record<string, unknown>;
   toolModes: Record<string, unknown>;
 };
@@ -58,6 +59,7 @@ export type RemoteMcpOperation =
 
 export type RemoteMcpGatewayRegistration = {
   approvalContext?: string;
+  connectionAvailable?: boolean;
   pluginName: string;
   source: ActionSourceId;
   connectionProvider: ActionProviderId;

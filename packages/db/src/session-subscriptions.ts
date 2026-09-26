@@ -13,6 +13,13 @@ export type SlackThreadReply = {
   messageTs: string;
   slackUserId: string;
   text: string;
+  files?: Array<{
+    id: string;
+    name: string;
+    mediaType: string;
+    sizeBytes: number;
+    urlPrivateDownload: string;
+  }>;
   integrationId?: string;
 };
 

@@ -9,6 +9,7 @@ import {
   CreateTaskBodySchema,
   CreateTaskCommentBodySchema,
   InvokeWorkflowBodySchema,
+  MessageEngineSchema,
   MessageReadModelSchema,
   MessageSummaryReadModelSchema,
   ReadModelSchema,
@@ -18,6 +19,23 @@ import {
 } from "./schemas";
 
 describe("headless protocol", () => {
+  it("accepts Ultracode for Claude Code and rejects it for Codex", () => {
+    expect(
+      MessageEngineSchema.safeParse({
+        type: "claude_code",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "ultracode" },
+      }).success,
+    ).toBe(true);
+    expect(
+      MessageEngineSchema.safeParse({
+        type: "codex",
+        schemaVersion: 1,
+        settings: { reasoningEffort: "ultracode" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("accepts Task comments with text, attachments, or both", () => {
     expect(
       CreateTaskCommentBodySchema.safeParse({
@@ -123,6 +141,7 @@ describe("headless protocol", () => {
       "/v1/onboarding",
       "/v1/onboarding/profile",
       "/v1/onboarding/workspace",
+      "/v1/onboarding/repository-scan",
       "/v1/onboarding/complete",
       "/v1/wikis",
       "/v1/wikis/{wikiId}",
@@ -211,6 +230,10 @@ describe("headless protocol", () => {
       "/v1/workspace/slack-provisioning/complete",
       "/v1/workspace/slack-provisioning/confirm",
       "/v1/workspace/slack-bot",
+      "/v1/company-plugins/github",
+      "/v1/company-plugins/github/available-installations",
+      "/v1/company-plugins/github/installations",
+      "/v1/company-plugins/github/installations/{integrationId}",
       "/v1/integrations/{integrationId}/resource-options",
       "/v1/integration-accounts/{integrationId}/capability-modes/{capabilityId}",
       "/v1/integration-accounts/{integrationId}/tool-modes/{toolId}",

@@ -48,15 +48,24 @@ export const CONVERSATION_DRAG_TYPE = "application/x-opencompany-conversation";
 export type SidebarRowDragProps = {
   draggable?: true;
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd?: (event: DragEvent<HTMLElement>) => void;
 };
 
-export function conversationDragProps(conversationId: string): SidebarRowDragProps {
+export function conversationDragProps(
+  conversationId: string,
+  hooks?: { onDragStart?: () => void; onDragEnd?: () => void },
+): SidebarRowDragProps {
   return {
     draggable: true,
     onDragStart: (event: DragEvent<HTMLElement>) => {
       event.dataTransfer.setData(CONVERSATION_DRAG_TYPE, conversationId);
-      event.dataTransfer.effectAllowed = "move";
+      // One drag, two destinations: a Project files the chat (move) and a chat
+      // pane opens a second view of it (copy). Allowing both lets each drop
+      // target set the effect that describes what it is about to do.
+      event.dataTransfer.effectAllowed = "copyMove";
+      hooks?.onDragStart?.();
     },
+    onDragEnd: () => hooks?.onDragEnd?.(),
   };
 }
 
@@ -485,7 +494,16 @@ function ProjectFolder({
             event.dataTransfer.dropEffect = "move";
             setDropTarget(true);
           }}
-          onDragLeave={() => setDropTarget(false)}
+          onDragLeave={(event) => {
+            // Crossing onto the folder's own name or menu button is not leaving it, and treating
+            // it as such made the highlight flicker under the pointer.
+            if (
+              event.relatedTarget instanceof Node &&
+              event.currentTarget.contains(event.relatedTarget)
+            )
+              return;
+            setDropTarget(false);
+          }}
           onDrop={(event) => {
             setDropTarget(false);
             const conversationId = draggedConversationId(event);

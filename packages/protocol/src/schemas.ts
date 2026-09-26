@@ -40,7 +40,15 @@ export const ConversationRuntimeSchema = z
   })
   .strict()
   .openapi("ConversationRuntime");
-export const EngineReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const CodexReasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh"]);
+export const ClaudeCodeReasoningEffortSchema = z.enum([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "ultracode",
+]);
+export const EngineReasoningEffortSchema = ClaudeCodeReasoningEffortSchema;
 export const CodexGoalModeSchema = z
   .object({
     objective: z.string().min(1).max(4_000),
@@ -70,7 +78,7 @@ export const MessageEngineSchema = z
         schemaVersion: z.literal(1),
         settings: z
           .object({
-            reasoningEffort: EngineReasoningEffortSchema,
+            reasoningEffort: CodexReasoningEffortSchema,
             planModeEnabled: z.boolean().optional(),
             goalMode: CodexGoalModeSchema.nullable().optional(),
           })
@@ -83,7 +91,7 @@ export const MessageEngineSchema = z
         schemaVersion: z.literal(1),
         settings: z
           .object({
-            reasoningEffort: EngineReasoningEffortSchema,
+            reasoningEffort: ClaudeCodeReasoningEffortSchema,
           })
           .strict(),
       })
@@ -3238,6 +3246,43 @@ export const FinishOnboardingBodySchema = z
   .strict()
   .openapi("FinishOnboardingBody");
 
+// "owner/name", as GitHub spells a repository. The scan re-checks access, so this only bounds input.
+export const GitHubRepositoryFullNameSchema = z
+  .string()
+  .max(201)
+  .regex(/^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/)
+  .openapi("GitHubRepositoryFullName");
+
+export const ScanOnboardingRepositoryBodySchema = z
+  .object({ repository: GitHubRepositoryFullNameSchema.optional() })
+  .strict()
+  .openapi("ScanOnboardingRepositoryBody");
+
+export const OnboardingRepositoryScanSchema = z
+  .discriminatedUnion("status", [
+    z.object({ status: z.literal("not_connected") }).strict(),
+    z.object({ status: z.literal("no_repositories") }).strict(),
+    z
+      .object({
+        status: z.literal("scanned"),
+        repository: z.object({ fullName: z.string(), private: z.boolean() }).strict(),
+        repositories: z.array(z.string()).max(20),
+        plugins: z
+          .array(
+            z.object({ plugin: z.string().min(1).max(64), reason: z.string().max(300) }).strict(),
+          )
+          .max(20),
+        recommendedBy: z.enum(["jev", "rules"]),
+      })
+      .strict(),
+  ])
+  .openapi("OnboardingRepositoryScan");
+
+export const OnboardingRepositoryScanEnvelopeSchema = z
+  .object({ data: OnboardingRepositoryScanSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("OnboardingRepositoryScanEnvelope");
+
 export const OnboardingCommandEnvelopeSchema = z
   .object({
     data: z.object({ completed: z.literal(true) }).strict(),
@@ -3599,6 +3644,73 @@ export const SlackBotWorkspaceSettingsEnvelopeSchema = z
   .strict()
   .openapi("SlackBotWorkspaceSettingsEnvelope");
 
+// Plugins → Company → GitHub. Every member can read which GitHub accounts the workspace linked,
+// because company automations bind their event triggers to them; only admins change the links.
+export const CompanyGitHubInstallationSchema = z
+  .object({
+    integrationId: IntegrationAccountIdSchema,
+    installationId: z.string().min(1).max(64),
+    accountLogin: z.string().min(1).max(256),
+    accountType: z.enum(["Organization", "User"]),
+    status: z.enum(["connected", "needs_reauth", "sync_failed", "disconnected"]),
+    statusReason: z.string().max(2_000).nullable(),
+    linkedAt: TimestampSchema,
+  })
+  .strict()
+  .openapi("CompanyGitHubInstallation");
+
+export const CompanyGitHubPluginSchema = z
+  .object({
+    configured: z.boolean(),
+    canManage: z.boolean(),
+    installations: z.array(CompanyGitHubInstallationSchema).max(100),
+    events: z.array(PluginEventDefinitionSchema).max(64),
+  })
+  .strict()
+  .openapi("CompanyGitHubPlugin");
+
+export const CompanyGitHubPluginEnvelopeSchema = z
+  .object({ data: CompanyGitHubPluginSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyGitHubPluginEnvelope");
+
+// The App installations the admin's own GitHub account can reach, offered for linking. `null`
+// installations means the admin has not connected GitHub as themselves yet.
+export const CompanyGitHubAvailableInstallationsSchema = z
+  .object({
+    installations: z
+      .array(
+        z
+          .object({
+            installationId: z.string().min(1).max(64),
+            accountLogin: z.string().min(1).max(256),
+            accountType: z.enum(["Organization", "User"]),
+            avatarUrl: z.url().nullable(),
+            suspended: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(500)
+      .nullable(),
+  })
+  .strict()
+  .openapi("CompanyGitHubAvailableInstallations");
+
+export const CompanyGitHubAvailableInstallationsEnvelopeSchema = z
+  .object({ data: CompanyGitHubAvailableInstallationsSchema, meta: ProtocolMetadataSchema })
+  .strict()
+  .openapi("CompanyGitHubAvailableInstallationsEnvelope");
+
+export const LinkCompanyGitHubInstallationBodySchema = z
+  .object({
+    installationId: z
+      .string()
+      .trim()
+      .regex(/^\d{1,20}$/u),
+  })
+  .strict()
+  .openapi("LinkCompanyGitHubInstallationBody");
+
 // Settings → Channels → iMessage. `binding` is null until the member asks for a link code.
 export const ImessageSettingsSchema = z
   .object({
@@ -3655,7 +3767,7 @@ export const SlackBotMutationEnvelopeSchema = z
   .openapi("SlackBotMutationEnvelope");
 
 // Workflow event triggers offer real filter options (a Linear team, a Gmail
-// label, a Granola folder) from the author's connected account.
+// label, a Granola folder, a GitHub repository) from the author's connected account.
 // Wiki company imports are retired; the routes stay mounted so a stale client
 // gets an explicit 410 instead of a 404.
 export const RetiredWikiImportBodySchema = z.looseObject({}).openapi("RetiredWikiImportBody");
@@ -3667,6 +3779,7 @@ export const IntegrationResourceOptionsBodySchema = z
       .strict(),
     z.object({ provider: z.literal("granola") }).strict(),
     z.object({ provider: z.literal("gmail") }).strict(),
+    z.object({ provider: z.literal("github_app") }).strict(),
   ])
   .openapi("IntegrationResourceOptionsBody");
 
@@ -3715,6 +3828,17 @@ export const IntegrationResourceOptionsSchema = z
             z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(200) }).strict(),
           )
           .max(2_000),
+      })
+      .strict(),
+    z
+      .object({
+        provider: z.literal("github_app"),
+        // GitHub's own pagination ceiling for one installation's repositories.
+        repositories: z
+          .array(
+            z.object({ id: z.string().min(1).max(256), name: z.string().min(1).max(200) }).strict(),
+          )
+          .max(10_000),
       })
       .strict(),
   ])
@@ -4397,6 +4521,8 @@ export type WorkspaceSettingsDto = z.infer<typeof WorkspaceSettingsSchema>;
 export type WorkspaceActivationDto = z.infer<typeof WorkspaceActivationSchema>;
 export type OnboardingRole = z.infer<typeof OnboardingRoleSchema>;
 export type OnboardingStateDto = z.infer<typeof OnboardingStateSchema>;
+export type OnboardingRepositoryScan = z.infer<typeof OnboardingRepositoryScanSchema>;
+export type ScanOnboardingRepositoryBody = z.infer<typeof ScanOnboardingRepositoryBodySchema>;
 export type OnboardingEmailStep = "welcome" | "checkin" | "feedback_call";
 export type OnboardingEmailClaimDto = {
   id: string;
@@ -4501,6 +4627,11 @@ export type IntegrationAccountStatus = z.infer<typeof IntegrationAccountStatusSc
 export type PersonalIntegrationProvider = z.infer<typeof PersonalIntegrationProviderSchema>;
 export type IntegrationAccountDto = z.infer<typeof IntegrationAccountSchema>;
 export type SlackBotWorkspaceSettingsDto = z.infer<typeof SlackBotWorkspaceSettingsSchema>;
+export type CompanyGitHubInstallationDto = z.infer<typeof CompanyGitHubInstallationSchema>;
+export type CompanyGitHubPluginDto = z.infer<typeof CompanyGitHubPluginSchema>;
+export type CompanyGitHubAvailableInstallationsDto = z.infer<
+  typeof CompanyGitHubAvailableInstallationsSchema
+>;
 export type AttioAccountStateDto = z.infer<typeof AttioAccountStateSchema>;
 export type FathomAccountStateDto = z.infer<typeof FathomAccountStateSchema>;
 export type GranolaAccountStateDto = z.infer<typeof GranolaAccountStateSchema>;

@@ -6,6 +6,7 @@ const workflowDirectory = new URL("../../.github/workflows/", import.meta.url);
 const pullRequestWorkflowUrl = new URL("ci.yml", workflowDirectory);
 const verifyWorkflowUrl = new URL("verify.yml", workflowDirectory);
 const releaseWorkflowUrl = new URL("release-production.yml", workflowDirectory);
+const desktopReleaseWorkflowUrl = new URL("release-desktop.yml", workflowDirectory);
 
 test("every third-party workflow action is pinned to a full commit SHA", async () => {
   const workflowFiles = (await readdir(workflowDirectory)).filter((name) => name.endsWith(".yml"));
@@ -97,6 +98,29 @@ test("cache restore and save use the same pinned action release", async () => {
   assert.equal(new Set([...restoreRefs, ...saveRefs]).size, 1);
 });
 
+test("the build job caches dependencies without Turbo build artifacts", async () => {
+  const verifier = await readFile(verifyWorkflowUrl, "utf8");
+  const header = "\n  build:\n";
+  const start = verifier.indexOf(header);
+  assert.notEqual(start, -1, "the verifier must define a `build` job");
+  const bodyStart = start + header.length;
+  const next = verifier.slice(bodyStart).search(/^ {2}[a-z][\w-]*:$/mu);
+  assert.notEqual(next, -1, "the `build` job must be followed by another job");
+  const buildJob = verifier.slice(bodyStart, bodyStart + next);
+
+  const steps = [...buildJob.matchAll(/\n {6}- name: [^\n]*\n(?<body>(?: {8}[^\n]*\n)*)/gu)];
+  const cacheSteps = steps.filter((step) => (step.groups?.body ?? "").includes("actions/cache/"));
+  assert.equal(cacheSteps.length, 2, "the build job must restore and save exactly one cache");
+
+  for (const step of cacheSteps) {
+    // Restoring built `.turbo` artifacts cost more than rebuilding them. The dependency
+    // cache keeps `bun install` at a couple of seconds and is the only entry worth paying for.
+    const body = step.groups?.body ?? "";
+    assert.doesNotMatch(body, /^\s+\.turbo\s*$/mu, "the build job must not cache .turbo");
+    assert.match(body, /path: ~\/\.bun\/install\/cache/u);
+  }
+});
+
 test("the PR gate aggregates every direct gate job", async () => {
   const workflow = await readFile(pullRequestWorkflowUrl, "utf8");
   const jobsBlock = workflow.slice(workflow.indexOf("\njobs:\n"));
@@ -126,4 +150,25 @@ test("production verifies main before entering the privileged release job", asyn
   assert.doesNotMatch(workflow, /pull_request_target:/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /workflow_run:/u);
+});
+
+test("desktop releases are manual, main-only, and verified before publishing", async () => {
+  const workflow = await readFile(desktopReleaseWorkflowUrl, "utf8");
+
+  assert.match(workflow, /^on:\n\s+workflow_dispatch:/mu);
+  assert.match(workflow, /if: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/u);
+  assert.match(workflow, /environment: production/u);
+  assert.match(workflow, /secret-path: \/desktop/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  for (const forbidden of [/pull_request/u, /workflow_run:/u, /push:/u]) {
+    assert.doesNotMatch(workflow, forbidden);
+  }
+
+  const verify = workflow.indexOf("node scripts/verify-package.mjs --signed");
+  const draft = workflow.indexOf("gh release create");
+  const publish = workflow.indexOf("--draft=false --latest");
+  assert.ok(verify !== -1 && verify < draft, "signed builds must be verified before upload");
+  assert.match(workflow, /gh release create[\s\S]*?--draft/u);
+  assert.ok(draft < publish, "publishing must follow the draft upload");
+  assert.match(workflow, /if: \$\{\{ inputs\.publish \}\}/u);
 });

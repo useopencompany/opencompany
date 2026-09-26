@@ -1,8 +1,13 @@
-import { type Actor, TASK_WRITE_PERMISSION, TaskApplicationService } from "@opencompany/core";
+import {
+  type Actor,
+  companyPluginEventKeys,
+  TASK_WRITE_PERMISSION,
+  TaskApplicationService,
+} from "@opencompany/core";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
 import { captureException, createLogger } from "@opencompany/observability";
-import { type SQL, sql } from "drizzle-orm";
+import { inArray, type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 import { rowsFromExecute } from "./sql-exec";
@@ -73,7 +78,7 @@ export async function createNextWorkflowEventTask(
              AND member.workspace_id = event.workspace_id
             WHERE actor_user.workos_user_id = event.user_workos_id
               AND actor_user.onboarded_at IS NOT NULL
-              AND EXISTS (
+              AND (${companyPluginEventEligibility()} OR EXISTS (
                 SELECT 1
                 FROM goat.workflows workflow
                 JOIN goat.plugins plugin ON plugin.workspace_id = workflow.workspace_id
@@ -126,7 +131,7 @@ export async function createNextWorkflowEventTask(
                   )
                   AND EXISTS (SELECT 1 FROM jsonb_array_elements(plugin.events) declaration
                     WHERE declaration->>'id' = event.event_type)
-              )
+              ))
           ) AS eligible
         FROM goat.workflow_event_runs AS event
         WHERE event.status = 'pending'
@@ -193,6 +198,39 @@ export async function createNextWorkflowEventTask(
     `);
     return { status: "created" as const, eventId: event.id, taskId: created.taskId };
   });
+}
+
+// A company plugin event stays eligible while the workspace connection its trigger names is still
+// connected and the trigger is still the one that matched. Company plugins have no personal
+// installation or event opt-in, so this replaces the plugin checks of the personal path.
+function companyPluginEventEligibility() {
+  return sql`(
+    EXISTS (
+      SELECT 1
+      FROM goat.workflows workflow
+      CROSS JOIN LATERAL jsonb_array_elements(workflow.automation_triggers) trigger(value)
+      JOIN goat.integrations integration
+        ON integration.id = trigger.value->>'integrationId'
+       AND integration.workspace_id = event.workspace_id
+       AND integration.status = 'connected'
+      WHERE workflow.id = event.workflow_id
+        AND ${inArray(
+          sql`event.provider || ':' || integration.provider || ':' || event.event_type`,
+          companyPluginEventKeys(),
+        )}
+        AND workflow.workspace_id = event.workspace_id
+        AND workflow.status = 'active' AND workflow.archived_at IS NULL
+        AND trigger.value->>'id' = event.trigger_id
+        AND trigger.value->>'type' = 'event'
+        AND trigger.value->>'userWorkosId' = event.user_workos_id
+        AND trigger.value->>'provider' = event.provider
+        AND trigger.value->>'event' = event.event_type
+        AND (
+          trigger.value->>'activatedAt' IS NULL
+          OR event.event_at >= (trigger.value->>'activatedAt')::timestamptz
+        )
+    )
+  )`;
 }
 
 async function createWorkflowEventTask(

@@ -2,6 +2,7 @@ import {
   slackBotCanCustomizeIdentity,
   slackBotCanReact,
   slackBotCanReadDirectMessages,
+  slackBotCanUploadFiles,
   slackBotScopesSatisfied,
 } from "@opencompany/agent/integrations/slack-bot";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -27,6 +28,7 @@ vi.mock("@opencompany/agent/integrations/slack-bot", () => ({
   slackBotCanCustomizeIdentity: vi.fn(() => true),
   slackBotCanReact: vi.fn(() => true),
   slackBotCanReadDirectMessages: vi.fn(() => true),
+  slackBotCanUploadFiles: vi.fn(() => true),
   isSlackBotConfigured: vi.fn(() => true),
 }));
 
@@ -60,6 +62,7 @@ describe("Slack bot settings service", () => {
     vi.mocked(slackBotScopesSatisfied).mockReturnValue(true);
     vi.mocked(slackBotCanCustomizeIdentity).mockReturnValue(true);
     vi.mocked(slackBotCanReact).mockReturnValue(true);
+    vi.mocked(slackBotCanUploadFiles).mockReturnValue(true);
     vi.mocked(getSlackBotIntegrationForWorkspace).mockResolvedValue(integration as never);
     vi.mocked(loadIntegrationCredential).mockResolvedValue({
       payload: { access_token: "token_test" },
@@ -81,6 +84,7 @@ describe("Slack bot settings service", () => {
       canCustomizeIdentity: true,
       canReact: true,
       canReadDirectMessages: true,
+      canPostImages: true,
       teamName: null,
       statusReason: null,
     });
@@ -113,6 +117,12 @@ describe("Slack bot settings service", () => {
     await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
       canCustomizeIdentity: true,
       canReadDirectMessages: false,
+    });
+
+    vi.mocked(slackBotCanUploadFiles).mockReturnValue(false);
+    await expect(service.getWorkspaceSettings(member)).resolves.toMatchObject({
+      canCustomizeIdentity: true,
+      canPostImages: false,
     });
   });
 

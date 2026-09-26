@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { type BrowserWindow, ipcMain, shell } from "electron";
-import { APP_ORIGIN, APP_URL } from "./urls";
+import { APP_URL, isAppOrigin } from "./urls";
 
 // PKCE verifier for the in-flight desktop sign-in. Held only in main-process
 // memory: it never travels through the browser leg, so an app that squats the
@@ -29,13 +29,7 @@ function normalizeInvitationToken(value: unknown): string | null {
 // app. Only requests originating from our own app origin are honored.
 export function registerDesktopAuth() {
   ipcMain.on("desktop-auth:start-google", (event, invitationToken: unknown) => {
-    const frameUrl = event.senderFrame?.url;
-    if (!frameUrl) return;
-    try {
-      if (new URL(frameUrl).origin !== APP_ORIGIN) return;
-    } catch {
-      return;
-    }
+    if (!isAppOrigin(event.senderFrame?.url)) return;
 
     pendingVerifier = newVerifier();
     const url = new URL("/auth/desktop/start", APP_URL);

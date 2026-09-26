@@ -3,7 +3,8 @@
 `.env.example` is the complete local template. This document records ownership rather than
 duplicating every optional provider variable.
 
-Codex sandboxes default to `gpt-6-astra` and also offer GPT 5.6 Sol, Terra, and Luna.
+Codex sandboxes default to `gpt-6-astra` and also offer GPT 6 Sol and Luna, plus GPT 5.6 Sol,
+Terra, and Luna.
 `RUNNER_CODEX_MODEL` overrides the runner's fallback model; an explicit session or task selection
 takes precedence. Codex availability is separate from the opencompany engine's Gateway catalog.
 
@@ -18,6 +19,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
 | `prod` `/runner` | Render runner | production worker and broker configuration |
 | `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials, Sentry artifact upload credential, and public mobile configuration |
+| `prod` `/desktop` | GitHub Actions | macOS Developer ID certificate and App Store Connect notarization key |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
@@ -113,6 +115,12 @@ installation enabled. Set
 its Setup URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
 updates return to opencompany.
+
+The company GitHub plugin reuses that App for workspace-level events. Set the App's webhook URL to
+`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/webhooks/github` with content type `application/json`,
+subscribe it to Issues and Pull request events, and put the same webhook secret in prod `/api` as `GITHUB_USER_APP_WEBHOOK_SECRET`. The
+variable is optional: without it, admins can still link accounts and the plugin page says events
+are not set up, but the API rejects deliveries. Only the API reads it.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin

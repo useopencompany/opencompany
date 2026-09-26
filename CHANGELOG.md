@@ -12,8 +12,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
+<!-- Hold #1978 here until a distributed iOS build containing it is confirmed. -->
+
+- copy or share an assistant's reply from the iphone app. attach heic photos from photos or files; the app converts them to jpeg before uploading (#1978) — @louis.
+
+<!-- Hold #2013 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
+
+- start a workflow or company agent when someone opens a github issue or pull request. an admin connects github under plugins → company, then the trigger's owner selects a repository they can access. events from bots are skipped (#2013) — @louis.
+
+<!-- Hold #2021 here until a signed macOS release and a real update between published versions are confirmed. Desktop releases are manual (#2028). -->
+
+- the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
+
+### Fixed
+- the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
+- iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+
+## [1.35.1] - 2026-09-25
+
+### Fixed
+- long chats are less likely to end with an empty reply when the assistant summarizes earlier messages to make room. if the summary comes back blank, the chat retries automatically (#2032, #2035) — @louis.
+- the billing page now opens reliably after checkout, even when your browser uses a different timezone or number format. dates and amounts still adjust to your local settings (#2031) — @louis.
+
+## [1.35.0] - 2026-09-24
+
+### Added
+- workflows and company agents can now post up to four images in a slack reply, under their own name and avatar. older slack connections may need to reconnect to allow uploads; until then, replies link to the task (#2025) — @louis.
+- drag chats into a new arrangement and preview the full layout before you drop. use pane titles to move or swap open chats, or drop at the workspace edge to make a full-width row or full-height column. double-click a divider to make its two panes equal (#2024) — @louis.
+
+### Changed
+- connect or reconnect a plugin from a card in chat when its account is missing or expired. after you finish connecting, the chat or task continues with your earlier request (#2027) — @louis.
+- return to the browser tab and start typing in the chat composer without clicking it first (#2023) — @louis.
+
+### Fixed
+- connected slack plugins can use their tools again, including search and messaging (#2026) — @louis.
+- latitude now shows its connected account and lets you change its tool permissions. those changes apply to latitude, even when you also have linear connected (#2029) — @louis.
+- using connected tools in parallel no longer fails because their first requests arrive at the same time (#2011) — @louis.
+
+## [1.34.0] - 2026-09-23
+
+### Added
+- work in up to four chats at once. drag a chat from the sidebar to a pane edge, or choose open right or open below from its menu. resize the panes and return to the same layout after a refresh (#2005, #2008) — @louis.
+- choose gpt 6 sol or gpt 6 luna in chat, workflows, and codex coding sessions. both use workspace credits in normal chat, even with a connected chatgpt subscription (#2006) — @louis.
+- choose claude opus 5.5 in chat and claude code sessions, including existing coding sandboxes (#2001, #2003) — @louis.
+- select ultracode from claude code's reasoning choices in chats and workflows using sonnet 5 or opus 5.5 (#2002) — @louis.
+
+### Fixed
+- renamed workflows now show their current name when you select their shortcut in the composer (#2004) — @louis.
+- creating, commenting on, or archiving a task no longer waits up to five extra seconds for the page to catch up (#1998) — @louis.
+- chats can refresh an expired connection automatically, so you can keep working without reloading the page (#1996) — @louis.
+- if you set up company agent identities in slack, thread replies now reach the agent even when your slack and opencompany emails differ (#1997) — @louis.
+- coding sessions are less likely to restart or fail because of a brief sandbox connection timeout (#1999) — @louis.
+
+## [1.33.0] - 2026-09-22
+
+### Added
+- delete a wiki you created from wiki settings. workspace admins can also delete other wikis. deletion permanently removes its pages and history; the company wiki stays protected (#1991) — @louis.
+- send screenshots and other supported images to a company agent in slack, including in follow-up replies. existing agent connections may need to reconnect to read images (#1994) — @louis.
+
 ### Changed
 - hobby accounts can now keep up to five workspaces instead of one, so you can run more than one thing without moving to pro. upgrading a workspace to pro frees up a slot (#1988) — @louis.
+- chat can now make up to ten web searches per turn, up from four. compare more options and check more sources in one question (#1985) — @louis.
+
+### Fixed
+- if you set up company agent identities in slack, you can now message those agents even when your slack and opencompany emails differ. other teammates still need matching emails (#1987) — @louis.
+- when your organization blocks claude subscription access, the connection now shows that it needs attention and explains the admin action required. scheduled runs stop retrying the blocked connection (#1989) — @louis.
+- coding chats can now start even when github access is temporarily unavailable. a notice explains the missing access so you can continue work that does not need github (#1990) — @louis.
 
 ## [1.32.0] - 2026-09-21
 

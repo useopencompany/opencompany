@@ -315,6 +315,22 @@ describe("WikiCommandApplicationService", () => {
     expect(commandCalls(calls)).toHaveLength(0);
   });
 
+  it('treats "default" as an explicit alias for the default wiki', async () => {
+    const listWikis = vi.fn(async () => [DEFAULT_WIKI]);
+    const resolveWiki = vi.fn(async () => DEFAULT_WIKI);
+    const { repository } = fakeRepository({ listWikis, resolveWiki });
+    const service = new WikiCommandApplicationService(repository);
+
+    await expect(
+      run(service, readActor, { command: "tree" }, undefined, "default"),
+    ).resolves.toMatchObject({ ok: true, wikiContext: defaultWikiContext });
+    expect(listWikis).not.toHaveBeenCalled();
+    expect(resolveWiki).toHaveBeenCalledWith({
+      workspaceId: "ws_1",
+      userWorkosId: "user_1",
+    });
+  });
+
   it("reports an id-versus-slug ambiguity as not_found with every reachable wiki", async () => {
     const { repository } = fakeRepository({
       listWikis: async () => [

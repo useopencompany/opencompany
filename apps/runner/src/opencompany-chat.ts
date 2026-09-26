@@ -60,6 +60,7 @@ import { getBraintrustAISDK } from "@opencompany/observability/braintrust";
 import {
   createGatewayAttribution,
   type GatewayAttribution,
+  type GatewayProviderOptions,
   gatewayProviderOptions,
 } from "@opencompany/telemetry";
 import { flushLatitude } from "@opencompany/telemetry/latitude";
@@ -96,6 +97,7 @@ import {
   CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
   CONTEXT_COMPACTION_SYSTEM_PROMPT,
   ContextCompactionCapacityError,
+  ContextCompactionEmptySummaryError,
   compactProductChatContextIfNeeded,
 } from "./opencompany-context-compaction";
 import { attachHostSkillsToPrompt, loadHostTools } from "./opencompany-host-tools";
@@ -129,6 +131,22 @@ const logger = createLogger({
 
 export function productChatGatewayProviderOptions(attribution: GatewayAttribution) {
   return gatewayProviderOptions(attribution, GATEWAY_AUTO_CACHE_PROVIDER_OPTIONS);
+}
+
+export function productChatContextCompactionProviderOptions(input: {
+  provider: "gateway" | "codex-backend";
+  providerOptions: GatewayProviderOptions;
+}): GatewayProviderOptions {
+  if (input.provider !== "codex-backend") return input.providerOptions;
+  return {
+    ...input.providerOptions,
+    openai: {
+      ...(input.providerOptions.openai ?? {}),
+      // Provider-specific reasoning settings override AI SDK's top-level `reasoning` option.
+      reasoningEffort: "none",
+      reasoningSummary: null,
+    },
+  };
 }
 
 function isTextExtractableAttachment(attachment: Pick<ChatMessageAttachment, "kind">) {
@@ -289,6 +307,10 @@ export async function runProductChatTurn(input: {
     });
     const providerOptions =
       modelResolution.providerOptions ?? productChatGatewayProviderOptions(attribution);
+    const contextCompactionProviderOptions = productChatContextCompactionProviderOptions({
+      provider: modelResolution.provider,
+      providerOptions,
+    });
     const previousCompaction = await loadProductChatContextCompaction(session.chatSessionId);
     let context;
     try {
@@ -310,9 +332,12 @@ export async function runProductChatTurn(input: {
             model: modelResolution.model,
             system: CONTEXT_COMPACTION_SYSTEM_PROMPT,
             messages,
+            // A checkpoint only needs faithful compression. Reasoning shares this output budget,
+            // so a reasoning model can otherwise spend every token before emitting summary text.
+            reasoning: "none",
             maxOutputTokens: CONTEXT_COMPACTION_MAX_OUTPUT_TOKENS,
             abortSignal: generationController.signal,
-            providerOptions,
+            providerOptions: contextCompactionProviderOptions,
           });
           await projector.recordStepUsage({
             stepIndex: auxiliaryUsageStepIndex--,
@@ -1683,8 +1708,13 @@ export function errorMessage(error: unknown) {
 export function isReplaySafeProductChatInfrastructureFailure(
   error: unknown,
   projection: ProductChatProjection,
-): error is APICallError | StreamProviderError | KimiToolCallLeakError {
+): error is
+  | APICallError
+  | StreamProviderError
+  | KimiToolCallLeakError
+  | ContextCompactionEmptySummaryError {
   const retryableProviderFailure =
+    error instanceof ContextCompactionEmptySummaryError ||
     error instanceof KimiToolCallLeakError ||
     (APICallError.isInstance(error)
       ? error.isRetryable ||
@@ -1705,9 +1735,16 @@ export function isReplaySafeProductChatInfrastructureFailure(
 }
 
 export function productChatInfrastructureFailureDiagnostic(
-  error: APICallError | StreamProviderError | KimiToolCallLeakError,
+  error:
+    | APICallError
+    | StreamProviderError
+    | KimiToolCallLeakError
+    | ContextCompactionEmptySummaryError,
 ) {
-  if (error instanceof KimiToolCallLeakError) {
+  if (
+    error instanceof KimiToolCallLeakError ||
+    error instanceof ContextCompactionEmptySummaryError
+  ) {
     return `[run_turn] ${error.name}: ${error.message}`;
   }
   const status = error.statusCode === undefined ? "unknown" : String(error.statusCode);

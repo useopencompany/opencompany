@@ -11,6 +11,7 @@ import { createGoogleCalendarMcpService } from "@opencompany/agent/integrations/
 import { getAvailableHarnessTools } from "@opencompany/agent/integrations/google-data";
 import { createGoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import { imessageConfig } from "@opencompany/agent/integrations/imessage";
+import { createSlackMcpService } from "@opencompany/agent/integrations/slack-mcp-server";
 import { whatsappConfig } from "@opencompany/agent/integrations/whatsapp";
 import { createMcpService } from "@opencompany/agent/mcp-http";
 import {
@@ -61,11 +62,13 @@ import { parseBrowserOrigins } from "./browser-origins";
 import { createChatResourceService } from "./chat-resources";
 import { createChatTitleService } from "./chat-title";
 import { createCompanyAgentSlackService } from "./company-agent-slack";
+import { createCompanyGitHubService } from "./company-github";
 import { createConvexIngress } from "./convex-ingress";
 import { ElectricReadModelProxy, parseElectricAuthMode } from "./electric-read-models";
 import { createEngineAuthService } from "./engine-auth";
 import { createEngineSessionService } from "./engine-sessions";
 import { createFeedbackService } from "./feedback";
+import { createGitHubAppIngress } from "./github-app-ingress";
 import { createGitHubUserIngress } from "./github-user-ingress";
 import { createGoogleIngress } from "./google-ingress";
 import { createIdentityService } from "./identity";
@@ -78,6 +81,7 @@ import { createMcpOAuthIngress } from "./mcp-oauth-ingress";
 import { PostgresMessagePresentationService } from "./message-presentations";
 import { createOnboardingService } from "./onboarding";
 import { createOnboardingEmailService } from "./onboarding-emails";
+import { createOnboardingRepositoryScanService } from "./onboarding-repository-scan";
 import { createPluginBillingService } from "./plugin-billing";
 import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
@@ -253,6 +257,7 @@ const app = createApiApp({
   }),
   slackProvisioning: createSlackProvisioningService({ db: database.db }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
+  companyGitHub: createCompanyGitHubService({ db: database.db }),
   companyAgentSlack: createCompanyAgentSlackService({
     db: database.db,
     agents: automations.agents,
@@ -309,6 +314,10 @@ const app = createApiApp({
           db: database.db,
           internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
         }),
+        slackMcp: createSlackMcpService({
+          db: database.db,
+          internalSecret: process.env.API_INTERNAL_TOKEN.trim(),
+        }),
       }
     : {}),
   billing: createBillingApplicationService({
@@ -337,6 +346,12 @@ const app = createApiApp({
   identity: createIdentityService({ db: database.db, workos, stripe }),
   onboarding: createOnboardingService({ db: database.db, workos }),
   onboardingEmails: createOnboardingEmailService({ db: database.db }),
+  onboardingRepositoryScan: createOnboardingRepositoryScanService({
+    db: database.db,
+    ...(process.env.VERCEL_AI_GATEWAY_API_KEY
+      ? { apiKey: process.env.VERCEL_AI_GATEWAY_API_KEY }
+      : {}),
+  }),
   authenticate,
   identify: identityVerifier,
   ...(process.env.CRON_SECRET ? { emailLifecycleInternalSecret: process.env.CRON_SECRET } : {}),
@@ -384,6 +399,7 @@ const app = createApiApp({
       }),
   }),
   linearIngress: createLinearIngress({ db: database.db, identify: identityVerifier }),
+  githubAppIngress: createGitHubAppIngress({ db: database.db }),
   jamieIngress: createJamieIngress({ db: database.db }),
   convexIngress: createConvexIngress({ db: database.db }),
   mcpOAuthIngress: createMcpOAuthIngress({

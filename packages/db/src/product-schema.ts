@@ -1,4 +1,8 @@
-import type { AgentModelId, CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type {
+  AgentModelId,
+  CloudCodingReasoningEffort,
+  CodexReasoningEffort,
+} from "@opencompany/agent-runtime/types";
 import {
   APPROVAL_RESOLUTIONS,
   type ApprovalResolution,
@@ -114,7 +118,7 @@ export type WorkflowStep = {
   model: string;
   // Concrete cloud-coding model selected when `model` is "codex" or "claude-code".
   runtimeModel?: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   instructions: string;
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
@@ -164,6 +168,7 @@ export type IntegrationProvider =
   | "google_drive"
   | "linear"
   | "github"
+  | "github_app"
   | "github_user"
   | "jamie"
   | "slack"
@@ -190,13 +195,14 @@ export type IntegrationProvider =
 // Ownership is a property of the integration's binding, not a per-connect
 // choice. Identity-bound connections (OAuth acting as a person: Gmail,
 // Calendar, Slack user token, Linear, GitHub user token, PostHog, Neon, Notion, Better Stack, Render, Vercel, SigNoz, X) are always personal. Installation-bound
-// connections (Jamie webhook secrets and the Slack answer-bot install) are
-// workspace plumbing: they carry no human identity,
+// connections (Jamie webhook secrets, the Slack answer-bot install, and GitHub App
+// installations linked as a company plugin) are workspace plumbing: they carry no human identity,
 // must survive the connecting admin leaving, and are manageable by any
 // workspace admin. `github` remains here only for historical rows from the
 // retired workspace-ingestion integration.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
   "github",
+  "github_app",
   "jamie",
   "slack_bot",
   "stripe",
@@ -298,7 +304,7 @@ export type HarnessWorkflowStep = {
   title: string;
   engine: HarnessEngine;
   model: AgentModelId;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   systemPrompt: string;
   systemBlocks: string[];
   skillIds: string[];
@@ -342,7 +348,7 @@ export type HarnessSpec = {
   codex?: {
     repository?: string | null;
     createPullRequest?: boolean;
-    reasoningEffort?: CodexReasoningEffort;
+    reasoningEffort?: CloudCodingReasoningEffort;
     goalMode?: {
       objective: string;
       tokenBudget?: number | null;
@@ -577,7 +583,7 @@ export type CodexChatTurnSettings = {
   approvalContinuation?: boolean;
   mentions?: Array<{ kind: "skill"; id: string }>;
   taskResultMode?: TaskResultMode;
-  reasoningEffort?: CodexReasoningEffort;
+  reasoningEffort?: CloudCodingReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
   wakeupChain?: number;
   scheduledWakeup?: {
@@ -1160,7 +1166,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1210,7 +1216,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1260,7 +1266,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -4501,9 +4507,11 @@ export const messageReadModelV1 = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => ({
-    actorWorkspaceConversationIdx: index(
-      "goat_message_read_model_v1_actor_workspace_conversation_idx",
-    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+    // Electric opens this shape for one conversation at a time. Keep that
+    // equality predicate first so authorization does not force a skip scan.
+    conversationWorkspaceActorIdx: index(
+      "goat_message_read_model_v1_conversation_workspace_actor_idx",
+    ).on(table.conversationId, table.workspaceId, table.actorId, table.createdAt),
   }),
 );
 
@@ -4525,9 +4533,11 @@ export const runReadModelV1 = productSchema.table(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
   (table) => ({
-    actorWorkspaceConversationIdx: index(
-      "goat_run_read_model_v1_actor_workspace_conversation_idx",
-    ).on(table.actorId, table.workspaceId, table.conversationId, table.createdAt),
+    // Electric opens this shape for one conversation at a time. Keep that
+    // equality predicate first so authorization does not force a sequential scan.
+    conversationWorkspaceActorIdx: index(
+      "goat_run_read_model_v1_conversation_workspace_actor_idx",
+    ).on(table.conversationId, table.workspaceId, table.actorId, table.createdAt),
   }),
 );
 
@@ -6142,6 +6152,7 @@ export const slackAgentMessages = productSchema.table(
     messageTs: text("message_ts").notNull(),
     slackUserId: text("slack_user_id").notNull(),
     text: text("text").notNull(),
+    files: jsonb("files").notNull().default([]),
     status: text("status").notNull().default("pending"),
     attemptCount: integer("attempt_count").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
@@ -6160,6 +6171,7 @@ export const slackAgentMessages = productSchema.table(
       "slack_agent_messages_status_check",
       sql`${table.status} IN ('pending', 'done', 'ignored')`,
     ),
+    check("slack_agent_messages_files_check", sql`jsonb_typeof(${table.files}) = 'array'`),
   ],
 );
 
@@ -6253,6 +6265,12 @@ export const channelDeliveries = productSchema.table(
     // retroactively change a queued post. Empty values keep the default bot identity.
     botDisplayName: text("bot_display_name").notNull().default(""),
     botAvatarUrl: text("bot_avatar_url").notNull().default(""),
+    // Artifact versions pinned when the post is queued, so republishing an image cannot change a
+    // queued post. The worker uploads them to Slack and shows them under the text.
+    imageArtifactVersionIds: jsonb("image_artifact_version_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
     status: text("status").notNull().default("pending"),
     messageTs: text("message_ts"),
     leaseId: text("lease_id"),
@@ -6268,6 +6286,10 @@ export const channelDeliveries = productSchema.table(
     check(
       "channel_deliveries_status_check",
       sql`${table.status} IN ('pending', 'sending', 'sent', 'uncertain', 'failed', 'canceled')`,
+    ),
+    check(
+      "channel_deliveries_images_check",
+      sql`jsonb_typeof(${table.imageArtifactVersionIds}) = 'array'`,
     ),
   ],
 );

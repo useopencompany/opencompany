@@ -1,4 +1,11 @@
-import type { Actor, PluginEventDefinition, WorkflowEventTrigger } from "@opencompany/core";
+import {
+  type Actor,
+  companyPluginEvent,
+  companyPluginIntegrationProvider,
+  isCompanyPluginProvider,
+  type PluginEventDefinition,
+  type WorkflowEventTrigger,
+} from "@opencompany/core";
 import { sql } from "drizzle-orm";
 import type { WorkflowSqlExecute } from "./workflow-repository";
 
@@ -12,6 +19,9 @@ export async function validateWorkflowEventSubscription(
   execute: WorkflowSqlExecute,
   input: { actor: Actor; trigger: WorkflowEventTrigger },
 ): Promise<string | null> {
+  if (isCompanyPluginProvider(input.trigger.provider)) {
+    return validateCompanyPluginEventSubscription(execute, input);
+  }
   const rows = rowsFromExecute<SubscriptionRow>(
     await execute(sql`
       SELECT
@@ -45,6 +55,31 @@ export async function validateWorkflowEventSubscription(
   if (!declaration || modes[input.trigger.event] !== true) {
     return "Enable this plugin event before activating the workflow.";
   }
+  return workflowEventFilterValidationError(declaration, input.trigger.filters);
+}
+
+// A company plugin trigger binds to a connection an admin linked for this workspace. Any member may
+// use it; there is no personal installation or event opt-in behind it.
+async function validateCompanyPluginEventSubscription(
+  execute: WorkflowSqlExecute,
+  input: { actor: Actor; trigger: WorkflowEventTrigger },
+): Promise<string | null> {
+  const [row] = rowsFromExecute<{ id: string }>(
+    await execute(sql`
+      SELECT integration.id
+      FROM goat.integrations AS integration
+      WHERE integration.id = ${input.trigger.integrationId}
+        AND integration.workspace_id = ${input.actor.workspaceId}
+        AND integration.provider = ${companyPluginIntegrationProvider(input.trigger.provider)}
+        AND integration.company_agent_id IS NULL
+        AND integration.status = 'connected'
+        AND EXISTS (SELECT 1 FROM goat.workspace_members member WHERE member.workspace_id = ${input.actor.workspaceId} AND member.user_workos_id = ${input.actor.userId})
+      LIMIT 1
+    `),
+  );
+  if (!row) return "Event triggers need an account your workspace admin connected.";
+  const declaration = companyPluginEvent(input.trigger.provider, input.trigger.event);
+  if (!declaration) return "This event is not available for this plugin.";
   return workflowEventFilterValidationError(declaration, input.trigger.filters);
 }
 

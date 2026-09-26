@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   hostToolContractVersionForEngine,
+  isClaudeCodeReasoningEffort,
   isCodexReasoningEffort,
 } from "@opencompany/agent-runtime";
 import {
@@ -2880,10 +2881,12 @@ function mapConversationComposerSettings(
   if (row.engine === "opencompany" || !row.latestTurnSettings) return null;
   const fallbackReasoningEffort = row.engine === "claude_code" ? "high" : "xhigh";
   const storedReasoningEffort = row.latestTurnSettings.reasoningEffort;
-  const reasoningEffort =
-    typeof storedReasoningEffort === "string" && isCodexReasoningEffort(storedReasoningEffort)
-      ? storedReasoningEffort
-      : fallbackReasoningEffort;
+  const supportsStoredEffort =
+    typeof storedReasoningEffort === "string" &&
+    (row.engine === "claude_code"
+      ? isClaudeCodeReasoningEffort(storedReasoningEffort)
+      : isCodexReasoningEffort(storedReasoningEffort));
+  const reasoningEffort = supportsStoredEffort ? storedReasoningEffort : fallbackReasoningEffort;
   const planModeEnabled = isCodexReasoningEffort(
     row.latestTurnSettings.planModeReasoningEffort ?? "",
   );

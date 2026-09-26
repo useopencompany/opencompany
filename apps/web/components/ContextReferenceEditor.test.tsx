@@ -46,9 +46,17 @@ beforeAll(() => {
   );
 });
 afterEach(() => {
-  cleanup();
-  captured = null;
+  disposeCapturedEditor();
 });
+
+function disposeCapturedEditor() {
+  // Tiptap defers destruction after React unmounts. Destroy while jsdom still owns window,
+  // otherwise its timer can fire after Vitest has removed the test environment.
+  const editor = captured;
+  cleanup();
+  if (editor && !editor.isDestroyed) editor.destroy();
+  captured = null;
+}
 
 describe("workflow and message references", () => {
   it("selects a plugin alongside existing skills and saves ordinary Markdown", async () => {
@@ -67,8 +75,7 @@ describe("workflow and message references", () => {
       ).toHaveTextContent("Slack"),
     );
     const saved = captured!.getMarkdown();
-    cleanup();
-    captured = null;
+    disposeCapturedEditor();
     render(
       <MarkdownEditor content={saved} onChange={() => {}} skillMentions={[]} contextMentions />,
     );

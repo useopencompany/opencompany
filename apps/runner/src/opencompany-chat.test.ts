@@ -25,12 +25,14 @@ import {
   hasHostedTurnCredits,
   isReplaySafeProductChatInfrastructureFailure,
   opencompanyModelMessagesFromStored,
+  productChatContextCompactionProviderOptions,
   productChatGatewayProviderOptions,
 } from "./opencompany-chat";
 import {
   ProductChatInterruptedError,
   type ProductChatProjection,
 } from "./opencompany-chat-projector";
+import { ContextCompactionEmptySummaryError } from "./opencompany-context-compaction";
 import { createSubagentTraceChannel } from "./opencompany-subagent";
 
 // Contract-level guard: this fixture is typed against the AI SDK's own
@@ -66,7 +68,7 @@ vi.mock("@opencompany/db/credits", async (importOriginal) => ({
   hasPositiveCreditBalance: vi.fn(),
 }));
 
-describe("opencompany chat Gateway options", () => {
+describe("opencompany chat provider options", () => {
   it("enables automatic prompt caching while preserving attribution", () => {
     const attribution = createGatewayAttribution({
       userWorkosId: "user_123",
@@ -80,6 +82,29 @@ describe("opencompany chat Gateway options", () => {
         caching: "auto",
         user: attribution.user,
         tags: ["app:goat", "env:test", "feature:chat", "chat:chat_session_123"],
+      },
+    });
+  });
+
+  it("disables provider-specific reasoning for Codex-backed context checkpoints", () => {
+    expect(
+      productChatContextCompactionProviderOptions({
+        provider: "codex-backend",
+        providerOptions: {
+          openai: {
+            store: false,
+            include: ["reasoning.encrypted_content"],
+            reasoningEffort: "medium",
+            reasoningSummary: "auto",
+          },
+        },
+      }),
+    ).toEqual({
+      openai: {
+        store: false,
+        include: ["reasoning.encrypted_content"],
+        reasoningEffort: "none",
+        reasoningSummary: null,
       },
     });
   });
@@ -754,6 +779,14 @@ describe("opencompany chat infrastructure recovery", () => {
   it("retries a retryable provider error reported after streaming starts", () => {
     expect(
       isReplaySafeProductChatInfrastructureFailure(retryableStreamProviderFailure(), {
+        parts: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("retries an empty context checkpoint before any tool executes", () => {
+    expect(
+      isReplaySafeProductChatInfrastructureFailure(new ContextCompactionEmptySummaryError(), {
         parts: [],
       }),
     ).toBe(true);

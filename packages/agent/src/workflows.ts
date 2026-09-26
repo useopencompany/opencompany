@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
+  claudeCodeModelSupportsUltracode,
+  isClaudeCodeReasoningEffort,
   isCodexReasoningEffort,
   isValidFiveFieldCron,
   nextCronRunAt,
@@ -28,6 +30,9 @@ import {
   DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "./workflow-schedule-defaults";
+import { WORKFLOW_NAME_MAX_LENGTH, workflowSlugFromName } from "./workflow-slug";
+
+export { WORKFLOW_NAME_MAX_LENGTH, workflowSlugFromName } from "./workflow-slug";
 
 // Workflows are workspace-scoped automations living in `goat.workflows`, so
 // "how work happens" is a first-class, company-level primitive. The `#`
@@ -36,28 +41,14 @@ import {
 
 type Db = ReturnType<typeof getDb>;
 
-export const WORKFLOW_NAME_MAX_LENGTH = 64;
 export const WORKFLOW_DESCRIPTION_MAX_LENGTH = 1024;
 
-// Slugs address a workflow in mentions and URLs, so they stay lowercase,
-// hyphenated, and bounded.
+// Slugs are the stable identity behind workflow mentions and URLs, so they stay
+// lowercase, hyphenated, and bounded even when the workflow's display name changes.
 const WORKFLOW_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/u;
 
 export function isValidWorkflowSlug(value: unknown): value is string {
   return typeof value === "string" && WORKFLOW_SLUG_PATTERN.test(value);
-}
-
-export function workflowSlugFromName(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/gu, "")
-    .replace(/[^a-z0-9]+/gu, "-")
-    .replace(/^-+/u, "")
-    .slice(0, WORKFLOW_NAME_MAX_LENGTH)
-    .replace(/-+$/u, "");
-  return slug || "workflow";
 }
 
 export { DEFAULT_WORKFLOW_SCHEDULE_CRON, DEFAULT_WORKFLOW_SCHEDULE_PROMPT };
@@ -107,7 +98,7 @@ export type WorkflowTriggerDetail =
       nextRunAt: Date | null;
     };
 
-// `id` is the workspace-unique slug used by composer mentions and task rows.
+// `id` is the stable workspace-unique slug carried by composer mentions and task rows.
 export type WorkspaceWorkflow = {
   id: string;
   name: string;
@@ -368,9 +359,20 @@ export function validateWorkflowFields(input: {
       if (
         reasoningEffort !== undefined &&
         reasoningEffort !== "" &&
-        (typeof reasoningEffort !== "string" || !isCodexReasoningEffort(reasoningEffort))
+        (typeof reasoningEffort !== "string" ||
+          !(option.engine === "claude_code"
+            ? isClaudeCodeReasoningEffort(reasoningEffort)
+            : isCodexReasoningEffort(reasoningEffort)))
       ) {
         return "That workflow effort level is not available.";
+      }
+      if (
+        option.engine === "claude_code" &&
+        reasoningEffort === "ultracode" &&
+        runtimeModel &&
+        !claudeCodeModelSupportsUltracode(runtimeModel)
+      ) {
+        return "Ultracode is not available for that Claude Code model.";
       }
     }
   }

@@ -2164,6 +2164,34 @@
       "when": 1790100400029,
       "tag": "0308_remove_project_wikis",
       "breakpoints": true
+    },
+    {
+      "idx": 309,
+      "version": "7",
+      "when": 1790100400030,
+      "tag": "0309_slack_agent_images",
+      "breakpoints": true
+    },
+    {
+      "idx": 310,
+      "version": "7",
+      "when": 1790100400031,
+      "tag": "0310_company_github_app",
+      "breakpoints": true
+    },
+    {
+      "idx": 311,
+      "version": "7",
+      "when": 1790100400032,
+      "tag": "0311_electric_conversation_shape_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 312,
+      "version": "7",
+      "when": 1790100400033,
+      "tag": "0312_channel_delivery_images",
+      "breakpoints": true
     }
   ]
 }

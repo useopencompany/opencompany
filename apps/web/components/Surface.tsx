@@ -7,14 +7,18 @@ import type {
   TaskStage,
   TaskStatus,
 } from "@opencompany/agent/task-runtime-types";
+import { workflowSlugFromName } from "@opencompany/agent/workflow-slug";
 import {
   CODEX_REASONING_EFFORTS,
   claudeCodeModelSupportsReasoningEffort,
+  claudeCodeModelSupportsUltracode,
+  claudeCodeReasoningEffortsForModel,
   getAgentModelDefinition,
   isAgentModelSelectable,
+  isCodexReasoningEffort,
   isCodexSubscriptionModel,
 } from "@opencompany/agent-runtime";
-import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine } from "@opencompany/core";
 import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
@@ -246,6 +250,7 @@ import {
   addOptimisticChatSummary,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
+import { resumeAfterPluginConnection } from "@/lib/plugin-connection-continuation";
 import { forgetLocalProjectAssignment, noteLocalProjectAssignment } from "@/lib/projects";
 import type { SkillCatalogItem } from "@/lib/skills";
 import type { TaskRow } from "@/lib/task-collections";
@@ -330,14 +335,14 @@ type MentionOption =
 
 type CodexComposerSettings = CodexComposerSettingsView;
 type EngineComposerSettings = {
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled?: boolean;
   goalMode?: CodexComposerSettings["goalMode"];
 };
 type CodexComposerUiState = {
   // null means "no explicit choice for this chat", so the composer falls back to the user's
   // last-used level for the active engine. Only an effort the user actually picked is stored.
-  reasoningEffort: CodexReasoningEffort | null;
+  reasoningEffort: CloudCodingReasoningEffort | null;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
@@ -520,6 +525,7 @@ export function Surface({
   const pendingNewSessionIdRef = useRef<string | null>(null);
   const pendingInputCaretRef = useRef<number | null>(null);
   const pendingProgrammaticPromptRef = useRef<string | null>(null);
+  const restoreComposerFocusOnTabReturnRef = useRef(false);
   const pendingTaskCommentRef = useRef<{
     id: string;
     body: string;
@@ -619,7 +625,7 @@ export function Surface({
   // The effort the user explicitly picked for the open chat. Null means "follow my last-used
   // level for this engine", resolved below once the composer's engine is known.
   const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
-    useState<CodexReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
+    useState<CloudCodingReasoningEffort | null>(initialCodexComposerUiState.reasoningEffort);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(
     initialCodexComposerUiState.planModeEnabled,
   );
@@ -959,7 +965,13 @@ export function Surface({
   // Resolved every render rather than frozen at mount, so switching engines (or the remembered
   // model arriving after hydration) lands on that engine's own last-used level.
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
-  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   // A running turn gates nothing: the message becomes a queued turn the user can steer into the
   // live one. A Task is a session like any other here -- viewing one shows the work, not a form to
   // leave a note on. Background sends keep their own dispatch rules.
@@ -1726,6 +1738,41 @@ export function Surface({
     return () =>
       window.removeEventListener(CHAT_COMPOSER_FOCUS_EVENT, handleChatComposerFocusRequest);
   }, [isActivePane]);
+
+  useEffect(() => {
+    if (!isActivePane || readOnly) return;
+    restoreComposerFocusOnTabReturnRef.current = document.visibilityState === "hidden";
+
+    const handleVisibilityChange = () => {
+      const composer = inputRef.current;
+      const composerElement = composer?.element;
+
+      if (document.visibilityState === "hidden") {
+        const activeElement = document.activeElement;
+        restoreComposerFocusOnTabReturnRef.current =
+          activeElement === composerElement ||
+          activeElement === document.body ||
+          activeElement === document.documentElement;
+        return;
+      }
+
+      if (!restoreComposerFocusOnTabReturnRef.current || !composer) return;
+      restoreComposerFocusOnTabReturnRef.current = false;
+      if (
+        composerElement?.getAttribute("aria-disabled") === "true" ||
+        composerElement?.getAttribute("aria-readonly") === "true"
+      ) {
+        return;
+      }
+      composer.focus({ preventScroll: true });
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      restoreComposerFocusOnTabReturnRef.current = false;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isActivePane, readOnly]);
 
   useLayoutEffect(() => {
     if (mode !== "chat" || !chatSessionId) return;
@@ -3350,6 +3397,46 @@ export function Surface({
                       onCodexAction={handleCodexToolAction}
                       allowCodexPlanActions={message.id === latestAssistantMessageId}
                       onActionApproval={handleActionApproval}
+                      onPluginConnectionResume={
+                        message.id === latestAssistantMessageId
+                          ? async (pluginName, id) => {
+                              if (activeTaskConversation) {
+                                await resumeAfterPluginConnection({
+                                  pluginName,
+                                  attemptId: id,
+                                  target: {
+                                    kind: "task",
+                                    taskId: activeTaskConversation.taskId,
+                                    workspaceId,
+                                  },
+                                });
+                                router.refresh();
+                                return;
+                              }
+                              if (!chatSessionId || persistedChatSessionId !== chatSessionId) {
+                                throw new Error("The chat session is no longer available.");
+                              }
+                              const engine = activeEngineChat?.engine;
+                              const messageEngine: MessageEngine = engine
+                                ? canonicalMessageEngine(engine, {
+                                    reasoningEffort: codexReasoningEffort,
+                                    planModeEnabled: false,
+                                    goalMode: null,
+                                  })
+                                : { type: "opencompany", schemaVersion: 1 };
+                              await resumeAfterPluginConnection({
+                                pluginName,
+                                attemptId: id,
+                                target: {
+                                  kind: "chat",
+                                  conversationId: chatSessionId,
+                                  model: String(engine ? engineChatModel[engine] : chatModel),
+                                  engine: messageEngine,
+                                },
+                              });
+                            }
+                          : undefined
+                      }
                       allowActionApproval={message.id === latestAssistantMessageId}
                       isTaskSession={Boolean(activeTaskConversation)}
                       turnActive={message.id === activeAssistantMessageId}
@@ -3810,6 +3897,11 @@ export function Surface({
                                 : null
                           }
                           engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                          reasoningEfforts={
+                            composerEngine === "claude_code"
+                              ? claudeCodeReasoningEffortsForModel(claudeModel)
+                              : CODEX_REASONING_EFFORTS
+                          }
                           reasoningEffortAvailable={
                             composerEngine !== "claude_code" ||
                             claudeCodeModelSupportsReasoningEffort(claudeModel)
@@ -3950,7 +4042,7 @@ export function QuickChatComposer({
     claude_code: claudeModel,
   };
   const [codexReasoningEffortOverride, setCodexReasoningEffortOverride] =
-    useState<CodexReasoningEffort | null>(null);
+    useState<CloudCodingReasoningEffort | null>(null);
   const [codexPlanModeEnabled, setCodexPlanModeEnabled] = useState(false);
   const [codexGoalModeEnabled, setCodexGoalModeEnabled] = useState(false);
   const [codexGoalObjective, setCodexGoalObjective] = useState("");
@@ -3988,7 +4080,13 @@ export function QuickChatComposer({
     ? (backgroundLaunchSelection?.engine ?? null)
     : selectedEngine;
   const rememberedReasoningEffort = useRememberedReasoningEffort(userWorkosId, composerEngine);
-  const codexReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const requestedReasoningEffort = codexReasoningEffortOverride ?? rememberedReasoningEffort;
+  const codexReasoningEffort = effectiveComposerReasoningEffort({
+    engine: composerEngine,
+    claudeModel,
+    requested: requestedReasoningEffort,
+    remembered: rememberedReasoningEffort,
+  });
   const isEngineChat = composerEngine !== null;
   const adHocTaskMentionEnabled = !selectedEngine;
   const backgroundAdHocTaskSelected = Boolean(
@@ -4800,6 +4898,11 @@ export function QuickChatComposer({
                       : null
                 }
                 engineLabel={composerEngine === "claude_code" ? "Claude" : "Codex"}
+                reasoningEfforts={
+                  composerEngine === "claude_code"
+                    ? claudeCodeReasoningEffortsForModel(claudeModel)
+                    : CODEX_REASONING_EFFORTS
+                }
                 reasoningEffortAvailable={
                   composerEngine !== "claude_code" ||
                   claudeCodeModelSupportsReasoningEffort(claudeModel)
@@ -5278,7 +5381,7 @@ function latestChatTurnStartedAtMs(messages: readonly ChatUiMessage[]) {
 function useRememberedReasoningEffort(
   userWorkosId: string,
   engine: EngineChatKind | null,
-): CodexReasoningEffort {
+): CloudCodingReasoningEffort {
   const effortEngine = engine ?? CODEX_PICKER_VALUE;
   return useSyncExternalStore(
     subscribeLastReasoningEffort,
@@ -5357,12 +5460,15 @@ function currentCodexComposerUiState(input: CodexComposerUiState): CodexComposer
 
 function buildCodexComposerSettings(input: {
   prompt: string;
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled: boolean;
   goalModeEnabled: boolean;
   goalObjective: string;
   goalTokenBudget: string;
 }): { ok: true; settings: CodexComposerSettings } | { ok: false; error: string } {
+  if (!isCodexReasoningEffort(input.reasoningEffort)) {
+    return { ok: false, error: "Ultracode is only available with Claude Code." };
+  }
   let goalMode: CodexComposerSettings["goalMode"] = null;
   if (input.goalModeEnabled) {
     const objective = (input.goalObjective.trim() || input.prompt).trim();
@@ -5413,6 +5519,9 @@ function canonicalMessageEngine(
         settings: { reasoningEffort: settings.reasoningEffort },
       };
     case "codex":
+      if (!isCodexReasoningEffort(settings.reasoningEffort)) {
+        throw new Error("Codex cannot run Claude Code's Ultracode mode.");
+      }
       return {
         type: "codex",
         schemaVersion: 1,
@@ -5459,8 +5568,20 @@ function findActiveMentionToken(value: string, caret: number): ActiveMentionToke
 
 function chatMentionToken(mention: ChatMention) {
   if (mention.kind === "engine") return mention.id === "claude" ? "@claude" : "@codex";
-  if (mention.kind === "workflow") return `#${mention.id}`;
+  if (mention.kind === "workflow") return `#${workflowMentionHandle(mention)}`;
   return `/${mention.name ?? mention.id}`;
+}
+
+function workflowMentionHandle(
+  workflow: Pick<Extract<ChatMention, { kind: "workflow" }>, "id" | "name">,
+) {
+  const displayHandle = workflowSlugFromName(workflow.name ?? workflow.id);
+  // #task is the reserved ad-hoc task command. A workflow renamed to "Task"
+  // keeps its stable handle so selecting it cannot silently start the wrong task.
+  // Older workflows whose stable id is also `task` get a presentation-only
+  // handle; invocation still carries their stable id in mention metadata.
+  if (displayHandle !== AD_HOC_TASK_ID) return displayHandle;
+  return workflow.id === AD_HOC_TASK_ID ? `${AD_HOC_TASK_ID}-workflow` : workflow.id;
 }
 
 function chatMentionIsVisible(value: string, mention: ChatMention) {
@@ -5614,18 +5735,23 @@ function workflowMentionsFromPastedText(input: {
   workflows: WorkflowCatalogItem[];
 }): ChatMention[] {
   const matches = input.workflows.flatMap((workflow) => {
-    if (!input.workflowIds.has(workflow.id)) return [];
+    const displayId = workflowMentionHandle({ id: workflow.id, name: workflow.name });
+    const usesCurrentName = input.workflowIds.has(displayId);
+    if (!usesCurrentName && !input.workflowIds.has(workflow.id)) return [];
     const mention: ChatMention = {
       kind: "workflow",
       id: workflow.id,
+      ...(usesCurrentName ? { name: workflow.name } : {}),
     };
     return chatMentionIsVisible(input.pastedText, mention) &&
       chatMentionIsVisible(input.fullInput, mention)
       ? [mention]
       : [];
   });
-  // One workflow per message.
-  return matches.slice(0, 1);
+  // One workflow per message. If a current display handle collides with another
+  // workflow's stable id (or two names slugify alike), leave pasted text plain
+  // instead of choosing an arbitrary workflow from catalog order.
+  return matches.length === 1 ? matches : [];
 }
 
 function mergeVisibleChatMentions(value: string, current: ChatMention[], additions: ChatMention[]) {
@@ -5673,15 +5799,15 @@ function buildMentionOptions(input: {
     }
     if (input.workflowsEnabled) {
       for (const workflow of input.workflows) {
-        if (workflow.id === AD_HOC_TASK_ID) continue;
         const haystack = `${workflow.id} ${workflow.name} ${workflow.description}`.toLowerCase();
         if (query && !haystack.includes(query)) continue;
+        const mention: ChatMention = { kind: "workflow", id: workflow.id, name: workflow.name };
         options.push({
           kind: "workflow",
-          token: `#${workflow.id}`,
+          token: chatMentionToken(mention),
           label: workflow.name,
           description: workflow.description,
-          mention: { kind: "workflow", id: workflow.id },
+          mention,
         });
       }
     }
@@ -6009,6 +6135,7 @@ function SandboxIndicator() {
 function EngineComposerControls({
   model,
   engineLabel,
+  reasoningEfforts,
   reasoningEffortAvailable,
   reasoningEffort,
   planModeEnabled,
@@ -6027,8 +6154,9 @@ function EngineComposerControls({
 }: {
   model: EngineModelPickerModel | null;
   engineLabel: "Claude" | "Codex";
+  reasoningEfforts: readonly CloudCodingReasoningEffort[];
   reasoningEffortAvailable: boolean;
-  reasoningEffort: CodexReasoningEffort;
+  reasoningEffort: CloudCodingReasoningEffort;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   goalModeAvailable: boolean;
@@ -6037,7 +6165,7 @@ function EngineComposerControls({
   goalTokenBudget: string;
   disabled: boolean;
   modelDisabled: boolean;
-  onReasoningEffortChange: (reasoningEffort: CodexReasoningEffort) => void;
+  onReasoningEffortChange: (reasoningEffort: CloudCodingReasoningEffort) => void;
   onPlanModeEnabledChange: (enabled: boolean) => void;
   onGoalModeEnabledChange: (enabled: boolean) => void;
   onGoalObjectiveChange: (objective: string) => void;
@@ -6051,9 +6179,15 @@ function EngineComposerControls({
         <button
           type="button"
           aria-label={`${engineLabel} reasoning effort: ${reasoningLabel} (click to cycle)`}
-          title="Reasoning effort"
+          title={
+            reasoningEffort === "ultracode"
+              ? "XHigh reasoning with dynamic workflows"
+              : "Reasoning effort"
+          }
           disabled={disabled}
-          onClick={() => onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort))}
+          onClick={() =>
+            onReasoningEffortChange(nextCodexReasoningEffort(reasoningEffort, reasoningEfforts))
+          }
           className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-[12px] font-medium leading-none text-ink-muted transition-colors duration-150 hover:bg-surface-hover hover:text-ink focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ReasoningBars effort={reasoningEffort} size={12} />
@@ -6136,17 +6270,47 @@ function EngineComposerControls({
   );
 }
 
-function codexReasoningLabel(effort: CodexReasoningEffort) {
-  return effort === "xhigh" ? "XHigh" : effort.charAt(0).toUpperCase() + effort.slice(1);
+function codexReasoningLabel(effort: CloudCodingReasoningEffort) {
+  if (effort === "xhigh") return "XHigh";
+  if (effort === "ultracode") return "Ultracode";
+  return effort.charAt(0).toUpperCase() + effort.slice(1);
 }
 
-function nextCodexReasoningEffort(current: CodexReasoningEffort): CodexReasoningEffort {
-  const index = CODEX_REASONING_EFFORTS.indexOf(current);
-  return CODEX_REASONING_EFFORTS[(index + 1) % CODEX_REASONING_EFFORTS.length] ?? current;
+function effectiveComposerReasoningEffort(input: {
+  engine: EngineChatKind | null;
+  claudeModel: ClaudeChatModelId;
+  requested: CloudCodingReasoningEffort;
+  remembered: CloudCodingReasoningEffort;
+}): CloudCodingReasoningEffort {
+  if (input.engine === "codex" && !isCodexReasoningEffort(input.requested)) {
+    return input.remembered;
+  }
+  if (
+    input.engine === "claude_code" &&
+    input.requested === "ultracode" &&
+    !claudeCodeModelSupportsUltracode(input.claudeModel)
+  ) {
+    return "xhigh";
+  }
+  return input.requested;
 }
 
-function ReasoningBars({ effort, size = 12 }: { effort: CodexReasoningEffort; size?: number }) {
-  const activeBars = CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
+function nextCodexReasoningEffort(
+  current: CloudCodingReasoningEffort,
+  options: readonly CloudCodingReasoningEffort[],
+): CloudCodingReasoningEffort {
+  const index = options.indexOf(current);
+  return options[(index + 1) % options.length] ?? current;
+}
+
+function ReasoningBars({
+  effort,
+  size = 12,
+}: {
+  effort: CloudCodingReasoningEffort;
+  size?: number;
+}) {
+  const activeBars = effort === "ultracode" ? 4 : CODEX_REASONING_EFFORTS.indexOf(effort) + 1;
   return (
     <svg
       width={size}

@@ -5,7 +5,7 @@
 
 import { execFileSync } from "node:child_process";
 
-import { expectedReleaseFor } from "./lib/release-smoke.mjs";
+import { expectedReleaseFor, webHealthTargets } from "./lib/release-smoke.mjs";
 import { vercelCurlArgs } from "./lib/release-vercel.mjs";
 
 const webUrl = normalizeBaseUrl(
@@ -43,30 +43,49 @@ if (checkApi && !apiUrl) {
 const checks = [];
 
 if (checkWeb) {
-  checks.push(checkUntilReady("web", healthTarget("web"), webAttempts, delayMs));
+  for (const target of webHealthTargets({
+    webUrl,
+    deploymentUrl: webVercelDeployment,
+  })) {
+    checks.push(checkUntilReady("web", target, webAttempts, delayMs));
+  }
 }
 
 if (checkApi) {
-  checks.push(checkUntilReady("api", `${apiUrl}/healthz`, apiAttempts, delayMs));
+  checks.push(
+    checkUntilReady(
+      "api",
+      { label: "api", url: `${apiUrl}/healthz`, useVercelCli: false },
+      apiAttempts,
+      delayMs,
+    ),
+  );
 }
 
 if (checkRunner) {
-  checks.push(checkUntilReady("runner", `${runnerUrl}/healthz`, runnerAttempts, delayMs));
+  checks.push(
+    checkUntilReady(
+      "runner",
+      { label: "runner", url: `${runnerUrl}/healthz`, useVercelCli: false },
+      runnerAttempts,
+      delayMs,
+    ),
+  );
 }
 
 await Promise.all(checks);
 
 console.log("Release smoke checks passed.");
 
-async function checkUntilReady(name, url, maxAttempts, waitMs) {
+async function checkUntilReady(name, target, maxAttempts, waitMs) {
   let lastError;
   const expectedRelease = expectedReleaseFor(name);
 
-  console.log(`${name} health check target: ${url}`);
+  console.log(`${target.label} health check target: ${target.url}`);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      const body = await readHealthBody(name, url);
+      const body = await readHealthBody(target);
       const payload = parseJson(body);
       if (payload?.ok !== true) {
         throw new Error(`unexpected payload: ${body.slice(0, 200)}`);
@@ -83,12 +102,12 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
         );
       }
 
-      console.log(`${name} health check passed: ${url}`);
+      console.log(`${target.label} health check passed: ${target.url}`);
       return;
     } catch (error) {
       lastError = error;
       console.log(
-        `${name} health check attempt ${attempt}/${maxAttempts} failed: ${error.message}`,
+        `${target.label} health check attempt ${attempt}/${maxAttempts} failed: ${error.message}`,
       );
       if (attempt < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, waitMs));
@@ -97,13 +116,13 @@ async function checkUntilReady(name, url, maxAttempts, waitMs) {
   }
 
   throw new Error(
-    `${name} health check failed after ${maxAttempts} attempts: ${lastError.message}`,
+    `${target.label} health check failed after ${maxAttempts} attempts: ${lastError.message}`,
   );
 }
 
-async function readHealthBody(name, url) {
-  if (name === "web" && webVercelDeployment) {
-    const args = vercelCurlArgs("/api/healthz", url);
+async function readHealthBody(target) {
+  if (target.useVercelCli) {
+    const args = vercelCurlArgs("/api/healthz", target.url);
     return execFileSync("bunx", args, {
       encoding: "utf8",
       env: process.env,
@@ -111,7 +130,7 @@ async function readHealthBody(name, url) {
     });
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(target.url, {
     headers: { Accept: "application/json" },
     cache: "no-store",
   });
@@ -120,13 +139,6 @@ async function readHealthBody(name, url) {
     throw new Error(`${response.status} ${body.slice(0, 200)}`);
   }
   return body;
-}
-
-function healthTarget(name) {
-  if (name !== "web") {
-    throw new Error(`Unknown health target: ${name}`);
-  }
-  return webVercelDeployment || `${webUrl}/api/healthz`;
 }
 
 function normalizeBaseUrl(value) {

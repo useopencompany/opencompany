@@ -8,6 +8,8 @@ export type JsonValue =
 
 export type AgentModelId =
   | "openai/gpt-6-astra"
+  | "openai/gpt-6-sol"
+  | "openai/gpt-6-luna"
   | "openai/gpt-5.6-sol"
   | "openai/gpt-5.6-terra"
   | "openai/gpt-5.6-luna"
@@ -22,6 +24,7 @@ export type AgentModelId =
   | "anthropic/claude-opus-4.7"
   | "anthropic/claude-opus-4.8"
   | "anthropic/claude-opus-5"
+  | "anthropic/claude-opus-5.5"
   | "anthropic/claude-fable-5.1"
   | "anthropic/claude-fable-5"
   | "google/gemini-3-flash"
@@ -59,6 +62,8 @@ export type AgentModelId =
   | "openrouter/fusion";
 
 export type CodexReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ClaudeCodeReasoningEffort = CodexReasoningEffort | "ultracode";
+export type CloudCodingReasoningEffort = ClaudeCodeReasoningEffort;
 
 export type AgentSkillFile = {
   path: string;

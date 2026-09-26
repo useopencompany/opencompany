@@ -153,9 +153,10 @@ export type ChatMention =
       name?: string;
     }
   | {
-      // `id` is the workspace-scoped workflow slug (the # handle).
+      // Stable workspace-scoped slug; name supplies the current visible # handle.
       kind: "workflow";
       id: string;
+      name?: string;
     };
 
 // Attachment view riding on user-message metadata. The blob fields are only

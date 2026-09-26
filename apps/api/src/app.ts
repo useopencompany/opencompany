@@ -21,6 +21,7 @@ import type { GoogleAdminMcpService } from "@opencompany/agent/integrations/goog
 import type { GoogleCalendarMcpService } from "@opencompany/agent/integrations/google-calendar-mcp-server";
 import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/google-drive-mcp-server";
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
+import type { SlackMcpService } from "@opencompany/agent/integrations/slack-mcp-server";
 import type { McpService } from "@opencompany/agent/mcp-http";
 import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
@@ -94,6 +95,7 @@ import type { BotService } from "./bots";
 import type { ChatResourceDownload, ChatResourceService } from "./chat-resources";
 import type { ChatTitleService } from "./chat-title";
 import type { CompanyAgentSlackService } from "./company-agent-slack";
+import type { CompanyGitHubService } from "./company-github";
 import type { ConvexIngressService } from "./convex-ingress";
 import type { ReadModelService } from "./electric-read-models";
 import type { EngineAuthService } from "./engine-auth";
@@ -101,6 +103,7 @@ import { admitEngineMessage } from "./engine-messages";
 import type { EngineSessionService } from "./engine-sessions";
 import { ApiError, errorResponse } from "./errors";
 import type { FeedbackService } from "./feedback";
+import type { GitHubAppIngressService } from "./github-app-ingress";
 import type { GitHubUserIngressService } from "./github-user-ingress";
 import type { GoogleIngressService } from "./google-ingress";
 import type { IdentityService } from "./identity";
@@ -113,6 +116,7 @@ import type { McpOAuthIngressService } from "./mcp-oauth-ingress";
 import { type MessagePresentationService, messagePresentationEtag } from "./message-presentations";
 import type { OnboardingService } from "./onboarding";
 import type { OnboardingEmailService } from "./onboarding-emails";
+import type { OnboardingRepositoryScanService } from "./onboarding-repository-scan";
 import type { PluginBillingService } from "./plugin-billing";
 import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
@@ -219,6 +223,7 @@ export type CreateApiAppInput = {
   integrationAccounts: IntegrationAccountService;
   integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
+  companyGitHub?: CompanyGitHubService;
   slackProvisioning?: SlackProvisioningService;
   imessageSettings?: ImessageSettingsService;
   whatsappSettings?: WhatsappSettingsService;
@@ -228,6 +233,7 @@ export type CreateApiAppInput = {
   googleCalendarMcp?: GoogleCalendarMcpService;
   convexMcp?: ConvexMcpService;
   googleDriveMcp?: GoogleDriveMcpService;
+  slackMcp?: SlackMcpService;
   engineAuth: EngineAuthService;
   engineSessions: EngineSessionService;
   billing: BillingApplicationService;
@@ -237,11 +243,13 @@ export type CreateApiAppInput = {
   identity: IdentityService;
   onboarding: OnboardingService;
   onboardingEmails: OnboardingEmailService;
+  onboardingRepositoryScan: OnboardingRepositoryScanService;
   authenticate: ApiAuthenticator;
   identify: ApiIdentityVerifier;
   emailLifecycleInternalSecret?: string;
   browserOrigins?: readonly string[];
   githubUserIngress?: GitHubUserIngressService;
+  githubAppIngress?: GitHubAppIngressService;
   googleIngress?: GoogleIngressService;
   slackIngress?: SlackIngressService;
   linearIngress?: LinearIngressService;
@@ -278,6 +286,11 @@ export function createApiApp(input: CreateApiAppInput) {
   const rateLimiter = input.rateLimiter ?? new InMemoryApiRateLimiter();
   const now = input.now ?? (() => new Date());
   const browserOrigins = [...(input.browserOrigins ?? [])];
+  const companyGitHub = () => {
+    if (!input.companyGitHub)
+      throw new CoreError("unavailable", "Company plugins are unavailable.");
+    return input.companyGitHub;
+  };
   const handlers: V1RouteHandlers = {
     listTasks: async (c) => {
       const actor = actorFrom(c);
@@ -880,6 +893,16 @@ export function createApiApp(input: CreateApiAppInput) {
       await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-workspace", 10);
       const workspace = await input.onboarding.saveWorkspace(identity, c.req.valid("json"));
       return c.json({ data: workspace, meta }, 200);
+    },
+    scanOnboardingRepository: async (c) => {
+      const identity = identityFrom(c);
+      // Each scan lists GitHub installations, reads a repository tree, and calls a model.
+      await enforceIdentityRateLimit(rateLimiter, identity, "onboarding-repository-scan", 20);
+      const { repository } = c.req.valid("json");
+      const scan = await input.onboardingRepositoryScan.scan(identity, {
+        ...(repository ? { repository } : {}),
+      });
+      return c.json({ data: scan, meta }, 200);
     },
     finishOnboarding: async (c) => {
       const identity = identityFrom(c);
@@ -2473,6 +2496,28 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.slackBotSettings.disconnect(actor);
       return c.json({ data: { updated: true as const }, meta }, 200);
     },
+    getCompanyGitHubPlugin: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 300);
+      return c.json({ data: await companyGitHub().get(actor), meta }, 200);
+    },
+    listCompanyGitHubAvailableInstallations: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "read", 60);
+      return c.json({ data: await companyGitHub().listAvailableInstallations(actor), meta }, 200);
+    },
+    linkCompanyGitHubInstallation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { installationId } = c.req.valid("json");
+      return c.json({ data: await companyGitHub().link(actor, installationId), meta }, 200);
+    },
+    unlinkCompanyGitHubInstallation: async (c) => {
+      const actor = actorFrom(c);
+      await enforceRateLimit(rateLimiter, actor, "write", 60);
+      const { integrationId } = c.req.valid("param");
+      return c.json({ data: await companyGitHub().unlink(actor, integrationId), meta }, 200);
+    },
     listIntegrationResourceOptions: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 60);
@@ -2899,6 +2944,9 @@ export function createApiApp(input: CreateApiAppInput) {
   if (input.googleDriveMcp) {
     app.post("/mcp/plugins/google-drive", (c) => input.googleDriveMcp!.handle(c.req.raw));
   }
+  if (input.slackMcp) {
+    app.post("/mcp/plugins/slack", (c) => input.slackMcp!.handle(c.req.raw));
+  }
   app.post("/internal/onboarding-emails/enroll", async (c) => {
     authorizeEmailLifecycleInternalRequest(c.req.raw, input.emailLifecycleInternalSecret);
     const body = await internalJsonBody(c.req.raw);
@@ -3024,6 +3072,12 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
+  if (input.githubAppIngress) {
+    const ingress = input.githubAppIngress;
+    // GitHub caps webhook payloads at 25 MB; issue and pull request bodies are far smaller.
+    app.use("/webhooks/github", ingressBodyLimit(25 * 1024 * 1024));
+    app.post("/webhooks/github", (c) => ingress.webhook(c.req.raw));
+  }
   if (input.githubUserIngress) {
     const ingress = input.githubUserIngress;
     app.get("/integrations/github-user/start", (c) => ingress.start(c.req.raw));
@@ -3499,7 +3553,7 @@ function conversationDto(conversation: {
   engine: "opencompany" | "codex" | "claude_code";
   model: string;
   composerSettings: {
-    reasoningEffort: "low" | "medium" | "high" | "xhigh";
+    reasoningEffort: "low" | "medium" | "high" | "xhigh" | "ultracode";
     planModeEnabled?: boolean;
     goalMode?: { objective: string; tokenBudget?: number | null } | null;
   } | null;

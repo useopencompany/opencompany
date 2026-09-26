@@ -11,11 +11,12 @@ import {
   actionDiscoveryInstructionsForContract,
   CLOUD_CODING_ENGINE_CONFIG,
   claudeCodeModelSupportsReasoningEffort,
+  claudeCodeModelSupportsUltracode,
   createAcpEventNormalizer,
   createExternalEngineGatewayTicket,
   type HarnessNormalizedEvent,
   isActionHostToolContractVersion,
-  isCodexReasoningEffort,
+  isClaudeCodeReasoningEffort,
   isWikiHostToolContractVersion,
   shellQuote,
   supportsCompactActionDiscovery,
@@ -900,12 +901,16 @@ export async function runClaudeCodeChatTurn(input: {
       });
     };
 
-    const reasoningEffort =
+    const requestedReasoningEffort =
       claudeCodeModelSupportsReasoningEffort(session.model) &&
       typeof turn.settings?.reasoningEffort === "string" &&
-      isCodexReasoningEffort(turn.settings.reasoningEffort)
+      isClaudeCodeReasoningEffort(turn.settings.reasoningEffort)
         ? turn.settings.reasoningEffort
         : null;
+    const reasoningEffort =
+      requestedReasoningEffort === "ultracode" && !claudeCodeModelSupportsUltracode(session.model)
+        ? "xhigh"
+        : requestedReasoningEffort;
     executionStage = "run_turn";
     engineStarted = true;
     const runAcpOnce = async (resume: string | null, prompt: string) => {

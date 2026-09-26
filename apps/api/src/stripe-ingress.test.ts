@@ -1,6 +1,9 @@
+import { captureProductServerEvent } from "@opencompany/analytics/product/server";
+import { captureServerEvent } from "@opencompany/analytics/server";
 import { completeAutoRefillSetup } from "@opencompany/billing/legacy-auto-refill";
 import {
   applyStripeSubscriptionProjection,
+  PRO_STRIPE_PRODUCT_KEY,
   releasePendingForWorkspace,
   setAutoRefillPaymentMethod,
   settleAutoRefill,
@@ -220,6 +223,66 @@ describe("Stripe ingress", () => {
         seatQuantity: 2,
       }),
       { db },
+    );
+    expect(captureProductServerEvent).not.toHaveBeenCalled();
+  });
+
+  it("captures a product event when a subscription changes the workspace plan", async () => {
+    constructEventAsync.mockResolvedValue({
+      id: "evt_subscription_upgrade",
+      type: "customer.subscription.created",
+      created: 1_786_636_800,
+      data: {
+        object: {
+          id: "sub_upgrade",
+          customer: "cus_1",
+          status: "active",
+          cancel_at_period_end: false,
+          metadata: {
+            billingProduct: PRO_STRIPE_PRODUCT_KEY,
+            workspaceId: "workspace_1",
+            userWorkosId: "user_1",
+          },
+          items: {
+            data: [
+              {
+                id: "si_upgrade",
+                price: { id: "price_1" },
+                quantity: 2,
+                current_period_start: 1_786_636_800,
+                current_period_end: 1_789_315_200,
+              },
+            ],
+          },
+        },
+      },
+    });
+    vi.mocked(applyStripeSubscriptionProjection).mockResolvedValue({
+      applied: true,
+      planChanged: true,
+      plan: "pro",
+      seatQuantity: 2,
+      cancellationScheduled: false,
+      includedUsageGranted: true,
+    });
+
+    const response = await signedRequest(createStripeIngress({ db, stripe, webhookSecret: "x" }));
+
+    expect(response.status).toBe(200);
+    expect(captureProductServerEvent).toHaveBeenCalledWith("billing_plan_changed", "user_1", {
+      workspace_id: "workspace_1",
+      plan: "pro",
+      subscription_status: "active",
+      seat_quantity: 2,
+    });
+    expect(captureServerEvent).toHaveBeenCalledWith(
+      expect.stringMatching(/billing_plan_changed$/u),
+      "workspace_1",
+      {
+        workspace_id: "workspace_1",
+        plan: "pro",
+        subscription_status: "active",
+      },
     );
   });
 

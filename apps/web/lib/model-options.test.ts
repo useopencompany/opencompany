@@ -15,19 +15,30 @@ import {
 } from "@/lib/model-options";
 
 describe("opencompany model options", () => {
-  it("offers Opus 5 in Claude Code sandboxes with its full context window", () => {
-    expect(CLAUDE_CODE_MODELS).toContainEqual(
+  it("offers Opus 5.5 in main chat and Claude Code with its full context window", () => {
+    expect(MODELS).toContainEqual(
       expect.objectContaining({
-        id: "anthropic/claude-opus-5",
-        label: "Claude Opus 5",
+        id: "anthropic/claude-opus-5.5",
+        label: "Claude Opus 5.5",
         supportsImages: true,
+        supportsPdf: true,
         supportsReasoning: true,
       }),
     );
-    expect(normalizeConversationModel("claude_code", "anthropic/claude-opus-5")).toBe(
-      "anthropic/claude-opus-5",
+    expect(CLAUDE_CODE_MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "anthropic/claude-opus-5.5",
+        label: "Claude Opus 5.5",
+        supportsImages: true,
+        supportsPdf: true,
+        supportsReasoning: true,
+      }),
     );
-    expect(modelContextWindowTokens("anthropic/claude-opus-5")).toBe(1_000_000);
+    expect(normalizeModel("anthropic/claude-opus-5.5")).toBe("anthropic/claude-opus-5.5");
+    expect(normalizeConversationModel("claude_code", "anthropic/claude-opus-5.5")).toBe(
+      "anthropic/claude-opus-5.5",
+    );
+    expect(modelContextWindowTokens("anthropic/claude-opus-5.5")).toBe(1_000_000);
   });
 
   it("offers Fable 5.1 in Claude Code sandboxes without adding it to main chat", () => {
@@ -122,6 +133,29 @@ describe("opencompany model options", () => {
     );
     expect(normalizeModel("xai/grok-4.6")).toBe("xai/grok-4.6");
     expect(modelContextWindowTokens("xai/grok-4.6")).toBe(500_000);
+  });
+
+  it("offers the verified GPT 6 models in main chat", () => {
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "openai/gpt-6-sol",
+        label: "GPT 6 Sol",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(MODELS).toContainEqual(
+      expect.objectContaining({
+        id: "openai/gpt-6-luna",
+        label: "GPT 6 Luna",
+        supportsImages: true,
+        supportsReasoning: true,
+      }),
+    );
+    expect(normalizeModel("openai/gpt-6-sol")).toBe("openai/gpt-6-sol");
+    expect(normalizeModel("openai/gpt-6-luna")).toBe("openai/gpt-6-luna");
+    expect(modelContextWindowTokens("openai/gpt-6-sol")).toBe(1_050_000);
+    expect(modelContextWindowTokens("openai/gpt-6-luna")).toBe(1_050_000);
   });
 
   it("offers the verified GPT 5.6 models and remaps persisted Astra selections", () => {

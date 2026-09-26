@@ -5,6 +5,7 @@ import { toast } from "@opencompany/ui/components/sonner";
 import { BadgeCheck, CreditCard, Loader2, RefreshCw, Users, Wallet } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { PageContent } from "@/components/PageContent";
+import { useHydrated } from "@/components/useHydrated";
 import {
   createBillingPortalAction,
   createCreditTopUpAction,
@@ -31,6 +32,9 @@ export function BillingPanel({
   );
   const announcedTopupResult = useRef(false);
   const announcedCheckoutResult = useRef(false);
+  const hydrated = useHydrated();
+  const displayLocale = hydrated ? undefined : "en-US";
+  const displayTimeZone = hydrated ? undefined : "UTC";
 
   useEffect(() => {
     if (!checkoutResult || announcedCheckoutResult.current) return;
@@ -74,7 +78,7 @@ export function BillingPanel({
     const cents = Math.round(dollars * 100);
     if (cents < data.minTopUpCents || cents > data.maxTopUpCents) {
       toast.error(
-        `Top-ups must be between ${formatUsd(data.minTopUpCents)} and ${formatUsd(data.maxTopUpCents)}.`,
+        `Top-ups must be between ${formatUsd(data.minTopUpCents, displayLocale)} and ${formatUsd(data.maxTopUpCents, displayLocale)}.`,
       );
       return;
     }
@@ -86,7 +90,7 @@ export function BillingPanel({
     const cents = Math.round(dollars * 100);
     if (!Number.isFinite(dollars) || cents < data.minTopUpCents || cents > data.maxTopUpCents) {
       toast.error(
-        `Auto-refill amounts must be between ${formatUsd(data.minTopUpCents)} and ${formatUsd(data.maxTopUpCents)}.`,
+        `Auto-refill amounts must be between ${formatUsd(data.minTopUpCents, displayLocale)} and ${formatUsd(data.maxTopUpCents, displayLocale)}.`,
       );
       return;
     }
@@ -118,7 +122,8 @@ export function BillingPanel({
 
       {data.cancelAtPeriodEnd && data.currentPeriodEnd ? (
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
-          Seat billing is cancelled and remains active until {formatDate(data.currentPeriodEnd)}.
+          Seat billing is cancelled and remains active until{" "}
+          {formatDate(data.currentPeriodEnd, displayLocale, displayTimeZone)}.
         </div>
       ) : null}
 
@@ -130,7 +135,7 @@ export function BillingPanel({
               {data.plan === "pro" ? "Pro" : "Hobby"}
             </div>
             <div className="mt-1 text-[20px] font-semibold tracking-tight text-ink">
-              {data.plan === "pro" ? formatUsd(data.proMonthlyPriceCents) : "$0"}
+              {data.plan === "pro" ? formatUsd(data.proMonthlyPriceCents, displayLocale) : "$0"}
               {data.plan === "pro" ? (
                 <span className="ml-1 text-[12.5px] font-normal text-ink-subtle">
                   per seat / month
@@ -139,8 +144,8 @@ export function BillingPanel({
             </div>
             <p className="mt-1 max-w-xl text-[12.5px] leading-5 text-ink-subtle">
               {data.plan === "pro"
-                ? `${data.seatQuantity} billed ${data.seatQuantity === 1 ? "seat" : "seats"} with ${formatUsd(data.includedUsagePerSeatCents)} of included at-cost usage per seat each month.`
-                : `${formatUsd(data.hobbyIncludedUsageCents)} of included usage refreshes on the first of every month. Upgrade to add teammates or buy more credits.`}
+                ? `${data.seatQuantity} billed ${data.seatQuantity === 1 ? "seat" : "seats"} with ${formatUsd(data.includedUsagePerSeatCents, displayLocale)} of included at-cost usage per seat each month.`
+                : `${formatUsd(data.hobbyIncludedUsageCents, displayLocale)} of included usage refreshes on the first of every month. Upgrade to add teammates or buy more credits.`}
             </p>
             <p className="mt-2 text-[11.5px] text-ink-subtle">
               {data.memberCount} of {data.memberCap} members used
@@ -183,7 +188,7 @@ export function BillingPanel({
         <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12.5px] leading-5 text-ink">
           {data.plan === "hobby"
             ? data.creditBalanceUsdMicros <= 0
-              ? `Your Hobby credits are used up. Usage resumes ${data.includedUsagePeriodEnd ? `on ${formatDate(data.includedUsagePeriodEnd)}` : "next month"}, or you can upgrade to Pro.`
+              ? `Your Hobby credits are used up. Usage resumes ${data.includedUsagePeriodEnd ? `on ${formatDate(data.includedUsagePeriodEnd, displayLocale, displayTimeZone)}` : "next month"}, or you can upgrade to Pro.`
               : "Your Hobby balance is running low. It refreshes on the first of next month."
             : data.creditBalanceUsdMicros <= 0
               ? "Your workspace is out of credits. An admin can add credits to resume usage."
@@ -206,13 +211,17 @@ export function BillingPanel({
               Balance
             </div>
             <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
-              {formatUsdMicros(data.creditBalanceUsdMicros)}
+              {formatUsdMicros(data.creditBalanceUsdMicros, displayLocale)}
             </div>
             <div className="mt-1 text-[11.5px] text-ink-subtle">
-              {formatUsdMicros(data.includedBalanceUsdMicros)} included ·{" "}
-              {formatUsdMicros(data.topUpBalanceUsdMicros)} top-up
+              {formatUsdMicros(data.includedBalanceUsdMicros, displayLocale)} included ·{" "}
+              {formatUsdMicros(data.topUpBalanceUsdMicros, displayLocale)} top-up
               {data.includedUsagePeriodEnd
-                ? ` · included expires ${formatDate(data.includedUsagePeriodEnd)}`
+                ? ` · included expires ${formatDate(
+                    data.includedUsagePeriodEnd,
+                    displayLocale,
+                    displayTimeZone,
+                  )}`
                 : ""}
             </div>
           </div>
@@ -221,7 +230,7 @@ export function BillingPanel({
               Spent this month
             </div>
             <div className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-              {formatUsdMicros(data.spendThisMonthUsdMicros)}
+              {formatUsdMicros(data.spendThisMonthUsdMicros, displayLocale)}
             </div>
           </div>
         </div>
@@ -244,7 +253,7 @@ export function BillingPanel({
                   }`}
                 >
                   {isPending ? <Loader2 size={12} className="animate-spin" /> : null}
-                  Add {formatUsd(amountCents)}
+                  Add {formatUsd(amountCents, displayLocale)}
                 </button>
               ))}
               <div className="flex items-center gap-1.5">
@@ -297,7 +306,7 @@ export function BillingPanel({
             <div key={String(label)} className="rounded-lg border border-border px-3 py-2.5">
               <div className="text-[11px] text-ink-subtle">{label}</div>
               <div className="mt-0.5 text-[15px] font-semibold text-ink">
-                {formatUsdMicros(Number(amount))}
+                {formatUsdMicros(Number(amount), displayLocale)}
               </div>
             </div>
           ))}
@@ -353,8 +362,8 @@ export function BillingPanel({
             </p>
           ) : null}
           <p className="text-[11.5px] leading-4 text-ink-subtle">
-            Automatic charges stop at {formatUsd(data.autoRefillMonthlyMaxCents)} per calendar
-            month.
+            Automatic charges stop at {formatUsd(data.autoRefillMonthlyMaxCents, displayLocale)} per
+            calendar month.
           </p>
         </section>
       ) : null}
@@ -398,12 +407,7 @@ export function BillingPanel({
                     {billingActivityLabel(entry.source, entry.capabilityAction, entry.isAutoRefill)}
                   </div>
                   <div className="text-[11px] text-ink-subtle">
-                    {new Intl.DateTimeFormat(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    }).format(new Date(entry.createdAt))}
+                    {formatDateTime(entry.createdAt, displayLocale, displayTimeZone)}
                   </div>
                 </div>
                 <div className="shrink-0 text-right">
@@ -412,11 +416,12 @@ export function BillingPanel({
                       ? "Covered"
                       : `${entry.amountUsdMicros < 0 ? "-" : "+"}${formatUsdMicros(
                           Math.abs(entry.amountUsdMicros),
+                          displayLocale,
                         )}`}
                   </div>
                   {entry.amountUsdMicros < 0 ? (
                     <div className="text-[10.5px] text-ink-subtle">
-                      {formatUsdMicros(entry.providerCostUsdMicros)} cost
+                      {formatUsdMicros(entry.providerCostUsdMicros, displayLocale)} cost
                     </div>
                   ) : null}
                 </div>
@@ -429,15 +434,26 @@ export function BillingPanel({
   );
 }
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, {
+function formatDate(value: string, locale?: string, timeZone?: string) {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
+    ...(timeZone ? { timeZone } : {}),
   }).format(new Date(value));
 }
 
-function formatUsd(cents: number) {
+function formatDateTime(value: string, locale?: string, timeZone?: string) {
+  return new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(new Date(value));
+}
+
+function formatUsd(cents: number, locale?: string) {
   const wholeDollars = cents % 100 === 0;
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: wholeDollars ? 0 : 2,
@@ -445,10 +461,10 @@ function formatUsd(cents: number) {
   }).format(cents / 100);
 }
 
-function formatUsdMicros(usdMicros: number) {
+function formatUsdMicros(usdMicros: number, locale?: string) {
   const dollars = usdMicros / 1_000_000;
   const fractionDigits = Math.abs(dollars) > 0 && Math.abs(dollars) < 0.1 ? 4 : 2;
-  return new Intl.NumberFormat(undefined, {
+  return new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: fractionDigits,
