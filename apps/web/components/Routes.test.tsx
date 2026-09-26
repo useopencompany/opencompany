@@ -1,10 +1,16 @@
 import "@testing-library/jest-dom/vitest";
 import type { SkillImportPreviewDto } from "@opencompany/protocol";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPaneWorkspaceProvider } from "@/components/chat-panes/ChatPaneWorkspace";
+import {
+  addOptimisticChatSummary,
+  clearAllOptimisticChatSummaries,
+  markOptimisticChatSummaryAccepted,
+  removeOptimisticChatSummary,
+} from "@/lib/optimistic-chat-summaries";
 import {
   HomeRoute,
   InferenceSettingsRoute,
@@ -270,6 +276,136 @@ describe("HomeRoute", () => {
       id: "conversation_1",
       runtime: null,
     });
+  });
+
+  it("keeps a new chat out of the URL until the API has accepted its first message", () => {
+    Object.assign(appDataMock.value, {
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      openChats: [],
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+    routerMock.replace.mockClear();
+    clearAllOptimisticChatSummaries();
+
+    renderHome(<HomeRoute chatId={null} />);
+    const onOpenChat = surfaceMock.props?.onOpenChat as (chat: {
+      id: string;
+      model: string;
+      engine: "opencompany";
+    }) => void;
+
+    // The composer mints the id and opens it in the pane before the send is
+    // accepted; the server route would redirect home for that id.
+    act(() => {
+      addOptimisticChatSummary({
+        workspaceId: appDataMock.value.workspace.id,
+        sessionId: "conversation_new",
+        prompt: "hello",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+      onOpenChat({
+        id: "conversation_new",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+    });
+    expect(routerMock.replace).not.toHaveBeenCalled();
+
+    // The API accepting the first message is what makes the route renderable.
+    act(() => {
+      markOptimisticChatSummaryAccepted("conversation_new");
+    });
+    expect(routerMock.replace).toHaveBeenCalledTimes(1);
+    expect(routerMock.replace).toHaveBeenCalledWith("/chat/conversation_new", { scroll: false });
+  });
+
+  it("never routes to a new chat whose first send failed", () => {
+    Object.assign(appDataMock.value, {
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      openChats: [],
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+    routerMock.replace.mockClear();
+    clearAllOptimisticChatSummaries();
+
+    renderHome(<HomeRoute chatId={null} />);
+    const onOpenChat = surfaceMock.props?.onOpenChat as (chat: {
+      id: string;
+      model: string;
+      engine: "opencompany";
+    }) => void;
+
+    act(() => {
+      addOptimisticChatSummary({
+        workspaceId: appDataMock.value.workspace.id,
+        sessionId: "conversation_failed",
+        prompt: "hello",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+      onOpenChat({
+        id: "conversation_failed",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+    });
+    // The composer drops the optimistic row when the API rejects the send; the
+    // pane keeps the draft, and there is still nothing for the server to render.
+    act(() => {
+      removeOptimisticChatSummary("conversation_failed");
+    });
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
+  it("mirrors a durable chat into the URL as soon as it takes the focused pane", () => {
+    Object.assign(appDataMock.value, {
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      openChats: [
+        {
+          id: "conversation_1",
+          title: "Durable chat",
+          model: "anthropic/claude-sonnet-5",
+          engine: "opencompany",
+          runtime: null,
+          activityState: "idle",
+          hasUnseen: false,
+          preview: "Done",
+          updatedAt: "2026-08-19T10:00:00.000Z",
+        },
+      ],
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+    routerMock.replace.mockClear();
+    clearAllOptimisticChatSummaries();
+
+    renderHome(<HomeRoute chatId={null} />);
+    const onOpenChat = surfaceMock.props?.onOpenChat as (chat: {
+      id: string;
+      model: string;
+      engine: "opencompany";
+    }) => void;
+
+    act(() => {
+      onOpenChat({
+        id: "conversation_1",
+        model: "anthropic/claude-sonnet-5",
+        engine: "opencompany",
+      });
+    });
+    expect(routerMock.replace).toHaveBeenCalledWith("/chat/conversation_1", { scroll: false });
   });
 
   it("hands the composer the project a new chat was started from", () => {
