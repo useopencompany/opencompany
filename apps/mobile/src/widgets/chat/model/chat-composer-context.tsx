@@ -90,9 +90,15 @@ export interface ComposerAttachment {
   height?: number;
 }
 
+// Input acknowledgements live only in the cache, never in the persisted draft.
+interface ComposerDraft extends StoredDraft {
+  nativeEventCount?: number;
+}
+
 interface ChatComposerContextValue {
   conversationId: string;
   value: string;
+  nativeEventCount: number;
   attachments: ComposerAttachment[];
   selectedModelId: ChatModelId;
   isReady: boolean;
@@ -100,7 +106,7 @@ interface ChatComposerContextValue {
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   selectModel: (id: ChatModelId) => void;
-  setValue: (value: string) => void;
+  setValue: (value: string, nativeEventCount: number) => void;
 }
 
 const ChatComposerContext = createContext<ChatComposerContextValue | null>(null);
@@ -114,10 +120,13 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     : ["chat", "draft", "signed-out"];
   const draftQuery = useQuery({
     queryKey,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }): Promise<ComposerDraft> => {
       const draft = await getStoredDraft(partition!, conversationId);
       throwIfAborted(signal);
-      return draft;
+      return {
+        ...draft,
+        nativeEventCount: queryClient.getQueryData<ComposerDraft>(queryKey)?.nativeEventCount ?? 0,
+      };
     },
     enabled: Boolean(partition),
     staleTime: Infinity,
@@ -139,19 +148,27 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         );
     },
   });
-  const emptyDraft: StoredDraft = {
+  const emptyDraft: ComposerDraft = {
     conversationId,
     text: "",
     modelId: "moonshotai/kimi-k3",
     attachments: [],
   };
   const draft = draftQuery.data ?? emptyDraft;
-  const editDraft = (changes: Partial<Pick<StoredDraft, "text" | "modelId">>) => {
+  const editDraft = (
+    changes: Partial<Pick<ComposerDraft, "text" | "modelId" | "nativeEventCount">>,
+  ) => {
     if (!partition) return;
     // Cancel a stale disk read before publishing an edit. The query cache is the live draft;
     // SQLite owns persistence, and successful writes never hydrate older text over newer edits.
     void queryClient.cancelQueries({ queryKey, exact: true });
-    const next = { ...(queryClient.getQueryData<StoredDraft>(queryKey) ?? emptyDraft), ...changes };
+    const current = queryClient.getQueryData<ComposerDraft>(queryKey) ?? emptyDraft;
+    if (
+      changes.nativeEventCount !== undefined &&
+      changes.nativeEventCount < (current.nativeEventCount ?? 0)
+    )
+      return;
+    const next = { ...current, ...changes };
     queryClient.setQueryData(queryKey, next);
     saveDraftMutation.mutate({ partition, draft: next });
   };
@@ -176,6 +193,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
       value={{
         conversationId,
         value: draft.text,
+        nativeEventCount: draft.nativeEventCount ?? 0,
         attachments: draft.attachments,
         selectedModelId: draft.modelId,
         isReady: !partition || draftQuery.isFetched,
@@ -186,7 +204,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
           editDraft({ modelId });
           analytics.capture("chat_model_selected", { model_id: modelId });
         },
-        setValue: (text) => editDraft({ text }),
+        setValue: (text, nativeEventCount) => editDraft({ text, nativeEventCount }),
       }}
     >
       {children}

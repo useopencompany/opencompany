@@ -7,7 +7,7 @@ import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/r
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Text, useWindowDimensions, View } from "react-native";
 import Reanimated, {
   FadeIn,
@@ -19,10 +19,12 @@ import Reanimated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useCSSVariable, useResolveClassNames, useUniwind } from "uniwind";
+import { until } from "until-async";
 import { throwIfAborted } from "@/shared/lib/abort";
 import { analytics } from "@/shared/lib/analytics";
 import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
 import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
+import { useToast } from "@/shared/ui/toast";
 import type { ChatMessage as ChatMessageModel, ConnectivityState } from "../model/chat";
 import { useChatComposer } from "../model/chat-composer-context";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
@@ -74,6 +76,7 @@ export function StreamingChat({
   const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const isFocused = useIsFocused();
   const reducedMotion = useReducedMotion();
+  const { showErrorToast } = useToast();
   const { theme } = useUniwind();
   const [gradientStart, gradientEnd] = useCSSVariable([
     "--color-background-transparent",
@@ -82,13 +85,14 @@ export function StreamingChat({
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
   const [composerHeight, setComposerHeight] = useState(insets.bottom + 68);
+  const [initialAnchorMessageId] = useState(pendingAnchorMessageId);
+  const [hasSent, setHasSent] = useState(false);
   const [anchorMessageId, setAnchorMessageId] = useState<string | undefined>(
     pendingAnchorMessageId,
   );
-  const [following, setFollowing] = useState(true);
-  const [listLayoutReady, setListLayoutReady] = useState(false);
-  const openedAtEndRef = useRef<string | null>(null);
+  const [following, setFollowing] = useState(!pendingAnchorMessageId);
   const anchorOverflowedRef = useRef(false);
+  const followResponseRef = useRef(true);
   const listRef = useRef<LegendListRef>(null);
   const composerContainerRef = useRef<View>(null);
   const markdownStyle = useChatMarkdownStyle();
@@ -146,9 +150,9 @@ export function StreamingChat({
     pendingSend && !storedMessages.some((message) => message.id === pendingSend.message.id)
       ? [...storedMessages, pendingSend.message]
       : storedMessages;
-  const pendingUserMessage =
-    pendingSend?.message ??
-    userMessages.findLast((message) => message.role === "user" && message.delivery !== "accepted");
+  const pendingUserMessage = userMessages.findLast(
+    (message) => message.role === "user" && message.delivery !== "accepted",
+  );
   const sendingMessage: ChatMessageModel | undefined = pendingUserMessage
     ? {
         id: `sending:${pendingUserMessage.id}`,
@@ -169,9 +173,15 @@ export function StreamingChat({
       pendingMessageQuery.data?.isStopping ||
       run?.isStopping,
   );
-  const anchorIndex = anchorMessageId
-    ? messages.findIndex((message) => message.id === anchorMessageId)
+  const activeAnchorMessageId = pendingSend?.message.id ?? anchorMessageId;
+  const anchorIndex = activeAnchorMessageId
+    ? messages.findIndex((message) => message.id === activeAnchorMessageId)
     : -1;
+  const initialAnchorIndex = initialAnchorMessageId
+    ? messages.findIndex((message) => message.id === initialAnchorMessageId)
+    : -1;
+  const anchorHasAttachments =
+    anchorIndex >= 0 && messages[anchorIndex].parts.some((part) => part.type === "attachment");
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerContainerRef,
@@ -187,43 +197,12 @@ export function StreamingChat({
   }, [pendingSend?.message.id]);
 
   useLayoutEffect(() => {
-    if (anchorIndex < 0 || !anchorMessageId || !listLayoutReady) return;
-    void scrollMessageToEnd({ animated: storedMessages.length > 0, closeKeyboard: false });
-  }, [anchorMessageId, anchorIndex, listLayoutReady]);
-
-  useLayoutEffect(() => {
     if (!isFocused) return;
     composer.activateConversation(chatId);
     coordinator.setVisibleConversation(chatId);
     if (coordinator.partition) void markConversationViewed(coordinator.partition, chatId);
     return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
-
-  useEffect(() => {
-    openedAtEndRef.current = null;
-    setListLayoutReady(false);
-    setFollowing(true);
-    if (pendingAnchorMessageId) setAnchorMessageId(pendingAnchorMessageId);
-  }, [chatId]);
-
-  useLayoutEffect(() => {
-    if (
-      !listLayoutReady ||
-      messagesQuery.isLoading ||
-      openedAtEndRef.current === chatId ||
-      pendingAnchorMessageId
-    ) {
-      return;
-    }
-    openedAtEndRef.current = chatId;
-    void listRef.current?.scrollToEnd({ animated: false });
-  }, [chatId, listLayoutReady, messagesQuery.isLoading, pendingAnchorMessageId]);
-
-  useEffect(() => {
-    if (!pendingAnchorMessageId || anchorIndex < 0 || !listLayoutReady) return;
-    openedAtEndRef.current = chatId;
-    router.setParams({ anchorMessageId: undefined });
-  }, [anchorIndex, chatId, listLayoutReady, pendingAnchorMessageId]);
 
   const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
@@ -272,9 +251,27 @@ export function StreamingChat({
   );
 
   const handleSend = (draft: StoredDraft): Promise<SentMessageIdentity> => {
-    const sent = coordinator.sendDraft(draft);
-    void input.dismissComposer();
-    return sent;
+    const isFirstMessage = messages.length === 0;
+    anchorOverflowedRef.current = false;
+    followResponseRef.current = true;
+    setFollowing(false);
+    setHasSent(true);
+    return coordinator.sendDraft(draft, async () => {
+      // Match Margelo's send sequence: publish, then let the library coordinate
+      // keyboard dismissal and one end scroll using its measured reply space.
+      const [error] = await until(async () => {
+        const scrolling = scrollMessageToEnd({
+          animated: !isFirstMessage && !reducedMotion,
+          closeKeyboard: true,
+        });
+        input.composerInputRef.current?.blur();
+        await scrolling;
+      });
+      if (error) {
+        freeze.set(false);
+        showErrorToast("The message could not be brought into view.", error, "chat.send.scroll");
+      }
+    });
   };
 
   const statusMessage = getStatusMessage(isStopping, coordinator.connectivity);
@@ -293,17 +290,22 @@ export function StreamingChat({
           <View className="flex-1" />
         ) : (
           <KeyboardAwareLegendList
-            alignItemsAtEnd
+            // Measure the sent message even when the user was reading older history.
+            alwaysRender={
+              pendingSend && anchorIndex >= 0
+                ? { keys: messages.slice(anchorIndex).map((message) => message.id) }
+                : undefined
+            }
             anchoredEndSpace={
               anchorIndex >= 0
                 ? {
                     anchorIndex,
-                    anchorMaxSize: ANCHOR_MAX_SIZE,
+                    anchorMaxSize: anchorHasAttachments ? undefined : ANCHOR_MAX_SIZE,
                     anchorOffset: insets.top + CHAT_TOP_CLEARANCE,
                     onSizeChanged: (size) => {
                       if (size <= 0 && !anchorOverflowedRef.current) {
                         anchorOverflowedRef.current = true;
-                        setFollowing(true);
+                        if (followResponseRef.current) setFollowing(true);
                       }
                     },
                   }
@@ -322,18 +324,34 @@ export function StreamingChat({
             estimatedListSize={{ width: windowWidth, height: windowHeight }}
             extraData={[theme, run, coordinator.connectivity, sendingMessage?.id]}
             freeze={freeze}
-            initialScrollAtEnd
+            initialScrollAtEnd={chatId !== NEW_CHAT_ID && !initialAnchorMessageId && !hasSent}
+            initialScrollIndex={
+              initialAnchorIndex >= 0
+                ? { index: initialAnchorIndex, viewOffset: insets.top + CHAT_TOP_CLEARANCE }
+                : undefined
+            }
             keyboardDismissMode="interactive"
             keyboardLiftBehavior="whenAtEnd"
             keyboardOffset={insets.bottom}
             keyExtractor={(message) => message.id}
             maintainScrollAtEnd={
-              following ? { on: { dataChange: true, itemLayout: true } } : undefined
+              following && !pendingSend ? { on: { dataChange: true, itemLayout: true } } : undefined
             }
             maintainScrollAtEndThreshold={1}
-            maintainVisibleContentPosition
-            onLayout={() => setListLayoutReady(true)}
-            onScrollBeginDrag={() => setFollowing(false)}
+            onLoad={() => {
+              if (!initialAnchorMessageId) return;
+              router.setParams({ anchorMessageId: undefined });
+            }}
+            onEndVisible={(visible) => {
+              if (visible && anchorOverflowedRef.current) {
+                followResponseRef.current = true;
+                setFollowing(true);
+              }
+            }}
+            onScrollBeginDrag={() => {
+              followResponseRef.current = false;
+              setFollowing(false);
+            }}
             recycleItems={false}
             ref={listRef}
             renderItem={renderItem}

@@ -27,7 +27,10 @@ interface ChatCoordinatorValue {
   setVisibleConversation: (id: string | null) => void;
   pendingSends: Record<string, PendingDraftSend>;
   stoppingConversations: ReadonlySet<string>;
-  sendDraft: (draft: StoredDraft) => Promise<{ conversationId: string; userMessageId: string }>;
+  sendDraft: (
+    draft: StoredDraft,
+    onPublished?: () => Promise<void>,
+  ) => Promise<{ conversationId: string; userMessageId: string }>;
   stopRun: (id: string) => Promise<void>;
   resolveApproval: (
     id: string,
@@ -70,7 +73,7 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     return () => current?.dispose();
   }, [generation]);
   const partition = session?.partition ?? null;
-  const draftSend = useDraftSend(partition);
+  const draftSend = useDraftSend(partition, () => session?.drain());
   const [stoppingConversations, setStoppingConversations] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -116,8 +119,9 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
 
   const sendDraft = async (
     draft: StoredDraft,
+    onPublished?: () => Promise<void>,
   ): Promise<{ conversationId: string; userMessageId: string }> => {
-    const queued = await draftSend.sendDraft(draft);
+    const queued = await draftSend.sendDraft(draft, onPublished);
     if (!partition) throw new Error("Choose a workspace before sending a message.");
     void queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
     if (
@@ -131,7 +135,6 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
           anchorMessageId: queued.clientMessageId,
         },
       });
-    session?.drain();
     return { conversationId: queued.conversationId, userMessageId: queued.clientMessageId };
   };
   const stopRun = async (id: string): Promise<void> => {

@@ -22,12 +22,15 @@ export interface PendingDraftSend {
   persisted: Promise<QueuedMessageIdentity>;
 }
 
-export function useDraftSend(partition: ChatPartition | null) {
+export function useDraftSend(partition: ChatPartition | null, onQueued: () => void) {
   const { showErrorToast } = useToast();
   const pendingRef = useRef(new Map<string, PendingDraftSend>());
   const [pendingSends, setPendingSends] = useState<Record<string, PendingDraftSend>>({});
 
-  const sendDraft = async (draft: StoredDraft): Promise<QueuedMessageIdentity> => {
+  const sendDraft = async (
+    draft: StoredDraft,
+    onPublished?: () => Promise<void>,
+  ): Promise<QueuedMessageIdentity> => {
     if (!partition) throw new Error("Choose a workspace before sending a message.");
     throwIfAborted(partition.signal);
     const sourceId = draft.conversationId;
@@ -65,7 +68,12 @@ export function useDraftSend(partition: ChatPartition | null) {
     };
     const draftKey = chatQueryKeys.draft(partition, sourceId);
     void queryClient.cancelQueries({ queryKey: draftKey, exact: true });
-    queryClient.setQueryData<StoredDraft>(draftKey, { ...draft, text: "", attachments: [] });
+    queryClient.setQueryData<StoredDraft>(draftKey, (current) => ({
+      ...current,
+      ...draft,
+      text: "",
+      attachments: [],
+    }));
 
     // Publish before waiting for SQLite, keyboard dismissal, or the server. The
     // same IDs enter the durable outbox so acceptance cannot duplicate the bubble.
@@ -73,12 +81,16 @@ export function useDraftSend(partition: ChatPartition | null) {
     const pending = { message, conversationId: identity.conversationId, persisted };
     pendingRef.current.set(sourceId, pending);
     setPendingSends((current) => ({ ...current, [sourceId]: pending }));
+    // LegendList queues its scroll for the next data commit. Start it immediately
+    // after publishing, in the same send event, rather than from a layout callback.
+    const transition = onPublished?.();
     const [error, queued] = await until(() => persisted);
 
     if (!partition.signal?.aborted) {
       if (error) {
         const currentDraft = queryClient.getQueryData<StoredDraft>(draftKey);
         const restored = {
+          ...currentDraft,
           ...draft,
           text: [draft.text, currentDraft?.text].filter(Boolean).join("\n\n"),
           attachments: [...draft.attachments, ...(currentDraft?.attachments ?? [])],
@@ -104,6 +116,10 @@ export function useDraftSend(partition: ChatPartition | null) {
           },
         );
         analytics.capture("message_sent", { is_new_chat: sourceId === NEW_CHAT_ID });
+        onQueued();
+        // Keep the optimistic bubble mounted until its send animation finishes.
+        // Network delivery starts above and does not wait for presentation.
+        await transition;
       }
     }
     pendingRef.current.delete(sourceId);

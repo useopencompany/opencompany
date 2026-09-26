@@ -54,6 +54,7 @@ export function ChatComposer({
   ]) as [string, string];
   const [blurRequest, setBlurRequest] = useState(0);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [nativeLayoutReady, setNativeLayoutReady] = useState(false);
   const focusedRef = useRef(false);
   const didHandleInitialFocusRef = useRef(false);
   const isActiveConversation = composer.conversationId === conversationId;
@@ -81,10 +82,10 @@ export function ChatComposer({
   const sendMutation = useMutation({
     mutationFn: (draft: StoredDraft) => {
       analytics.capture("message_send_started", {
-        attachment_count: attachments.length,
-        has_text: Boolean(value.trim()),
-        is_new_chat: conversationId === "new",
-        model_id: composer.selectedModelId,
+        attachment_count: draft.attachments.length,
+        has_text: Boolean(draft.text.trim()),
+        is_new_chat: draft.conversationId === "new",
+        model_id: draft.modelId,
       });
       return onSend(draft);
     },
@@ -97,7 +98,14 @@ export function ChatComposer({
   });
 
   useLayoutEffect(() => {
-    if (!isScreenFocused || !isActiveConversation || !composer.isReady || input.drawerOpen) return;
+    if (
+      !isScreenFocused ||
+      !isActiveConversation ||
+      !composer.isReady ||
+      !nativeLayoutReady ||
+      input.drawerOpen
+    )
+      return;
     const shouldHandleInitialFocus = autoFocus && !didHandleInitialFocusRef.current;
     const shouldHandleRequestedFocus =
       autoFocus && input.consumeComposerFocusRequest(input.focusRequestId);
@@ -107,6 +115,7 @@ export function ChatComposer({
   }, [
     autoFocus,
     composer.isReady,
+    nativeLayoutReady,
     input.drawerOpen,
     input.focusRequestId,
     isActiveConversation,
@@ -122,15 +131,15 @@ export function ChatComposer({
       onLayout={onLayout}
       pointerEvents="box-none"
       ref={containerRef}
-      // Reserve the native control's first layout and keep the home-indicator
-      // inset in Yoga, independent of asynchronous SwiftUI content measurements.
+      // Reserve space in both Yoga and the Host. A parent minimum alone still
+      // lets the hosting view collapse during its first content measurement.
       style={{ minHeight: bottomInset + 68, paddingBottom: bottomInset }}
     >
       <Host
         ignoreSafeArea="all"
         matchContents={{ horizontal: false, vertical: true }}
         pointerEvents="box-none"
-        style={{ width: "100%" }}
+        style={{ width: "100%", minHeight: 68 }}
       >
         <NativeChatComposerView
           accentColor={accent}
@@ -143,24 +152,33 @@ export function ChatComposer({
           isGenerating={isGenerating}
           isStopping={isStopping}
           nativeID="chat-composer"
+          mostRecentEventCount={isActiveConversation ? composer.nativeEventCount : 0}
           onAttachmentPress={() => {
             blurHandle();
             analytics.capture("attachment_picker_opened");
             router.push("/attachment-sheet");
           }}
-          onChangeText={(event) => composer.setValue(event.nativeEvent.value)}
+          onChangeText={(event) => {
+            if (isActiveConversation)
+              composer.setValue(event.nativeEvent.value, event.nativeEvent.eventCount);
+          }}
+          onComposerHeightChange={(event) => {
+            if (event.nativeEvent.height >= 68) setNativeLayoutReady(true);
+          }}
           onFocusChange={(event) => {
             focusedRef.current = event.nativeEvent.focused;
             if (event.nativeEvent.focused) input.setKeyboardOwner("composer");
           }}
           onSend={(event) => {
-            if (!sendMutation.isPending)
+            if (!sendMutation.isPending && isActiveConversation) {
+              composer.setValue("", event.nativeEvent.eventCount);
               sendMutation.mutate({
                 conversationId,
                 text: event.nativeEvent.value,
                 modelId: composer.selectedModelId,
                 attachments,
               });
+            }
           }}
           onStop={() => {
             void until(onStop).then(([error]) => {

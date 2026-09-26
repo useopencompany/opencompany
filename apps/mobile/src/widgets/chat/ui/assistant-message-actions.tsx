@@ -72,12 +72,12 @@ export function AssistantMessageActions({
   );
 
   return (
-    <View className="flex-row items-center">
+    <View className="-ml-4 flex-row items-center">
       <Reanimated.View entering={animateOnMount ? copyEntering : undefined}>
         <Pressable
           accessibilityLabel="Copy response"
           accessibilityRole="button"
-          className="size-11 items-start justify-center active:opacity-50"
+          className="size-13 items-start justify-center pl-4 active:opacity-50"
           disabled={copyMutation.isPending}
           onPress={() => {
             pressHaptic();
@@ -96,7 +96,7 @@ export function AssistantMessageActions({
         <Pressable
           accessibilityLabel="Share response"
           accessibilityRole="button"
-          className="size-11 items-start justify-center active:opacity-50"
+          className="size-13 items-start justify-center pl-4 active:opacity-50"
           disabled={shareMutation.isPending}
           onPress={() => {
             pressHaptic();

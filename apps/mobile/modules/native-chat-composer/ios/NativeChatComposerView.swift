@@ -26,6 +26,7 @@ final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
   @Field var isGenerating = false
   @Field var isStopping = false
   @Field var value = ""
+  @Field var mostRecentEventCount = 0
   @Field var bottomInset: Double = 0
   @Field var accentColor: Color = .blue
   @Field var accentForegroundColor: Color = .white
@@ -43,7 +44,10 @@ final class NativeChatComposerViewProps: ExpoSwiftUI.ViewProps {
 
 struct NativeChatComposerView: ExpoSwiftUI.View {
   @ObservedObject var props: NativeChatComposerViewProps
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var isInputFocused: Bool
+  @State private var text = ""
+  @State private var eventCount = 0
   @State private var isExpanded = false
   @State private var lastBlurRequest = 0
   @State private var lastFocusRequest = 0
@@ -81,13 +85,9 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
       .onChange(of: isInputFocused) {
         props.onFocusChange(["focused": isInputFocused])
       }
-      .onChange(of: props.value) {
-        if props.value.isEmpty {
-          isExpanded = false
-        } else {
-          updateExpandedState()
-        }
-      }
+      .onChange(of: props.value, initial: true) { synchronizeText() }
+      .onChange(of: props.mostRecentEventCount) { synchronizeText() }
+      .onChange(of: text) { updateExpandedState() }
   }
 
   private var composer: some View {
@@ -193,6 +193,10 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
         Image(systemName: props.isGenerating ? "stop.fill" : "arrow.up")
           .font(.system(size: 14, weight: .bold))
           .foregroundStyle(props.accentForegroundColor)
+          .contentTransition(
+            reduceMotion ? .opacity : .symbolEffect(.replace.downUp.wholeSymbol)
+          )
+          .animation(reduceMotion ? .easeOut(duration: 0.1) : .default, value: props.isGenerating)
           .frame(width: 30, height: 30)
           .background(props.accentColor, in: Circle())
           .frame(width: ComposerMetrics.controlSize, height: ComposerMetrics.controlSize)
@@ -211,9 +215,12 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
 
   private var textBinding: Binding<String> {
     Binding(
-      get: { props.value },
+      get: { text },
       set: { value in
-        props.onChangeText(["value": value])
+        guard value != text else { return }
+        text = value
+        eventCount += 1
+        props.onChangeText(["value": value, "eventCount": eventCount])
         if value.isEmpty { isExpanded = false }
       }
     )
@@ -221,7 +228,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
 
   private var isSendDisabled: Bool {
     props.disabled
-      || (props.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      || (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         && !props.hasAttachments)
   }
 
@@ -249,7 +256,7 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private var measurementText: String {
-    props.value.isEmpty ? "M" : "\(props.value)\u{200B}"
+    text.isEmpty ? "M" : "\(text)\u{200B}"
   }
 
   private func lineProbe(
@@ -275,11 +282,11 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private func updateExpandedState() {
-    guard !props.value.isEmpty,
+    guard !text.isEmpty,
       let singleLineHeight,
       let measuredCollapsedContentHeight
     else {
-      if props.value.isEmpty { isExpanded = false }
+      if text.isEmpty { isExpanded = false }
       return
     }
 
@@ -289,9 +296,20 @@ struct NativeChatComposerView: ExpoSwiftUI.View {
   }
 
   private func send() {
-    let draft = props.value.trimmingCharacters(in: .whitespacesAndNewlines)
+    let draft = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !props.disabled, !draft.isEmpty || props.hasAttachments else { return }
-    props.onSend(["value": draft])
+    // Clear in the native tap transaction. Older JS echoes must not restore
+    // sent text while keyboard dismissal and draft persistence are in flight.
+    text = ""
+    isExpanded = false
+    eventCount += 1
+    props.onSend(["value": draft, "eventCount": eventCount])
+  }
+
+  private func synchronizeText() {
+    guard props.mostRecentEventCount >= eventCount else { return }
+    eventCount = props.mostRecentEventCount
+    text = props.value
   }
 
   private func stop() {
