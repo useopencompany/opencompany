@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
 
 ### Fixed
+- starting a new chat no longer throws you back to home while the first reply is on its way, and the chat stays in the sidebar after a reload. the address bar only switches to the chat once the server has it (#2040) — @louis.
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
 
