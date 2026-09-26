@@ -252,13 +252,23 @@ describe("E2B workspace billing", () => {
     ).toBe(price(45_000));
   });
 
-  it("keeps provider request timeouts in retry telemetry", async () => {
+  it.each([
+    {
+      name: "request timeout",
+      error: new DOMException("The operation timed out.", "TimeoutError"),
+    },
+    {
+      name: "service-busy response",
+      error: Object.assign(new Error("Service temporarily unavailable, please retry"), {
+        name: "ServiceBusyError",
+      }),
+    },
+  ])("keeps a provider $name in retry telemetry", async ({ error }) => {
     await database.exec(
       "UPDATE goat.sandbox_billing_cursors SET next_poll_at = '2026-09-10T12:00:00Z'",
     );
-    // Sandbox.getInfo uses AbortSignal.timeout for requestTimeoutMs, which rejects with this
-    // platform error rather than E2B's similarly named SDK TimeoutError class.
-    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+    // Sandbox.getInfo can reject with platform timeout errors or E2B provider errors. Both leave
+    // the billing cursor unchanged, so the next poll remains the recovery path.
 
     await pollSandboxBilling({
       namespace: "test",
@@ -266,18 +276,18 @@ describe("E2B workspace billing", () => {
       now: at(0),
       db,
       getInfo: async () => {
-        throw timeout;
+        throw error;
       },
     });
 
     expect(observability.captureException).not.toHaveBeenCalled();
     expect(observability.error).not.toHaveBeenCalled();
     expect(observability.warn).toHaveBeenCalledWith(
-      "E2B usage settlement timed out; the billing cursor remains retryable",
+      "E2B usage settlement deferred; the billing cursor remains retryable",
       {
         event: "opencompany.sandbox_billing_deferred",
         sandbox_id: "sandbox_1",
-        error: timeout,
+        error,
       },
     );
     expect(
