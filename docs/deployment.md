@@ -98,6 +98,9 @@ or web build jobs. A successful build is submitted to TestFlight with the matchi
 profile. The profile pins the App Store Connect app ID, and `--wait` makes the GitHub job report the
 final build and submission result.
 
+Chat's Copy and Share controls use `expo-haptics`. Install a new native iOS build when adding
+or updating native modules. Reloading the JavaScript bundle cannot add their native code.
+
 Concurrency cancels an older GitHub run for the same branch. If that run already submitted its job
 to EAS, the remote build and its configured submission may continue in Expo after GitHub stops
 waiting for it.

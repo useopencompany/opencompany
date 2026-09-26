@@ -1,5 +1,6 @@
 import { Stack, useLocalSearchParams } from "expo-router";
 import { StreamingChat } from "@/widgets/chat";
+import { ChatToolbar } from "@/widgets/chat/ui/chat-toolbar";
 
 export default function ChatScreen() {
   const { anchorMessageId, chatId } = useLocalSearchParams<{
@@ -9,7 +10,8 @@ export default function ChatScreen() {
   return (
     <>
       <Stack.Screen options={{ headerTitle: "", headerTransparent: true }} />
-      <StreamingChat chatId={chatId} pendingAnchorMessageId={anchorMessageId} />
+      <StreamingChat key={chatId} chatId={chatId} pendingAnchorMessageId={anchorMessageId} />
+      <ChatToolbar chatId={chatId} />
     </>
   );
 }

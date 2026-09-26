@@ -3,6 +3,7 @@ import type { NativeSyntheticEvent, ViewProps } from "react-native";
 
 interface ValueEvent {
   value: string;
+  eventCount: number;
 }
 
 interface HeightEvent {
@@ -24,6 +25,7 @@ export interface NativeChatComposerViewProps extends ViewProps {
   isGenerating: boolean;
   isStopping: boolean;
   value: string;
+  mostRecentEventCount: number;
   children?: ReactElement;
   onAttachmentPress?: () => void;
   onComposerHeightChange?: (event: NativeSyntheticEvent<HeightEvent>) => void;

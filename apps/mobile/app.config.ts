@@ -1,4 +1,5 @@
-const IS_DEV = process.env.APP_VARIANT === "development";
+const APP_VARIANT = process.env.APP_VARIANT === "development" ? "development" : "production";
+const IS_DEV = APP_VARIANT === "development";
 const CAMERA_USAGE_DESCRIPTION =
   "Allow opencompany to use your camera to attach photos to messages.";
 
@@ -80,6 +81,7 @@ export default {
     reactCompiler: true,
   },
   extra: {
+    appVariant: APP_VARIANT,
     router: {},
     eas: {
       projectId: "1370f590-6c69-4e42-86e9-9bd68058d0f4",

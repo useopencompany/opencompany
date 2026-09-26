@@ -22,6 +22,7 @@ import {
   NEW_CHAT_ID,
   type OutboxCommand,
   type OutboxRow,
+  type StoredDraft,
 } from "./types";
 
 const provisionalTitle = (text: string, attachments: ComposerAttachment[]): string => {
@@ -30,20 +31,19 @@ const provisionalTitle = (text: string, attachments: ComposerAttachment[]): stri
   return attachments[0]?.name ?? "New chat";
 };
 
+export interface QueuedMessageIdentity {
+  conversationId: string;
+  commandId: string;
+  clientMessageId: string;
+}
+
 export const queueMessageFromDraft = async (
   partition: ChatPartition,
-  sourceConversationId: string,
-): Promise<{ conversationId: string; commandId: string; clientMessageId: string }> => {
+  draft: StoredDraft,
+  result: QueuedMessageIdentity,
+): Promise<QueuedMessageIdentity> => {
+  const sourceConversationId = draft.conversationId;
   return withChatTransaction(partition, async (database) => {
-    const result = {
-      conversationId:
-        sourceConversationId === NEW_CHAT_ID
-          ? globalThis.crypto.randomUUID()
-          : sourceConversationId,
-      commandId: globalThis.crypto.randomUUID(),
-      clientMessageId: globalThis.crypto.randomUUID(),
-    };
-
     const existingConversation = await database.getFirstAsync<{ provisional: number }>(
       "SELECT provisional FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
       ...values(partition),
@@ -66,12 +66,6 @@ export const queueMessageFromDraft = async (
     );
     if (pending) throw new Error("Wait for the current response before sending another message.");
 
-    const draft = await database.getFirstAsync<DraftRow>(
-      `SELECT conversation_id, text, model_id FROM drafts
-        WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?`,
-      ...values(partition),
-      sourceConversationId,
-    );
     const attachments = await database.getAllAsync<AttachmentRow>(
       `SELECT local_id, conversation_id, uri, kind, filename, media_type, size_bytes, width,
               height, upload_generation, server_attachment_id, expires_at
@@ -92,7 +86,7 @@ export const queueMessageFromDraft = async (
       });
       if (!validation.ok) throw new Error(validation.message);
     }
-    const text = draft?.text.trim() ?? "";
+    const text = draft.text.trim();
     if (!text && attachments.length === 0) throw new Error("A message or attachment is required.");
     const now = Date.now();
     const timestamp = new Date(now).toISOString();
@@ -105,7 +99,7 @@ export const queueMessageFromDraft = async (
       ...values(partition),
       result.conversationId,
       provisionalTitle(text, attachments.map(attachmentFromRow)),
-      draft?.model_id ?? "moonshotai/kimi-k3",
+      draft.modelId,
       timestamp,
       now,
       isNewConversation ? 1 : 0,
@@ -154,7 +148,7 @@ export const queueMessageFromDraft = async (
       result.clientMessageId,
       JSON.stringify({
         content: text,
-        model: draft?.model_id ?? "moonshotai/kimi-k3",
+        model: draft.modelId,
         isNewConversation,
       }),
       `mobile-message:${result.clientMessageId}`,
@@ -177,19 +171,29 @@ export const queueMessageFromDraft = async (
   });
 };
 
-export const hasPendingMessageCommand = async (
+export interface PendingMessageCommand {
+  clientMessageId: string;
+  isStopping: boolean;
+}
+
+export const getPendingMessageCommand = async (
   partition: ChatPartition,
   conversationId: string,
-): Promise<boolean> => {
+): Promise<PendingMessageCommand | null> => {
   const database = await getChatDatabase();
-  const row = await database.getFirstAsync<{ pending: number }>(
-    `SELECT 1 AS pending FROM outbox
-      WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND kind = 'message'
+  const row = await database.getFirstAsync<{ client_message_id: string; is_stopping: number }>(
+    `SELECT m.client_message_id, EXISTS (
+       SELECT 1 FROM outbox s WHERE s.user_id = m.user_id AND s.workspace_id = m.workspace_id
+         AND s.kind = 'stop' AND s.client_message_id = m.client_message_id
+     ) AS is_stopping FROM outbox m
+      WHERE m.user_id = ? AND m.workspace_id = ? AND m.conversation_id = ? AND m.kind = 'message'
       LIMIT 1`,
     ...values(partition),
     conversationId,
   );
-  return Boolean(row);
+  return row
+    ? { clientMessageId: row.client_message_id, isStopping: Boolean(row.is_stopping) }
+    : null;
 };
 
 export const nextOutboxCommand = async (
@@ -201,6 +205,7 @@ export const nextOutboxCommand = async (
             intent_json, frozen_body_json, idempotency_key, attempts, next_attempt_at, created_at
        FROM outbox
       WHERE user_id = ? AND workspace_id = ? AND status = 'queued' AND next_attempt_at <= ?
+        AND (kind != 'stop' OR run_id IS NOT NULL)
       ORDER BY CASE kind WHEN 'stop' THEN 0 WHEN 'approval' THEN 1 ELSE 2 END, created_at ASC
       LIMIT 1`,
     ...values(partition),
@@ -393,6 +398,13 @@ export const acceptMessageCommand = async (
       now,
     );
     await database.runAsync(
+      `UPDATE outbox SET run_id = ? WHERE user_id = ? AND workspace_id = ?
+        AND kind = 'stop' AND client_message_id = ?`,
+      accepted.runId,
+      ...values(partition),
+      command.clientMessageId,
+    );
+    await database.runAsync(
       "DELETE FROM outbox WHERE user_id = ? AND workspace_id = ? AND id = ?",
       ...values(partition),
       command.id,
@@ -436,6 +448,11 @@ export const failMessageCommand = async (
       command.clientMessageId,
     );
     await database.runAsync(
+      "DELETE FROM outbox WHERE user_id = ? AND workspace_id = ? AND kind = 'stop' AND client_message_id = ?",
+      ...values(partition),
+      command.clientMessageId,
+    );
+    await database.runAsync(
       "DELETE FROM outbox WHERE user_id = ? AND workspace_id = ? AND id = ?",
       ...values(partition),
       command.id,
@@ -446,17 +463,32 @@ export const failMessageCommand = async (
 export const queueStopCommand = async (
   partition: ChatPartition,
   conversationId: string,
-  runId: string,
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
+    // Keep a stop durable even before createMessage returns the server's run ID.
+    // Acceptance resolves it in the same transaction that removes the message command.
+    const pending = await database.getFirstAsync<{ client_message_id: string }>(
+      "SELECT client_message_id FROM outbox WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND kind = 'message' LIMIT 1",
+      ...values(partition),
+      conversationId,
+    );
+    const run = pending
+      ? null
+      : await database.getFirstAsync<{ run_id: string }>(
+          "SELECT run_id FROM run_checkpoints WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND status IN ('queued', 'running', 'paused') ORDER BY updated_at DESC LIMIT 1",
+          ...values(partition),
+          conversationId,
+        );
+    if (!pending && !run) return;
     await database.runAsync(
       `INSERT OR IGNORE INTO outbox (
-         user_id, workspace_id, id, kind, status, conversation_id, run_id, intent_json, created_at
-       ) VALUES (?, ?, ?, 'stop', 'queued', ?, ?, '{}', ?)`,
+         user_id, workspace_id, id, kind, status, conversation_id, run_id, client_message_id, intent_json, created_at
+       ) VALUES (?, ?, ?, 'stop', 'queued', ?, ?, ?, '{}', ?)`,
       ...values(partition),
-      `stop:${runId}`,
+      pending ? `stop-message:${pending.client_message_id}` : `stop:${run!.run_id}`,
       conversationId,
-      runId,
+      run?.run_id ?? null,
+      pending?.client_message_id ?? null,
       Date.now(),
     );
   });
@@ -512,7 +544,7 @@ export const recoverOutbox = async (partition: ChatPartition): Promise<void> => 
 export async function nextOutboxWakeAt(partition: ChatPartition): Promise<number | null> {
   const database = await getChatDatabase();
   const row = await database.getFirstAsync<{ wake_at: number | null }>(
-    "SELECT MIN(next_attempt_at) AS wake_at FROM outbox WHERE user_id = ? AND workspace_id = ? AND status = 'queued'",
+    "SELECT MIN(next_attempt_at) AS wake_at FROM outbox WHERE user_id = ? AND workspace_id = ? AND status = 'queued' AND (kind != 'stop' OR run_id IS NOT NULL)",
     ...values(partition),
   );
   return row?.wake_at ?? null;

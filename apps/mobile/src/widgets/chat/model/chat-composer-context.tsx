@@ -90,19 +90,23 @@ export interface ComposerAttachment {
   height?: number;
 }
 
+// Input acknowledgements live only in the cache, never in the persisted draft.
+interface ComposerDraft extends StoredDraft {
+  nativeEventCount?: number;
+}
+
 interface ChatComposerContextValue {
   conversationId: string;
   value: string;
+  nativeEventCount: number;
   attachments: ComposerAttachment[];
   selectedModelId: ChatModelId;
   isReady: boolean;
   activateConversation: (conversationId: string) => void;
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
-  clearAfterSend: () => void;
-  flushDraft: () => Promise<void>;
   removeAttachment: (id: string) => Promise<void>;
   selectModel: (id: ChatModelId) => void;
-  setValue: (value: string) => void;
+  setValue: (value: string, nativeEventCount: number) => void;
 }
 
 const ChatComposerContext = createContext<ChatComposerContextValue | null>(null);
@@ -116,10 +120,13 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     : ["chat", "draft", "signed-out"];
   const draftQuery = useQuery({
     queryKey,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }): Promise<ComposerDraft> => {
       const draft = await getStoredDraft(partition!, conversationId);
       throwIfAborted(signal);
-      return draft;
+      return {
+        ...draft,
+        nativeEventCount: queryClient.getQueryData<ComposerDraft>(queryKey)?.nativeEventCount ?? 0,
+      };
     },
     enabled: Boolean(partition),
     staleTime: Infinity,
@@ -141,19 +148,27 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         );
     },
   });
-  const emptyDraft: StoredDraft = {
+  const emptyDraft: ComposerDraft = {
     conversationId,
     text: "",
     modelId: "moonshotai/kimi-k3",
     attachments: [],
   };
   const draft = draftQuery.data ?? emptyDraft;
-  const editDraft = (changes: Partial<Pick<StoredDraft, "text" | "modelId">>) => {
+  const editDraft = (
+    changes: Partial<Pick<ComposerDraft, "text" | "modelId" | "nativeEventCount">>,
+  ) => {
     if (!partition) return;
     // Cancel a stale disk read before publishing an edit. The query cache is the live draft;
     // SQLite owns persistence, and successful writes never hydrate older text over newer edits.
     void queryClient.cancelQueries({ queryKey, exact: true });
-    const next = { ...(queryClient.getQueryData<StoredDraft>(queryKey) ?? emptyDraft), ...changes };
+    const current = queryClient.getQueryData<ComposerDraft>(queryKey) ?? emptyDraft;
+    if (
+      changes.nativeEventCount !== undefined &&
+      changes.nativeEventCount < (current.nativeEventCount ?? 0)
+    )
+      return;
+    const next = { ...current, ...changes };
     queryClient.setQueryData(queryKey, next);
     saveDraftMutation.mutate({ partition, draft: next });
   };
@@ -173,33 +188,23 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     analytics.capture("attachment_removed");
     await queryClient.invalidateQueries({ queryKey, exact: true });
   };
-  const flushDraft = async (): Promise<void> => {
-    if (!partition) return;
-    const current = queryClient.getQueryData<StoredDraft>(queryKey) ?? emptyDraft;
-    await saveDraftMutation.mutateAsync({ partition, draft: current });
-  };
-  const clearAfterSend = () => {
-    if (!partition) return;
-    void queryClient.invalidateQueries({ queryKey, exact: true });
-  };
   return (
     <ChatComposerContext
       value={{
         conversationId,
         value: draft.text,
+        nativeEventCount: draft.nativeEventCount ?? 0,
         attachments: draft.attachments,
         selectedModelId: draft.modelId,
         isReady: !partition || draftQuery.isFetched,
         activateConversation: setConversationId,
         addAttachments,
         removeAttachment,
-        flushDraft,
-        clearAfterSend,
         selectModel: (modelId) => {
           editDraft({ modelId });
           analytics.capture("chat_model_selected", { model_id: modelId });
         },
-        setValue: (text) => editDraft({ text }),
+        setValue: (text, nativeEventCount) => editDraft({ text, nativeEventCount }),
       }}
     >
       {children}
