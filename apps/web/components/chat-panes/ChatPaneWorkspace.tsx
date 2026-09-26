@@ -36,6 +36,10 @@ import {
   splitPane,
 } from "@/lib/chat-pane-layout";
 import { persistChatPaneLayout, readStoredChatPaneLayout } from "@/lib/chat-pane-storage";
+import {
+  acceptedOptimisticChatIds,
+  useOptimisticChatSummaries,
+} from "@/lib/optimistic-chat-summaries";
 
 const FLASH_DURATION_MS = 600;
 
@@ -194,13 +198,30 @@ export function ChatPaneWorkspaceProvider({ children }: { children: ReactNode })
 
   const focusedChatId = findPane(layout.root, layout.focusedPaneId)?.chatId ?? null;
 
+  // A chat whose first message the API has not accepted yet exists only in this
+  // tab. The chat route is server-rendered and redirects home for an id the API
+  // cannot see, so putting the optimistic id in the URL races the send: when
+  // the page fetch wins, the redirect empties the very pane that is sending and
+  // the reader is bounced back to Home mid-turn. The same holds for a new chat
+  // whose send failed, so routability is opt-in: a durable row, or acceptance.
+  const optimisticChats = useOptimisticChatSummaries();
+  const focusedChatRoutable =
+    focusedChatId === null ||
+    openChats.some((chat) => chat.id === focusedChatId) ||
+    acceptedOptimisticChatIds(optimisticChats, workspaceId).has(focusedChatId);
+
   // Layout -> route. The focused pane owns the URL. `replace` keeps focusing a
   // pane the reader can already see out of the back stack; the history entries
   // that matter come from the sidebar's own link navigations.
+  //
+  // The URL only ever names a Conversation the server can render: a new chat
+  // reaches it on the render after the API accepts its first message. Keyed on
+  // the boolean rather than the optimistic set so the row reconciling later,
+  // while that navigation is still in flight, does not request it a second time.
   useEffect(() => {
-    if (!onCanvas || focusedChatId === routedChatId) return;
+    if (!onCanvas || !focusedChatRoutable || focusedChatId === routedChatId) return;
     router.replace(chatPath(focusedChatId), { scroll: false });
-  }, [focusedChatId, onCanvas, routedChatId, router]);
+  }, [focusedChatId, focusedChatRoutable, onCanvas, routedChatId, router]);
 
   const [draggingChatId, setDraggingChatId] = useState<string | null>(null);
   const [dragVersion, setDragVersion] = useState(0);
