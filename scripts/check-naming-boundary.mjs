@@ -192,6 +192,7 @@ const baseEnvKeys = envKeys(
 // `.env.example` still matches origin/main modulo the rename map; genuinely new
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
+  "APP_VARIANT",
   "API_INTERNAL_TOKEN",
   "GITHUB_USER_APP_WEBHOOK_SECRET",
   "MESSAGES_API_KEY",
