@@ -204,6 +204,13 @@ export function startSandboxReconciler(options: { namespace: string; pollInterva
       }
     },
     onError: (error) => {
+      if (isSandboxReconcileTimeout(error)) {
+        logger.warn("Managed sandbox reconciliation timed out; the next poll will retry", {
+          event: "opencompany.runner_sandbox_reconcile_deferred",
+          error,
+        });
+        return;
+      }
       captureException(error, { event: "opencompany.runner_sandbox_reconcile_failed" });
       logger.error("Managed sandbox reconciliation failed", {
         event: "opencompany.runner_sandbox_reconcile_failed",
@@ -211,6 +218,10 @@ export function startSandboxReconciler(options: { namespace: string; pollInterva
       });
     },
   });
+}
+
+function isSandboxReconcileTimeout(error: unknown) {
+  return error instanceof Error && error.name === "TimeoutError";
 }
 
 function isManagedSandboxOwnerKind(value: string | undefined): value is ManagedSandboxOwnerKind {
