@@ -79,6 +79,9 @@ export default {
   experiments: {
     typedRoutes: true,
     reactCompiler: true,
+    inlineModules: {
+      watchedDirectories: ["src/widgets/sidebar/native"],
+    },
   },
   extra: {
     appVariant: APP_VARIANT,

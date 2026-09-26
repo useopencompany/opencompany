@@ -36,7 +36,7 @@ import { useChatMarkdownStyle } from "@/widgets/chat/ui/use-chat-markdown-style"
 import {
   NativeSidebarHeader,
   SIDEBAR_HEADER_INITIAL_HEIGHT,
-} from "../../../../modules/open-company-sidebar-header";
+} from "@/widgets/sidebar/native/NativeSidebarHeaderView";
 
 const SIDEBAR_SCROLL_VIEW_TEST_ID = "sidebar-scroll-view";
 // The native bar items render between SwiftUI's regular and large control sizes.

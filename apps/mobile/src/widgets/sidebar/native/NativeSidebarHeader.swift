@@ -1,7 +1,8 @@
-import ExpoModulesCore
+internal import ExpoModulesCore
 
-public class NativeSidebarHeaderModule: Module {
-  public func definition() -> ModuleDefinition {
+// Expo registers inline modules by filename, so the file, class, and Name must stay identical.
+class NativeSidebarHeader: Module {
+  func definition() -> ModuleDefinition {
     Name("NativeSidebarHeader")
 
     View(NativeSidebarHeaderView.self) {
