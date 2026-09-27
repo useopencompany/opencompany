@@ -91,6 +91,12 @@ the opt-in. Issues and pull requests opened by bots never start runs. Issue and 
 are written by whoever opened them, which on a public repository is anyone, so the run context marks
 them as untrusted data.
 
+**Pull request review** is the packaged setup for `pull_request.opened`: a workflow template that
+asks for the account and repository, then opens a draft whose trigger is already bound to them and
+whose step reviews the pull request and comments the findings. The clone needs a linked company
+account; the run also needs the activating member's own **GitHub as you** connection, because a
+company plugin delivers events but supplies no tools. Both gaps are named on the template card.
+
 ## Contract and ownership
 
 Reviewed plugin packages declare `so.opencompany.events`. Each event has an ID, label, description,
