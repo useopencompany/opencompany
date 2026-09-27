@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
@@ -16,6 +17,8 @@ import {
   type ComposerAttachment,
   useChatComposer,
 } from "../model/chat-composer-context";
+import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
+import { listStoredConversations } from "../model/chat-store";
 import { prepareImageAttachments } from "../model/prepare-image-attachment";
 
 interface AttachmentAction {
@@ -36,9 +39,20 @@ export default function AttachmentSheet() {
   const {
     addAttachments,
     attachments: currentAttachments,
+    conversationId,
     selectedModelId,
     selectModel,
   } = useChatComposer();
+  const { partition } = useChatCoordinator();
+  // A Task keeps the engine and model it was created with, so its replies offer no model choice.
+  const isTask = useQuery({
+    queryKey: partition
+      ? chatQueryKeys.conversations(partition)
+      : ["chat", "conversations", "signed-out"],
+    queryFn: () => listStoredConversations(partition!),
+    enabled: Boolean(partition),
+    select: (items) => items.find((item) => item.id === conversationId)?.kind === "task",
+  }).data;
 
   const persistPickedAttachments = async (attachments: ComposerAttachment[]) => {
     const [preparationError, preparedAttachments] = await until(() =>
@@ -237,57 +251,61 @@ export default function AttachmentSheet() {
         ))}
       </View>
 
-      <Text className="px-1 pt-[25px] pb-2 text-[17px] text-muted-foreground leading-[22px]">
-        Models
-      </Text>
+      {isTask ? null : (
+        <>
+          <Text className="px-1 pt-[25px] pb-2 text-[17px] text-muted-foreground leading-[22px]">
+            Models
+          </Text>
 
-      <View className="gap-0.5">
-        {CHAT_MODELS.map((model) => {
-          const selected = model.id === selectedModelId;
-          const logoSource = theme === "dark" ? model.logo.dark : model.logo.light;
+          <View className="gap-0.5">
+            {CHAT_MODELS.map((model) => {
+              const selected = model.id === selectedModelId;
+              const logoSource = theme === "dark" ? model.logo.dark : model.logo.light;
 
-          return (
-            <Pressable
-              accessibilityLabel={`${model.label}, ${model.provider}`}
-              accessibilityRole="button"
-              accessibilityState={{ selected }}
-              className="min-h-[58px] flex-row items-center rounded-[14px] border-continuous px-1"
-              key={model.id}
-              onPress={() => {
-                selectModel(model.id);
-                router.back();
-              }}
-            >
-              <View className="w-[30px] items-center justify-center">
-                {selected ? (
-                  <StyledSymbolView
-                    name="checkmark"
-                    size={19}
-                    tintColorClassName="accent-muted-foreground"
-                    weight="medium"
-                  />
-                ) : null}
-              </View>
-              <View className="mr-3 w-9 items-center justify-center">
-                <StyledImage
-                  accessibilityIgnoresInvertColors
-                  className="size-6 opacity-55"
-                  contentFit="contain"
-                  source={logoSource}
-                />
-              </View>
-              <View className="flex-1 py-2">
-                <Text className="font-medium text-[16px] text-foreground leading-5 tracking-[-0.2px]">
-                  {model.label}
-                </Text>
-                <Text className="text-[13px] text-muted-foreground leading-[17px] tracking-[-0.1px]">
-                  {model.provider}
-                </Text>
-              </View>
-            </Pressable>
-          );
-        })}
-      </View>
+              return (
+                <Pressable
+                  accessibilityLabel={`${model.label}, ${model.provider}`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  className="min-h-[58px] flex-row items-center rounded-[14px] border-continuous px-1"
+                  key={model.id}
+                  onPress={() => {
+                    selectModel(model.id);
+                    router.back();
+                  }}
+                >
+                  <View className="w-[30px] items-center justify-center">
+                    {selected ? (
+                      <StyledSymbolView
+                        name="checkmark"
+                        size={19}
+                        tintColorClassName="accent-muted-foreground"
+                        weight="medium"
+                      />
+                    ) : null}
+                  </View>
+                  <View className="mr-3 w-9 items-center justify-center">
+                    <StyledImage
+                      accessibilityIgnoresInvertColors
+                      className="size-6 opacity-55"
+                      contentFit="contain"
+                      source={logoSource}
+                    />
+                  </View>
+                  <View className="flex-1 py-2">
+                    <Text className="font-medium text-[16px] text-foreground leading-5 tracking-[-0.2px]">
+                      {model.label}
+                    </Text>
+                    <Text className="text-[13px] text-muted-foreground leading-[17px] tracking-[-0.1px]">
+                      {model.provider}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      )}
     </ScrollView>
   );
 }

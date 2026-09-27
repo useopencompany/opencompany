@@ -33,6 +33,14 @@
       --color-link: #2b557f;
       --color-accent: #007aff;
       --color-accent-foreground: #ffffff;
+      --color-warning: #795b19;
+      --color-info: #2b557f;
+      --color-destructive: #cf222e;
+      --color-pr-open: #1a7f37;
+      --color-pr-draft: #59636e;
+      --color-pr-blocked: #cf222e;
+      --color-pr-merged: #8250df;
+      --color-pr-closed: #cf222e;
     }
 
     @variant dark {
@@ -56,6 +64,14 @@
       --color-link: #a9cfff;
       --color-accent: #0a84ff;
       --color-accent-foreground: #ffffff;
+      --color-warning: #f1d08a;
+      --color-info: #a9cfff;
+      --color-destructive: #f85149;
+      --color-pr-open: #3fb950;
+      --color-pr-draft: #8b949e;
+      --color-pr-blocked: #f85149;
+      --color-pr-merged: #a371f7;
+      --color-pr-closed: #f85149;
     }
   }
 }

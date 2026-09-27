@@ -31,6 +31,7 @@ The app supports dark mode. Theme is switched automatically based on the system 
 We prefer using native UI components where possible to achieve the best performance and native feel. Use `expo-native-ui` skill to learn about this approach, and `expo-ui` skill to understand how `@expo/ui` library works.
 
 Use the `apple-design` when implementing iOS UI to get recent Apple design guidelines. Use `write-swift` skill to write performant native Swift code.
+
 ## Routing
 
 We use Expo Router with file-based navigation. The API is similar to React Navigation, but recently started diverging from it, so always use `expo-router` skill when working with routing and linking.
@@ -51,13 +52,15 @@ React Compiler is enabled in the mobile app. Don't use `useMemo`, `useCallback`,
 - Do not create separate interfaces for props, just inline the type definition in the function component
 - Do not use nested function declarations, only use arrow functions inside other functions
 - Use `Boolean()` instead of `!!`, and for boolean-type conversions
-- No testing is done in the mobile app for now. Don't write tests unless explicitly asked to by the user.
+- No testing is implemented in the mobile app for now. Don't write unit or E2E tests unless explicitly asked to by the user.
 
 ## Device Testing
 
-Do not use a simulator or preview unless user requests it explicitly to verify the app. Use agent-device only for app/device automation tasks. For a normal app-driving task, start immediately. Do not probe first with `--help`, `--version`, `devices`, `appstate`, `snapshot`, or `screenshot`; open the requested app in the foreground and continue from its initial interactive snapshot. For TV, Fire TV, or Vega OS tasks, read `agent-device help tv`. For exploratory QA, read `agent-device help dogfood`. For logs, network, audio, traces, or runtime failures, read `agent-device help debugging`. For React Native component trees, props/state/hooks, slow renders, or rerenders, read `agent-device help react-devtools`. For React Native JavaScript heap growth, heap snapshots, allocation hotspots, or retained-object leaks, read `agent-device help cdp`. For React Native apps, overlays, Metro/Fast Refresh blockers, and routing to React DevTools or debugging evidence, read `agent-device help react-native`.
+Do not use a simulator or a preview to verify the app unless the user requests that explicitly. Use agent-device only for app/device automation tasks. For a normal app-driving task, start immediately. Do not probe first with `--help`, `--version`, `devices`, `appstate`, `snapshot`, or `screenshot`; open the requested app in the foreground and continue from its initial interactive snapshot. For TV, Fire TV, or Vega OS tasks, read `agent-device help tv`. For exploratory QA, read `agent-device help dogfood`. For logs, network, audio, traces, or runtime failures, read `agent-device help debugging`. For React Native component trees, props/state/hooks, slow renders, or rerenders, read `agent-device help react-devtools`. For React Native JavaScript heap growth, heap snapshots, allocation hotspots, or retained-object leaks, read `agent-device help cdp`. For React Native apps, overlays, Metro/Fast Refresh blockers, and routing to React DevTools or debugging evidence, read `agent-device help react-native`.
 
 Use the CLI in the integrated terminal. `agent-device` is installed as a dev dependency, so run via `bun agent-device <subcommand>` in the `apps/mobile` directory. Do not assume the agent process `PATH` is the user's `PATH`. Do not silently fall back to `bunx agent-device@latest`; ask or use an exact version. See correct bundle identifier in the Expo config in `app.config.ts` (we use the dev version of the app for development). Prefer `open -> snapshot -i -> act -> re-snapshot -> verify -> close` where the target supports capture and selectors; otherwise follow target-specific help. Use current refs such as `@e3` for exploration and selectors for durable replay. Keep mutating commands against one session serial. Capture screenshots, logs, network, audio, perf, traces, recordings, and `.ad` replay scripts only when they add evidence.
+
+If the app is not authenticated, do not try to silently get around, but explicitly asked the user to sign in to properly test the app.
 
 ## Data Fetching
 
