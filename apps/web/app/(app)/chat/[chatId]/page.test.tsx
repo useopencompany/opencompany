@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChatPage from "./page";
 
 const routeMock = vi.hoisted(() => vi.fn(() => null));
+const currentUserMock = vi.hoisted(() => vi.fn());
 const loadChatMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() =>
   vi.fn((path: string) => {
@@ -15,6 +16,10 @@ vi.mock("@/components/Routes", () => ({
   HomeRoute: routeMock,
 }));
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: currentUserMock,
+}));
+
 vi.mock("@/lib/chat", () => ({
   loadCurrentChatSessionById: loadChatMock,
 }));
@@ -22,6 +27,8 @@ vi.mock("@/lib/chat", () => ({
 describe("opencompany chat route", () => {
   beforeEach(() => {
     routeMock.mockClear();
+    currentUserMock.mockReset();
+    currentUserMock.mockResolvedValue({});
     loadChatMock.mockReset();
     redirectMock.mockClear();
   });
@@ -41,8 +48,22 @@ describe("opencompany chat route", () => {
     });
 
     expect(loadChatMock).toHaveBeenCalledWith("goat_chat_1");
+    expect(currentUserMock.mock.invocationCallOrder[0]).toBeLessThan(
+      loadChatMock.mock.invocationCallOrder[0]!,
+    );
     expect(page.props).toEqual({ chatId: "goat_chat_1", initialChat: chat });
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("does not load the conversation after the auth boundary redirects an expired session", async () => {
+    currentUserMock.mockRejectedValue(new Error("redirect:/signin"));
+
+    await expect(ChatPage({ params: Promise.resolve({ chatId: "goat_chat_1" }) })).rejects.toThrow(
+      "redirect:/signin",
+    );
+
+    expect(loadChatMock).not.toHaveBeenCalled();
+    expect(routeMock).not.toHaveBeenCalled();
   });
 
   it("redirects a nonexistent conversation before mounting chat collections", async () => {
@@ -63,6 +84,7 @@ describe("opencompany chat route", () => {
     );
 
     expect(loadChatMock).not.toHaveBeenCalled();
+    expect(currentUserMock).not.toHaveBeenCalled();
     expect(routeMock).not.toHaveBeenCalled();
   });
 });
