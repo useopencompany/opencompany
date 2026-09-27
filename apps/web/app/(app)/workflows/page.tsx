@@ -1,6 +1,6 @@
 import { WorkflowsRoute } from "@/components/Routes";
 import { currentUser } from "@/lib/auth";
-import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
+import { getCompanyGitHubPluginAction } from "@/lib/company-plugin-actions";
 import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 import { listHeadlessPlugins } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -13,22 +13,27 @@ export default async function WorkflowsPage() {
   // The API only returns company workflows plus this user's personal ones, so every row here is
   // one they can open and edit. Owner names only decorate that list, so a workspace-settings
   // failure degrades the Owner column rather than taking the whole page down with it.
-  // Plugin and account state only decorates the template cards with what still needs connecting, so
-  // a failure there drops the setup hints rather than taking the page down.
-  const [workflows, members, templateSetup, companyGitHub] = await Promise.all([
+  // Plugin, account, and company-connection state only decorates the template cards with what still
+  // needs connecting, so a failure there drops the setup hints rather than taking the page down.
+  // They load together because a partial read would let a card claim GitHub is unconnected when it
+  // is only unreadable.
+  const [workflows, members, templateSetup] = await Promise.all([
     listHeadlessWorkflows(),
     listWorkspaceMembersAction().catch((error: unknown) => {
       console.error("[opencompany] Failed to load workspace members for the workflow list", error);
       return null;
     }),
-    Promise.all([listHeadlessPlugins(), getPersonalAccounts()]).catch((error: unknown) => {
+    Promise.all([
+      listHeadlessPlugins(),
+      getPersonalAccounts(),
+      getCompanyGitHubPluginAction(),
+    ]).catch((error: unknown) => {
       console.error(
         "[opencompany] Failed to load plugin setup state for workflow templates",
         error,
       );
       return null;
     }),
-    getCompanyGitHubPluginForTriggersAction(),
   ]);
   const ownerNames = members
     ? {
@@ -49,7 +54,7 @@ export default async function WorkflowsPage() {
           workflowTemplateMissingPlugins(template, {
             plugins: templateSetup[0],
             personalAccounts: templateSetup[1],
-            companyGitHub,
+            companyGitHub: templateSetup[2],
           }),
         ]),
       )
@@ -61,7 +66,7 @@ export default async function WorkflowsPage() {
       canEdit
       ownerNames={ownerNames}
       templateMissingPlugins={templateMissingPlugins}
-      companyGitHub={companyGitHub}
+      companyGitHub={templateSetup?.[2] ?? null}
     />
   );
 }

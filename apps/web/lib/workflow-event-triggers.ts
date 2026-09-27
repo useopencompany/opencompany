@@ -78,14 +78,19 @@ function companyGitHubEventProvider(plugin: CompanyGitHubPluginDto): WorkflowEve
     label: "GitHub (company)",
     accountHref: "/plugins/company/github",
     accountLabel: plugin.canManage ? "Connect GitHub" : "Ask an admin to connect GitHub",
-    accounts: plugin.installations
-      .filter((installation: CompanyGitHubInstallationDto) => installation.status === "connected")
-      .map((installation: CompanyGitHubInstallationDto) => ({
-        integrationId: installation.integrationId,
-        label: installation.accountLogin,
-      })),
+    accounts: companyGitHubEventAccounts(plugin),
     events: plugin.events,
   };
+}
+
+/** The company GitHub accounts an event trigger can bind to. */
+export function companyGitHubEventAccounts(plugin: CompanyGitHubPluginDto | null | undefined) {
+  return (plugin?.installations ?? [])
+    .filter((installation: CompanyGitHubInstallationDto) => installation.status === "connected")
+    .map((installation: CompanyGitHubInstallationDto) => ({
+      integrationId: installation.integrationId,
+      label: installation.accountLogin,
+    }));
 }
 
 export function workflowEventProvidersReady(providers: readonly WorkflowEventProviderOption[]) {

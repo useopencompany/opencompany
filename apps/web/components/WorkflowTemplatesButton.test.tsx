@@ -173,6 +173,21 @@ describe("WorkflowTemplatesButton", () => {
     });
   });
 
+  it("reopens on the gallery after the setup step is dismissed", async () => {
+    render(
+      <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,
+    );
+
+    await useTemplate(eventTemplate.name);
+    await screen.findByRole("combobox", { name: "Repository" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await openTemplates();
+
+    expect(screen.getByRole("dialog", { name: "Workflow templates" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Repository" })).not.toBeInTheDocument();
+  });
+
   it("cannot clone an event template before a repository is chosen", async () => {
     render(
       <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,

@@ -44,9 +44,9 @@ import {
   loadWorkflowEventFilterOptions,
   type WorkflowEventFilterOption,
 } from "@/lib/workflow-event-filters";
+import { companyGitHubEventAccounts } from "@/lib/workflow-event-triggers";
 import { DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE } from "@/lib/workflow-schedule-defaults";
 import {
-  companyGitHubEventAccounts,
   WORKFLOW_TEMPLATES,
   type WorkflowTemplate,
   type WorkflowTemplateIcon,
@@ -131,7 +131,14 @@ export function WorkflowTemplatesButton({
 
       {/* Closing mid-clone is allowed: the draft is already committed server-side and the push to it
           still runs, so blocking dismissal would only risk trapping the user behind the modal. */}
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          // Reopening the gallery should show the gallery, not the setup step it was closed on.
+          if (!next) setSetup(null);
+        }}
+      >
         <DialogContent className="max-h-[calc(100vh-4rem)] max-w-[560px] gap-5 overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[15px]">

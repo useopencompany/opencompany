@@ -1,15 +1,14 @@
-import type {
-  CompanyGitHubInstallationDto,
-  CompanyGitHubPluginDto,
-  PluginListItemDto,
-} from "@opencompany/protocol";
+import type { CompanyGitHubPluginDto, PluginListItemDto } from "@opencompany/protocol";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   OFFICIAL_MCP_PLUGIN_METADATA,
   type OfficialMcpPluginMetadata,
   type OfficialMcpPluginName,
 } from "@/lib/official-plugins";
-import { COMPANY_GITHUB_EVENT_PROVIDER } from "@/lib/workflow-event-triggers";
+import {
+  COMPANY_GITHUB_EVENT_PROVIDER,
+  companyGitHubEventAccounts,
+} from "@/lib/workflow-event-triggers";
 
 // Templates answer the blank-editor problem: a founder opens Workflows with nothing to react to and
 // has to invent both the job and the prompt. Each one is a complete, running-quality workflow they
@@ -226,14 +225,4 @@ export function workflowTemplateMissingPlugins(
       ];
     }),
   );
-}
-
-/** The company GitHub accounts an event template's trigger can bind to, newest link last. */
-export function companyGitHubEventAccounts(plugin: CompanyGitHubPluginDto | null | undefined) {
-  return (plugin?.installations ?? [])
-    .filter((installation: CompanyGitHubInstallationDto) => installation.status === "connected")
-    .map((installation: CompanyGitHubInstallationDto) => ({
-      integrationId: installation.integrationId,
-      label: installation.accountLogin,
-    }));
 }
