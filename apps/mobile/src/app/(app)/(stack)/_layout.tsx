@@ -48,6 +48,18 @@ export default function StackLayout() {
           }}
         />
         <Stack.Screen
+          name="share-sheet"
+          options={{
+            presentation: "formSheet",
+            animation: "default",
+            headerShown: false,
+            gestureEnabled: true,
+            sheetGrabberVisible: true,
+            contentStyle: { backgroundColor },
+            sheetAllowedDetents: "fitToContents",
+          }}
+        />
+        <Stack.Screen
           name="settings-sheet"
           options={{
             headerTransparent: true,

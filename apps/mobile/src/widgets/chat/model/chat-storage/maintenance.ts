@@ -58,6 +58,18 @@ export const purgeAllChatData = async (): Promise<void> => {
   if (directory.exists) directory.delete();
 };
 
+// A conversation with local work in flight is never evicted, whatever its age.
+const IDLE_CONVERSATION = `
+  json_extract(c.runtime_json, '$.activeRunId') IS NULL
+  AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.user_id = c.user_id AND d.workspace_id = c.workspace_id AND d.conversation_id = c.local_id)
+  AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.user_id = c.user_id AND o.workspace_id = c.workspace_id AND o.conversation_id = c.local_id)
+  AND NOT EXISTS (SELECT 1 FROM run_checkpoints r WHERE r.user_id = c.user_id AND r.workspace_id = c.workspace_id AND r.conversation_id = c.local_id AND r.status IN ('queued','running','paused'))`;
+
+/**
+ * Bounds the transcript cache without touching the sidebar. Sidebar rows (pins included) keep
+ * their metadata however long ago they were read; only their messages are dropped, and opening
+ * one refetches its transcript. Rows that left the sidebar (archived or deleted elsewhere) go.
+ */
 export const evictCompletedCache = async (partition: ChatPartition): Promise<void> => {
   const uris = await withChatTransaction(partition, async (database) => {
     await database.runAsync(
@@ -65,11 +77,7 @@ export const evictCompletedCache = async (partition: ChatPartition): Promise<voi
         WHERE user_id = ? AND workspace_id = ? AND local_id IN (
           SELECT c.local_id FROM conversations c
            WHERE c.user_id = ? AND c.workspace_id = ?
-             AND json_extract(c.runtime_json, '$.activeRunId') IS NULL
-             AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.user_id = c.user_id AND d.workspace_id = c.workspace_id AND d.conversation_id = c.local_id)
-             AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.user_id = c.user_id AND o.workspace_id = c.workspace_id AND o.conversation_id = c.local_id)
-             AND NOT EXISTS (SELECT 1 FROM run_checkpoints r WHERE r.user_id = c.user_id AND r.workspace_id = c.workspace_id AND r.conversation_id = c.local_id AND r.status IN ('queued','running','paused'))
-           ORDER BY c.last_viewed_at DESC LIMIT -1 OFFSET 100
+             AND c.in_sidebar = 0 AND c.provisional = 0 AND ${IDLE_CONVERSATION}
         )`,
       ...values(partition),
       ...values(partition),
@@ -79,10 +87,21 @@ export const evictCompletedCache = async (partition: ChatPartition): Promise<voi
          SELECT m.rowid FROM messages m JOIN conversations c
            ON c.user_id = m.user_id AND c.workspace_id = m.workspace_id AND c.local_id = m.conversation_id
           WHERE m.user_id = ? AND m.workspace_id = ? AND m.delivery = 'accepted'
-            AND json_extract(c.runtime_json, '$.activeRunId') IS NULL
-            AND NOT EXISTS (SELECT 1 FROM drafts d WHERE d.user_id = c.user_id AND d.workspace_id = c.workspace_id AND d.conversation_id = c.local_id)
-            AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.user_id = c.user_id AND o.workspace_id = c.workspace_id AND o.conversation_id = c.local_id)
-            AND NOT EXISTS (SELECT 1 FROM run_checkpoints r WHERE r.user_id = c.user_id AND r.workspace_id = c.workspace_id AND r.conversation_id = c.local_id AND r.status IN ('queued','running','paused'))
+            AND ${IDLE_CONVERSATION}
+            AND c.local_id NOT IN (
+              SELECT recent.local_id FROM conversations recent
+               WHERE recent.user_id = c.user_id AND recent.workspace_id = c.workspace_id
+               ORDER BY recent.last_viewed_at DESC LIMIT 100
+            )
+       )`,
+      ...values(partition),
+    );
+    await database.runAsync(
+      `DELETE FROM messages WHERE rowid IN (
+         SELECT m.rowid FROM messages m JOIN conversations c
+           ON c.user_id = m.user_id AND c.workspace_id = m.workspace_id AND c.local_id = m.conversation_id
+          WHERE m.user_id = ? AND m.workspace_id = ? AND m.delivery = 'accepted'
+            AND ${IDLE_CONVERSATION}
           ORDER BY m.created_at DESC LIMIT -1 OFFSET 10000
        )`,
       ...values(partition),

@@ -1,4 +1,9 @@
-import type { AttachmentDto, ConversationDto, MessageDto } from "@opencompany/protocol/schemas";
+import type {
+  AttachmentDto,
+  ConversationDto,
+  MessageDto,
+  TaskReadModel,
+} from "@opencompany/protocol/schemas";
 import type { ChatMessage, ChatPart } from "../chat";
 import { getChatDatabase, parseJson, values, withChatTransaction } from "./database";
 import type {
@@ -28,6 +33,7 @@ const normalizePartIdentities = (messageId: string, parts: ChatPart[]): ChatPart
 
 const conversationFromRow = (row: ConversationRow): StoredConversation => ({
   id: row.local_id,
+  kind: row.kind,
   title: row.title,
   engine: row.engine,
   model: row.model,
@@ -35,18 +41,40 @@ const conversationFromRow = (row: ConversationRow): StoredConversation => ({
   updatedAt: row.updated_at,
   lastViewedAt: row.last_viewed_at,
   provisional: Boolean(row.provisional),
+  pinnedAt: row.pinned_at,
+  inSidebar: Boolean(row.in_sidebar),
+  activityState: row.activity_state,
+  hasUnseen: Boolean(row.has_unseen),
+  awaitingInput: Boolean(row.awaiting_input),
+  task:
+    row.task_id && row.task_display_id && row.task_status
+      ? { id: row.task_id, displayId: row.task_display_id, status: row.task_status }
+      : null,
+  hasLocalWork: Boolean(row.has_local_work),
+  hasQueuedMessages: Boolean(row.has_queued_messages),
 });
+
+const CONVERSATION_COLUMNS = `c.*,
+  EXISTS (
+    SELECT 1 FROM outbox o WHERE o.user_id = c.user_id AND o.workspace_id = c.workspace_id
+      AND o.conversation_id = c.local_id AND o.kind = 'message'
+  ) AS has_queued_messages,
+  EXISTS (
+    SELECT 1 FROM outbox o WHERE o.user_id = c.user_id AND o.workspace_id = c.workspace_id
+      AND o.conversation_id = c.local_id AND o.kind = 'message'
+  ) OR EXISTS (
+    SELECT 1 FROM run_checkpoints r WHERE r.user_id = c.user_id AND r.workspace_id = c.workspace_id
+      AND r.conversation_id = c.local_id AND r.status IN ('queued', 'running', 'paused')
+  ) AS has_local_work`;
 
 export const listStoredConversations = async (
   partition: ChatPartition,
 ): Promise<StoredConversation[]> => {
   const database = await getChatDatabase();
   const rows = await database.getAllAsync<ConversationRow>(
-    `SELECT local_id, title, engine, model, runtime_json, updated_at,
-            last_viewed_at, provisional
-       FROM conversations
-      WHERE user_id = ? AND workspace_id = ?
-      ORDER BY updated_at DESC`,
+    `SELECT ${CONVERSATION_COLUMNS} FROM conversations c
+      WHERE c.user_id = ? AND c.workspace_id = ?
+      ORDER BY c.updated_at DESC`,
     ...values(partition),
   );
   return rows.map(conversationFromRow);
@@ -135,29 +163,46 @@ export const getStoredConversation = async (
 ): Promise<StoredConversation | null> => {
   const database = await getChatDatabase();
   const row = await database.getFirstAsync<ConversationRow>(
-    "SELECT * FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
+    `SELECT ${CONVERSATION_COLUMNS} FROM conversations c
+      WHERE c.user_id = ? AND c.workspace_id = ? AND c.local_id = ?`,
     ...values(partition),
     conversationId,
   );
   return row ? conversationFromRow(row) : null;
 };
 
+/**
+ * Writes server snapshots of chats, or of a Task's conversation read directly.
+ *
+ * `preserved` names conversations with a pin, rename, or archive the server may not reflect yet.
+ * Their reader-owned fields keep the local value, so a refresh that started before the change
+ * cannot undo it on screen. A row's kind is set by the list it first arrived in and never flips.
+ */
 export const mergeConversationSnapshots = async (
   partition: ChatPartition,
   conversations: ConversationDto[],
+  preserved: ReadonlySet<string> = new Set(),
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     const now = Date.now();
-    for (const conversation of conversations)
+    for (const conversation of conversations) {
+      const keepLocal = preserved.has(conversation.id) ? 1 : 0;
       await database.runAsync(
         `INSERT INTO conversations (
        user_id, workspace_id, local_id, title, engine, model, runtime_json,
-       updated_at, last_viewed_at, provisional
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+       updated_at, last_viewed_at, provisional, pinned_at, activity_state, has_unseen,
+       awaiting_input
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
      ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET
-       title = excluded.title, engine = excluded.engine,
-       model = excluded.model, runtime_json = excluded.runtime_json,
-       updated_at = excluded.updated_at, provisional = 0`,
+       title = CASE WHEN ? THEN conversations.title ELSE excluded.title END,
+       engine = excluded.engine, model = excluded.model,
+       runtime_json = excluded.runtime_json, updated_at = excluded.updated_at, provisional = 0,
+       pinned_at = CASE
+         WHEN ? OR conversations.kind = 'task' THEN conversations.pinned_at
+         ELSE excluded.pinned_at
+       END,
+       activity_state = excluded.activity_state,
+       has_unseen = excluded.has_unseen, awaiting_input = excluded.awaiting_input`,
         ...values(partition),
         conversation.id,
         conversation.title,
@@ -166,9 +211,119 @@ export const mergeConversationSnapshots = async (
         JSON.stringify(conversation.runtime),
         conversation.updatedAt,
         now,
+        conversation.pinnedAt ?? null,
+        conversation.activityState,
+        conversation.hasUnseen ? 1 : 0,
+        conversation.awaitingInput ? 1 : 0,
+        keepLocal,
+        keepLocal,
       );
+    }
   });
 };
+
+export const mergeTaskSnapshots = async (
+  partition: ChatPartition,
+  tasks: TaskReadModel[],
+  preserved: ReadonlySet<string> = new Set(),
+): Promise<void> => {
+  return withChatTransaction(partition, async (database) => {
+    const now = Date.now();
+    for (const task of tasks) {
+      await database.runAsync(
+        `INSERT INTO conversations (
+       user_id, workspace_id, local_id, kind, title, engine, model, runtime_json,
+       updated_at, last_viewed_at, provisional, activity_state, has_unseen, awaiting_input,
+       task_id, task_display_id, task_status
+     ) VALUES (?, ?, ?, 'task', ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET
+       kind = 'task', title = excluded.title, engine = excluded.engine, model = excluded.model,
+       updated_at = excluded.updated_at, provisional = 0,
+       activity_state = excluded.activity_state, has_unseen = excluded.has_unseen,
+       awaiting_input = excluded.awaiting_input, task_id = excluded.task_id,
+       task_display_id = excluded.task_display_id,
+       task_status = CASE WHEN ? THEN conversations.task_status ELSE excluded.task_status END`,
+        ...values(partition),
+        task.conversationId,
+        task.name,
+        task.engine,
+        task.model,
+        task.updatedAt,
+        now,
+        task.status === "queued" || task.status === "running" ? "working" : "idle",
+        task.hasUnseen ? 1 : 0,
+        task.awaitingInput ? 1 : 0,
+        task.id,
+        task.displayId,
+        task.status,
+        preserved.has(task.conversationId) ? 1 : 0,
+      );
+    }
+  });
+};
+
+/**
+ * Marks exactly the listed conversations as sidebar members. Only call it with the IDs of a
+ * complete, successful pagination: a partial list would drop every row it did not reach.
+ * Provisional chats and those with a pending local change keep their membership.
+ */
+export const reconcileSidebarMembership = async (
+  partition: ChatPartition,
+  listedIds: readonly string[],
+  preserved: ReadonlySet<string>,
+): Promise<void> => {
+  return withChatTransaction(partition, async (database) => {
+    await database.runAsync(
+      `UPDATE conversations
+          SET in_sidebar = CASE WHEN local_id IN (SELECT value FROM json_each(?)) THEN 1 ELSE 0 END
+        WHERE user_id = ? AND workspace_id = ? AND provisional = 0
+          AND local_id NOT IN (SELECT value FROM json_each(?))`,
+      JSON.stringify(listedIds),
+      ...values(partition),
+      JSON.stringify([...preserved]),
+    );
+  });
+};
+
+/** The reader-owned sidebar fields an action changes, and restores if the server refuses it. */
+export interface SidebarFields {
+  title: string;
+  pinnedAt: string | null;
+  inSidebar: boolean;
+  hasUnseen: boolean;
+}
+
+export const writeSidebarFields = async (
+  partition: ChatPartition,
+  conversationId: string,
+  fields: Partial<SidebarFields>,
+): Promise<SidebarFields | null> =>
+  withChatTransaction(partition, async (database) => {
+    const current = await database.getFirstAsync<ConversationRow>(
+      "SELECT * FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
+      ...values(partition),
+      conversationId,
+    );
+    if (!current) return null;
+    const previous: SidebarFields = {
+      title: current.title,
+      pinnedAt: current.pinned_at,
+      inSidebar: Boolean(current.in_sidebar),
+      hasUnseen: Boolean(current.has_unseen),
+    };
+    const next = { ...previous, ...fields };
+    await database.runAsync(
+      `UPDATE conversations SET title = ?, pinned_at = ?, in_sidebar = ?, has_unseen = ?
+        WHERE user_id = ? AND workspace_id = ? AND local_id = ?`,
+      next.title,
+      next.pinnedAt,
+      next.inSidebar ? 1 : 0,
+      next.hasUnseen ? 1 : 0,
+      ...values(partition),
+      conversationId,
+    );
+    return previous;
+  });
 
 export const mergeMessageSnapshots = async (
   partition: ChatPartition,

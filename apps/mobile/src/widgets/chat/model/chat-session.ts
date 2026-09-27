@@ -1,6 +1,13 @@
 import { RunEventCursorError } from "@opencompany/protocol/run-stream";
-import type { MessageDto } from "@opencompany/protocol/schemas";
+import {
+  type ConversationDto,
+  type MessageDto,
+  MessageSummaryReadModelSchema,
+  RunReadModelSchema,
+  TaskReadModelSchema,
+} from "@opencompany/protocol/schemas";
 import { until } from "until-async";
+import type { z } from "zod";
 import {
   ApiRequestError,
   type AuthenticatedApi,
@@ -23,17 +30,62 @@ import {
   markCommandInFlight,
   mergeConversationSnapshots,
   mergeMessageSnapshots,
+  mergeTaskSnapshots,
   NEW_CHAT_ID,
   nextOutboxCommand,
   nextOutboxWakeAt,
   type OutboxCommand,
+  reconcileSidebarMembership,
   recoverOutbox,
   requeueCommand,
-  setRunSnapshot,
+  settleIdleConversationRuns,
+  syncRunSnapshots,
 } from "./chat-store";
 import { orderedPartsFromPresentation, textFromParts } from "./message-presentation";
 import { processChatCommand } from "./process-chat-command";
 import { projectRunEvent } from "./run-projection";
+import { sidebarChangeGuard } from "./sidebar-change-guard";
+
+// A Task conversation is not served by the chat resources, so its transcript and Runs come from
+// the authorized read models. How often an open Task checks for Runs started elsewhere.
+const TASK_POLL_INTERVAL_MS = 3_000;
+
+const ATTACHMENT_MEDIA_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  tsv: "text/tab-separated-values",
+  json: "application/json",
+  srt: "text/plain",
+  text: "text/plain",
+  image: "image/*",
+};
+
+type MessageSummary = z.output<typeof MessageSummaryReadModelSchema>;
+interface PresentationAttachment {
+  id: string;
+  name: string;
+  sizeBytes: number;
+  kind: string;
+}
+
+// The read model names attachments by presentation kind; the transcript stores canonical DTOs.
+const messageFromReadModel = (message: MessageSummary): MessageDto => ({
+  id: message.id,
+  conversationId: message.conversationId,
+  role: message.role,
+  content: message.content,
+  attachments: (message.attachments ?? []).map((attachment: PresentationAttachment) => ({
+    id: attachment.id,
+    filename: attachment.name,
+    mediaType: ATTACHMENT_MEDIA_TYPES[attachment.kind] ?? "application/octet-stream",
+    sizeBytes: attachment.sizeBytes,
+    kind: attachment.kind === "image" ? "image" : "document",
+  })),
+  createdAt: message.createdAt,
+  updatedAt: message.updatedAt,
+});
 
 function retryDelay(command: OutboxCommand, error: unknown): number {
   if (error instanceof ApiRequestError && error.retryAfterMs !== undefined)
@@ -162,49 +214,108 @@ export function createChatSession(input: {
     return { ...active, content: nextContent, parts };
   };
 
+  const mergeTranscript = async (
+    id: string,
+    messages: MessageDto[],
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const current = scope(signal);
+    await mergeMessageSnapshots(current, id, messages);
+    const assistantMessages = messages.filter((message) => message.role === "assistant");
+    for (let index = 0; index < assistantMessages.length; index += 6) {
+      await Promise.all(
+        assistantMessages
+          .slice(index, index + 6)
+          .map((message) => refreshMessagePresentation(id, message.id, message.content, signal)),
+      );
+    }
+  };
+
+  const readRuns = (id: string, signal: AbortSignal) =>
+    input.api.readModelSnapshot("chat-runs-v1", RunReadModelSchema, { conversationId: id }, signal);
+
   const refreshConversation = async (id: string, signal: AbortSignal): Promise<void> => {
     if (id === NEW_CHAT_ID) return;
     throwIfAborted(signal);
     const local = await getStoredConversation(partition, id);
     if (local?.provisional) return;
     const current = scope(signal);
+    if (local?.kind === "task") {
+      const messages = await input.api.readModelSnapshot(
+        "chat-messages-v2",
+        MessageSummaryReadModelSchema,
+        { conversationId: id },
+        signal,
+      );
+      await mergeTranscript(
+        id,
+        messages
+          .map(messageFromReadModel)
+          .sort((left, right) =>
+            left.createdAt === right.createdAt
+              ? left.id.localeCompare(right.id)
+              : Date.parse(left.createdAt) - Date.parse(right.createdAt),
+          ),
+        signal,
+      );
+      await syncRunSnapshots(current, id, await readRuns(id, signal));
+      await invalidateConversation(current, id);
+      await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
+      return;
+    }
     const envelope = await input.api.getConversation(id, signal);
-    await mergeConversationSnapshots(current, [envelope.data]);
+    await mergeConversationSnapshots(current, [envelope.data], sidebarChangeGuard.preservedFor(0));
     let cursor: string | undefined;
     do {
       const page = await input.api.listMessages(id, { cursor, limit: 100 }, signal);
-      await mergeMessageSnapshots(current, id, page.data);
-      const assistantMessages = page.data.filter(
-        (message: MessageDto) => message.role === "assistant",
-      );
-      for (let index = 0; index < assistantMessages.length; index += 6) {
-        await Promise.all(
-          assistantMessages
-            .slice(index, index + 6)
-            .map((message: MessageDto) =>
-              refreshMessagePresentation(id, message.id, message.content, signal),
-            ),
-        );
-      }
+      await mergeTranscript(id, page.data, signal);
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
-    const runId = envelope.data.runtime?.activeRunId;
-    if (runId) {
-      const run = await input.api.getRun(runId, signal);
-      await setRunSnapshot(current, run.data);
-    }
+    // Runs carry their reply Message explicitly, so an active Run is matched to its own reply
+    // rather than to whichever assistant Message happens to be newest.
+    if (envelope.data.runtime?.activeRunId)
+      await syncRunSnapshots(current, id, await readRuns(id, signal));
     await invalidateConversation(current, id);
+    await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
   };
 
   const refreshConversations = async (): Promise<void> => {
     if (!activity || activity.signal.aborted) return;
     const current = scope(activity.signal);
+    const startedAt = Date.now();
+    const listed: string[] = [];
+    const idle: string[] = [];
     let cursor: string | undefined;
     do {
       const page = await input.api.listConversations({ cursor, limit: 100 }, current.signal);
-      await mergeConversationSnapshots(current, page.data);
+      for (const conversation of page.data as ConversationDto[])
+        if (conversation.activityState === "idle" && !conversation.runtime?.activeRunId)
+          idle.push(conversation.id);
+      await mergeConversationSnapshots(
+        current,
+        page.data,
+        sidebarChangeGuard.preservedFor(startedAt),
+      );
+      listed.push(...page.data.map((conversation: ConversationDto) => conversation.id));
       cursor = page.nextCursor ?? undefined;
     } while (cursor);
+    const tasks = (
+      await input.api.readModelSnapshot("tasks-v1", TaskReadModelSchema, {}, current.signal)
+    ).filter((task) => !task.archivedAt);
+    await mergeTaskSnapshots(current, tasks, sidebarChangeGuard.preservedFor(startedAt));
+    listed.push(...tasks.map((task) => task.conversationId));
+    idle.push(
+      ...tasks
+        .filter((task) => task.status !== "queued" && task.status !== "running")
+        .map((task) => task.conversationId),
+    );
+    await settleIdleConversationRuns(
+      current,
+      idle.filter((id) => id !== visibleId),
+      startedAt,
+    );
+    // Membership is only rewritten from a complete listing of both chats and Tasks.
+    await reconcileSidebarMembership(current, listed, sidebarChangeGuard.preservedFor(startedAt));
     await evictCompletedCache(current);
     throwIfAborted(current.signal);
     await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
@@ -213,40 +324,64 @@ export function createChatSession(input: {
   const observe = async (id: string, signal: AbortSignal): Promise<void> => {
     const current = scope(signal);
     await refreshConversation(id, signal);
-    const checkpoint = await getConversationRunCheckpoint(current, id);
-    throwIfAborted(signal);
     clearConnectionFailure();
-    if (!checkpoint) return;
-    let projection = checkpoint;
-    for await (const event of input.api.streamRunEvents({
-      runId: checkpoint.runId,
-      ...(checkpoint.cursor ? { cursor: checkpoint.cursor } : {}),
-      ...(checkpoint.presentationCursor
-        ? { presentationCursor: checkpoint.presentationCursor }
-        : {}),
-      signal,
-      maxReconnectAttempts: 0,
-      onReconnect: () => markConnectionFailure(signal),
-      onConnected: clearConnectionFailure,
-    })) {
+    // Stream the working Run, then any Run that was queued behind it, until none is left. A Run
+    // whose stream ended without settling is paused on the reader; it resumes through a new
+    // observation once they answer.
+    let streamedRunId: string | null = null;
+    for (;;) {
+      const checkpoint = await getConversationRunCheckpoint(current, id);
       throwIfAborted(signal);
-      projection = projectRunEvent(projection, event);
-      if (STRUCTURAL_EVENT_TYPES.has(event.type)) {
-        projection =
-          (await refreshMessagePresentation(
-            id,
-            checkpoint.assistantMessageId,
-            projection.content,
-            signal,
-            projection,
-          )) ?? projection;
+      if (!checkpoint || checkpoint.runId === streamedRunId) return;
+      streamedRunId = checkpoint.runId;
+      let projection = checkpoint;
+      for await (const event of input.api.streamRunEvents({
+        runId: checkpoint.runId,
+        ...(checkpoint.cursor ? { cursor: checkpoint.cursor } : {}),
+        ...(checkpoint.presentationCursor
+          ? { presentationCursor: checkpoint.presentationCursor }
+          : {}),
+        signal,
+        maxReconnectAttempts: 0,
+        onReconnect: () => markConnectionFailure(signal),
+        onConnected: clearConnectionFailure,
+      })) {
+        throwIfAborted(signal);
+        projection = projectRunEvent(projection, event);
+        if (STRUCTURAL_EVENT_TYPES.has(event.type)) {
+          projection =
+            (await refreshMessagePresentation(
+              id,
+              checkpoint.assistantMessageId,
+              projection.content,
+              signal,
+              projection,
+            )) ?? projection;
+        }
+        await applyRunProjection(current, projection);
+        await invalidateConversation(current, id);
       }
-      await applyRunProjection(current, projection);
-      await invalidateConversation(current, id);
+      // The protocol iterator decides when the response is terminal, including historical pauses.
+      throwIfAborted(signal);
+      await refreshConversation(id, signal);
     }
-    // The protocol iterator decides when the response is terminal, including historical pauses.
-    throwIfAborted(signal);
-    await refreshConversation(id, signal);
+  };
+
+  // Between Runs, an open Task only checks whether a Run started or settled elsewhere, and
+  // refreshes its transcript when one did.
+  const pollTask = async (id: string, signal: AbortSignal): Promise<void> => {
+    let seen = "";
+    for (;;) {
+      await abortableDelay(TASK_POLL_INTERVAL_MS, signal);
+      throwIfAborted(signal);
+      const runs = await readRuns(id, signal);
+      const signature = runs
+        .map((run) => `${run.id}:${run.status}`)
+        .sort()
+        .join(",");
+      if (seen && signature !== seen) await observe(id, signal);
+      seen = signature;
+    }
   };
 
   const restartObservation = () => {
@@ -258,7 +393,11 @@ export function createChatSession(input: {
     void until(async () => {
       let attempts = 0;
       while (!signal.aborted && visibleId === id) {
-        const [error] = await until(() => observe(id, signal));
+        const [error] = await until(async () => {
+          await observe(id, signal);
+          const local = await getStoredConversation(partition, id);
+          if (local?.kind === "task") await pollTask(id, signal);
+        });
         if (!error) return;
         if (error instanceof RunEventCursorError) {
           const current = scope(signal);
