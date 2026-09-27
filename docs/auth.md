@@ -26,6 +26,21 @@ Local development uses `OPENCOMPANY_NEXT_PUBLIC_APP_URL=https://localhost:3443` 
 `OPENCOMPANY_NEXT_PUBLIC_WORKOS_REDIRECT_URI=https://localhost:3443/auth/callback` by default. Production
 values live in Infisical `prod` `/web` and must match the WorkOS dashboard exactly.
 
+## Mobile sign-out redirects
+
+The mobile app builds its sign-out callback with `Linking.createURL("signout-callback")` from the
+scheme in `apps/mobile/app.config.ts`. Native development builds use
+`opencompany-dev://signout-callback`; production builds use
+`opencompany://signout-callback`. Add both exact URIs to the WorkOS mobile application's
+Sign-out URIs in the relevant development and production environments. WorkOS accepts a
+`return_to` URL only when it is configured there. Check these dashboard entries before testing or
+releasing a mobile build, and keep them in sync if the app scheme changes.
+
+Mobile sign-out opens the WorkOS session logout URL with `openBrowserAsync` and keeps
+local credentials until the callback returns. The pending session ID is stored securely so a
+callback delivered after an app relaunch can finish sign-out. Canceling the browser leaves the
+local session available for another attempt.
+
 ## Browser/API session boundary
 
 The macOS desktop shell opens Google sign-in in the system browser and receives
