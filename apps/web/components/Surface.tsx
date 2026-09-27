@@ -533,6 +533,7 @@ export function Surface({
     id: string;
     body: string;
     attachmentIds?: string[];
+    skillIds?: string[];
   } | null>(null);
   const backgroundTaskFocusOriginRef = useRef<Element | null>(null);
   const onboardingKickoffReadRef = useRef(false);
@@ -696,9 +697,9 @@ export function Surface({
   const backgroundDirectiveActive = Boolean(backgroundInputDirective);
   const workflowMentionsEnabled = !activeTaskConversation;
   const readOnly = readOnlyNotice !== null;
-  const skillMentionsEnabled = !readOnly && !activeTaskConversation;
+  const skillMentionsEnabled = !readOnly;
   const activeSelectedMentions = selectedMentions.filter((mention) => {
-    if (activeTaskConversation) return false;
+    if (activeTaskConversation && mention.kind !== "skill") return false;
     if (!chatMentionIsVisible(input, mention)) return false;
     if (mention.kind === "engine") {
       return mention.id === "claude" ? claudeCodeConnected : codexConnected;
@@ -706,6 +707,9 @@ export function Surface({
     if (mention.kind === "workflow") return workflowMentionsEnabled;
     return skillMentionsEnabled;
   });
+  const mentionSkillCatalog = activeTaskConversation
+    ? skillCatalog.filter((skill) => skill.scope === "company")
+    : skillCatalog;
   const chatModel =
     chatModelSelectionFromEngineMention(
       activeSelectedMentions.find((mention) => mention.kind === "engine"),
@@ -1008,7 +1012,7 @@ export function Surface({
   const mentionOptions = buildMentionOptions({
     references: referenceCatalog.items,
     token: mentionToken,
-    skills: skillCatalog,
+    skills: mentionSkillCatalog,
     workflows: workflowCatalog,
     selectedMentions: activeSelectedMentions,
     codexConnected,
@@ -1989,15 +1993,20 @@ export function Surface({
       // is the feedback. Only a Task that had stopped needs to be told it started again.
       const resumesTask = !isTaskConversationWorking;
       const attachmentIds = readyAttachments.map((attachment) => attachment.id);
+      const skillIds = activeSelectedMentions.flatMap((mention) =>
+        mention.kind === "skill" ? [mention.id] : [],
+      );
       const pendingCommand = pendingTaskCommentRef.current;
       const command =
         pendingCommand?.body === rawPrompt &&
-        JSON.stringify(pendingCommand.attachmentIds ?? []) === JSON.stringify(attachmentIds)
+        JSON.stringify(pendingCommand.attachmentIds ?? []) === JSON.stringify(attachmentIds) &&
+        JSON.stringify(pendingCommand.skillIds ?? []) === JSON.stringify(skillIds)
           ? pendingCommand
           : {
               id: newHeadlessTaskCommentId(),
               body: rawPrompt,
               ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+              ...(skillIds.length > 0 ? { skillIds } : {}),
             };
       pendingTaskCommentRef.current = command;
       clearError();
@@ -2925,7 +2934,7 @@ export function Surface({
         );
         return;
       }
-      if (event.key === "Enter" || event.key === "Tab") {
+      if ((event.key === "Enter" || event.key === "Tab") && mentionOptions.length > 0) {
         event.preventDefault();
         const option = mentionOptions[mentionOptionIndex];
         if (option) selectMention(option);
@@ -2996,7 +3005,7 @@ export function Surface({
         pastedText: insertedText,
         fullInput: nextInput,
         skillIds: pastedSkillIds,
-        skills: skillCatalog,
+        skills: mentionSkillCatalog,
       }),
       ...workflowMentionsFromPastedText({
         pastedText: insertedText,
@@ -3012,7 +3021,7 @@ export function Surface({
     setSelectedMentions((current) => mergeVisibleChatMentions(nextInput, current, pastedMentions));
 
     const knownSkillIds = new Set(
-      skillCatalog.flatMap((skill) => (pastedSkillIds.has(skill.id) ? [skill.id] : [])),
+      mentionSkillCatalog.flatMap((skill) => (pastedSkillIds.has(skill.id) ? [skill.id] : [])),
     );
     const knownWorkflowIds = new Set(
       workflowCatalog.flatMap((workflow) =>
@@ -3036,13 +3045,16 @@ export function Surface({
         if (!mountedRef.current) return;
         setSkillCatalog(skills);
         if (workflowMentionsEnabled) setWorkflowCatalog(workflows);
+        const availableSkills = activeTaskConversation
+          ? skills.filter((skill: SkillCatalogItem) => skill.scope === "company")
+          : skills;
         const currentInput = inputRef.current?.value ?? nextInput;
         const resolvedMentions = [
           ...skillMentionsFromPastedText({
             pastedText: insertedText,
             fullInput: currentInput,
             skillIds: pastedSkillIds,
-            skills,
+            skills: availableSkills,
           }),
           ...workflowMentionsFromPastedText({
             pastedText: insertedText,

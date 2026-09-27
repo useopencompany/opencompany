@@ -80,9 +80,13 @@ beforeAll(async () => {
       "0215_goat_chat_sidebar_state",
       "0216_goat_conversation_runtime_summary",
       "0223_goat_task_projection_preservation",
+      "0226_goat_immutable_skill_bundles",
+      "0227_goat_chat_skill_bundle_snapshots",
+      "0229_goat_chat_skill_bundle_names",
       "0245_goat_task_activities",
       "0246_goat_task_waiting_status",
       "0248_goat_chat_attachment_upload_idempotency",
+      "0263_personal_company_skills",
     ]) {
       await db.exec(
         await readFile(new URL(`../../../drizzle/${name}.sql`, import.meta.url), "utf8"),

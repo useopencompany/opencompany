@@ -2520,6 +2520,7 @@ export const CreateTaskCommentBodySchema = z
     id: ResourceIdSchema,
     body: z.string().max(10_000),
     attachmentIds: z.array(ResourceIdSchema).max(5).optional(),
+    skillIds: z.array(ResourceIdSchema).max(16).optional(),
   })
   .strict()
   .refine(

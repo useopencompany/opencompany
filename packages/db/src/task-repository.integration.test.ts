@@ -33,12 +33,15 @@ const migrationPaths = [
   "0216_goat_conversation_runtime_summary.sql",
   "0223_goat_task_projection_preservation.sql",
   "0226_goat_immutable_skill_bundles.sql",
+  "0227_goat_chat_skill_bundle_snapshots.sql",
   "0228_goat_plugins.sql",
+  "0229_goat_chat_skill_bundle_names.sql",
   "0245_goat_task_activities.sql",
   "0246_goat_task_waiting_status.sql",
   "0248_goat_chat_attachment_upload_idempotency.sql",
   "0255_goat_task_waiting_projection.sql",
   "0261_persistent_bots.sql",
+  "0263_personal_company_skills.sql",
   "0268_goat_task_review_unseen.sql",
   "0270_opencompany_sidebar_projects.sql",
   "0279_goat_awaiting_input_state.sql",
@@ -798,11 +801,31 @@ describe("Postgres Task repository", () => {
        WHERE id = $1`,
       [created.task.id],
     );
+    await database.exec(`
+      INSERT INTO goat.skill_bundles (
+        id, workspace_id, integrity, name, description, body,
+        source_type, source_url, source_path, source_ref, resolved_commit
+      ) VALUES (
+        'skill_bundle_decision_brief', 'workspace_1',
+        'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'decision-brief', 'Frame a decision.', 'Compare the options.', 'github',
+        'https://github.com/example/decision-brief', 'decision-brief', 'main',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+      );
+      INSERT INTO goat.skill_bundle_files (bundle_id, path, content, executable, size_bytes)
+      VALUES ('skill_bundle_decision_brief', 'SKILL.md', ''::bytea, false, 0);
+      INSERT INTO goat.skill_installations (id, workspace_id, name, bundle_id, scope)
+      VALUES (
+        'skill_decision_brief', 'workspace_1', 'decision-brief',
+        'skill_bundle_decision_brief', 'company'
+      );
+    `);
 
     const body = "  Approved — also rename the config flag.\n";
     const resumed = await service.createComment(actor(), created.task.displayId.toLowerCase(), {
       id: "task_comment_1",
       body,
+      skillIds: ["decision-brief"],
     });
 
     expect(resumed).toMatchObject({
@@ -831,12 +854,15 @@ describe("Postgres Task repository", () => {
         assistant_content: string;
         run_prompt: string;
         run_result_mode: string;
+        run_mentions: Array<{ kind: string; id: string }>;
         run_status: string;
         run_owner: string;
         event_type: string;
         comment_body: string;
         comment_author: string;
         status_activity: string;
+        activated_skill: string;
+        comment_skill_ids: string[];
       }>(
         `SELECT
            task.status,
@@ -849,12 +875,15 @@ describe("Postgres Task repository", () => {
            assistant_message.content AS assistant_content,
            run.prompt AS run_prompt,
            run.settings->>'taskResultMode' AS run_result_mode,
+           run.settings->'mentions' AS run_mentions,
            run.status AS run_status,
            run.user_workos_id AS run_owner,
            event.type AS event_type,
            comment.body AS comment_body,
            comment.author_workos_id AS comment_author,
-           resumed.body AS status_activity
+           resumed.body AS status_activity,
+           skill_snapshot.name AS activated_skill,
+           comment.metadata->'skillIds' AS comment_skill_ids
          FROM goat.tasks AS task
          JOIN goat.codex_chat_sessions AS runtime ON runtime.chat_session_id = task.session_id
          JOIN goat.codex_chat_turns AS run ON run.id = $2
@@ -864,6 +893,9 @@ describe("Postgres Task repository", () => {
          JOIN goat.task_activities AS comment ON comment.id = 'task_comment_1'
          JOIN goat.task_activities AS resumed
            ON resumed.task_id = task.id AND resumed.kind = 'status_changed'
+         JOIN goat.chat_session_skill_bundles AS skill_snapshot
+           ON skill_snapshot.chat_session_id = task.session_id
+          AND skill_snapshot.activated_message_id = user_message.id
          WHERE task.id = $1`,
         [created.task.id, resumed.runId],
       ),
@@ -880,18 +912,25 @@ describe("Postgres Task repository", () => {
           assistant_content: "",
           run_prompt: body,
           run_result_mode: "assistant_final",
+          run_mentions: [{ kind: "skill", id: "decision-brief" }],
           run_status: "queued",
           run_owner: "user_1",
           event_type: "run.queued",
           comment_body: body,
           comment_author: "user_1",
           status_activity: "Resumed by user.",
+          activated_skill: "decision-brief",
+          comment_skill_ids: ["decision-brief"],
         },
       ],
     });
 
     await expect(
-      service.createComment(actor(), created.task.id, { id: "task_comment_1", body }),
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_1",
+        body,
+        skillIds: ["decision-brief"],
+      }),
     ).resolves.toMatchObject({
       messageId: resumed.messageId,
       assistantMessageId: resumed.assistantMessageId,
@@ -904,6 +943,18 @@ describe("Postgres Task repository", () => {
         body: "Changed after the first request.",
       }),
     ).rejects.toMatchObject({ code: "idempotency_conflict" });
+    await database.exec(`
+      UPDATE goat.skill_installations
+      SET scope = 'personal', created_by_user_id = 'user_1'
+      WHERE id = 'skill_decision_brief'
+    `);
+    await expect(
+      service.createComment(actor(), created.task.id, {
+        id: "task_comment_personal_skill",
+        body: "Use my private notes.",
+        skillIds: ["decision-brief"],
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
     // A Task that is already working takes the message as a queued Run behind the live one, the
     // same way a Chat does. The Task is not reopened and keeps the turn it is running.
     // Bind the Session to a non-default backend: a queued Run that does not copy it is invisible

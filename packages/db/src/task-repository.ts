@@ -35,9 +35,11 @@ import {
   type ChatSqlExecute,
   type ResolvedChatAttachments,
   RUN_EVENT_NOTIFY_CHANNEL,
+  resolveMentionedSkillsForConversation,
 } from "./chat-repository";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { HarnessSpec } from "./product-schema";
+import { conflictingChatSkillNames, preserveChatSkillBundle } from "./skill-access";
 
 export type TaskRepositoryIdFactory = {
   command(): string;
@@ -763,15 +765,69 @@ export class PostgresTaskRepository implements TaskRepository {
     taskId: string;
     command: CreateTaskCommentCommand;
   }): Promise<CreateTaskCommentResult | null> {
-    const [preflight] = await this.rows<{ idExists: boolean }>(sql`
-      SELECT EXISTS (
-        SELECT 1 FROM goat.task_activities WHERE id = ${input.command.id}
-      ) AS "idExists"
+    const [preflight] = await this.rows<{ idExists: boolean; conversationId: string | null }>(sql`
+      SELECT
+        EXISTS (
+          SELECT 1 FROM goat.task_activities WHERE id = ${input.command.id}
+        ) AS "idExists",
+        (
+          SELECT task.session_id
+          FROM goat.tasks AS task
+          JOIN goat.chat_sessions AS conversation
+            ON conversation.id = task.session_id
+           AND conversation.kind = 'task'
+           AND conversation.closed_at IS NULL
+          WHERE (task.id = ${input.taskId} OR upper(task.display_id) = upper(${input.taskId}))
+            AND ${taskAccessPredicate(input.actor)}
+          LIMIT 1
+        ) AS "conversationId"
     `);
     const attachmentIds = input.command.attachmentIds ?? [];
+    const skillIds = input.command.skillIds ?? [];
     const resolvedAttachments = preflight?.idExists
       ? { attachments: [], attachmentTexts: null }
       : await this.resolveAttachments(input.actor, attachmentIds);
+    const resolvedMentionSkills =
+      !preflight?.idExists && preflight?.conversationId
+        ? await resolveMentionedSkillsForConversation({
+            execute: this.execute,
+            actor: input.actor,
+            mentionedSkillIds: skillIds,
+            conversationId: preflight.conversationId,
+          })
+        : [];
+    if (
+      new Set(resolvedMentionSkills.map((skill) => skill.name)).size !==
+      resolvedMentionSkills.length
+    ) {
+      throw new CoreError("conflict", "Choose one Skill for each name in a Task comment.");
+    }
+    if (
+      resolvedMentionSkills.some(
+        (skill) => skill.sourceKind !== "standalone" || skill.scope !== "company",
+      )
+    ) {
+      throw new CoreError("not_found", "A selected Skill is unavailable for Tasks.");
+    }
+    if (resolvedMentionSkills.length > 0 && preflight?.conversationId) {
+      const [result] = await this.rows<{ conflict: boolean }>(
+        sql`SELECT ${conflictingChatSkillNames(
+          preflight.conversationId,
+          resolvedMentionSkills.map((skill) => skill.bundleId),
+        )} AS conflict`,
+      );
+      if (result?.conflict) {
+        throw new CoreError("conflict", "This Task already uses another Skill with this name.");
+      }
+    }
+    const resolvedMentionSkillsJson = stringifyPostgresJson(
+      resolvedMentionSkills.map((skill) => ({
+        bundle_id: skill.bundleId,
+        source_kind: skill.sourceKind,
+        plugin_id: skill.pluginId,
+        installation_id: skill.installationId,
+      })),
+    );
     const attachmentsRequireClaim = !preflight?.idExists;
     const attachmentIdList = attachmentIds.length
       ? sql.join(
@@ -872,6 +928,8 @@ export class PostgresTaskRepository implements TaskRepository {
           AND activity.body = ${input.command.body}
           AND COALESCE(activity.metadata->'attachmentIds', '[]'::jsonb)
             = ${stringifyPostgresJson(attachmentIds)}::jsonb
+          AND COALESCE(activity.metadata->'skillIds', '[]'::jsonb)
+            = ${stringifyPostgresJson(skillIds)}::jsonb
           AND NULLIF(activity.metadata->>'messageId', '') IS NOT NULL
           AND NULLIF(activity.metadata->>'assistantMessageId', '') IS NOT NULL
           AND NULLIF(activity.metadata->>'runId', '') IS NOT NULL
@@ -923,7 +981,8 @@ export class PostgresTaskRepository implements TaskRepository {
             'messageId', ${messageId}::text,
             'assistantMessageId', ${assistantMessageId}::text,
             'runId', ${runId}::text,
-            'attachmentIds', ${stringifyPostgresJson(attachmentIds)}::jsonb
+            'attachmentIds', ${stringifyPostgresJson(attachmentIds)}::jsonb,
+            'skillIds', ${stringifyPostgresJson(skillIds)}::jsonb
           ),
           ${now}
         FROM eligible AS task
@@ -1000,6 +1059,41 @@ export class PostgresTaskRepository implements TaskRepository {
           )
         RETURNING id
       ),
+      activated_skill_bundles AS MATERIALIZED (
+        INSERT INTO goat.chat_session_skill_bundles (
+          chat_session_id, bundle_id, name, activated_message_id, source_kind
+        )
+        SELECT
+          task.session_id, bundle.id, bundle.name, inserted_user_message.id,
+          resolved_skill.source_kind
+        FROM inserted_user_message
+        JOIN eligible AS task ON true
+        CROSS JOIN jsonb_to_recordset(
+          ${resolvedMentionSkillsJson}::jsonb
+        ) AS resolved_skill(bundle_id text, source_kind text, installation_id text)
+        JOIN goat.skill_bundles AS bundle
+          ON bundle.id = resolved_skill.bundle_id
+         AND bundle.workspace_id = ${input.actor.workspaceId}
+        WHERE resolved_skill.source_kind = 'standalone'
+          AND EXISTS (
+            SELECT 1
+            FROM goat.skill_installations AS installation
+            WHERE installation.id = resolved_skill.installation_id
+              AND installation.bundle_id = bundle.id
+              AND installation.workspace_id = ${input.actor.workspaceId}
+              AND installation.scope = 'company'
+              AND installation.enabled
+              AND installation.archived_at IS NULL
+          )
+        ON CONFLICT (chat_session_id, name) DO UPDATE
+        SET bundle_id = ${preserveChatSkillBundle()}
+        RETURNING bundle_id
+      ),
+      skill_activation_guard AS MATERIALIZED (
+        SELECT count(*) AS count
+        FROM activated_skill_bundles
+        HAVING count(*) = ${resolvedMentionSkills.length}
+      ),
       inserted_assistant_message AS MATERIALIZED (
         INSERT INTO goat.chat_messages (
           id, session_id, role, content, task_id, debug_trace, created_at, updated_at
@@ -1022,6 +1116,7 @@ export class PostgresTaskRepository implements TaskRepository {
           ${assistantCreatedAt}, ${assistantCreatedAt}
         FROM eligible AS task
         JOIN inserted_user_message AS message ON message.id = ${messageId}
+        JOIN skill_activation_guard ON true
         WHERE ${reopenLanded}
         RETURNING id
       ),
@@ -1037,7 +1132,10 @@ export class PostgresTaskRepository implements TaskRepository {
           jsonb_strip_nulls(jsonb_build_object(
             'reasoningEffort', task.harness_spec #>> '{codex,reasoningEffort}',
             'goalMode', task.harness_spec #> '{codex,goalMode}',
-            'taskResultMode', 'assistant_final'
+            'taskResultMode', 'assistant_final',
+            'mentions', ${stringifyPostgresJson(
+              skillIds.map((id) => ({ kind: "skill", id })),
+            )}::jsonb
           )),
           task.execution_backend, task.execution_backend_version, 1, ${now}, ${now}
         FROM eligible AS task
