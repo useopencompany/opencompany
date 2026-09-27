@@ -1,5 +1,6 @@
 import { WorkflowsRoute } from "@/components/Routes";
 import { currentUser } from "@/lib/auth";
+import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
 import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 import { listHeadlessPlugins } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -14,7 +15,7 @@ export default async function WorkflowsPage() {
   // failure degrades the Owner column rather than taking the whole page down with it.
   // Plugin and account state only decorates the template cards with what still needs connecting, so
   // a failure there drops the setup hints rather than taking the page down.
-  const [workflows, members, templateSetup] = await Promise.all([
+  const [workflows, members, templateSetup, companyGitHub] = await Promise.all([
     listHeadlessWorkflows(),
     listWorkspaceMembersAction().catch((error: unknown) => {
       console.error("[opencompany] Failed to load workspace members for the workflow list", error);
@@ -27,6 +28,7 @@ export default async function WorkflowsPage() {
       );
       return null;
     }),
+    getCompanyGitHubPluginForTriggersAction(),
   ]);
   const ownerNames = members
     ? {
@@ -47,6 +49,7 @@ export default async function WorkflowsPage() {
           workflowTemplateMissingPlugins(template, {
             plugins: templateSetup[0],
             personalAccounts: templateSetup[1],
+            companyGitHub,
           }),
         ]),
       )
@@ -58,6 +61,7 @@ export default async function WorkflowsPage() {
       canEdit
       ownerNames={ownerNames}
       templateMissingPlugins={templateMissingPlugins}
+      companyGitHub={companyGitHub}
     />
   );
 }

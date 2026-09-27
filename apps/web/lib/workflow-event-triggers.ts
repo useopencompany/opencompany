@@ -11,6 +11,10 @@ import {
   type OfficialMcpPluginMetadata,
 } from "@/lib/official-plugins";
 
+// The company GitHub plugin's provider name in a trigger. Trigger and event-run providers share the
+// plugin-name grammar, which has no underscores, so it is not the `github_app` connection provider.
+export const COMPANY_GITHUB_EVENT_PROVIDER = "github-app";
+
 // One installable provider the workflow trigger picker can offer: the events its plugin declares
 // and the user has switched on, plus the connected accounts an event trigger may bind to.
 export type WorkflowEventProviderOption = {
@@ -70,7 +74,7 @@ export function workflowEventProviderOptions(input: {
 // no personal installation or event opt-in to wait for.
 function companyGitHubEventProvider(plugin: CompanyGitHubPluginDto): WorkflowEventProviderOption {
   return {
-    provider: "github-app",
+    provider: COMPANY_GITHUB_EVENT_PROVIDER,
     label: "GitHub (company)",
     accountHref: "/plugins/company/github",
     accountLabel: plugin.canManage ? "Connect GitHub" : "Ask an admin to connect GitHub",

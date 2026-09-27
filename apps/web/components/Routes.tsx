@@ -2,6 +2,7 @@
 
 import { scheduleSummary } from "@opencompany/agent-runtime";
 import type {
+  CompanyGitHubPluginDto,
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
@@ -671,6 +672,7 @@ export function WorkflowsRoute({
   canEdit,
   ownerNames,
   templateMissingPlugins,
+  companyGitHub,
 }: {
   workflows: WorkflowListItem[];
   workspaceId: string;
@@ -682,6 +684,8 @@ export function WorkflowsRoute({
   ownerNames: Record<string, string> | null;
   /** Required plugins each template is still missing, keyed by template id; `null` hides the hints. */
   templateMissingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
+  /** The company GitHub connection an event template's trigger binds to, when one is linked. */
+  companyGitHub: CompanyGitHubPluginDto | null;
 }) {
   const router = useRouter();
   const data = useAppData();
@@ -747,6 +751,7 @@ export function WorkflowsRoute({
               <div className="flex shrink-0 items-center gap-2">
                 <WorkflowTemplatesButton
                   missingPlugins={templateMissingPlugins}
+                  companyGitHub={companyGitHub}
                   scope={scopeFilter === "all" ? "company" : scopeFilter}
                 />
                 <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">
