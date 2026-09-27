@@ -5,6 +5,7 @@ import type { SFSymbol } from "expo-symbols";
 import { ActivityIndicator, Linking, Pressable, Text, View } from "react-native";
 import type { MarkdownStyle } from "react-native-enriched-markdown";
 import { StreamdownText } from "react-native-streamdown";
+import { until } from "until-async";
 import { analytics, captureError } from "@/shared/lib/analytics";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { chatQueryKeys, useChatCoordinator } from "@/widgets/chat/model/chat-coordinator";
@@ -88,6 +89,84 @@ function RowMarker({ item, pullRequest }: { item: SidebarItem; pullRequest?: Ses
   );
 }
 
+const PREVIEW_SIZE = { width: 340, height: 300 };
+
+/**
+ * Link.Preview mounts its children only while the preview is open, so the transcript loads when the
+ * reader asks for it. Chats and Tasks never opened on this device have no local transcript yet, so
+ * opening the preview also syncs it from the server into the local cache.
+ */
+function ConversationPreview({
+  conversation,
+  markdownStyle,
+  themeKey,
+}: {
+  conversation: SidebarItem["conversation"];
+  markdownStyle: MarkdownStyle;
+  themeKey: string;
+}) {
+  const { partition, refreshConversation } = useChatCoordinator();
+  const storedQuery = useQuery({
+    queryKey: partition
+      ? [...chatQueryKeys.messages(partition, conversation.id), "sidebar-preview"]
+      : ["chat", "sidebar-preview", "signed-out"],
+    queryFn: () => listStoredMessages(partition!, conversation.id),
+    enabled: Boolean(partition),
+    staleTime: Infinity,
+  });
+  const syncQuery = useQuery({
+    queryKey: partition
+      ? chatQueryKeys.transcriptSync(partition, conversation.id)
+      : ["chat", "transcript-sync", "signed-out"],
+    queryFn: async ({ signal }) => {
+      const [error] = await until(() => refreshConversation(conversation.id, signal));
+      if (error) {
+        if (!signal.aborted) captureError("sidebar_preview_sync_failed", error);
+        throw error;
+      }
+      return null;
+    },
+    enabled: Boolean(partition),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const assistant = storedQuery.data?.findLast((message) => message.role === "assistant");
+  const markdown = assistant
+    ? assistant.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
+      assistant.content
+    : "";
+
+  return (
+    // The preview container has no size of its own until it appears, so without a fixed size the
+    // markdown is measured against an unbounded width, and the text view it then lays out with an
+    // infinite width crashes UIKit (CALayerInvalidGeometry).
+    <View className="gap-4 bg-background p-5" style={PREVIEW_SIZE}>
+      <Text numberOfLines={2} className="text-[19px] font-semibold text-foreground">
+        {conversation.title}
+      </Text>
+      {markdown ? (
+        <StreamdownText
+          flavor="github"
+          key={themeKey}
+          markdown={markdown}
+          markdownStyle={markdownStyle}
+        />
+      ) : storedQuery.isPending || syncQuery.isPending ? (
+        <View className="flex-row items-center gap-2">
+          <ActivityIndicator size="small" colorClassName="accent-muted-foreground" />
+          <Text className="text-[15px] text-muted-foreground">Loading the latest reply...</Text>
+        </View>
+      ) : storedQuery.isError || syncQuery.isError ? (
+        <Text className="text-[15px] text-muted-foreground">
+          The latest reply could not be loaded.
+        </Text>
+      ) : (
+        <Text className="text-[15px] text-muted-foreground">No replies yet.</Text>
+      )}
+    </View>
+  );
+}
+
 export function SidebarConversationRow({
   active,
   actions,
@@ -103,23 +182,9 @@ export function SidebarConversationRow({
   pullRequest?: SessionPullRequest;
   themeKey: string;
 }) {
-  const { partition } = useChatCoordinator();
   const input = useChatInputController();
   const { conversation } = item;
   const availability = actions.availability(conversation);
-  const previewQuery = useQuery({
-    queryKey: partition
-      ? [...chatQueryKeys.messages(partition, conversation.id), "sidebar-preview"]
-      : ["chat", "sidebar-preview", "signed-out"],
-    queryFn: () => listStoredMessages(partition!, conversation.id),
-    enabled: Boolean(partition),
-    staleTime: Infinity,
-  });
-  const assistant = previewQuery.data?.findLast((message) => message.role === "assistant");
-  const previewMarkdown = assistant
-    ? assistant.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("") ||
-      assistant.content
-    : "";
   const marked = item.state !== "done_seen" || Boolean(pullRequest);
   const isTask = conversation.kind === "task";
   const hasMenu = !isTask || availability.canArchive;
@@ -159,22 +224,12 @@ export function SidebarConversationRow({
           </View>
         </Pressable>
       </Link.Trigger>
-      <Link.Preview style={{ width: 340, height: 300 }}>
-        <View className="h-full w-full gap-4 bg-background p-5">
-          <Text numberOfLines={2} className="text-[19px] font-semibold text-foreground">
-            {conversation.title}
-          </Text>
-          {previewMarkdown ? (
-            <StreamdownText
-              flavor="github"
-              key={themeKey}
-              markdown={previewMarkdown}
-              markdownStyle={markdownStyle}
-            />
-          ) : (
-            <Text className="text-[15px] text-muted-foreground">Preview unavailable</Text>
-          )}
-        </View>
+      <Link.Preview style={PREVIEW_SIZE}>
+        <ConversationPreview
+          conversation={conversation}
+          markdownStyle={markdownStyle}
+          themeKey={themeKey}
+        />
       </Link.Preview>
       {hasMenu ? (
         <Link.Menu>

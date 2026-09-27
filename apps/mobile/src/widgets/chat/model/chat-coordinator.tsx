@@ -39,6 +39,7 @@ interface ChatCoordinatorValue {
     body: ResolveApprovalBody,
   ) => Promise<void>;
   refreshConversations: () => Promise<void>;
+  refreshConversation: (id: string, signal: AbortSignal) => Promise<void>;
 }
 const ChatCoordinatorContext = createContext<ChatCoordinatorValue | null>(null);
 
@@ -191,6 +192,10 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
         refreshConversations: async () => {
           await session?.refreshConversations();
           analytics.capture("conversation_list_refreshed");
+        },
+        refreshConversation: async (id, signal) => {
+          if (!session) throw new Error("Sign in to load this chat.");
+          await session.refreshConversation(id, signal);
         },
       }}
     >

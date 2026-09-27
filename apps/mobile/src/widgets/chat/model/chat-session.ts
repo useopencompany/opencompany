@@ -546,6 +546,9 @@ export function createChatSession(input: {
       restartObservation();
     },
     refreshConversations,
+    // Pulls a conversation's transcript into the local cache without opening it.
+    refreshConversation: (id: string, signal: AbortSignal) =>
+      refreshConversation(id, combineAbortSignals([lifetime.signal, signal])),
     drain,
   };
 }
