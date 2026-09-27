@@ -448,6 +448,7 @@ describe("WorkflowsRoute", () => {
       canEdit: true,
       ownerNames: WORKFLOW_OWNER_NAMES,
       templateMissingPlugins: null,
+      companyGitHub: null,
     };
     const view = render(<WorkflowsRoute {...props} />);
 
@@ -481,6 +482,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -518,6 +520,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -555,6 +558,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -591,6 +595,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -614,6 +619,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -637,6 +643,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -656,6 +663,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={null}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -677,6 +685,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 

@@ -1,4 +1,5 @@
 import { schedulePresetFromCron } from "@opencompany/agent-runtime";
+import type { CompanyGitHubPluginDto } from "@opencompany/protocol";
 import { describe, expect, it } from "vitest";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import { WORKFLOW_TEMPLATES, workflowTemplateMissingPlugins } from "./workflow-templates";
@@ -13,13 +14,26 @@ function account(connected = true): IntegrationAccountView {
   return { integrationId: "gint_1", connected } as unknown as IntegrationAccountView;
 }
 
+function companyGitHub(status = "connected"): CompanyGitHubPluginDto {
+  return {
+    configured: true,
+    canManage: true,
+    installations: [{ integrationId: "gint_company", accountLogin: "acme", status }],
+    events: [],
+  } as unknown as CompanyGitHubPluginDto;
+}
+
 const digest = WORKFLOW_TEMPLATES.find((template) => template.id === "weekly-shipping-digest");
 if (!digest) throw new Error("The weekly shipping digest template is missing from the catalog.");
+
+const review = WORKFLOW_TEMPLATES.find((template) => template.id === "pull-request-review");
+if (!review) throw new Error("The pull request review template is missing from the catalog.");
 
 describe("workflow template catalog", () => {
   it("only ships schedules the editor can render, so a clone never opens on an unsupported cron", () => {
     for (const template of WORKFLOW_TEMPLATES) {
-      expect(schedulePresetFromCron(template.schedule.cron)).not.toBeNull();
+      if (template.trigger.kind !== "schedule") continue;
+      expect(schedulePresetFromCron(template.trigger.cron)).not.toBeNull();
     }
   });
 
@@ -48,6 +62,50 @@ describe("workflowTemplateMissingPlugins", () => {
         personalAccounts: { github_user: [account()], slack: [account()] },
       }),
     ).toEqual([]);
+  });
+
+  it("asks for the company connection an event template's trigger binds to", () => {
+    const missing = workflowTemplateMissingPlugins(review, {
+      plugins: [plugin("github")],
+      personalAccounts: { github_user: [account()] },
+      companyGitHub: null,
+    });
+    expect(missing).toEqual([
+      { plugin: "github", label: "GitHub (company)", setupHref: "/plugins/company/github" },
+    ]);
+  });
+
+  it("stops asking for the company connection once an installation is linked", () => {
+    expect(
+      workflowTemplateMissingPlugins(review, {
+        plugins: [plugin("github")],
+        personalAccounts: { github_user: [account()] },
+        companyGitHub: companyGitHub(),
+      }),
+    ).toEqual([]);
+  });
+
+  it("keeps asking while the only linked installation cannot deliver events", () => {
+    const missing = workflowTemplateMissingPlugins(review, {
+      plugins: [plugin("github")],
+      personalAccounts: { github_user: [account()] },
+      companyGitHub: companyGitHub("needs_reauth"),
+    });
+    expect(missing.map((entry) => entry.setupHref)).toEqual(["/plugins/company/github"]);
+  });
+
+  it("separates the company connection that delivers the event from the account that acts on it", () => {
+    // Both halves are GitHub, and a run needs each for a different reason, so neither may hide
+    // the other.
+    const missing = workflowTemplateMissingPlugins(review, {
+      plugins: [],
+      personalAccounts: {},
+      companyGitHub: null,
+    });
+    expect(missing.map((entry) => entry.setupHref)).toEqual([
+      "/plugins/company/github",
+      "/plugins/github",
+    ]);
   });
 
   it("reports a plugin that is enabled but has no connected account", () => {

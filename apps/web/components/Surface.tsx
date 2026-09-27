@@ -1783,10 +1783,10 @@ export function Surface({
   }, [isActivePane, readOnly]);
 
   useLayoutEffect(() => {
-    if (mode !== "chat" || !chatSessionId) return;
+    if (!isActivePane || mode !== "chat" || !chatSessionId) return;
     if (!consumePendingChatComposerFocus(chatSessionId)) return;
     inputRef.current?.focus({ preventScroll: true });
-  }, [chatSessionId, mode]);
+  }, [chatSessionId, isActivePane, mode]);
 
   useLayoutEffect(() => {
     const form = formRef.current;

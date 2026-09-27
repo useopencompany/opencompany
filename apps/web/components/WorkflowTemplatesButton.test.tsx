@@ -12,12 +12,31 @@ const commandsMock = vi.hoisted(() => ({
   updateHeadlessWorkflow: vi.fn(),
   archiveHeadlessWorkflow: vi.fn(),
 }));
+const filtersMock = vi.hoisted(() => ({ loadWorkflowEventFilterOptions: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
 vi.mock("@opencompany/ui/components/sonner", () => ({ toast: toastMock }));
 vi.mock("@/lib/headless-automation-commands", () => commandsMock);
+vi.mock("@/lib/workflow-event-filters", () => filtersMock);
 
 const template = WORKFLOW_TEMPLATES[0]!;
+const eventTemplate = WORKFLOW_TEMPLATES.find((entry) => entry.trigger.kind === "event")!;
+const companyGitHub = {
+  configured: true,
+  canManage: true,
+  installations: [
+    {
+      integrationId: "gint_company",
+      installationId: "1",
+      accountLogin: "acme",
+      accountType: "Organization",
+      status: "connected",
+      statusReason: null,
+      linkedAt: "2026-09-01T00:00:00.000Z",
+    },
+  ],
+  events: [],
+} as unknown as Parameters<typeof WorkflowTemplatesButton>[0]["companyGitHub"];
 
 function createdWorkflow() {
   return {
@@ -44,6 +63,9 @@ describe("WorkflowTemplatesButton", () => {
     commandsMock.createHeadlessWorkflow.mockReset().mockResolvedValue(createdWorkflow());
     commandsMock.updateHeadlessWorkflow.mockReset().mockResolvedValue({ version: 2 });
     commandsMock.archiveHeadlessWorkflow.mockReset().mockResolvedValue({ version: 2 });
+    filtersMock.loadWorkflowEventFilterOptions
+      .mockReset()
+      .mockResolvedValue({ ok: true, options: [{ id: "repo_1", name: "acme/web" }] });
   });
 
   it("keeps the templates behind the button until it is pressed", async () => {
@@ -116,14 +138,108 @@ describe("WorkflowTemplatesButton", () => {
       },
     ]);
     expect(update.triggers).toHaveLength(1);
+    const schedule = template.trigger.kind === "schedule" ? template.trigger : null;
     expect(update.triggers[0]).toMatchObject({
       type: "schedule",
-      cron: template.schedule.cron,
-      prompt: template.schedule.prompt,
+      cron: schedule?.cron,
+      prompt: schedule?.prompt,
       enabled: true,
     });
     // The legacy single-trigger field has to agree with the automation trigger the editor reads back.
-    expect(update.trigger).toMatchObject({ type: "schedule", cron: template.schedule.cron });
+    expect(update.trigger).toMatchObject({ type: "schedule", cron: schedule?.cron });
+  });
+
+  it("asks an event template for its repository before cloning, and binds the trigger to it", async () => {
+    render(
+      <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,
+    );
+
+    await useTemplate(eventTemplate.name);
+
+    const repository = await screen.findByRole("combobox", { name: "Repository" });
+    await waitFor(() => expect(screen.getByRole("option", { name: "acme/web" })).toBeEnabled());
+    await userEvent.selectOptions(repository, "repo_1");
+    await userEvent.click(screen.getByRole("button", { name: "Use template" }));
+
+    await waitFor(() => expect(commandsMock.updateHeadlessWorkflow).toHaveBeenCalled());
+    const update = commandsMock.updateHeadlessWorkflow.mock.calls[0]![1];
+    expect(update.status).toBe("draft");
+    expect(update.triggers[0]).toMatchObject({
+      type: "event",
+      provider: "github-app",
+      event: "pull_request.opened",
+      integrationId: "gint_company",
+      filters: { repository: { id: "repo_1", name: "acme/web" } },
+    });
+  });
+
+  it("reopens on the gallery after the setup step is dismissed", async () => {
+    render(
+      <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,
+    );
+
+    await useTemplate(eventTemplate.name);
+    await screen.findByRole("combobox", { name: "Repository" });
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await openTemplates();
+
+    expect(screen.getByRole("dialog", { name: "Workflow templates" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Repository" })).not.toBeInTheDocument();
+  });
+
+  it("cannot clone an event template before a repository is chosen", async () => {
+    render(
+      <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,
+    );
+
+    await useTemplate(eventTemplate.name);
+
+    expect(await screen.findByRole("button", { name: "Use template" })).toBeDisabled();
+    expect(commandsMock.createHeadlessWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("keeps an event template on the gallery while its company connection is missing", async () => {
+    render(
+      <WorkflowTemplatesButton
+        missingPlugins={{
+          [eventTemplate.id]: [
+            {
+              plugin: "github",
+              label: "GitHub (company)",
+              setupHref: "/plugins/company/github",
+            },
+          ],
+        }}
+        companyGitHub={null}
+        scope="company"
+      />,
+    );
+
+    await openTemplates();
+
+    expect(screen.getByRole("button", { name: new RegExp(eventTemplate.name) })).toBeDisabled();
+    expect(screen.queryByRole("combobox", { name: "Repository" })).not.toBeInTheDocument();
+    expect(commandsMock.createHeadlessWorkflow).not.toHaveBeenCalled();
+    expect(screen.getByRole("link", { name: "GitHub (company)" })).toHaveAttribute(
+      "href",
+      "/plugins/company/github",
+    );
+  });
+
+  it("reports a repository list the GitHub account could not serve", async () => {
+    filtersMock.loadWorkflowEventFilterOptions.mockResolvedValue({
+      ok: false,
+      error: "Reconnect GitHub to list repositories.",
+    });
+    render(
+      <WorkflowTemplatesButton missingPlugins={{}} companyGitHub={companyGitHub} scope="company" />,
+    );
+
+    await useTemplate(eventTemplate.name);
+
+    expect(await screen.findByText("Reconnect GitHub to list repositories.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use template" })).toBeDisabled();
   });
 
   it("clones into the scope the list is filtered to, matching New workflow", async () => {
