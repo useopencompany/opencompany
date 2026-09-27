@@ -3,6 +3,7 @@ import ChatPage from "./page";
 
 const routeMock = vi.hoisted(() => vi.fn(() => null));
 const loadChatMock = vi.hoisted(() => vi.fn());
+const currentUserMock = vi.hoisted(() => vi.fn());
 const redirectMock = vi.hoisted(() =>
   vi.fn((path: string) => {
     throw new Error(`redirect:${path}`);
@@ -19,10 +20,16 @@ vi.mock("@/lib/chat", () => ({
   loadCurrentChatSessionById: loadChatMock,
 }));
 
+vi.mock("@/lib/auth", () => ({
+  currentUser: currentUserMock,
+}));
+
 describe("opencompany chat route", () => {
   beforeEach(() => {
     routeMock.mockClear();
     loadChatMock.mockReset();
+    currentUserMock.mockReset();
+    currentUserMock.mockResolvedValue({});
     redirectMock.mockClear();
   });
 
@@ -60,6 +67,17 @@ describe("opencompany chat route", () => {
   it("redirects an empty route id without calling the API", async () => {
     await expect(ChatPage({ params: Promise.resolve({ chatId: "   " }) })).rejects.toThrow(
       "redirect:/",
+    );
+
+    expect(loadChatMock).not.toHaveBeenCalled();
+    expect(routeMock).not.toHaveBeenCalled();
+  });
+
+  it("finishes authentication before loading a conversation", async () => {
+    currentUserMock.mockRejectedValue(new Error("redirect:/signin"));
+
+    await expect(ChatPage({ params: Promise.resolve({ chatId: "chat_1" }) })).rejects.toThrow(
+      "redirect:/signin",
     );
 
     expect(loadChatMock).not.toHaveBeenCalled();
