@@ -1,16 +1,11 @@
 import { Host } from "@expo/ui";
 import { Button, HStack, Label } from "@expo/ui/swift-ui";
-import {
-  buttonBorderShape,
-  buttonStyle,
-  controlSize,
-  disabled,
-  frame,
-  labelStyle,
-} from "@expo/ui/swift-ui/modifiers";
+import { buttonStyle, controlSize, disabled, frame } from "@expo/ui/swift-ui/modifiers";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
-import { router, useLocalSearchParams } from "expo-router";
+import * as Haptics from "expo-haptics";
+import { useLocalSearchParams } from "expo-router";
+import { useHeaderHeight } from "expo-router/react-navigation";
 import type { SFSymbol } from "expo-symbols";
 import { ActivityIndicator, Alert, Pressable, Share, Text, View } from "react-native";
 import { until } from "until-async";
@@ -22,6 +17,12 @@ import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import { useToast } from "@/shared/ui/toast";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
 import { listStoredConversations } from "../model/chat-store";
+
+const pressHaptic = () => {
+  void until(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)).then(([error]) => {
+    if (error) captureError("share_sheet_haptic_failed", error);
+  });
+};
 
 function AccessOption({
   detail,
@@ -84,6 +85,7 @@ function AccessOption({
 
 export default function ShareSheet() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
+  const headerHeight = useHeaderHeight();
   const { api } = useAuth();
   const { partition, connectivity } = useChatCoordinator();
   const { showToast, showErrorToast } = useToast();
@@ -173,31 +175,9 @@ export default function ShareSheet() {
   };
 
   return (
-    // The sheet sizes itself to this content, so the title and close button live here rather than
-    // in a native header: a transparent header's inset isn't counted, which leaves the bottom
-    // buttons outside the sheet's touch area.
-    <View className="gap-6 bg-background px-5 pt-4 pb-8">
-      <View className="h-11 items-center justify-center">
-        <Text accessibilityRole="header" className="text-[17px] font-semibold text-foreground">
-          Share Chat
-        </Text>
-        <View className="absolute right-0">
-          <Host matchContents>
-            <Button
-              label="Close"
-              systemImage="xmark"
-              onPress={() => router.dismiss()}
-              modifiers={[
-                buttonStyle("glass"),
-                buttonBorderShape("circle"),
-                controlSize("large"),
-                labelStyle("iconOnly"),
-              ]}
-            />
-          </Host>
-        </View>
-      </View>
-
+    // The sheet sizes itself to this content, and the transparent header's height isn't counted.
+    // Without this padding the bottom buttons would sit partly outside the sheet's touch area.
+    <View className="gap-6 bg-background px-5 pb-8" style={{ paddingTop: headerHeight + 8 }}>
       <View className="flex-row items-center gap-3 rounded-2xl bg-secondary px-4 py-3.5 border-continuous">
         <StyledSymbolView
           accessibilityElementsHidden
@@ -287,7 +267,10 @@ export default function ShareSheet() {
       <Host matchContents={{ vertical: true }} style={{ width: "100%" }}>
         <HStack spacing={12}>
           <Button
-            onPress={() => void copy()}
+            onPress={() => {
+              pressHaptic();
+              void copy();
+            }}
             modifiers={[buttonStyle("glassProminent"), controlSize("large"), disabled(!ready)]}
           >
             <Label
@@ -297,7 +280,10 @@ export default function ShareSheet() {
             />
           </Button>
           <Button
-            onPress={() => void share()}
+            onPress={() => {
+              pressHaptic();
+              void share();
+            }}
             modifiers={[buttonStyle("glass"), controlSize("large"), disabled(!ready)]}
           >
             <Label

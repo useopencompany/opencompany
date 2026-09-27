@@ -44,7 +44,7 @@ import {
 import { orderedPartsFromPresentation, textFromParts } from "./message-presentation";
 import { processChatCommand } from "./process-chat-command";
 import { projectRunEvent } from "./run-projection";
-import { sidebarChangeGuard } from "./sidebar-change-guard";
+import { seenChangeGuard, sidebarChangeGuard } from "./sidebar-change-guard";
 
 // A Task conversation is not served by the chat resources, so its transcript and Runs come from
 // the authorized read models. How often an open Task checks for Runs started elsewhere.
@@ -263,8 +263,14 @@ export function createChatSession(input: {
       await queryClient.invalidateQueries({ queryKey: chatQueryKeys.conversations(partition) });
       return;
     }
+    const startedAt = Date.now();
     const envelope = await input.api.getConversation(id, signal);
-    await mergeConversationSnapshots(current, [envelope.data], sidebarChangeGuard.preservedFor(0));
+    await mergeConversationSnapshots(
+      current,
+      [envelope.data],
+      sidebarChangeGuard.preservedFor(0),
+      seenChangeGuard.preservedFor(startedAt),
+    );
     let cursor: string | undefined;
     do {
       const page = await input.api.listMessages(id, { cursor, limit: 100 }, signal);
@@ -295,6 +301,7 @@ export function createChatSession(input: {
         current,
         page.data,
         sidebarChangeGuard.preservedFor(startedAt),
+        seenChangeGuard.preservedFor(startedAt),
       );
       listed.push(...page.data.map((conversation: ConversationDto) => conversation.id));
       cursor = page.nextCursor ?? undefined;
@@ -302,7 +309,12 @@ export function createChatSession(input: {
     const tasks = (
       await input.api.readModelSnapshot("tasks-v1", TaskReadModelSchema, {}, current.signal)
     ).filter((task) => !task.archivedAt);
-    await mergeTaskSnapshots(current, tasks, sidebarChangeGuard.preservedFor(startedAt));
+    await mergeTaskSnapshots(
+      current,
+      tasks,
+      sidebarChangeGuard.preservedFor(startedAt),
+      seenChangeGuard.preservedFor(startedAt),
+    );
     listed.push(...tasks.map((task) => task.conversationId));
     idle.push(
       ...tasks

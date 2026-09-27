@@ -182,6 +182,7 @@ export const mergeConversationSnapshots = async (
   partition: ChatPartition,
   conversations: ConversationDto[],
   preserved: ReadonlySet<string> = new Set(),
+  preservedSeen: ReadonlySet<string> = new Set(),
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     const now = Date.now();
@@ -202,7 +203,8 @@ export const mergeConversationSnapshots = async (
          ELSE excluded.pinned_at
        END,
        activity_state = excluded.activity_state,
-       has_unseen = excluded.has_unseen, awaiting_input = excluded.awaiting_input`,
+       has_unseen = CASE WHEN ? THEN conversations.has_unseen ELSE excluded.has_unseen END,
+       awaiting_input = excluded.awaiting_input`,
         ...values(partition),
         conversation.id,
         conversation.title,
@@ -217,6 +219,7 @@ export const mergeConversationSnapshots = async (
         conversation.awaitingInput ? 1 : 0,
         keepLocal,
         keepLocal,
+        preservedSeen.has(conversation.id) ? 1 : 0,
       );
     }
   });
@@ -226,6 +229,7 @@ export const mergeTaskSnapshots = async (
   partition: ChatPartition,
   tasks: TaskReadModel[],
   preserved: ReadonlySet<string> = new Set(),
+  preservedSeen: ReadonlySet<string> = new Set(),
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     const now = Date.now();
@@ -239,7 +243,8 @@ export const mergeTaskSnapshots = async (
      ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET
        kind = 'task', title = excluded.title, engine = excluded.engine, model = excluded.model,
        updated_at = excluded.updated_at, provisional = 0,
-       activity_state = excluded.activity_state, has_unseen = excluded.has_unseen,
+       activity_state = excluded.activity_state,
+       has_unseen = CASE WHEN ? THEN conversations.has_unseen ELSE excluded.has_unseen END,
        awaiting_input = excluded.awaiting_input, task_id = excluded.task_id,
        task_display_id = excluded.task_display_id,
        task_status = CASE WHEN ? THEN conversations.task_status ELSE excluded.task_status END`,
@@ -256,6 +261,7 @@ export const mergeTaskSnapshots = async (
         task.id,
         task.displayId,
         task.status,
+        preservedSeen.has(task.conversationId) ? 1 : 0,
         preserved.has(task.conversationId) ? 1 : 0,
       );
     }

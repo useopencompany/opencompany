@@ -50,13 +50,27 @@ export default function StackLayout() {
         <Stack.Screen
           name="share-sheet"
           options={{
+            headerTransparent: true,
             presentation: "formSheet",
+            headerTitle: "Share Chat",
             animation: "default",
-            headerShown: false,
+            headerShown: true,
             gestureEnabled: true,
             sheetGrabberVisible: true,
             contentStyle: { backgroundColor },
             sheetAllowedDetents: "fitToContents",
+            unstable_headerLeftItems: () => [],
+            unstable_headerRightItems: () => [
+              {
+                type: "button",
+                label: "Close",
+                icon: {
+                  type: "sfSymbol",
+                  name: "xmark",
+                },
+                onPress: () => router.dismiss(),
+              },
+            ],
           }}
         />
         <Stack.Screen

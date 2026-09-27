@@ -125,33 +125,29 @@ export function SidebarConversationRow({
   const hasMenu = !isTask || availability.canArchive;
 
   return (
-    <View
-      className={
-        active
-          ? "min-h-11 flex-row items-start rounded-xl border-continuous bg-secondary"
-          : "min-h-11 flex-row items-start rounded-xl border-continuous"
-      }
-    >
-      {marked ? (
-        // Centered on the title's first line, so a Task's number stays aligned under its title.
-        <View className="pl-1.5 pt-[4px]">
-          <RowMarker item={item} pullRequest={pullRequest} />
-        </View>
-      ) : null}
-      <Link asChild href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}>
-        <Link.Trigger>
-          <Pressable
-            accessibilityHint={isTask ? `Task ${conversation.task?.displayId ?? ""}` : undefined}
-            accessibilityState={{ selected: active }}
-            className={
-              marked
-                ? "min-h-11 flex-1 justify-center rounded-r-xl py-3 pr-4 pl-1 active:bg-secondary"
-                : "min-h-11 flex-1 justify-center rounded-xl px-4 py-3 active:bg-secondary"
-            }
-            collapsable={false}
-            onPress={() => analytics.capture("conversation_opened", { kind: conversation.kind })}
-            onPressIn={() => void input.dismissSearch()}
-          >
+    // The marker sits inside the trigger so a long press lifts the whole rounded row. A PR button
+    // is its own Pressable, so tapping it opens GitHub rather than the chat.
+    <Link asChild href={{ pathname: "/chats/[chatId]", params: { chatId: conversation.id } }}>
+      <Link.Trigger>
+        <Pressable
+          accessibilityHint={isTask ? `Task ${conversation.task?.displayId ?? ""}` : undefined}
+          accessibilityState={{ selected: active }}
+          className={
+            active
+              ? "min-h-11 flex-row items-start rounded-xl bg-secondary border-continuous"
+              : "min-h-11 flex-row items-start rounded-xl border-continuous active:bg-secondary"
+          }
+          collapsable={false}
+          onPress={() => analytics.capture("conversation_opened", { kind: conversation.kind })}
+          onPressIn={() => void input.dismissSearch()}
+        >
+          {marked ? (
+            // Centered on the title's first line, so a Task's number stays aligned under its title.
+            <View className="pl-1.5 pt-[4px]">
+              <RowMarker item={item} pullRequest={pullRequest} />
+            </View>
+          ) : null}
+          <View className={marked ? "flex-1 py-3 pr-4 pl-1" : "flex-1 px-4 py-3"}>
             <Text numberOfLines={1} className="text-[17px] text-sidebar-foreground leading-[22px]">
               {conversation.title}
             </Text>
@@ -160,52 +156,52 @@ export function SidebarConversationRow({
                 {conversation.task.displayId}
               </Text>
             ) : null}
-          </Pressable>
-        </Link.Trigger>
-        <Link.Preview style={{ width: 340, height: 300 }}>
-          <View className="h-full w-full gap-4 bg-background p-5">
-            <Text numberOfLines={2} className="text-[19px] font-semibold text-foreground">
-              {conversation.title}
-            </Text>
-            {previewMarkdown ? (
-              <StreamdownText
-                flavor="github"
-                key={themeKey}
-                markdown={previewMarkdown}
-                markdownStyle={markdownStyle}
-              />
-            ) : (
-              <Text className="text-[15px] text-muted-foreground">Preview unavailable</Text>
-            )}
           </View>
-        </Link.Preview>
-        {hasMenu ? (
-          <Link.Menu>
-            {isTask ? null : (
-              <Link.MenuAction
-                disabled={!availability.canShare}
-                icon="square.and.arrow.up"
-                onPress={() => actions.share(conversation)}
-                title="Share"
-              />
-            )}
-            {isTask ? null : (
-              <Link.MenuAction
-                disabled={!availability.canPin}
-                icon={availability.isPinned ? "pin.slash" : "pin"}
-                onPress={() => actions.togglePin(conversation)}
-                title={availability.isPinned ? "Unpin" : "Pin"}
-              />
-            )}
-            <Link.MenuAction
-              disabled={!availability.canArchive}
-              icon="archivebox"
-              onPress={() => actions.archive(conversation)}
-              title="Archive"
+        </Pressable>
+      </Link.Trigger>
+      <Link.Preview style={{ width: 340, height: 300 }}>
+        <View className="h-full w-full gap-4 bg-background p-5">
+          <Text numberOfLines={2} className="text-[19px] font-semibold text-foreground">
+            {conversation.title}
+          </Text>
+          {previewMarkdown ? (
+            <StreamdownText
+              flavor="github"
+              key={themeKey}
+              markdown={previewMarkdown}
+              markdownStyle={markdownStyle}
             />
-          </Link.Menu>
-        ) : null}
-      </Link>
-    </View>
+          ) : (
+            <Text className="text-[15px] text-muted-foreground">Preview unavailable</Text>
+          )}
+        </View>
+      </Link.Preview>
+      {hasMenu ? (
+        <Link.Menu>
+          {isTask ? null : (
+            <Link.MenuAction
+              disabled={!availability.canShare}
+              icon="square.and.arrow.up"
+              onPress={() => actions.share(conversation)}
+              title="Share"
+            />
+          )}
+          {isTask ? null : (
+            <Link.MenuAction
+              disabled={!availability.canPin}
+              icon={availability.isPinned ? "pin.slash" : "pin"}
+              onPress={() => actions.togglePin(conversation)}
+              title={availability.isPinned ? "Unpin" : "Pin"}
+            />
+          )}
+          <Link.MenuAction
+            disabled={!availability.canArchive}
+            icon="archivebox"
+            onPress={() => actions.archive(conversation)}
+            title="Archive"
+          />
+        </Link.Menu>
+      ) : null}
+    </Link>
   );
 }

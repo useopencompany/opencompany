@@ -12,7 +12,7 @@ import {
   type StoredConversation,
   writeSidebarFields,
 } from "./chat-store";
-import { sidebarChangeGuard } from "./sidebar-change-guard";
+import { seenChangeGuard, sidebarChangeGuard } from "./sidebar-change-guard";
 
 export const PINNED_CHAT_LIMIT = 20;
 const PIN_LIMIT_MESSAGE = `You can pin up to ${PINNED_CHAT_LIMIT} chats. Unpin one to pin this chat.`;
@@ -184,38 +184,58 @@ export function useConversationActions() {
 }
 
 /**
- * Acknowledges a conversation's unread result once the reader has it on screen. It never touches
- * awaiting-input, which only answering the pending request clears.
+ * Acknowledges a conversation's unread result as soon as the reader opens it. The dot clears at
+ * once and comes back only if the server refuses. It never touches awaiting-input, which only
+ * answering the pending request clears.
  */
 export function useMarkConversationSeen() {
   const { api } = useAuth();
   const coordinator = useChatCoordinator();
   const mutation = useMutation({
-    mutationFn: async (conversation: StoredConversation) => {
-      const partition = coordinator.partition;
-      if (!partition) return;
-      const previous = await writeSidebarFields(partition, conversation.id, { hasUnseen: false });
-      await invalidateConversations(partition);
+    mutationFn: async ({
+      conversation,
+      partition,
+    }: {
+      conversation: StoredConversation;
+      partition: ChatPartition;
+    }) => {
       try {
-        if (conversation.kind === "task") {
-          if (conversation.task)
-            await api.updateTask(conversation.task.id, { markSeen: true }, partition.signal);
-        } else {
-          await api.updateConversation(conversation.id, { markSeen: true }, partition.signal);
+        const previous = await writeSidebarFields(partition, conversation.id, { hasUnseen: false });
+        try {
+          if (conversation.kind === "task") {
+            if (conversation.task)
+              await api.updateTask(conversation.task.id, { markSeen: true }, partition.signal);
+          } else {
+            await api.updateConversation(conversation.id, { markSeen: true }, partition.signal);
+          }
+        } catch (error) {
+          if (previous && !partition.signal?.aborted)
+            await writeSidebarFields(partition, conversation.id, { hasUnseen: previous.hasUnseen });
+          throw error;
         }
-      } catch (error) {
-        if (previous && !partition.signal?.aborted) {
-          await writeSidebarFields(partition, conversation.id, { hasUnseen: previous.hasUnseen });
-          await invalidateConversations(partition);
-        }
-        throw error;
+      } finally {
+        seenChangeGuard.end(conversation.id);
+        if (!partition.signal?.aborted) await invalidateConversations(partition);
       }
     },
-    // The unread dot simply stays; the next visit acknowledges it again.
+    // The unread dot comes back; the next visit acknowledges it again.
     onError: (error) => captureError("conversation_mark_seen_failed", error),
   });
   return (conversation: StoredConversation) => {
-    if (mutation.isPending || coordinator.connectivity === "offline") return;
-    mutation.mutate(conversation);
+    const partition = coordinator.partition;
+    if (
+      !partition ||
+      seenChangeGuard.isPending(conversation.id) ||
+      coordinator.connectivity === "offline"
+    )
+      return;
+    // Refreshes leave this conversation's unread flag alone until the server has confirmed it.
+    seenChangeGuard.begin(conversation.id);
+    const key = chatQueryKeys.conversations(partition);
+    void queryClient.cancelQueries({ queryKey: key });
+    queryClient.setQueryData<StoredConversation[]>(key, (items) =>
+      items?.map((item) => (item.id === conversation.id ? { ...item, hasUnseen: false } : item)),
+    );
+    mutation.mutate({ conversation, partition });
   };
 }

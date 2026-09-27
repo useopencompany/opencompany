@@ -230,12 +230,11 @@ export function StreamingChat({
     return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
 
-  // Acknowledge an unread result only once its transcript is on screen. Sidebar previews never
-  // get here, so peeking at a row leaves it unread.
-  const hasLoadedTranscript = Boolean(messagesQuery.data?.length);
+  // Opening a conversation acknowledges its unread result. Sidebar previews never take focus, so
+  // peeking at a row leaves it unread.
   useEffect(() => {
-    if (isFocused && hasLoadedTranscript && conversation?.hasUnseen) markSeen(conversation);
-  }, [isFocused, hasLoadedTranscript, conversation?.hasUnseen]);
+    if (isFocused && conversation?.hasUnseen) markSeen(conversation);
+  }, [isFocused, conversation?.hasUnseen]);
 
   const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
