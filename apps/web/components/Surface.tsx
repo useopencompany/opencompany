@@ -248,6 +248,7 @@ import {
 import { consumeOnboardingKickoffPrompt } from "@/lib/onboarding-kickoff";
 import {
   addOptimisticChatSummary,
+  markOptimisticChatSummaryAccepted,
   removeOptimisticChatSummary,
 } from "@/lib/optimistic-chat-summaries";
 import { resumeAfterPluginConnection } from "@/lib/plugin-connection-continuation";
@@ -505,8 +506,10 @@ export function Surface({
   // Run; stopping work remains an explicit Stop action. When omitted, Surface
   // falls back to its current single-instance close behavior.
   onClosePane?: () => void;
-  // Called when an optimistic chat id resolves to its durable id, so a host can
-  // update its pane -> chat mapping and, if this pane is focused, the URL.
+  // Called when the API accepts a new chat's first message and its optimistic id
+  // resolves to the durable one. A host that provides this owns the browser URL:
+  // it updates its pane -> chat mapping and moves the URL for the focused pane,
+  // so Surface itself never navigates while hosted.
   onConversationResolved?: (resolution: { optimisticId: string; durableId: string }) => void;
 }) {
   const router = useRouter();
@@ -857,10 +860,15 @@ export function Surface({
         setPersistedChatSessionId(conversationId);
         if (optimisticId && optimisticId === conversationId) {
           pendingNewSessionIdRef.current = null;
-          // Only the active pane owns the browser URL; a host is told about the
-          // resolution regardless so it can update its own pane -> chat mapping.
-          if (isActivePane) router.replace(chatHref(conversationId), { scroll: false });
-          onConversationResolved?.({ optimisticId, durableId: conversationId });
+          // The Conversation now exists server-side, so its route can render. A
+          // pane host owns the URL and moves it on this signal; a standalone
+          // Surface moves it itself, and only from the active pane.
+          markOptimisticChatSummaryAccepted(conversationId);
+          if (onConversationResolved) {
+            onConversationResolved({ optimisticId, durableId: conversationId });
+          } else if (isActivePane) {
+            router.replace(chatHref(conversationId), { scroll: false });
+          }
         }
       }
       setEngineSubmitting(false);

@@ -29,6 +29,7 @@ const workos = new WorkOS({ clientId: WORKOS_CLIENT_ID, timeout: 10_000, maxRetr
 const KEYS = {
   SESSION: "workos_session",
   PKCE: "workos_pkce",
+  PENDING_SIGN_OUT: "workos_pending_sign_out",
 } as const;
 
 export interface User {
@@ -339,6 +340,20 @@ export function getLogoutUrl(sessionId: string): string {
   });
 }
 
+/** Keep the current session ID until WorkOS returns, including across an app relaunch. */
+export async function setPendingSignOut(sessionId: string): Promise<void> {
+  await queueSecureStoreWrite(() => SecureStore.setItemAsync(KEYS.PENDING_SIGN_OUT, sessionId));
+}
+
+export async function getPendingSignOut(): Promise<string | null> {
+  await secureStoreWriteTail;
+  return SecureStore.getItemAsync(KEYS.PENDING_SIGN_OUT);
+}
+
+export async function clearPendingSignOut(): Promise<void> {
+  await queueSecureStoreWrite(() => SecureStore.deleteItemAsync(KEYS.PENDING_SIGN_OUT));
+}
+
 /** Clear stored session and PKCE state. */
 export async function clearSession(): Promise<void> {
   sessionGeneration += 1;
@@ -347,5 +362,6 @@ export async function clearSession(): Promise<void> {
   await queueSecureStoreWrite(async () => {
     await SecureStore.deleteItemAsync(KEYS.SESSION);
     await SecureStore.deleteItemAsync(KEYS.PKCE);
+    await SecureStore.deleteItemAsync(KEYS.PENDING_SIGN_OUT);
   });
 }

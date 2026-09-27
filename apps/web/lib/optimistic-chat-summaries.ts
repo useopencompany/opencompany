@@ -6,6 +6,10 @@ import type { ChatSummaryView } from "@/lib/chat-ui";
 export type OptimisticChatSummary = {
   workspaceId: string;
   chat: ChatSummaryView;
+  // Set once the API has accepted the chat's first message. The row keeps bridging the sidebar
+  // until the durable projection arrives, but the Conversation itself now exists server-side,
+  // so its route can be rendered and the URL may name it.
+  accepted?: boolean;
 };
 
 const EMPTY_SNAPSHOT: readonly OptimisticChatSummary[] = [];
@@ -43,9 +47,32 @@ export function addOptimisticChatSummary(input: {
   publishSnapshot();
 }
 
+export function markOptimisticChatSummaryAccepted(sessionId: string) {
+  const entry = summaries.get(sessionId);
+  if (!entry || entry.accepted) return;
+  summaries.set(sessionId, { ...entry, accepted: true });
+  publishSnapshot();
+}
+
 export function removeOptimisticChatSummary(sessionId: string) {
   if (!summaries.delete(sessionId)) return;
   publishSnapshot();
+}
+
+/**
+ * Chats in `workspaceId` whose first message the API has accepted but whose durable row has not
+ * reached the client yet. They can be routed to; the rest of the optimistic rows exist only in
+ * this tab and a server-rendered route cannot show them.
+ */
+export function acceptedOptimisticChatIds(
+  optimisticChats: readonly OptimisticChatSummary[],
+  workspaceId: string,
+): ReadonlySet<string> {
+  return new Set(
+    optimisticChats
+      .filter((entry) => entry.workspaceId === workspaceId && entry.accepted)
+      .map((entry) => entry.chat.id),
+  );
 }
 
 export function reconcileOptimisticChatSummaries(

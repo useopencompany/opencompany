@@ -5,10 +5,28 @@ import {
   listManagedSandboxes,
   reconcileManagedSandboxes,
   SANDBOX_RECONCILE_GRACE_MS,
+  startSandboxReconciler,
 } from "./sandbox-reconciler";
+
+const observability = vi.hoisted(() => ({
+  captureException: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}));
+
+vi.mock("@opencompany/observability", () => ({
+  captureException: observability.captureException,
+  createLogger: () => ({
+    error: observability.error,
+    warn: observability.warn,
+    info: observability.info,
+  }),
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("managedSandboxMetadata", () => {
@@ -59,6 +77,37 @@ describe("listManagedSandboxes", () => {
       requestTimeoutMs: 30_000,
     });
     expect(nextItems).toHaveBeenCalledWith({ signal, requestTimeoutMs: 30_000 });
+  });
+});
+
+describe("startSandboxReconciler", () => {
+  it("keeps provider request timeouts in retry telemetry", async () => {
+    const timeout = new DOMException("The operation timed out.", "TimeoutError");
+    let hasNext = true;
+    vi.spyOn(Sandbox, "list").mockReturnValue({
+      get hasNext() {
+        return hasNext;
+      },
+      nextItems: vi.fn(async () => {
+        hasNext = false;
+        throw timeout;
+      }),
+    } as never);
+
+    const worker = startSandboxReconciler({ namespace: "production", pollIntervalMs: 60_000 });
+    await vi.waitFor(() =>
+      expect(observability.warn).toHaveBeenCalledWith(
+        "Managed sandbox reconciliation timed out; the next poll will retry",
+        {
+          event: "opencompany.runner_sandbox_reconcile_deferred",
+          error: timeout,
+        },
+      ),
+    );
+    await worker.stop();
+
+    expect(observability.captureException).not.toHaveBeenCalled();
+    expect(observability.error).not.toHaveBeenCalled();
   });
 });
 
