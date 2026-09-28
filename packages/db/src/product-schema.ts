@@ -310,6 +310,9 @@ export type HarnessWorkflowStep = {
   skillIds: string[];
   skillBundleIds: string[];
   pluginSkillBundleIds?: string[];
+  // Workflow slugs this step's instructions mention as `@workflow/<slug>`: the only workflows
+  // the run may start while it is on this step.
+  handoffWorkflowIds?: string[];
 };
 
 export type HarnessSpec = {
@@ -340,6 +343,9 @@ export type HarnessSpec = {
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;
+    // How many workflow handoffs led to this run. Absent for a run a person, schedule, or event
+    // started. Bounds handoff chains; see MAX_WORKFLOW_HANDOFF_DEPTH.
+    handoffDepth?: number;
     lastCompletedStepOutcome?: {
       reportedOutcome: TaskReportedOutcome | null;
       outcomeComment: string | null;

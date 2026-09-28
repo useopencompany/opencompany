@@ -7,6 +7,7 @@ import type {
 } from "@opencompany/agent-runtime";
 import { isBrowserToolName } from "@opencompany/browser-tools";
 import { type Actor, SKILL_READ_PERMISSION, SKILL_WRITE_PERMISSION } from "@opencompany/core";
+import type { WorkflowHandoffGrant } from "../workflow-handoffs";
 import { WorkflowCommandSchema } from "../workflow-tool";
 
 export type ChatHostContext = {
@@ -25,6 +26,8 @@ export type ChatHostContext = {
   skillToolsEnabled: boolean;
   // True only for a run of a workflow whose Channels section keeps Slack on.
   slackChannelEnabled: boolean;
+  // Only a Task run whose current step mentions other workflows can start them.
+  workflowHandoff: WorkflowHandoffGrant | null;
 };
 
 export type ChatHostToolCommand = {
@@ -156,6 +159,7 @@ export type ChatHostToolServiceDependencies = {
     workspaceId: string;
     mention: { id: string };
     description: string;
+    handoffDepth?: number;
   }) => Promise<TaskResult>;
   listWorkflowCatalog: (
     workspaceId: string,
@@ -356,12 +360,19 @@ async function executeOperation(
       });
     }
     case "start_workflow": {
-      assertAutomationTools(context);
+      const workflowId = requiredString(toolInput.workflowId, "workflowId");
+      let handoffDepth: number | undefined;
+      if (context.taskConversation) {
+        handoffDepth = assertWorkflowHandoff(context, workflowId).depth + 1;
+      } else {
+        assertAutomationTools(context);
+      }
       const created = await dependencies.createWorkflowTask({
         actorId: context.actorId,
         workspaceId: context.workspaceId,
-        mention: { id: requiredString(toolInput.workflowId, "workflowId") },
+        mention: { id: workflowId },
         description: requiredString(toolInput.prompt, "prompt"),
+        ...(handoffDepth ? { handoffDepth } : {}),
       });
       return taskResult(created);
     }
@@ -479,7 +490,7 @@ async function bootstrap(
     ),
     automationToolsEnabled
       ? dependencies.listWorkflowCatalog(context.workspaceId, context.actorId)
-      : Promise.resolve([]),
+      : handoffCatalog(context, dependencies),
     dependencies.browserProfilesAvailable()
       ? dependencies.listBrowserProfiles(context.actorId)
       : Promise.resolve([]),
@@ -551,6 +562,28 @@ function browserProfileResult(session: BrowserProfileSession) {
     liveViewUrl: session.liveViewPath,
     message: `Authenticated browser profile active for ${session.profile.siteHost}.`,
   };
+}
+
+// A Task sees only the mentioned workflows its actor can run right now, so the model's choices
+// match what start_workflow will accept.
+async function handoffCatalog(
+  context: ChatHostContext,
+  dependencies: ChatHostToolServiceDependencies,
+) {
+  const handoff = context.taskConversation ? context.workflowHandoff : null;
+  if (!handoff) return [];
+  const catalog = await dependencies.listWorkflowCatalog(context.workspaceId, context.actorId);
+  return catalog.filter((workflow) => handoff.workflowIds.includes(workflow.id));
+}
+
+function assertWorkflowHandoff(context: ChatHostContext, workflowId: string) {
+  const handoff = context.workflowHandoff;
+  if (!handoff?.workflowIds.includes(workflowId)) {
+    throw new Error(
+      `This task can only start workflows its step instructions mention, and "${workflowId}" is not one of them.`,
+    );
+  }
+  return handoff;
 }
 
 function assertAutomationTools(context: ChatHostContext) {

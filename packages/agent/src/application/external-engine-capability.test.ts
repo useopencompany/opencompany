@@ -100,6 +100,7 @@ describe("External engine tool capability authority", () => {
       taskConversation: false,
       automationToolsEnabled: true,
       slackChannelEnabled: false,
+      workflowHandoff: null,
       skillToolsEnabled: true,
       actorId: "user_1",
       workspaceId: "workspace_1",
@@ -112,6 +113,35 @@ describe("External engine tool capability authority", () => {
       assistantMessageId: "message_assistant_1",
       hostToolContractVersion: ACTION_HOST_TOOL_CONTRACT_VERSION,
     });
+  });
+
+  it("grants a Task run the workflows its current step mentions, and chat nothing", () => {
+    const taskHarnessSpec = {
+      workflow: {
+        id: "build",
+        workspaceId: "workspace_1",
+        skillIds: [],
+        skillBundleIds: [],
+        pluginIds: [],
+        steps: [{ handoffWorkflowIds: ["review-pr"] }] as never,
+        currentStepIndex: 0,
+        handoffDepth: 1,
+      },
+    };
+    expect(
+      authorizeExternalEngineToolCapability({
+        capability,
+        state: state({ conversationKind: "task", taskHarnessSpec }),
+        now,
+      }),
+    ).toMatchObject({ workflowHandoff: { workflowIds: ["review-pr"], depth: 1 } });
+    expect(
+      authorizeExternalEngineToolCapability({
+        capability,
+        state: state({ conversationKind: "chat", taskHarnessSpec }),
+        now,
+      }),
+    ).toMatchObject({ workflowHandoff: null });
   });
 
   it("authorizes MCP initialization while the claimed engine session is starting", () => {

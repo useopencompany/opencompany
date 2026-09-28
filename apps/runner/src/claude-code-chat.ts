@@ -1,8 +1,9 @@
 import {
-  TASK_SYSTEM_BLOCK,
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+  taskSystemBlock,
 } from "@opencompany/agent/chat-agent";
 import { GitHubUserAccessAuthError } from "@opencompany/agent/integrations/github-user";
+import { workflowHandoffGrant } from "@opencompany/agent/workflow-handoffs";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
@@ -1557,7 +1558,7 @@ function claudeBackgroundTaskPromptLines(context: TaskTurnContext | undefined) {
   const codex = context.harnessSpec.codex;
   return [
     "",
-    TASK_SYSTEM_BLOCK,
+    taskSystemBlock(workflowHandoffGrant(context.harnessSpec)?.workflowIds),
     "Connected actions set to Ask pause this task for one-time approval. Call use_action with the intended inputs; the runner saves them, stops this turn, and resumes after approval. Do not ask the user to change standing permissions to On. Approved actions are executed by the runner, which supplies their results when you resume.",
     TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
     codex?.repository

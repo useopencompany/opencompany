@@ -17,7 +17,12 @@ import {
   executeActionHostGateway,
 } from "@opencompany/agent/application/persisted-action-gateway";
 import { authorizePersistedExternalEngineToolCapability } from "@opencompany/agent/application/persisted-external-engine-capability";
-import { SLACK_BOT_TOOL_NAME } from "@opencompany/agent/chat-ui";
+import { startWorkflowTaskForTurn } from "@opencompany/agent/application/persisted-host-tools";
+import {
+  SLACK_BOT_TOOL_NAME,
+  START_WORKFLOW_TOOL_NAME,
+  type StartWorkflowToolOutput,
+} from "@opencompany/agent/chat-ui";
 import {
   postWorkflowSlackMessage,
   SLACK_CHANNEL_INPUT_SCHEMA,
@@ -26,12 +31,18 @@ import {
 } from "@opencompany/agent/integrations/slack-channel";
 import { mcpInvocationId } from "@opencompany/agent/mcp-invocation";
 import { registerWikiTool } from "@opencompany/agent/mcp-server";
+import {
+  WORKFLOW_HANDOFF_ID_DESCRIPTION,
+  WORKFLOW_HANDOFF_PROMPT_DESCRIPTION,
+  WORKFLOW_HANDOFF_TOOL_DESCRIPTION,
+} from "@opencompany/agent/prompts";
 import { executeWorkspaceSkillToolForActor } from "@opencompany/agent/skills";
 import {
   parseWorkflowToolInput,
   WORKFLOWS_INPUT_SCHEMA,
   WORKFLOWS_TOOL_DESCRIPTION,
 } from "@opencompany/agent/workflow-tool";
+import { listWorkflowCatalog } from "@opencompany/agent/workflows";
 import {
   ACTION_HOST_TOOL_CONTRACT_VERSION,
   ACTION_HOST_TOOL_CONTRACT_VERSION_V3,
@@ -63,6 +74,7 @@ import type { RunnerEnv } from "./env";
 
 const MAX_MCP_BODY_BYTES = 256 * 1024;
 const DEFAULT_RATE_LIMIT_MAX = 300;
+const HANDOFF_PROMPT_ECHO_LIMIT = 1_000;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const APPROVAL_POLL_INTERVAL_MS = 500;
 const APPROVAL_PROGRESS_INTERVAL_MS = 15_000;
@@ -91,6 +103,14 @@ type AcpToolsMcpDependencies = {
   ) => ReturnType<typeof executeWorkspaceSkillToolForActor>;
   executeWorkflowCommand: typeof executeApiWorkflowCommand;
   executeWikiCommand: typeof executeApiWikiCommand;
+  listWorkflowCatalog: (
+    workspaceId: string,
+    userId: string,
+  ) => ReturnType<typeof listWorkflowCatalog>;
+  startWorkflowTask: typeof startWorkflowTaskForTurn;
+  // server.ts injects the Task worker's wake. Without it a started Task still runs, on the
+  // worker's next poll instead of immediately.
+  wakeTaskWorker: () => unknown;
   rateLimitMax: number;
 };
 
@@ -111,6 +131,9 @@ const defaultDependencies: AcpToolsMcpDependencies = {
   executeSkillTool: (input) => executeWorkspaceSkillToolForActor({ ...input, db: getDb() }),
   executeWorkflowCommand: executeApiWorkflowCommand,
   executeWikiCommand: executeApiWikiCommand,
+  listWorkflowCatalog: (workspaceId, userId) => listWorkflowCatalog(workspaceId, userId),
+  startWorkflowTask: startWorkflowTaskForTurn,
+  wakeTaskWorker: () => {},
   rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
 };
 
@@ -253,6 +276,84 @@ export function registerAcpToolsMcpRoute(
               signal: request.signal,
             });
             return { content: [{ type: "text", text: JSON.stringify(result) }] };
+          },
+        );
+      }
+      const handoffCatalog = authorizedContext.workflowHandoff
+        ? (
+            await resolved.listWorkflowCatalog(
+              authorizedContext.workspaceId,
+              authorizedContext.actorId,
+            )
+          ).filter((workflow) =>
+            authorizedContext.workflowHandoff?.workflowIds.includes(workflow.id),
+          )
+        : [];
+      if (handoffCatalog.length) {
+        server.registerTool(
+          START_WORKFLOW_TOOL_NAME,
+          {
+            description: WORKFLOW_HANDOFF_TOOL_DESCRIPTION,
+            inputSchema: mcpInputSchema({
+              type: "object",
+              properties: {
+                workflowId: {
+                  type: "string",
+                  description: `${WORKFLOW_HANDOFF_ID_DESCRIPTION} One of: ${handoffCatalog
+                    .map((workflow) => `${workflow.id} (${workflow.name})`)
+                    .join(", ")}.`,
+                },
+                prompt: {
+                  type: "string",
+                  minLength: 1,
+                  description: WORKFLOW_HANDOFF_PROMPT_DESCRIPTION,
+                },
+              },
+              required: ["workflowId", "prompt"],
+            }),
+          },
+          async (args) => {
+            // Re-read authority per call: the step may have moved on, or the Task been stopped.
+            const current = await authorizeOperation();
+            const handoff = current?.workflowHandoff;
+            const workflowId = typeof args.workflowId === "string" ? args.workflowId.trim() : "";
+            const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
+            if (!current || !handoff?.workflowIds.includes(workflowId)) {
+              throw new Error(
+                `This task can only start workflows its step instructions mention, and "${workflowId}" is not one of them.`,
+              );
+            }
+            if (!prompt) throw new Error("start_workflow prompt is required.");
+            const task = await resolved.startWorkflowTask(
+              {
+                turnId: capability.codexChatTurnId,
+                actorId: current.actorId,
+                workspaceId: current.workspaceId,
+                mention: { id: workflowId },
+                description: prompt,
+                handoffDepth: handoff.depth + 1,
+              },
+              {
+                wakeTaskWorker: resolved.wakeTaskWorker,
+                defer: (work) => {
+                  void work;
+                },
+                gatewayApiKey: env.vercelAiGatewayApiKey,
+              },
+            );
+            const output: StartWorkflowToolOutput = {
+              taskId: task.id,
+              taskDisplayId: task.displayId,
+              taskName: task.name,
+              status: "queued",
+              // Transcripts keep MCP results only up to a few thousand characters, and the chat
+              // card is parsed from this JSON. The model wrote the prompt, so an excerpt suffices.
+              prompt:
+                task.prompt.length > HANDOFF_PROMPT_ECHO_LIMIT
+                  ? `${task.prompt.slice(0, HANDOFF_PROMPT_ECHO_LIMIT)}…`
+                  : task.prompt,
+            };
+            return { content: [{ type: "text", text: JSON.stringify(output) }] };
           },
         );
       }

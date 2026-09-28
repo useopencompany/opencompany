@@ -37,6 +37,37 @@ export function PullRequestBadge({ pullRequest }: { pullRequest: SessionPullRequ
 }
 
 /**
+ * The same state, spelled out, for a surface with room for it: a started Task's card in chat
+ * names the PR and its state so the reader can follow the hand-off without opening the Task.
+ */
+export function PullRequestPill({ pullRequest }: { pullRequest: SessionPullRequest }) {
+  const { Glyph, colorClassName, label: stateLabel } = presentationFor(pullRequest.state);
+  return (
+    <a
+      href={pullRequest.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${stateLabel}: ${pullRequest.repository} #${pullRequest.number}`}
+      data-testid="task-card-pull-request"
+      data-state={pullRequest.state}
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11.5px] font-medium leading-4 text-ink-muted transition-colors duration-150 hover:bg-surface-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20"
+    >
+      <Glyph size={12} strokeWidth={2} className={colorClassName} aria-hidden="true" />
+      <span>#{pullRequest.number}</span>
+      <span className="text-ink-subtle">{PILL_STATE_COPY[pullRequest.state]}</span>
+    </a>
+  );
+}
+
+const PILL_STATE_COPY: Record<PullRequestState, string> = {
+  draft: "Draft",
+  open: "Open",
+  blocked: "Blocked",
+  merged: "Merged",
+  closed: "Closed",
+};
+
+/**
  * A switch rather than a lookup table so the compiler proves every state is covered: adding a
  * sixth state should fail to build, not silently render nothing.
  */

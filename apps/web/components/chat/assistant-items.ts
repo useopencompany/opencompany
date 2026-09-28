@@ -39,7 +39,11 @@ import {
 } from "@/lib/chat-ui";
 import { codingToolPresentation } from "@/lib/coding-tool-presentation";
 import { isOfficialMcpPluginName } from "@/lib/official-plugins";
-import { type WorkflowCardOutput, workflowCardOutputFromTool } from "./workflow-tool-output";
+import {
+  startedTaskOutputFromTool,
+  type WorkflowCardOutput,
+  workflowCardOutputFromTool,
+} from "./workflow-tool-output";
 
 // Recurring Tasks were removed, but their tool calls are still in saved transcripts. These names
 // are spelled out because the constants no longer exist; they only ever match historical parts.
@@ -83,6 +87,8 @@ export type ChatTaskCardView = {
   displayId: string | null;
   title: string | null;
   status: TaskStatus | null;
+  // The Task's own conversation, which is what a pull request it opens is linked to.
+  conversationId: string | null;
 };
 
 export type ChatTaskLookup = ReadonlyMap<string, ChatTaskCardView>;
@@ -234,6 +240,15 @@ function collectRenderItems(
         type: "task",
         key: `${keyPrefix}task-${index}`,
         task: resolveChatTaskCard(taskFromOutput(part.output), taskLookup),
+      });
+      continue;
+    }
+    const startedTask = startedTaskOutputFromTool(tool);
+    if (startedTask) {
+      items.push({
+        type: "task",
+        key: `${keyPrefix}task-${index}`,
+        task: resolveChatTaskCard(taskFromOutput(startedTask), taskLookup),
       });
       continue;
     }
@@ -881,13 +896,17 @@ export function buildChatTaskLookup(input: {
   return lookup;
 }
 
-function setChatTaskLookupValue(lookup: Map<string, ChatTaskCardView>, task: TaskCardMetadata) {
+function setChatTaskLookupValue(
+  lookup: Map<string, ChatTaskCardView>,
+  task: TaskCardMetadata & { conversationId?: string | null },
+) {
   const existing = lookup.get(task.id);
   lookup.set(task.id, {
     id: task.id,
     displayId: task.displayId ?? existing?.displayId ?? null,
     title: task.title ?? existing?.title ?? null,
     status: task.status ?? existing?.status ?? null,
+    conversationId: task.conversationId ?? existing?.conversationId ?? null,
   });
 }
 
@@ -897,6 +916,7 @@ function taskCardFromTask(task: TaskView): ChatTaskCardView {
     displayId: task.displayId,
     title: task.name,
     status: task.status,
+    conversationId: task.sessionId ?? null,
   };
 }
 
@@ -910,6 +930,7 @@ export function resolveChatTaskCard(
     displayId: resolved?.displayId ?? fallback.displayId ?? null,
     title: resolved?.title ?? fallback.title ?? null,
     status: resolved?.status ?? fallback.status ?? null,
+    conversationId: resolved?.conversationId ?? null,
   };
 }
 

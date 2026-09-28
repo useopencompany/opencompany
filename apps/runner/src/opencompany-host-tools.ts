@@ -192,7 +192,16 @@ export async function loadHostTools(
             execute: (input) => call("start_workflow", input) as Promise<StartedTask>,
           },
         }
-      : {}),
+      : bootstrap.workflows.length
+        ? {
+            // A Task run's handoff catalog: start only, never manage.
+            workflows: {
+              catalog: bootstrap.workflows,
+              handoff: true,
+              execute: (input) => call("start_workflow", input) as Promise<StartedTask>,
+            },
+          }
+        : {}),
     close: async () => {
       await callGateway(context, execute, "browser_end_profile", undefined, undefined, false);
     },

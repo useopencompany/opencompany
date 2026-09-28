@@ -21,6 +21,7 @@ import {
   createWikiSlashCommandPlugin,
   type WikiSlashCommandHandlers,
 } from "@/components/WikiSlashCommand";
+import { WorkflowMention, type WorkflowMentionItem } from "@/components/WorkflowMentionNode";
 import type { SkillCatalogItem } from "@/lib/skills";
 
 const EMPTY_PAGE_LINKS: Record<string, string> = {};
@@ -51,6 +52,7 @@ export function MarkdownEditor({
   compact = false,
   placeholder = "Start writing...",
   skillMentions,
+  workflowMentions,
   contextMentions = false,
   wikiSlashCommands,
   blockHandles = false,
@@ -75,6 +77,9 @@ export function MarkdownEditor({
   // resolves at fire time. Captured once at mount, like `content`; callers
   // that need this pass a stable, server-fetched catalog.
   skillMentions?: SkillCatalogItem[];
+  // Workflow step instructions only: with contextMentions, "@" also offers these workflows and
+  // inserts a chip serialized as `@workflow/<slug>`, the handoff a run may then start.
+  workflowMentions?: WorkflowMentionItem[];
   contextMentions?: boolean;
   // Wiki surfaces only: typing "/" opens a Notion-style command menu (e.g.
   // "page" creates a sibling page). Captured once at mount like skillMentions.
@@ -155,6 +160,7 @@ export function MarkdownEditor({
             ]
           : []),
         ...(contextMentions ? [ContextReferenceNode] : []),
+        ...(workflowMentions ? [WorkflowMention.configure({ workflows: workflowMentions })] : []),
         ...(skillMentions
           ? [
               SkillMention.configure({ skills: skillMentions }),
@@ -165,7 +171,11 @@ export function MarkdownEditor({
                     ? []
                     : [
                         contextMentions
-                          ? createContextReferenceSuggestion(this.editor, skillMentions)
+                          ? createContextReferenceSuggestion(
+                              this.editor,
+                              skillMentions,
+                              workflowMentions,
+                            )
                           : createSkillMentionPlugin(this.editor, skillMentions),
                       ];
                 },

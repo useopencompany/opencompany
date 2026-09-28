@@ -58,7 +58,7 @@ export function createServer(
     }
   });
 
-  registerAcpToolsMcpRoute(app, env);
+  registerAcpToolsMcpRoute(app, env, { wakeTaskWorker: wakeCodexChatWorker });
   registerGitHubBrokerRoutes(app, { secret: env.internalToken });
 
   app.get("/healthz", async () => ({

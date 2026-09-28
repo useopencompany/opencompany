@@ -86,6 +86,7 @@ export type HarnessWorkflowStep = {
   skillIds: string[];
   skillBundleIds: string[];
   pluginSkillBundleIds?: string[];
+  handoffWorkflowIds?: string[];
 };
 
 export type HarnessSpec = {
@@ -108,6 +109,7 @@ export type HarnessSpec = {
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;
+    handoffDepth?: number;
     lastCompletedStepOutcome?: {
       reportedOutcome: TaskReportedOutcome | null;
       outcomeComment: string | null;
