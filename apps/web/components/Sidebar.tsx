@@ -505,9 +505,9 @@ function SidebarWorkList() {
   // and the review queue share: one click empties the row from both lists.
   const archiveTask = (task: SidebarTaskView, href: string) => {
     if (!archiveConversationOptimistically(task.conversationId)) return;
-    // If we archived the task we're currently viewing, fall back to the board.
+    // If we archived the task we're currently viewing, open a fresh chat.
     if (isTaskRouteActive(pathname, href)) {
-      router.push("/tasks");
+      router.push("/");
     }
     startTransition(async () => {
       try {

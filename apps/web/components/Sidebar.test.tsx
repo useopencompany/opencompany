@@ -1095,7 +1095,7 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
   });
 
-  it("archives a settled task from its row and offers no archive on a running one", async () => {
+  it("archives a settled task, opens a fresh chat, and keeps running tasks unarchivable", async () => {
     const user = userEvent.setup();
     pathnameMock.value = "/tasks/T-2";
     sidebarTasksMock.value = [
@@ -1124,11 +1124,11 @@ describe("Sidebar", () => {
     expect(taskCommandsMock.archiveHeadlessTask).toHaveBeenCalledWith("task_settled", {
       scopeKey: workspacesMock.value[0]!.id,
     });
-    // The row and the route move on the click, like an archived chat's, rather than a beat later
-    // when the write and its projection land.
+    // The row and the route move on the click rather than a beat later when the write and its
+    // projection land. An archived conversation always leaves the reader on a fresh chat.
     expect(screen.queryByRole("link", { name: /Settled task/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Running task/ })).toBeInTheDocument();
-    expect(routerMock.push).toHaveBeenCalledWith("/tasks");
+    expect(routerMock.push).toHaveBeenCalledWith("/");
   });
 
   it("keeps the Tasks nav row current on the board itself", () => {
