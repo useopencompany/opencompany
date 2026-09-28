@@ -39,6 +39,7 @@ interface ChatCoordinatorValue {
     body: ResolveApprovalBody,
   ) => Promise<void>;
   refreshConversations: () => Promise<void>;
+  refreshConversation: (id: string, signal: AbortSignal) => Promise<void>;
 }
 const ChatCoordinatorContext = createContext<ChatCoordinatorValue | null>(null);
 
@@ -127,14 +128,19 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
     if (
       draft.conversationId !== queued.conversationId &&
       visibleIdRef.current === draft.conversationId
-    )
-      router.replace({
+    ) {
+      const href = {
         pathname: "/chats/[chatId]",
         params: {
           chatId: queued.conversationId,
           anchorMessageId: queued.clientMessageId,
         },
-      });
+      } as const;
+      // A dismissed sidebar preview leaves its chat preloaded, and a replace reuses that preloaded
+      // screen with the previewed chat's params. Preloading this chat first takes its place.
+      router.prefetch(href);
+      router.replace(href);
+    }
     return { conversationId: queued.conversationId, userMessageId: queued.clientMessageId };
   };
   const stopRun = async (id: string): Promise<void> => {
@@ -186,6 +192,10 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
         refreshConversations: async () => {
           await session?.refreshConversations();
           analytics.capture("conversation_list_refreshed");
+        },
+        refreshConversation: async (id, signal) => {
+          if (!session) throw new Error("Sign in to load this chat.");
+          await session.refreshConversation(id, signal);
         },
       }}
     >

@@ -1,7 +1,6 @@
 import { Host } from "@expo/ui";
 import { Button, HStack, Spacer } from "@expo/ui/swift-ui";
 import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
-import { router } from "expo-router";
 import { Alert, ScrollView, Text, View } from "react-native";
 import { until } from "until-async";
 import { useAuth } from "@/features/auth";
@@ -90,7 +89,6 @@ export default function SettingsSheet() {
                   text: "Sign Out",
                   style: "destructive",
                   onPress: async () => {
-                    router.dismiss();
                     const [error] = await until(signOut);
                     if (error) showErrorToast(error.message, error, "auth.sign-out");
                   },

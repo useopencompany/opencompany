@@ -231,6 +231,7 @@ describe("HomeRoute", () => {
   beforeEach(() => {
     window.localStorage.clear();
     pathnameMock.value = "/";
+    Object.assign(appDataMock.value, { chatsReady: false });
     // jsdom has no media queries; the canvas asks whether the viewport is wide
     // enough to show panes side by side.
     window.matchMedia = ((query: string) => ({
@@ -276,6 +277,72 @@ describe("HomeRoute", () => {
       id: "conversation_1",
       runtime: null,
     });
+  });
+
+  it("recovers a server read miss from the complete open-chat collection", () => {
+    Object.assign(appDataMock.value, {
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      openChats: [
+        {
+          id: "conversation_older",
+          title: "Older open chat",
+          model: "anthropic/claude-sonnet-5",
+          engine: "opencompany",
+          runtime: null,
+          activityState: "idle",
+          hasUnseen: false,
+          preview: "Done",
+          updatedAt: "2026-08-19T10:00:00.000Z",
+        },
+      ],
+      chatsReady: true,
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+
+    pathnameMock.value = "/chat/conversation_older";
+    renderHome(<HomeRoute chatId="conversation_older" initialChat={null} />);
+
+    expect(surfaceMock.props?.initialChat).toMatchObject({
+      id: "conversation_older",
+      title: "Older open chat",
+      runtime: null,
+    });
+  });
+
+  it("waits for live chats before declaring a missed server read unavailable", () => {
+    Object.assign(appDataMock.value, {
+      tasks: [],
+      schedules: [],
+      recentChats: [],
+      archivedChats: [],
+      openChats: [],
+      chatsReady: false,
+      codexConnected: false,
+      claudeCodeConnected: false,
+    });
+    pathnameMock.value = "/chat/conversation_missing";
+    surfaceMock.props = null;
+
+    const view = renderHome(<HomeRoute chatId="conversation_missing" initialChat={null} />);
+
+    expect(screen.getByRole("status", { name: "Loading chat" })).toBeInTheDocument();
+    expect(screen.queryByText("Chat unavailable")).not.toBeInTheDocument();
+    expect(surfaceMock.props).toBeNull();
+
+    Object.assign(appDataMock.value, { chatsReady: true });
+    view.rerender(
+      <ChatPaneWorkspaceProvider>
+        <HomeRoute chatId="conversation_missing" initialChat={null} />
+      </ChatPaneWorkspaceProvider>,
+    );
+
+    expect(screen.getByText("Chat unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Start a new chat" })).toHaveAttribute("href", "/");
+    expect(surfaceMock.props).toBeNull();
   });
 
   it("keeps a new chat out of the URL until the API has accepted its first message", () => {
@@ -448,6 +515,7 @@ describe("WorkflowsRoute", () => {
       canEdit: true,
       ownerNames: WORKFLOW_OWNER_NAMES,
       templateMissingPlugins: null,
+      companyGitHub: null,
     };
     const view = render(<WorkflowsRoute {...props} />);
 
@@ -481,6 +549,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -518,6 +587,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -555,6 +625,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -591,6 +662,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -614,6 +686,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -637,6 +710,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -656,6 +730,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={null}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 
@@ -677,6 +752,7 @@ describe("WorkflowsRoute", () => {
         canEdit
         ownerNames={WORKFLOW_OWNER_NAMES}
         templateMissingPlugins={null}
+        companyGitHub={null}
       />,
     );
 

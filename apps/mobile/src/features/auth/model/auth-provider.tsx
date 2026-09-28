@@ -21,9 +21,11 @@ import {
   purgePartition,
 } from "@/widgets/chat/model/chat-store";
 import {
+  clearPendingSignOut,
   clearSession,
   getAccessToken,
   getLogoutUrl,
+  getPendingSignOut,
   getSessionId,
   getSignInUrl,
   getStoredUser,
@@ -32,6 +34,7 @@ import {
   REDIRECT_URI,
   SIGN_OUT_REDIRECT_URI,
   selectOrganization,
+  setPendingSignOut,
   type User,
 } from "./auth";
 
@@ -63,8 +66,7 @@ type AuthAction =
   | { type: "sign-in" }
   | { type: "callback"; url: string }
   | { type: "refresh-identity" }
-  | { type: "select-workspace"; workspaceId: string }
-  | { type: "clear-session" };
+  | { type: "select-workspace"; workspaceId: string };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
@@ -257,11 +259,83 @@ const openSignInBrowser = async (): Promise<string> => {
   return result.url;
 };
 
+let pendingSignOutCompletion: Promise<boolean> | null = null;
+let signOutBrowserOpen = false;
+
+/** The sign-out deep link can arrive twice, including after an app relaunch. */
+const completeSignOut = (url: string): Promise<boolean> => {
+  if (!matchesRedirectUri(url, SIGN_OUT_REDIRECT_URI)) return Promise.resolve(false);
+  if (pendingSignOutCompletion) return pendingSignOutCompletion;
+
+  const completion = (async () => {
+    const pendingSessionId = await getPendingSignOut();
+    if (!pendingSessionId) return false;
+    if (pendingSessionId !== (await getSessionId())) {
+      await clearPendingSignOut();
+      return false;
+    }
+
+    await clearAuthentication();
+    analytics.capture("sign_out_succeeded");
+    return true;
+  })();
+  pendingSignOutCompletion = completion;
+  void completion.then(
+    (completed) => {
+      if (!completed && pendingSignOutCompletion === completion) pendingSignOutCompletion = null;
+    },
+    () => {
+      if (pendingSignOutCompletion === completion) pendingSignOutCompletion = null;
+    },
+  );
+  return completion;
+};
+
+const performSignOut = async (): Promise<void> => {
+  const sessionId = await getSessionId();
+  if (!sessionId) throw new Error("No active session found");
+  const logoutUrl = getLogoutUrl(sessionId);
+  await setPendingSignOut(sessionId);
+  pendingSignOutCompletion = null;
+
+  let result: WebBrowser.WebBrowserResult;
+  try {
+    signOutBrowserOpen = true;
+    result = await WebBrowser.openBrowserAsync(logoutUrl);
+  } catch (error) {
+    if (pendingSignOutCompletion && (await pendingSignOutCompletion)) return;
+    await clearPendingSignOut();
+    throw error;
+  } finally {
+    signOutBrowserOpen = false;
+  }
+
+  if (pendingSignOutCompletion && (await pendingSignOutCompletion)) return;
+
+  await clearPendingSignOut();
+  throw new Error(
+    result.type === "cancel" || result.type === "dismiss"
+      ? "Sign out was canceled. Please try again."
+      : "Sign out did not return to the app. Please try again.",
+  );
+};
+
+let signOutInFlight: Promise<void> | null = null;
+
+const runSignOut = async (): Promise<void> => {
+  if (signOutInFlight) return signOutInFlight;
+
+  const attempt = performSignOut();
+  signOutInFlight = attempt;
+  try {
+    await attempt;
+  } finally {
+    if (signOutInFlight === attempt) signOutInFlight = null;
+  }
+};
+
 const runAuthAction = async (action: AuthAction): Promise<void> => {
   switch (action.type) {
-    case "clear-session":
-      return clearAuthentication();
-
     case "sign-in":
       return completeSignIn(await openSignInBrowser());
 
@@ -300,7 +374,6 @@ const runAuthAction = async (action: AuthAction): Promise<void> => {
 
 /** WorkOS redirects the app back to itself; every other deep link belongs to the router. */
 const toAuthAction = (url: string): AuthAction | null => {
-  if (matchesRedirectUri(url, SIGN_OUT_REDIRECT_URI)) return { type: "clear-session" };
   if (matchesRedirectUri(url, REDIRECT_URI)) return { type: "callback", url };
   return null;
 };
@@ -352,17 +425,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOutMutation = useMutation({
     mutationFn: async (): Promise<void> => {
       analytics.capture("sign_out_started");
-      const [error] = await until(async () => {
-        const sessionId = await getSessionId();
-        if (!sessionId) throw new Error("No active session found");
-        const logoutUrl = getLogoutUrl(sessionId);
-        analytics.capture("sign_out_succeeded");
-        await clearAuthentication();
-        await WebBrowser.openBrowserAsync(logoutUrl);
-      });
+      const [error] = await until(runSignOut);
       if (error) {
         captureError("sign_out_failed", error);
-        await clearAuthentication();
         throw normalizeAuthError(error);
       }
     },
@@ -389,10 +454,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     identity?.activeWorkspaceId,
   ]);
 
-  // WorkOS can hand its redirect to the OS rather than to `openAuthSessionAsync` — on a cold start,
-  // or when the sign-out browser returns — so the app has to listen for the deep link as well.
+  // Sign-in can also return through an OS deep link. Sign-out uses openBrowserAsync, so its
+  // callback arrives here, including when it relaunches the app.
   useEffect(() => {
     const handleUrl = (url: string) => {
+      if (matchesRedirectUri(url, SIGN_OUT_REDIRECT_URI)) {
+        const completion = completeSignOut(url);
+        if (signOutBrowserOpen) {
+          signOutBrowserOpen = false;
+          void WebBrowser.dismissBrowser().catch((error) =>
+            captureError("sign_out_dismiss_failed", error),
+          );
+        }
+        void completion.catch((error) => captureError("sign_out_failed", error));
+        return;
+      }
       const action = toAuthAction(url);
       if (action) dispatchAuth(action);
     };
@@ -420,11 +496,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             ? (workspaces.find((item) => item.id === identity.activeWorkspaceId) ?? null)
             : null,
         accountUnavailableReason: accountUnavailableReasonFor(identity),
-        isLoading:
-          sessionQuery.isLoading ||
-          identityQuery.isLoading ||
-          isSigningIn ||
-          pendingAction?.type === "clear-session",
+        isLoading: sessionQuery.isLoading || identityQuery.isLoading || isSigningIn,
         isSessionLoading: sessionQuery.isLoading,
         errorMessage:
           toDisplayMessage(authMutation.error) ??

@@ -1,8 +1,10 @@
 import type {
   ConversationDto,
   CreateMessageBody,
+  CreateTaskCommentBody,
   ResolveApprovalBody,
   RunDto,
+  TaskDto,
 } from "@opencompany/protocol/schemas";
 import type { ChatMessage, ChatPart } from "../chat";
 import type { ChatModelId, ComposerAttachment } from "../chat-composer-context";
@@ -15,8 +17,15 @@ export interface ChatPartition {
   signal?: AbortSignal;
 }
 
+export interface StoredTask {
+  id: string;
+  displayId: string;
+  status: TaskDto["status"];
+}
+
 export interface StoredConversation {
   id: string;
+  kind: "chat" | "task";
   title: string;
   engine: ConversationDto["engine"];
   model: string;
@@ -24,6 +33,17 @@ export interface StoredConversation {
   updatedAt: string;
   lastViewedAt: number;
   provisional: boolean;
+  pinnedAt: string | null;
+  /** Listed by the last complete sidebar refresh. Archived and deleted conversations are not. */
+  inSidebar: boolean;
+  activityState: ConversationDto["activityState"];
+  hasUnseen: boolean;
+  awaitingInput: boolean;
+  task: StoredTask | null;
+  /** A message is still in the outbox, or a Run this device knows about has not settled. */
+  hasLocalWork: boolean;
+  /** A message typed on this device has not reached the server yet. */
+  hasQueuedMessages: boolean;
 }
 
 export interface StoredDraft {
@@ -45,13 +65,25 @@ export interface CommandBase {
   createdAt: number;
 }
 
-export interface MessageCommand extends CommandBase {
+interface MessageCommandBase extends CommandBase {
   kind: "message";
   clientMessageId: string;
-  intent: { content: string; model: string; isNewConversation: boolean };
-  frozenBody: CreateMessageBody | null;
   idempotencyKey: string;
 }
+
+export type MessageCommand =
+  | (MessageCommandBase & {
+      target: "chat";
+      intent: { content: string; model: string; isNewConversation: boolean };
+      frozenBody: CreateMessageBody | null;
+    })
+  | (MessageCommandBase & {
+      // A reply to a Task goes through its comment endpoint, which keeps the Task's engine and
+      // model and queues behind a Run that is still working.
+      target: "task";
+      intent: { content: string; taskId: string };
+      frozenBody: CreateTaskCommentBody | null;
+    });
 
 export type OutboxCommand =
   | MessageCommand
@@ -98,6 +130,7 @@ export interface AttachmentRow {
 
 export interface ConversationRow {
   local_id: string;
+  kind: "chat" | "task";
   title: string;
   engine: ConversationDto["engine"];
   model: string;
@@ -105,6 +138,16 @@ export interface ConversationRow {
   updated_at: string;
   last_viewed_at: number;
   provisional: number;
+  pinned_at: string | null;
+  in_sidebar: number;
+  activity_state: ConversationDto["activityState"];
+  has_unseen: number;
+  awaiting_input: number;
+  task_id: string | null;
+  task_display_id: string | null;
+  task_status: TaskDto["status"] | null;
+  has_local_work: number;
+  has_queued_messages: number;
 }
 
 export interface MessageRow {

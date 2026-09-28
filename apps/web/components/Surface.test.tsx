@@ -2503,6 +2503,24 @@ describe("Surface chat streaming UI", () => {
     expect(composer).toHaveFocus();
   });
 
+  it("focuses the composer when a requested chat pane becomes active", () => {
+    const chat = {
+      id: "chat_1",
+      title: "Chat",
+      model: DEFAULT_MODEL,
+      messages: [],
+    };
+    const { rerender } = render(
+      <Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chat} isActivePane={false} />,
+    );
+    const composer = screen.getByPlaceholderText("Reply...");
+
+    act(() => requestChatComposerFocus("chat_1"));
+    rerender(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={chat} isActivePane />);
+
+    expect(composer).toHaveFocus();
+  });
+
   it("focuses the composer when the browser tab becomes visible again", () => {
     render(<Surface tasks={[]} defaultModel={DEFAULT_MODEL} initialChat={null} />);
     const composer = screen.getByPlaceholderText("Ask a question or describe a task...");

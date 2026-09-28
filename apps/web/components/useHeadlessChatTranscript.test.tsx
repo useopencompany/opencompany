@@ -123,6 +123,30 @@ describe("useHeadlessChatTranscript", () => {
     });
   });
 
+  it("hydrates Skill mention metadata from the durable user-message projection", () => {
+    mocks.messagesCollection.rows = [
+      {
+        id: "message_1",
+        conversationId: "chat_1",
+        role: "user",
+        content: "Use /research for this.",
+        taskId: null,
+        presentationSummary: {
+          mentions: [{ kind: "skill", id: "skill_installation_research", name: "research" }],
+        },
+        attachments: null,
+        createdAt: "2026-08-19T10:00:00.000Z",
+        updatedAt: "2026-08-19T10:00:00.000Z",
+      },
+    ];
+
+    const { result } = renderHook(() => useHeadlessChatTranscript("chat_1"));
+
+    expect(result.current.messages[0]?.metadata?.mentions).toEqual([
+      { kind: "skill", id: "skill_installation_research", name: "research" },
+    ]);
+  });
+
   it("does not create Electric collections before hydration", () => {
     mocks.hydrated = false;
 

@@ -146,3 +146,19 @@ ALTER TABLE messages ADD COLUMN presentation_revision TEXT;
 ALTER TABLE messages ADD COLUMN presentation_etag TEXT;
 PRAGMA user_version = 3;
 `;
+
+// Sidebar metadata lives on the conversation row so it survives transcript eviction. Rows already
+// cached came from the chat list, so they start as sidebar members until the next full refresh.
+export const SIDEBAR_METADATA_SCHEMA = `
+ALTER TABLE conversations ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat', 'task'));
+ALTER TABLE conversations ADD COLUMN pinned_at TEXT;
+ALTER TABLE conversations ADD COLUMN in_sidebar INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE conversations ADD COLUMN activity_state TEXT NOT NULL DEFAULT 'idle'
+  CHECK (activity_state IN ('working', 'idle'));
+ALTER TABLE conversations ADD COLUMN has_unseen INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN awaiting_input INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE conversations ADD COLUMN task_id TEXT;
+ALTER TABLE conversations ADD COLUMN task_display_id TEXT;
+ALTER TABLE conversations ADD COLUMN task_status TEXT;
+PRAGMA user_version = 4;
+`;

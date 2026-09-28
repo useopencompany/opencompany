@@ -52,16 +52,17 @@ describe("opencompany chat route", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
-  it("redirects a nonexistent conversation before mounting chat collections", async () => {
+  it("lets live chat data recover a conversation missed by the server read", async () => {
     loadChatMock.mockResolvedValue(null);
 
-    await expect(
-      ChatPage({ params: Promise.resolve({ chatId: "goat_chat_missing" }) }),
-    ).rejects.toThrow("redirect:/");
+    const page = await ChatPage({
+      params: Promise.resolve({ chatId: "goat_chat_missing" }),
+    });
 
     expect(loadChatMock).toHaveBeenCalledWith("goat_chat_missing");
-    expect(redirectMock).toHaveBeenCalledWith("/");
-    expect(routeMock).not.toHaveBeenCalled();
+    expect(page.props.initialChat).toBeNull();
+    expect(page.props.chatId).toBe(loadChatMock.mock.calls[0]?.[0]);
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it("redirects an empty route id without calling the API", async () => {

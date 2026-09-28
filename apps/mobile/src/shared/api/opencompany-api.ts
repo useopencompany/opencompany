@@ -4,8 +4,11 @@ import {
   CancelRunEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
+  ConversationShareEnvelopeSchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateTaskCommentBodySchema,
+  CreateTaskCommentEnvelopeSchema,
   type ErrorEnvelope,
   ErrorEnvelopeSchema,
   type IdentityDto,
@@ -17,13 +20,18 @@ import {
   ResolveApprovalBodySchema,
   ResolveApprovalEnvelopeSchema,
   RunEnvelopeSchema,
+  SessionPullRequestListSchema,
+  UpdateConversationBodySchema,
+  UpdateConversationEnvelopeSchema,
+  UpdateTaskBodySchema,
+  UpdateTaskEnvelopeSchema,
   type WorkspaceActivationDto,
   WorkspaceActivationEnvelopeSchema,
 } from "@opencompany/protocol/schemas";
 import { PROTOCOL_VERSION } from "@opencompany/protocol/version";
 import { fetch as expoFetch } from "expo/fetch";
 import { File } from "expo-file-system";
-import type { z } from "zod";
+import { z } from "zod";
 
 const parseApiOrigin = (): string => {
   const value = process.env.EXPO_PUBLIC_OPENCOMPANY_API_ORIGIN?.trim();
@@ -52,6 +60,24 @@ const parseApiOrigin = (): string => {
 };
 
 export const API_ORIGIN = parseApiOrigin();
+
+/**
+ * Public share pages are served by the web app, which runs beside the API: `api.` becomes `my.`
+ * on hosted origins, and the local API on :3001 pairs with the local web app on :3443.
+ */
+const shareOrigin = (apiOrigin: string): string | null => {
+  const url = new URL(apiOrigin);
+  if (url.hostname === "localhost" && url.port === "3001") return "https://localhost:3443";
+  if (url.hostname.startsWith("api.")) return `https://my.${url.hostname.slice("api.".length)}`;
+  return null;
+};
+
+const SHARE_ORIGIN = shareOrigin(API_ORIGIN);
+
+export const publicShareUrl = (shareId: string): string => {
+  if (!SHARE_ORIGIN) throw new Error("Share links are unavailable for this server.");
+  return new URL(`/share/${encodeURIComponent(shareId)}`, `${SHARE_ORIGIN}/`).toString();
+};
 
 export class ApiRequestError extends Error {
   constructor(
@@ -94,6 +120,13 @@ type CreateMessageBody = z.input<typeof CreateMessageBodySchema>;
 type ResolveApprovalBody = z.input<typeof ResolveApprovalBodySchema>;
 type ConversationPage = z.output<typeof ConversationPageSchema>;
 type ConversationEnvelope = z.output<typeof ConversationEnvelopeSchema>;
+type UpdateConversationBody = z.input<typeof UpdateConversationBodySchema>;
+type UpdateTaskBody = z.input<typeof UpdateTaskBodySchema>;
+type CreateTaskCommentBody = z.input<typeof CreateTaskCommentBodySchema>;
+type CreateTaskCommentEnvelope = z.output<typeof CreateTaskCommentEnvelopeSchema>;
+type ConversationShareEnvelope = z.output<typeof ConversationShareEnvelopeSchema>;
+type SessionPullRequestList = z.output<typeof SessionPullRequestListSchema>;
+export type ReadModelName = "tasks-v1" | "chat-messages-v2" | "chat-runs-v1";
 type MessagePage = z.output<typeof MessagePageSchema>;
 type AttachmentUploadEnvelope = z.output<typeof AttachmentUploadEnvelopeSchema>;
 type CreateMessageEnvelope = z.output<typeof CreateMessageEnvelopeSchema>;
@@ -111,6 +144,37 @@ export interface AuthenticatedApi {
   switchWorkspace: (workspaceId: string, signal?: AbortSignal) => Promise<WorkspaceActivationDto>;
   listConversations: (options?: ListPageOptions, signal?: AbortSignal) => Promise<ConversationPage>;
   getConversation: (conversationId: string, signal?: AbortSignal) => Promise<ConversationEnvelope>;
+  updateConversation: (
+    conversationId: string,
+    body: UpdateConversationBody,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  getConversationShare: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<ConversationShareEnvelope>;
+  createConversationShare: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<ConversationShareEnvelope>;
+  deleteConversationShare: (
+    conversationId: string,
+    signal?: AbortSignal,
+  ) => Promise<ConversationShareEnvelope>;
+  updateTask: (taskId: string, body: UpdateTaskBody, signal?: AbortSignal) => Promise<void>;
+  createTaskComment: (
+    taskId: string,
+    body: CreateTaskCommentBody,
+    signal?: AbortSignal,
+  ) => Promise<CreateTaskCommentEnvelope>;
+  listSessionPullRequests: (signal?: AbortSignal) => Promise<SessionPullRequestList>;
+  /** Every current row of an authorized read model, as a one-off snapshot rather than a stream. */
+  readModelSnapshot: <Schema extends z.ZodType>(
+    readModel: ReadModelName,
+    schema: Schema,
+    query: { conversationId?: string },
+    signal?: AbortSignal,
+  ) => Promise<z.output<Schema>[]>;
   listMessages: (
     conversationId: string,
     options?: ListPageOptions,
@@ -203,6 +267,35 @@ const responseError = async (response: ResponseLike): Promise<ApiRequestError> =
     body,
     retryAfterMilliseconds(response),
   );
+};
+
+const ElectricMessagesSchema = z.array(
+  z.object({
+    key: z.string().optional(),
+    value: z.record(z.string(), z.unknown()).optional(),
+    headers: z.object({ operation: z.string().optional(), control: z.string().optional() }).loose(),
+  }),
+);
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * An Electric update carries only the columns that changed. The API folds some columns into a
+ * nested object, such as a Task's `outcome`, so an update can hold part of that object. Merging
+ * one level deep keeps the fields the update left out.
+ */
+const mergeReadModelRow = (
+  current: Record<string, unknown> | undefined,
+  update: Record<string, unknown>,
+): Record<string, unknown> => {
+  const merged = { ...current };
+  for (const [field, value] of Object.entries(update)) {
+    const previous = merged[field];
+    merged[field] =
+      isPlainObject(previous) && isPlainObject(value) ? { ...previous, ...value } : value;
+  }
+  return merged;
 };
 
 const isAbortError = (error: unknown): boolean =>
@@ -329,6 +422,104 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
         undefined,
         signal,
       ),
+    updateConversation: async (conversationId, body, signal) => {
+      await requestJson(
+        `v1/conversations/${encodeURIComponent(conversationId)}`,
+        UpdateConversationEnvelopeSchema,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(UpdateConversationBodySchema.parse(body)),
+        },
+        signal,
+      );
+    },
+    getConversationShare: async (conversationId, signal) =>
+      requestJson(
+        `v1/conversations/${encodeURIComponent(conversationId)}/share`,
+        ConversationShareEnvelopeSchema,
+        undefined,
+        signal,
+      ),
+    createConversationShare: async (conversationId, signal) =>
+      requestJson(
+        `v1/conversations/${encodeURIComponent(conversationId)}/share`,
+        ConversationShareEnvelopeSchema,
+        { method: "PUT" },
+        signal,
+      ),
+    deleteConversationShare: async (conversationId, signal) =>
+      requestJson(
+        `v1/conversations/${encodeURIComponent(conversationId)}/share`,
+        ConversationShareEnvelopeSchema,
+        { method: "DELETE" },
+        signal,
+      ),
+    updateTask: async (taskId, body, signal) => {
+      await requestJson(
+        `v1/tasks/${encodeURIComponent(taskId)}`,
+        UpdateTaskEnvelopeSchema,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(UpdateTaskBodySchema.parse(body)),
+        },
+        signal,
+      );
+    },
+    createTaskComment: async (taskId, body, signal) =>
+      requestJson(
+        `v1/tasks/${encodeURIComponent(taskId)}/comments`,
+        CreateTaskCommentEnvelopeSchema,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(CreateTaskCommentBodySchema.parse(body)),
+        },
+        signal,
+      ),
+    listSessionPullRequests: async (signal) =>
+      requestJson("v1/session-pull-requests", SessionPullRequestListSchema, undefined, signal),
+    readModelSnapshot: async (readModel, schema, query, signal) => {
+      const rows = new Map<string, Record<string, unknown>>();
+      let offset = "-1";
+      let handle: string | undefined;
+      // Electric pages a large initial snapshot. Each response names the next offset, and the
+      // snapshot is complete once a response carries the up-to-date control message.
+      for (let page = 0; page < 100; page += 1) {
+        const response = await request(`v1/read-models/${readModel}`, undefined, signal, {
+          ...query,
+          offset,
+          handle,
+        });
+        if (response.status === 409) {
+          // The server rotated its shape. Start the snapshot again from the beginning.
+          rows.clear();
+          offset = "-1";
+          handle = undefined;
+          continue;
+        }
+        const messages = ElectricMessagesSchema.parse(
+          await parseJsonResponse(response, z.unknown()),
+        );
+        let upToDate = false;
+        for (const message of messages) {
+          if (message.headers.control === "up-to-date") upToDate = true;
+          if (!message.key || !message.value) continue;
+          if (message.headers.operation === "delete") rows.delete(message.key);
+          else rows.set(message.key, mergeReadModelRow(rows.get(message.key), message.value));
+        }
+        if (upToDate) return [...rows.values()].map((row) => schema.parse(row));
+        const nextOffset = response.headers.get("electric-offset");
+        const nextHandle = response.headers.get("electric-handle");
+        if (!nextOffset || !nextHandle) {
+          throw new Error("The read model response did not name its next page.");
+        }
+        offset = nextOffset;
+        handle = nextHandle;
+      }
+      throw new Error("The read model snapshot did not finish.");
+    },
     listMessages: async (conversationId, page = {}, signal) =>
       requestJson(
         `v1/conversations/${encodeURIComponent(conversationId)}/messages`,

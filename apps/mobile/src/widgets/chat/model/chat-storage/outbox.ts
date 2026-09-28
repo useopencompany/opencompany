@@ -6,6 +6,8 @@ import {
   type AttachmentDto,
   type CreateMessageBody,
   CreateMessageBodySchema,
+  type CreateTaskCommentBody,
+  CreateTaskCommentBodySchema,
   type ResolveApprovalBody,
   ResolveApprovalBodySchema,
 } from "@opencompany/protocol/schemas";
@@ -14,6 +16,7 @@ import type { ChatPart } from "../chat";
 import type { ComposerAttachment } from "../chat-composer-context";
 import { getChatDatabase, values, withChatTransaction } from "./database";
 import { attachmentFromRow } from "./drafts";
+import { ACTIVE_RUN_ORDER } from "./runs";
 import {
   type AttachmentRow,
   type ChatPartition,
@@ -44,26 +47,33 @@ export const queueMessageFromDraft = async (
 ): Promise<QueuedMessageIdentity> => {
   const sourceConversationId = draft.conversationId;
   return withChatTransaction(partition, async (database) => {
-    const existingConversation = await database.getFirstAsync<{ provisional: number }>(
-      "SELECT provisional FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
+    const existingConversation = await database.getFirstAsync<{
+      provisional: number;
+      task_id: string | null;
+    }>(
+      "SELECT provisional, task_id FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
       ...values(partition),
       sourceConversationId,
     );
     const isNewConversation =
       sourceConversationId === NEW_CHAT_ID || Boolean(existingConversation?.provisional);
-    const pending = await database.getFirstAsync<{ blocked: number }>(
-      `SELECT 1 AS blocked FROM outbox
+    // A Task takes replies while it works: each becomes a Run queued behind the active one.
+    const taskId = existingConversation?.task_id ?? null;
+    const pending = taskId
+      ? null
+      : await database.getFirstAsync<{ blocked: number }>(
+          `SELECT 1 AS blocked FROM outbox
         WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND kind = 'message'
        UNION ALL
        SELECT 1 AS blocked FROM run_checkpoints
         WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?
           AND status IN ('queued', 'running', 'paused')
        LIMIT 1`,
-      ...values(partition),
-      sourceConversationId,
-      ...values(partition),
-      sourceConversationId,
-    );
+          ...values(partition),
+          sourceConversationId,
+          ...values(partition),
+          sourceConversationId,
+        );
     if (pending) throw new Error("Wait for the current response before sending another message.");
 
     const attachments = await database.getAllAsync<AttachmentRow>(
@@ -146,11 +156,11 @@ export const queueMessageFromDraft = async (
       result.commandId,
       result.conversationId,
       result.clientMessageId,
-      JSON.stringify({
-        content: text,
-        model: draft.modelId,
-        isNewConversation,
-      }),
+      JSON.stringify(
+        taskId
+          ? { content: text, taskId }
+          : { content: text, model: draft.modelId, isNewConversation },
+      ),
       `mobile-message:${result.clientMessageId}`,
       now,
     );
@@ -222,19 +232,7 @@ export const nextOutboxCommand = async (
   };
   switch (row.kind) {
     case "message":
-      return {
-        ...base,
-        kind: "message",
-        clientMessageId: z.string().min(1).parse(row.client_message_id),
-        idempotencyKey: z.string().min(1).parse(row.idempotency_key),
-        intent: z
-          .object({ content: z.string(), model: z.string(), isNewConversation: z.boolean() })
-          .parse(JSON.parse(row.intent_json)),
-        frozenBody:
-          row.frozen_body_json === null
-            ? null
-            : CreateMessageBodySchema.parse(JSON.parse(row.frozen_body_json)),
-      };
+      return parseMessageCommand(row, base);
     case "stop":
       return { ...base, kind: "stop", runId: z.string().min(1).parse(row.run_id) };
     case "approval":
@@ -246,6 +244,45 @@ export const nextOutboxCommand = async (
         body: ResolveApprovalBodySchema.parse(JSON.parse(row.frozen_body_json ?? row.intent_json)),
       };
   }
+};
+
+const TaskIntentSchema = z.object({ content: z.string(), taskId: z.string().min(1) });
+const ChatIntentSchema = z.object({
+  content: z.string(),
+  model: z.string(),
+  isNewConversation: z.boolean(),
+});
+
+const parseMessageCommand = (
+  row: OutboxRow,
+  base: Omit<
+    MessageCommand,
+    "kind" | "clientMessageId" | "idempotencyKey" | "target" | "intent" | "frozenBody"
+  >,
+): MessageCommand => {
+  const identity = {
+    ...base,
+    kind: "message" as const,
+    clientMessageId: z.string().min(1).parse(row.client_message_id),
+    idempotencyKey: z.string().min(1).parse(row.idempotency_key),
+  };
+  const intent: unknown = JSON.parse(row.intent_json);
+  const frozen: unknown = row.frozen_body_json === null ? null : JSON.parse(row.frozen_body_json);
+  const task = TaskIntentSchema.safeParse(intent);
+  if (task.success) {
+    return {
+      ...identity,
+      target: "task",
+      intent: task.data,
+      frozenBody: frozen === null ? null : CreateTaskCommentBodySchema.parse(frozen),
+    };
+  }
+  return {
+    ...identity,
+    target: "chat",
+    intent: ChatIntentSchema.parse(intent),
+    frozenBody: frozen === null ? null : CreateMessageBodySchema.parse(frozen),
+  };
 };
 
 export const markCommandInFlight = async (
@@ -327,7 +364,7 @@ export const saveUploadedAttachment = async (
 export const freezeMessageCommand = async (
   partition: ChatPartition,
   commandId: string,
-  body: CreateMessageBody,
+  body: CreateMessageBody | CreateTaskCommentBody,
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     await database.runAsync(
@@ -353,11 +390,21 @@ export const acceptMessageCommand = async (
   return withChatTransaction(partition, async (database) => {
     if (
       accepted.conversationId !== command.conversationId ||
-      accepted.messageId !== command.clientMessageId
+      (command.target === "chat" && accepted.messageId !== command.clientMessageId)
     ) {
       throw new Error("The server returned unexpected chat identities.");
     }
     const now = Date.now();
+    // The Task comment endpoint allocates the Message ID itself. Adopt it so the transcript
+    // snapshot that follows updates this bubble instead of adding a second copy.
+    if (accepted.messageId !== command.clientMessageId) {
+      await database.runAsync(
+        `UPDATE messages SET local_id = ? WHERE user_id = ? AND workspace_id = ? AND local_id = ?`,
+        accepted.messageId,
+        ...values(partition),
+        command.clientMessageId,
+      );
+    }
     await database.runAsync(
       `UPDATE conversations SET provisional = 0, model = COALESCE(?, model),
          updated_at = ? WHERE user_id = ? AND workspace_id = ? AND local_id = ?`,
@@ -371,7 +418,7 @@ export const acceptMessageCommand = async (
         WHERE user_id = ? AND workspace_id = ? AND local_id = ?`,
       now,
       ...values(partition),
-      command.clientMessageId,
+      accepted.messageId,
     );
     await database.runAsync(
       `INSERT INTO messages (
@@ -432,7 +479,8 @@ export const failMessageCommand = async (
       ...values(partition),
       command.conversationId,
       restoredText,
-      currentDraft?.model_id ?? command.intent.model,
+      currentDraft?.model_id ??
+        (command.target === "chat" ? command.intent.model : "moonshotai/kimi-k3"),
       Date.now(),
     );
     await database.runAsync(
@@ -467,18 +515,23 @@ export const queueStopCommand = async (
   return withChatTransaction(partition, async (database) => {
     // Keep a stop durable even before createMessage returns the server's run ID.
     // Acceptance resolves it in the same transaction that removes the message command.
-    const pending = await database.getFirstAsync<{ client_message_id: string }>(
-      "SELECT client_message_id FROM outbox WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND kind = 'message' LIMIT 1",
+    // Stop always means the Run that is working now. A Task reply queued behind it is left alone.
+    const activeRun = await database.getFirstAsync<{ run_id: string }>(
+      `SELECT run_id FROM run_checkpoints
+        WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?
+          AND status IN ('queued', 'running', 'paused')
+        ORDER BY ${ACTIVE_RUN_ORDER} LIMIT 1`,
       ...values(partition),
       conversationId,
     );
-    const run = pending
+    const pending = activeRun
       ? null
-      : await database.getFirstAsync<{ run_id: string }>(
-          "SELECT run_id FROM run_checkpoints WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND status IN ('queued', 'running', 'paused') ORDER BY updated_at DESC LIMIT 1",
+      : await database.getFirstAsync<{ client_message_id: string }>(
+          "SELECT client_message_id FROM outbox WHERE user_id = ? AND workspace_id = ? AND conversation_id = ? AND kind = 'message' ORDER BY created_at ASC LIMIT 1",
           ...values(partition),
           conversationId,
         );
+    const run = activeRun;
     if (!pending && !run) return;
     await database.runAsync(
       `INSERT OR IGNORE INTO outbox (

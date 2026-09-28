@@ -16,6 +16,5 @@ export default async function ChatPage({ params }: ChatPageProps) {
   const trimmedChatId = chatId.trim();
   if (!trimmedChatId) redirect("/");
   const initialChat = await loadCurrentChatSessionById(trimmedChatId);
-  if (!initialChat) redirect("/");
   return <HomeRoute chatId={trimmedChatId} initialChat={initialChat} />;
 }

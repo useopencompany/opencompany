@@ -7,7 +7,7 @@ import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/r
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Text, useWindowDimensions, View } from "react-native";
 import Reanimated, {
   FadeIn,
@@ -15,6 +15,7 @@ import Reanimated, {
   Keyframe,
   ReduceMotion,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -32,11 +33,14 @@ import { useChatInputController } from "../model/chat-input-controller";
 import {
   getConversationRunCheckpoint,
   getPendingMessageCommand,
+  listQueuedRunMessageIds,
+  listStoredConversations,
   listStoredMessages,
   markConversationViewed,
   NEW_CHAT_ID,
   type StoredDraft,
 } from "../model/chat-store";
+import { useMarkConversationSeen } from "../model/conversation-actions";
 import { ChatComposer, type SentMessageIdentity } from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
@@ -99,13 +103,13 @@ export function StreamingChat({
   const coordinator = useChatCoordinator();
   const composer = useChatComposer();
   const input = useChatInputController();
-  const { keyboardHeight, keyboardProgress, keyboardOwner } = input;
+  const { foreignKeyboard, keyboardHeight, keyboardProgress, keyboardOwner } = input;
   const bottomInset = insets.bottom;
   const composerKeyboardStyle = useAnimatedStyle(() => ({
     transform: [
       {
         translateY:
-          keyboardOwner === "composer"
+          keyboardOwner === "composer" && !foreignKeyboard.get()
             ? Math.min(
                 0,
                 -keyboardHeight.get() +
@@ -130,9 +134,23 @@ export function StreamingChat({
     queryKey: coordinator.partition
       ? chatQueryKeys.run(coordinator.partition, chatId)
       : ["chat", "run", "signed-out"],
-    queryFn: () => getConversationRunCheckpoint(coordinator.partition!, chatId),
+    queryFn: async () => ({
+      active: await getConversationRunCheckpoint(coordinator.partition!, chatId),
+      queuedMessageIds: await listQueuedRunMessageIds(coordinator.partition!, chatId),
+    }),
     enabled: Boolean(coordinator.partition),
   });
+  const conversationQuery = useQuery({
+    queryKey: coordinator.partition
+      ? chatQueryKeys.conversations(coordinator.partition)
+      : ["chat", "conversations", "signed-out"],
+    queryFn: () => listStoredConversations(coordinator.partition!),
+    enabled: Boolean(coordinator.partition) && chatId !== NEW_CHAT_ID,
+    select: (items) => items.find((item) => item.id === chatId),
+  });
+  const conversation = conversationQuery.data;
+  const isTask = conversation?.kind === "task";
+  const markSeen = useMarkConversationSeen();
   const pendingMessageQuery = useQuery({
     queryKey: coordinator.partition
       ? chatQueryKeys.pendingMessage(coordinator.partition, chatId)
@@ -164,7 +182,8 @@ export function StreamingChat({
       }
     : undefined;
   const messages = sendingMessage ? [...userMessages, sendingMessage] : userMessages;
-  const run = runQuery.data;
+  const run = runQuery.data?.active;
+  const queuedRunMessageIds = new Set(runQuery.data?.queuedMessageIds);
   const isGenerating = Boolean(
     pendingUserMessage || (run && ["queued", "running", "paused"].includes(run.status)),
   );
@@ -188,6 +207,13 @@ export function StreamingChat({
     insets.bottom + 68,
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
+  // Hold keyboard-driven list insets and scrolling while an unrelated keyboard comes and goes.
+  const listFreeze = useDerivedValue(() => freeze.get() || foreignKeyboard.get());
+  const hasDraft =
+    composer.conversationId === chatId &&
+    (Boolean(composer.value.trim()) || composer.attachments.length > 0);
+  // A Task queues replies behind its working Run: a written reply shows Send, an empty one Stop.
+  const composerIsGenerating = isGenerating && !(isTask && hasDraft);
 
   useLayoutEffect(() => {
     if (!pendingSend) return;
@@ -203,6 +229,12 @@ export function StreamingChat({
     if (coordinator.partition) void markConversationViewed(coordinator.partition, chatId);
     return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
+
+  // Opening a conversation acknowledges its unread result. Sidebar previews never take focus, so
+  // peeking at a row leaves it unread.
+  useEffect(() => {
+    if (isFocused && conversation?.hasUnseen) markSeen(conversation);
+  }, [isFocused, conversation?.hasUnseen]);
 
   const handleLinkPress = (url: string) => {
     let parsedUrl: URL;
@@ -233,11 +265,13 @@ export function StreamingChat({
       isTerminal={
         item.role === "assistant" &&
         item.id !== sendingMessage?.id &&
+        !queuedRunMessageIds.has(item.id) &&
         (run?.assistantMessageId !== item.id ||
           !["queued", "running", "paused"].includes(run.status))
       }
       isSending={
         item.id === sendingMessage?.id ||
+        queuedRunMessageIds.has(item.id) ||
         (run?.assistantMessageId === item.id && run.status === "queued")
       }
       message={item}
@@ -322,8 +356,14 @@ export function StreamingChat({
             dataKey={chatId}
             estimatedItemSize={80}
             estimatedListSize={{ width: windowWidth, height: windowHeight }}
-            extraData={[theme, run, coordinator.connectivity, sendingMessage?.id]}
-            freeze={freeze}
+            extraData={[
+              theme,
+              run,
+              runQuery.data?.queuedMessageIds,
+              coordinator.connectivity,
+              sendingMessage?.id,
+            ]}
+            freeze={listFreeze}
             initialScrollAtEnd={chatId !== NEW_CHAT_ID && !initialAnchorMessageId && !hasSent}
             initialScrollIndex={
               initialAnchorIndex >= 0
@@ -395,7 +435,7 @@ export function StreamingChat({
           conversationId={chatId}
           disabled={!coordinator.partition}
           isScreenFocused={isFocused}
-          isGenerating={isGenerating}
+          isGenerating={composerIsGenerating}
           isStopping={isStopping}
           onLayout={(event) => {
             setComposerHeight(event.nativeEvent.layout.height);
