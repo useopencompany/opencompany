@@ -581,7 +581,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   taskActionApprovalPending?: true;
   approvalContinuation?: boolean;
-  mentions?: Array<{ kind: "skill"; id: string }>;
+  mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   taskResultMode?: TaskResultMode;
   reasoningEffort?: CloudCodingReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
@@ -602,6 +602,7 @@ export type CodexChatInteractionStatus = "pending" | "resolved" | "canceled";
 export type ChatMessageDebugTrace = {
   schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1" | "goat.codex_chat.debug.v1";
   model?: string;
+  mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   aborted?: boolean;
   finishReason?: string;
   uiMessageParts?: unknown[];

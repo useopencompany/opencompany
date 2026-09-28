@@ -45,7 +45,7 @@ type MessageMetadata = {
   sessionId?: string;
   runId?: string;
   model?: string;
-  mentions?: Array<{ kind: string; id: string }>;
+  mentions?: Array<{ kind: string; id: string; name?: string }>;
   attachments?: Array<{ id: string }>;
 };
 
@@ -125,7 +125,11 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
         ? {
             mentions: metadata.mentions
               .filter((mention) => mention.kind === "skill")
-              .map((mention) => ({ kind: "skill" as const, id: mention.id })),
+              .map((mention) => ({
+                kind: "skill" as const,
+                id: mention.id,
+                ...(mention.name ? { name: mention.name } : {}),
+              })),
           }
         : {}),
     };
@@ -331,7 +335,7 @@ export async function startHeadlessBackgroundChat(
     model: string;
     engine?: MessageEngine;
     attachmentIds?: string[];
-    mentions?: Array<{ kind: "skill"; id: string }>;
+    mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   },
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
@@ -392,7 +396,7 @@ export async function enqueueHeadlessChatMessage(
     model: string;
     engine: MessageEngine;
     attachmentIds?: string[];
-    mentions?: Array<{ kind: "skill"; id: string }>;
+    mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   },
   options: { baseUrl?: string; fetch?: typeof globalThis.fetch } = {},
 ) {
