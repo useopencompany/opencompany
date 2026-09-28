@@ -39,7 +39,11 @@ import {
 } from "./chat-repository";
 import { stringifyPostgresJson } from "./postgres-json";
 import type { HarnessSpec } from "./product-schema";
-import { conflictingChatSkillNames, preserveChatSkillBundle } from "./skill-access";
+import {
+  conflictingChatSkillNames,
+  isChatSkillNameConflict,
+  preserveChatSkillBundle,
+} from "./skill-access";
 
 export type TaskRepositoryIdFactory = {
   command(): string;
@@ -1259,6 +1263,9 @@ export class PostgresTaskRepository implements TaskRepository {
       LIMIT 1
       `);
     } catch (error) {
+      if (isChatSkillNameConflict(error)) {
+        throw new CoreError("conflict", "This Task already uses another Skill with this name.");
+      }
       if (attachmentIds.length > 0 && isUnmaterializedGuardError(error)) {
         throw new CoreError("invalid_argument", "An attachment is unavailable or has expired.");
       }
