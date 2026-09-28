@@ -182,7 +182,13 @@ const automationCommandMocks = vi.hoisted(() => ({
 
 const knowledgeCommandMocks = vi.hoisted(() => ({
   listSkillCatalog: vi.fn(
-    async () => [] as Array<{ id: string; name: string; description: string }>,
+    async () =>
+      [] as Array<{
+        id: string;
+        name: string;
+        description: string;
+        scope?: "personal" | "company" | null;
+      }>,
   ),
 }));
 
@@ -1881,14 +1887,21 @@ describe("Surface chat streaming UI", () => {
     expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
-  it("treats slash text in a Task comment as verbatim content, not a Skill mention", async () => {
+  it("activates a company Skill in a Task comment and submits it with Enter", async () => {
     const user = userEvent.setup();
     const taskId = "goat_task_1";
     knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([
       {
         id: "product-work",
-        name: "Product work",
+        name: "product-work",
         description: "Shape and ship product changes.",
+        scope: "company",
+      },
+      {
+        id: "private-notes",
+        name: "private-notes",
+        description: "Use private context.",
+        scope: "personal",
       },
     ]);
 
@@ -1913,19 +1926,60 @@ describe("Surface chat streaming UI", () => {
     );
 
     const textarea = screen.getByPlaceholderText("Reply...");
-    await user.type(textarea, "/prod investigate the mention menu");
-    expect(screen.queryByRole("option", { name: /Product work/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await user.type(textarea, "Use /");
+    expect(screen.queryByRole("option", { name: /private-notes/i })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("option", { name: /product-work/i }));
+    await user.type(textarea, "to investigate the mention menu{Enter}");
 
     await waitFor(() =>
       expect(taskCommandMocks.comment).toHaveBeenCalledWith(
         taskId,
+        {
+          id: "task_activity_comment_test",
+          body: "Use /product-work to investigate the mention menu",
+          skillIds: ["product-work"],
+        },
+        { scopeKey: "" },
+      ),
+    );
+    expect(knowledgeCommandMocks.listSkillCatalog).toHaveBeenCalled();
+    expect(chatMock.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("submits slash text with Enter when no Task Skill matches", async () => {
+    const user = userEvent.setup();
+    knowledgeCommandMocks.listSkillCatalog.mockResolvedValue([]);
+
+    render(
+      <Surface
+        tasks={[]}
+        defaultModel={DEFAULT_MODEL}
+        initialChat={{
+          id: "conversation_task_slash",
+          title: "Investigate task",
+          model: DEFAULT_MODEL,
+          engine: "opencompany",
+          messages: [],
+        }}
+        taskConversation={{
+          taskId: "task_slash",
+          status: "succeeded",
+          startedAtMs: Date.now(),
+        }}
+        userWorkosId="user_1"
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText("Reply...");
+    await user.type(textarea, "/prod investigate the mention menu{Enter}");
+
+    await waitFor(() =>
+      expect(taskCommandMocks.comment).toHaveBeenCalledWith(
+        "task_slash",
         { id: "task_activity_comment_test", body: "/prod investigate the mention menu" },
         { scopeKey: "" },
       ),
     );
-    expect(knowledgeCommandMocks.listSkillCatalog).not.toHaveBeenCalled();
-    expect(chatMock.sendMessage).not.toHaveBeenCalled();
   });
 
   it("queues a message sent while the Task run is still working", async () => {

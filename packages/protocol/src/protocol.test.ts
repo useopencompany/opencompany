@@ -42,6 +42,7 @@ describe("headless protocol", () => {
         id: "comment_1",
         body: "Review this",
         attachmentIds: ["attachment_1"],
+        skillIds: ["decision-brief"],
       }).success,
     ).toBe(true);
     expect(
@@ -54,6 +55,13 @@ describe("headless protocol", () => {
     expect(CreateTaskCommentBodySchema.safeParse({ id: "comment_3", body: " " }).success).toBe(
       false,
     );
+    expect(
+      CreateTaskCommentBodySchema.safeParse({
+        id: "comment_4",
+        body: "Use these Skills",
+        skillIds: Array.from({ length: 17 }, (_, index) => `skill-${index + 1}`),
+      }).success,
+    ).toBe(false);
   });
 
   it("keeps the browser request-header contract aligned with every OpenAPI operation", () => {
