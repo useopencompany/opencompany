@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy_api:
-        description: Deploy the Render product API
+        description: Deploy the Render product API (required when it changed since its last release)
         type: boolean
         default: true
       deploy_runner:
-        description: Deploy the Render runner
+        description: Deploy the Render runner (required when it changed since its last release)
         type: boolean
         default: true
 

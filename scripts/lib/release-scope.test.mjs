@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { databaseChanged, finalizeReleasePlan, planReleaseSurfaces } from "./release-scope.mjs";
+import {
+  databaseChanged,
+  finalizeReleasePlan,
+  planReleaseSurfaces,
+  skippedChangedSurfaces,
+} from "./release-scope.mjs";
 
 test("maps Turbo affected packages to production surfaces", () => {
   assert.deepEqual(
@@ -157,6 +162,34 @@ test("manual surface exclusions do not re-enable API or runner", () => {
     }),
     { database: true, web: true, marketing: true, docs: true, api: false, runner: false },
   );
+});
+
+test("a manual release cannot skip a Render surface its range changes", () => {
+  assert.deepEqual(
+    skippedChangedSurfaces({
+      changedSurfaces: { api: true, runner: true },
+      deployApi: false,
+      deployRunner: false,
+    }),
+    ["api", "runner"],
+  );
+  assert.deepEqual(
+    skippedChangedSurfaces({
+      changedSurfaces: { api: false, runner: true },
+      deployApi: true,
+      deployRunner: false,
+    }),
+    ["runner"],
+  );
+  assert.deepEqual(
+    skippedChangedSurfaces({
+      changedSurfaces: { api: false, runner: false },
+      deployApi: false,
+      deployRunner: false,
+    }),
+    [],
+  );
+  assert.deepEqual(skippedChangedSurfaces({ changedSurfaces: { api: true, runner: true } }), []);
 });
 
 test("a partial retry keeps successful API and database surfaces current", () => {
