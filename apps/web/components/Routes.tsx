@@ -11,7 +11,7 @@ import type {
   SkillListItemDto,
   SkillSourceDto,
 } from "@opencompany/protocol";
-import { Button } from "@opencompany/ui/components/button";
+import { Button, buttonVariants } from "@opencompany/ui/components/button";
 import {
   Dialog,
   DialogContent,
@@ -144,7 +144,9 @@ export function HomeRoute({
   const initialChat = useMemo(() => {
     if (!chatId) return null;
     if (routeInitialChat?.id === chatId) return routeInitialChat;
-    const summary = data.recentChats.find((chat) => chat.id === chatId);
+    const summary =
+      data.recentChats.find((chat) => chat.id === chatId) ??
+      data.openChats.find((chat) => chat.id === chatId);
     if (!summary?.engine) return null;
     return {
       id: chatId,
@@ -160,7 +162,32 @@ export function HomeRoute({
       updatedAt: summary.updatedAt,
       messages: [],
     };
-  }, [chatId, data.recentChats, routeInitialChat]);
+  }, [chatId, data.openChats, data.recentChats, routeInitialChat]);
+
+  if (chatId && !initialChat) {
+    return (
+      <main className="flex h-full min-h-0 w-full items-center justify-center overflow-hidden bg-canvas px-6 text-ink">
+        {data.chatsReady ? (
+          <div className="flex max-w-sm flex-col items-center text-center">
+            <h1 className="text-[17px] font-semibold tracking-[-0.01em]">Chat unavailable</h1>
+            <p className="mt-1.5 text-[13px] leading-5 text-ink-subtle">
+              This chat may have been deleted, or you may no longer have access to it.
+            </p>
+            <Link
+              href="/"
+              className={buttonVariants({ variant: "outline", size: "sm", className: "mt-4" })}
+            >
+              Start a new chat
+            </Link>
+          </div>
+        ) : (
+          <div role="status" aria-label="Loading chat">
+            <Loader2 size={18} className="animate-spin text-ink-subtle" />
+          </div>
+        )}
+      </main>
+    );
+  }
 
   return (
     <main className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-canvas text-ink">
