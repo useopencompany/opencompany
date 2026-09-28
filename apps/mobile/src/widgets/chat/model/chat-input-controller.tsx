@@ -18,6 +18,11 @@ interface ChatInputControllerValue {
   keyboardOwner: KeyboardOwner;
   keyboardHeight: SharedValue<number>;
   keyboardProgress: SharedValue<number>;
+  /**
+   * A keyboard the composer did not raise (sidebar search) is up or still dismissing. The chat
+   * list freezes its keyboard-driven insets and the composer stays put until it is fully gone.
+   */
+  foreignKeyboard: SharedValue<boolean>;
   consumeComposerFocusRequest: (requestId: number) => boolean;
   dismissComposer: () => Promise<void>;
   dismissSearch: () => Promise<void>;
@@ -37,6 +42,8 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
   const [keyboardOwner, setKeyboardOwner] = useState<KeyboardOwner>(null);
   const keyboardHeight = useSharedValue(0);
   const keyboardProgress = useSharedValue(0);
+  const foreignKeyboard = useSharedValue(false);
+  const foreignOwnerActive = useSharedValue(false);
 
   // iOS's provider values jump to the destination in onStart. Track the actual
   // frames instead, including interactive dismissal, without a JS render per frame.
@@ -55,8 +62,19 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
       "worklet";
       keyboardHeight.set(event.height);
       keyboardProgress.set(event.progress);
+      if (event.height === 0 && !foreignOwnerActive.get()) foreignKeyboard.set(false);
     },
   });
+
+  const updateKeyboardOwner = (owner: KeyboardOwner) => {
+    const foreign = owner !== null && owner !== "composer";
+    foreignOwnerActive.set(foreign);
+    // Released by the keyboard's own dismissal (onEnd at height 0), never by the owner change,
+    // so nothing reacts to the tail of a keyboard it did not ask for.
+    if (foreign) foreignKeyboard.set(true);
+    else if (keyboardHeight.get() === 0) foreignKeyboard.set(false);
+    setKeyboardOwner(owner);
+  };
 
   const dismissComposer = async () => {
     composerInputRef.current?.blur();
@@ -73,6 +91,7 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
         keyboardOwner,
         keyboardHeight,
         keyboardProgress,
+        foreignKeyboard,
         consumeComposerFocusRequest: (requestId) => {
           if (requestId <= consumedFocusRequestRef.current) return false;
           consumedFocusRequestRef.current = requestId;
@@ -85,7 +104,7 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
         },
         requestComposerFocus: () => setFocusRequestId((value) => value + 1),
         setDrawerOpen,
-        setKeyboardOwner,
+        setKeyboardOwner: updateKeyboardOwner,
       }}
     >
       {children}

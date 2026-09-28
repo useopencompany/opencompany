@@ -1787,10 +1787,10 @@ export function Surface({
   }, [isActivePane, readOnly]);
 
   useLayoutEffect(() => {
-    if (mode !== "chat" || !chatSessionId) return;
+    if (!isActivePane || mode !== "chat" || !chatSessionId) return;
     if (!consumePendingChatComposerFocus(chatSessionId)) return;
     inputRef.current?.focus({ preventScroll: true });
-  }, [chatSessionId, mode]);
+  }, [chatSessionId, isActivePane, mode]);
 
   useLayoutEffect(() => {
     const form = formRef.current;
@@ -2523,9 +2523,7 @@ export function Surface({
           : {}),
         ...(mentions.length > 0
           ? {
-              mentions: mentions.flatMap((mention) =>
-                mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
-              ),
+              mentions: mentions.filter(isSkillMention),
             }
           : {}),
       })
@@ -6870,9 +6868,7 @@ async function runBackgroundChatTurn(input: {
       : {}),
     ...(input.metadata?.mentions?.length
       ? {
-          mentions: input.metadata.mentions.flatMap((mention) =>
-            mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
-          ),
+          mentions: input.metadata.mentions.filter(isSkillMention),
         }
       : {}),
   });

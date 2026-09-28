@@ -290,7 +290,7 @@ describe("canonical Chat transport", () => {
           parts: [{ type: "text", text: "Update the account" }],
           metadata: {
             attachments: [{ id: "attachment_1" }],
-            mentions: [{ kind: "skill", id: "skill_1" }],
+            mentions: [{ kind: "skill", id: "skill_1", name: "research" }],
           },
         },
       ],
@@ -306,7 +306,7 @@ describe("canonical Chat transport", () => {
       engine: { type: "opencompany", schemaVersion: 1 },
       model: "model_1",
       attachmentIds: ["attachment_1"],
-      mentions: [{ kind: "skill", id: "skill_1" }],
+      mentions: [{ kind: "skill", id: "skill_1", name: "research" }],
     });
     expect(idempotencyKey).toBe("web-message:ui_message_1");
     expect(protocolVersion).toBe(PROTOCOL_VERSION);

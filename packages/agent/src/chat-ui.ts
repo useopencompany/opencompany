@@ -746,6 +746,7 @@ export function toChatMessageMetadata(
       : null;
   const error = message.debugTrace?.error;
   const model = message.debugTrace?.model;
+  const mentions = message.debugTrace?.mentions;
   const scheduledWakeup = message.debugTrace?.scheduledWakeup;
   const aborted = message.debugTrace?.aborted === true;
   const timing = toChatMessageTiming(message);
@@ -755,6 +756,7 @@ export function toChatMessageMetadata(
   if (
     !message.sessionId &&
     !model &&
+    !mentions?.length &&
     !scheduledWakeup &&
     !message.taskId &&
     !task &&
@@ -769,6 +771,7 @@ export function toChatMessageMetadata(
   return {
     sessionId: message.sessionId,
     ...(model ? { model } : {}),
+    ...(mentions?.length ? { mentions } : {}),
     ...(scheduledWakeup ? { scheduledWakeup } : {}),
     ...(attachments ? { attachments } : {}),
     ...(message.taskId ? { taskId: message.taskId } : {}),

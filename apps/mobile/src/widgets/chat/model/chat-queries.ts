@@ -11,6 +11,9 @@ export const chatQueryKeys = {
     [...root(partition), "messages", id, "pending"] as const,
   draft: (partition: ChatPartition, id: string) => [...root(partition), "draft", id] as const,
   run: (partition: ChatPartition, id: string) => [...root(partition), "run", id] as const,
+  // Kept outside `messages` so the invalidation a sync ends with does not restart the sync.
+  transcriptSync: (partition: ChatPartition, id: string) =>
+    [...root(partition), "transcript-sync", id] as const,
 };
 
 export async function invalidateConversation(partition: ChatPartition, id: string): Promise<void> {
