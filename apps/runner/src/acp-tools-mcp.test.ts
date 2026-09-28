@@ -984,3 +984,123 @@ describe("workflow authoring over MCP", () => {
     },
   );
 });
+
+describe("workflow handoffs over MCP", () => {
+  it("lets a task start only the workflows its step mentions, one level deeper", async () => {
+    let workflowHandoff: { workflowIds: string[]; depth: number } | null = {
+      workflowIds: ["review-pr"],
+      depth: 0,
+    };
+    const wakeTaskWorker = vi.fn();
+    const startWorkflowTask = vi.fn(async () => ({
+      id: "task_7",
+      displayId: "TASK-7",
+      name: "Review PR",
+      prompt: "Review https://github.com/o/r/pull/7.",
+    }));
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, {
+      authorize: async () => ({ ...authorized, taskConversation: true, workflowHandoff }),
+      listWorkflowCatalog: async () => [
+        { id: "review-pr", name: "Review PR", description: "" },
+        { id: "weekly-report", name: "Weekly report", description: "" },
+      ],
+      startWorkflowTask: startWorkflowTask as never,
+      wakeTaskWorker,
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP server");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const client = new Client({ name: "handoff-test", version: "1" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      const tool = (await client.listTools()).tools.find(
+        (candidate) => candidate.name === "start_workflow",
+      );
+      expect(tool?.inputSchema.properties?.workflowId).toMatchObject({
+        description: expect.stringContaining("review-pr (Review PR)"),
+      });
+      expect(JSON.stringify(tool)).not.toContain("weekly-report");
+
+      const rejected = await client.callTool({
+        name: "start_workflow",
+        arguments: { workflowId: "weekly-report", prompt: "Send it." },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(startWorkflowTask).not.toHaveBeenCalled();
+
+      const started = await client.callTool({
+        name: "start_workflow",
+        arguments: { workflowId: "review-pr", prompt: "Review https://github.com/o/r/pull/7." },
+      });
+      expect(started.isError).not.toBe(true);
+      expect(JSON.parse((started.content as { text: string }[])[0]!.text)).toEqual({
+        taskId: "task_7",
+        taskDisplayId: "TASK-7",
+        taskName: "Review PR",
+        status: "queued",
+        prompt: "Review https://github.com/o/r/pull/7.",
+      });
+      expect(startWorkflowTask).toHaveBeenCalledWith(
+        {
+          turnId: capability.codexChatTurnId,
+          actorId: "user_1",
+          workspaceId: "workspace_1",
+          mention: { id: "review-pr" },
+          description: "Review https://github.com/o/r/pull/7.",
+          handoffDepth: 1,
+        },
+        expect.objectContaining({ wakeTaskWorker }),
+      );
+
+      // Authority is re-read per call: a run whose step no longer mentions it cannot start it.
+      workflowHandoff = null;
+      const revoked = await client.callTool({
+        name: "start_workflow",
+        arguments: { workflowId: "review-pr", prompt: "Again." },
+      });
+      expect(revoked.isError).toBe(true);
+      expect(startWorkflowTask).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("does not advertise start_workflow to a task without handoffs", async () => {
+    const app = Fastify();
+    apps.push(app);
+    registerAcpToolsMcpRoute(app, env, {
+      authorize: async () => ({ ...authorized, taskConversation: true, workflowHandoff: null }),
+      listWorkflowCatalog: vi.fn(async () => []),
+    });
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    if (!address || typeof address === "string") throw new Error("Expected TCP server");
+    const ticket = createExternalEngineGatewayTicket({
+      ...capability,
+      secret: env.internalToken,
+    }).ticket;
+    const client = new Client({ name: "handoff-test", version: "1" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${address.port}/internal/goat/acp-tools`),
+      { requestInit: { headers: { "x-opencompany-tool-ticket": ticket } } },
+    );
+    try {
+      await client.connect(transport as Parameters<typeof client.connect>[0]);
+      expect((await client.listTools()).tools.some((tool) => tool.name === "start_workflow")).toBe(
+        false,
+      );
+    } finally {
+      await client.close();
+    }
+  });
+});

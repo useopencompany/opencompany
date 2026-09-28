@@ -39,6 +39,7 @@ async function loadPersistedAuthorityState(
     .select({
       conversationKind: chatSessions.kind,
       slackChannelEnabled: workflows.slackChannelEnabled,
+      taskHarnessSpec: tasks.harnessSpec,
       sessionId: codexChatSessions.id,
       turnId: codexChatTurns.id,
       attemptId: runAttempts.id,

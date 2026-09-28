@@ -4,7 +4,7 @@ import {
   type ChatHostToolGatewayResponse,
 } from "@opencompany/agent-runtime";
 import { getDb } from "@opencompany/db/client";
-import type { HarnessSpec } from "@opencompany/db/product-schema";
+import type { HarnessSpec, Task } from "@opencompany/db/product-schema";
 import {
   chatSessions,
   codexChatSessions,
@@ -35,6 +35,7 @@ import {
   resolveSkillMentions,
   updateWorkspaceSkillForActor,
 } from "../skills";
+import { workflowHandoffGrant } from "../workflow-handoffs";
 import { refineWorkflowTaskTitle } from "../workflow-task-title";
 import { createTaskFromWorkflow } from "../workflow-tasks";
 import { listWorkflowCatalog } from "../workflows";
@@ -77,10 +78,6 @@ export function executePersistedChatHostTool(input: {
   signal?: AbortSignal;
   dependencies?: Partial<ChatHostToolServiceDependencies>;
 }): Promise<ChatHostToolGatewayResponse> {
-  const taskDependencies = {
-    wakeTaskWorker: input.runtime.wakeTaskWorker,
-    defer: input.runtime.defer,
-  };
   const dependencies: ChatHostToolServiceDependencies = {
     loadContext: loadHostContext,
     browserProfilesAvailable,
@@ -120,46 +117,8 @@ export function executePersistedChatHostTool(input: {
     createWorkspaceSkill: createWorkspaceSkillForActor,
     manageWorkspaceSkills: manageWorkspaceSkillsForActor,
     updateWorkspaceSkill: updateWorkspaceSkillForActor,
-    createWorkflowTask: async ({ actorId, ...workflow }) => {
-      const task = await createTaskFromWorkflow(
-        { ...workflow, userWorkosId: actorId },
-        {
-          createTask: (task) =>
-            createTaskForActor(
-              {
-                ...task,
-                source: "workflow",
-                // Keyed per workflow, not per turn: a turn may start several distinct workflows,
-                // and each needs its own Task while a transport retry of the same one replays.
-                idempotencyKey: `workflow:${input.request.turnId}:${workflow.mention.id}`,
-              },
-              taskDependencies,
-            ),
-        },
-      );
-      if (!task.sessionId) return task;
-
-      const updated = await refineWorkflowTaskTitle(
-        {
-          taskId: task.id,
-          conversationId: task.sessionId,
-          workflowName: task.name,
-          description: workflow.description,
-          apiKey: input.runtime.gatewayApiKey,
-          actorId,
-        },
-        {
-          updateTaskName: (name) =>
-            updateTaskForActor({
-              actorId,
-              workspaceId: workflow.workspaceId,
-              taskId: task.id,
-              name,
-            }),
-        },
-      );
-      return updated ? { ...task, name: updated.task.name } : task;
-    },
+    createWorkflowTask: (workflow) =>
+      startWorkflowTaskForTurn({ ...workflow, turnId: input.request.turnId }, input.runtime),
     listWorkflowCatalog: listWorkflowCatalog,
     executeBrowserTool: async ({ context, name, args, activeSession, signal }) =>
       createChatBrowserToolSession({
@@ -252,6 +211,7 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
       workspaceName: workspaces.name,
       workspaceRole: workspaceMembers.role,
       slackChannelEnabled: workflows.slackChannelEnabled,
+      taskHarnessSpec: tasks.harnessSpec,
       // A Task opened from a Slack direct message has no workflow to read the toggle from. Its
       // open thread subscription is the equivalent grant: the Task exists to answer that thread.
       // A workflow Task keeps reading the toggle, so retiring a workflow still withholds the tool
@@ -316,6 +276,8 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     lastName: row.lastName,
     timezone: row.timezone,
     slackChannelEnabled: row.slackChannelEnabled === true || row.slackThreadSubscribed === true,
+    workflowHandoff:
+      row.conversationKind === "task" ? workflowHandoffGrant(row.taskHarnessSpec) : null,
     // The iMessage personal agent is a phone surface: no workflow, schedule or subagent tools
     // even for admins. Its runner does not wire those runners either; this is the server fence.
     automationToolsEnabled: row.workspaceRole === "admin" && row.harness !== "personal_agent",
@@ -323,6 +285,62 @@ async function loadHostContext(command: ChatHostToolCommand): Promise<ChatHostCo
     subagentsEnabled: row.subagentsEnabled && row.harness !== "personal_agent",
     skillToolsEnabled: true,
   };
+}
+
+/**
+ * Starts a workflow as a Task on behalf of a running turn: from main chat, or as a handoff from a
+ * Task run. Shared by the opencompany engine's host tools and the Codex/Claude Code tool bridge.
+ */
+export async function startWorkflowTaskForTurn(
+  workflow: {
+    turnId: string;
+    actorId: string;
+    workspaceId: string;
+    mention: { id: string };
+    description: string;
+    handoffDepth?: number;
+  },
+  runtime: Pick<PersistedHostRuntime, "wakeTaskWorker" | "defer" | "gatewayApiKey">,
+): Promise<Task> {
+  const { turnId, actorId, ...request } = workflow;
+  const task = await createTaskFromWorkflow(
+    { ...request, userWorkosId: actorId },
+    {
+      createTask: (task) =>
+        createTaskForActor(
+          {
+            ...task,
+            source: "workflow",
+            // Keyed per workflow, not per turn: a turn may start several distinct workflows,
+            // and each needs its own Task while a transport retry of the same one replays.
+            idempotencyKey: `workflow:${turnId}:${workflow.mention.id}`,
+          },
+          { wakeTaskWorker: runtime.wakeTaskWorker, defer: runtime.defer },
+        ),
+    },
+  );
+  if (!task.sessionId) return task;
+
+  const updated = await refineWorkflowTaskTitle(
+    {
+      taskId: task.id,
+      conversationId: task.sessionId,
+      workflowName: task.name,
+      description: workflow.description,
+      apiKey: runtime.gatewayApiKey,
+      actorId,
+    },
+    {
+      updateTaskName: (name) =>
+        updateTaskForActor({
+          actorId,
+          workspaceId: workflow.workspaceId,
+          taskId: task.id,
+          name,
+        }),
+    },
+  );
+  return updated ? { ...task, name: updated.task.name } : task;
 }
 
 function hostToolCommand(request: ChatHostToolGatewayRequest): ChatHostToolCommand {

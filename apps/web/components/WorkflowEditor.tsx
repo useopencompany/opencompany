@@ -49,6 +49,7 @@ import { MarkdownEditor } from "@/components/MarkdownEditor";
 import { ScopePicker } from "@/components/ScopeControls";
 import { StatusDot } from "@/components/StatusDot";
 import { WorkflowMemoryPanel } from "@/components/WorkflowMemoryPanel";
+import type { WorkflowMentionItem } from "@/components/WorkflowMentionNode";
 import {
   StepCloudRuntimeControls,
   StepRuntimePicker,
@@ -87,6 +88,7 @@ const AUTOSAVE_DELAY_MS = 1200;
 // Stable identity so the autosave effect is not re-run — and its error banner cleared — on every
 // render of a workflow whose providers were never passed.
 const NO_EVENT_PROVIDERS: WorkflowEventProviderOption[] = [];
+const NO_WORKFLOW_MENTIONS: WorkflowMentionItem[] = [];
 
 type WorkflowStatus = WorkflowDetail["status"];
 export type WorkflowStep = WorkflowDetail["steps"][number];
@@ -126,6 +128,7 @@ export function WorkflowEditor({
   canEdit,
   canManageScope,
   skillCatalog,
+  workflowCatalog = NO_WORKFLOW_MENTIONS,
   eventProviders = NO_EVENT_PROVIDERS,
   slackBotSettings,
   owner,
@@ -136,6 +139,8 @@ export function WorkflowEditor({
   canEdit: boolean;
   canManageScope: boolean;
   skillCatalog: SkillCatalogItem[];
+  // Other workflows a step can mention as `@workflow/<slug>` to hand work off to.
+  workflowCatalog?: WorkflowMentionItem[];
   eventProviders?: WorkflowEventProviderOption[];
   slackBotSettings: SlackBotWorkspaceSettingsDto;
   owner: { name: string; avatarUrl: string | null };
@@ -405,6 +410,7 @@ export function WorkflowEditor({
                 step={step}
                 canEdit={canEdit}
                 skillCatalog={skillCatalog}
+                workflowCatalog={workflowCatalog}
                 onChange={(partial) => updateStep(step.id, partial)}
               />
             ))}
@@ -1474,12 +1480,14 @@ export function StepCard({
   step,
   canEdit,
   skillCatalog,
+  workflowCatalog,
   onChange,
 }: {
   index: number;
   step: WorkflowStep;
   canEdit: boolean;
   skillCatalog: SkillCatalogItem[];
+  workflowCatalog?: WorkflowMentionItem[];
   onChange: (partial: WorkflowStepPatch) => void;
 }) {
   const selectedRuntime = WORKFLOW_MODEL_OPTIONS.find((option) => option.token === step.model);
@@ -1532,6 +1540,7 @@ export function StepCard({
             compact
             placeholder="Describe what this step should do..."
             skillMentions={skillCatalog}
+            {...(workflowCatalog ? { workflowMentions: workflowCatalog } : {})}
             contextMentions
           />
         ) : step.instructions.trim() ? (

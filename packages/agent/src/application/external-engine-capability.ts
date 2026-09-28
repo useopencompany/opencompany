@@ -1,4 +1,6 @@
 import { isWikiHostToolContractVersion } from "@opencompany/agent-runtime";
+import type { HarnessSpec } from "@opencompany/db/product-schema";
+import { type WorkflowHandoffGrant, workflowHandoffGrant } from "../workflow-handoffs";
 
 export type ExternalEngineToolCapability = {
   codexChatSessionId: string;
@@ -10,6 +12,7 @@ export type ExternalEngineToolCapability = {
 export type ExternalEngineToolAuthorityState = {
   conversationKind?: string;
   slackChannelEnabled: boolean | null;
+  taskHarnessSpec?: Pick<HarnessSpec, "workflow"> | null;
   sessionId: string;
   turnId: string;
   attemptId: string;
@@ -42,6 +45,8 @@ export type ExternalEngineToolAuthorizedContext = {
   taskConversation?: boolean;
   automationToolsEnabled?: boolean;
   slackChannelEnabled: boolean;
+  // Only a Task run whose current step mentions other workflows can start them.
+  workflowHandoff?: WorkflowHandoffGrant | null;
   skillToolsEnabled: boolean;
   actorId: string;
   workspaceId: string;
@@ -93,6 +98,8 @@ export function authorizeExternalEngineToolCapability(input: {
     taskConversation: state.conversationKind === "task",
     automationToolsEnabled: state.workspaceRole === "admin" && state.conversationKind !== "task",
     slackChannelEnabled: state.conversationKind === "task" && state.slackChannelEnabled === true,
+    workflowHandoff:
+      state.conversationKind === "task" ? workflowHandoffGrant(state.taskHarnessSpec) : null,
     skillToolsEnabled: true,
     actorId: state.actorId,
     workspaceId: state.workspaceId,

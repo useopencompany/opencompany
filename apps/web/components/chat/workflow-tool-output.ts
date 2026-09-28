@@ -1,3 +1,4 @@
+import { START_WORKFLOW_TOOL_NAME, type StartTaskToolOutput } from "@opencompany/agent/chat-ui";
 import {
   ACP_TOOLS_MCP_SERVER_NAME,
   CODEX_DYNAMIC_TOOL_NAME,
@@ -51,30 +52,47 @@ export function workflowCardOutputFromTool(tool: WorkflowToolCall): WorkflowCard
   if (tool.name !== CODEX_MCP_TOOL_NAME && tool.name !== CODEX_DYNAMIC_TOOL_NAME) {
     return null;
   }
-  if (!isWorkflowHostCall(tool.input)) return null;
+  if (!isHostCall(tool.input, "workflows")) return null;
 
   const output = isRecord(tool.output) ? tool.output : null;
   const projected = workflowCardOutput(output?.workflowOutput, command);
   if (projected) return projected;
-  const result = output?.result;
-  const envelope =
-    typeof result === "string" ? parseJsonRecord(result) : isRecord(result) ? result : null;
-  if (!envelope) return null;
-
-  const direct = workflowCardOutput(envelope, command);
-  if (direct) return direct;
-
-  const structured = workflowCardOutput(envelope.structuredContent, command);
-  if (structured) return structured;
-
-  if (!Array.isArray(envelope.content)) return null;
-  for (const item of envelope.content) {
-    if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
-    const parsed = parseJsonRecord(item.text);
-    const card = workflowCardOutput(parsed, command);
+  for (const candidate of hostCallResults(output?.result)) {
+    const card = workflowCardOutput(candidate, command);
     if (card) return card;
   }
   return null;
+}
+
+/**
+ * The Task a coding engine started through the host bridge: `start_workflow` (a Task run's
+ * handoff) or `workflows` with `run` (main chat). Native chat renders these from typed tool parts.
+ */
+export function startedTaskOutputFromTool(tool: WorkflowToolCall): StartTaskToolOutput | null {
+  if (tool.state !== "output-available") return null;
+  if (tool.name !== CODEX_MCP_TOOL_NAME && tool.name !== CODEX_DYNAMIC_TOOL_NAME) return null;
+  if (!isHostCall(tool.input, START_WORKFLOW_TOOL_NAME) && !isHostCall(tool.input, "workflows")) {
+    return null;
+  }
+  const output = isRecord(tool.output) ? tool.output : null;
+  return hostCallResults(output?.result).find(isStartTaskToolOutput) ?? null;
+}
+
+// An MCP result arrives as the structured object, its `structuredContent`, or JSON text content.
+function hostCallResults(result: unknown): Record<string, unknown>[] {
+  const envelope =
+    typeof result === "string" ? parseJsonRecord(result) : isRecord(result) ? result : null;
+  if (!envelope) return [];
+  const results = [envelope];
+  if (isRecord(envelope.structuredContent)) results.push(envelope.structuredContent);
+  if (Array.isArray(envelope.content)) {
+    for (const item of envelope.content) {
+      if (!isRecord(item) || item.type !== "text" || typeof item.text !== "string") continue;
+      const parsed = parseJsonRecord(item.text);
+      if (parsed) results.push(parsed);
+    }
+  }
+  return results;
 }
 
 function workflowCardOutput(value: unknown, command: string | null): WorkflowCardOutput | null {
@@ -93,13 +111,13 @@ function workflowCommand(value: unknown) {
   return typeof args.command === "string" ? args.command : null;
 }
 
-function isWorkflowHostCall(value: unknown) {
+function isHostCall(value: unknown, tool: string) {
   if (!isRecord(value)) return false;
-  if (value.server === ACP_TOOLS_MCP_SERVER_NAME && value.tool === "workflows") return true;
+  if (value.server === ACP_TOOLS_MCP_SERVER_NAME && value.tool === tool) return true;
   for (const identity of [value.toolName, value.title]) {
     if (
-      identity === `mcp__${ACP_TOOLS_MCP_SERVER_NAME}__workflows` ||
-      identity === `mcp.${ACP_TOOLS_MCP_SERVER_NAME}.workflows`
+      identity === `mcp__${ACP_TOOLS_MCP_SERVER_NAME}__${tool}` ||
+      identity === `mcp.${ACP_TOOLS_MCP_SERVER_NAME}.${tool}`
     ) {
       return true;
     }
@@ -118,4 +136,12 @@ function parseJsonRecord(value: string) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isStartTaskToolOutput(value: Record<string, unknown>): value is StartTaskToolOutput {
+  return (
+    typeof value.taskId === "string" &&
+    typeof value.taskDisplayId === "string" &&
+    typeof value.taskName === "string"
+  );
 }

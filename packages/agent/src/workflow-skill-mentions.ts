@@ -6,8 +6,18 @@ import type { SkillMentionRef } from "./skills";
 
 // Match inline tokens wherever the editor can render a chip, including next to punctuation.
 const SKILL_MENTION_PATTERN = /@skill\/([a-z0-9][a-z0-9_-]{0,199})(?![a-z0-9_-])/gi;
+const WORKFLOW_MENTION_PATTERN = /@workflow\/([a-z0-9][a-z0-9-]{0,63})(?![a-z0-9_-])/gi;
 
 export function extractWorkflowSkillMentionRefs(instructions: string): SkillMentionRef[] {
+  return extractInstructionMentionIds(instructions, SKILL_MENTION_PATTERN).map((id) => ({ id }));
+}
+
+/** Workflow slugs authored as `@workflow/<slug>` chips in step instructions. */
+export function extractWorkflowMentionIds(instructions: string): string[] {
+  return extractInstructionMentionIds(instructions, WORKFLOW_MENTION_PATTERN);
+}
+
+function extractInstructionMentionIds(instructions: string, pattern: RegExp): string[] {
   // Workflow editors serialize Markdown escapes (including underscores in installation IDs).
   // Read prose text after parsing so formatting and code examples cannot corrupt references.
   const root = fromMarkdown(instructions, {
@@ -24,7 +34,7 @@ export function extractWorkflowSkillMentionRefs(instructions: string): SkillMent
         return;
     }
     if (node.type === "text") {
-      for (const match of node.value.matchAll(SKILL_MENTION_PATTERN)) {
+      for (const match of node.value.matchAll(pattern)) {
         ids.add(match[1]!.toLowerCase());
       }
     } else if ("children" in node) {
@@ -32,5 +42,5 @@ export function extractWorkflowSkillMentionRefs(instructions: string): SkillMent
     }
   }
   for (const node of root.children) visit(node);
-  return [...ids].map((id) => ({ id }));
+  return [...ids];
 }
