@@ -88,6 +88,20 @@ describe("toChatUiMessage", () => {
     });
   });
 
+  it("restores persisted Skill mentions on a user message", () => {
+    const message = storedAssistantMessage({
+      role: "user",
+      content: "Use /research for this.",
+      debugTrace: {
+        mentions: [{ kind: "skill", id: "skill_installation_research", name: "research" }],
+      },
+    });
+
+    expect(toChatUiMessage(message).metadata?.mentions).toEqual([
+      { kind: "skill", id: "skill_installation_research", name: "research" },
+    ]);
+  });
+
   it("replays a persisted steering part so a steered turn keeps explaining itself", () => {
     // The persisted-transcript parser drops any part shape it does not recognise, so a steered
     // instruction that survives a reload is the only proof the durable projection is wired up.

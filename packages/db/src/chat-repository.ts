@@ -768,6 +768,9 @@ export class PostgresChatRepository implements ChatRepository {
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
     const attachmentsJson = stringifyPostgresJson(resolvedAttachments.attachments);
     const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
+    const userMessageDebugTraceJson = stringifyPostgresJson(
+      input.command.mentions?.length ? { mentions: input.command.mentions } : null,
+    );
     const settingsJson = stringifyPostgresJson({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
@@ -1169,12 +1172,13 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
-          id, session_id, role, content, task_id, attachments, attachment_texts,
+          id, session_id, role, content, task_id, debug_trace, attachments, attachment_texts,
           created_at, updated_at
         )
         SELECT
           reservation.message_id, target_chat.id, 'user', ${input.command.content},
-          target_chat.task_id, ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb,
+          target_chat.task_id, ${userMessageDebugTraceJson}::jsonb,
+          ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true

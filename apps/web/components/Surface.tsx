@@ -2514,9 +2514,7 @@ export function Surface({
           : {}),
         ...(mentions.length > 0
           ? {
-              mentions: mentions.flatMap((mention) =>
-                mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
-              ),
+              mentions: mentions.filter(isSkillMention),
             }
           : {}),
       })
@@ -6858,9 +6856,7 @@ async function runBackgroundChatTurn(input: {
       : {}),
     ...(input.metadata?.mentions?.length
       ? {
-          mentions: input.metadata.mentions.flatMap((mention) =>
-            mention.kind === "skill" ? [{ kind: "skill" as const, id: mention.id }] : [],
-          ),
+          mentions: input.metadata.mentions.filter(isSkillMention),
         }
       : {}),
   });
