@@ -153,6 +153,12 @@ body {
   }
 }
 
+/* Native scrollbar visibility follows the OS setting. */
+@utility scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-subtle) transparent;
+}
+
 .desktop-drag-region {
   -webkit-app-region: drag;
 }
