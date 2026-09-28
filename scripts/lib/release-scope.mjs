@@ -103,6 +103,16 @@ export function planReleaseSurfaces({
   return Object.fromEntries(RELEASE_SURFACES.map((surface) => [surface, selected.has(surface)]));
 }
 
+// A manual release may keep a Render surface on its current deployment only while nothing since
+// that deployment changes it. Skipping a changed surface leaves it running older shared packages
+// than the surfaces being released, and shared contracts such as stored credential shapes break.
+export function skippedChangedSurfaces({ changedSurfaces, deployApi = true, deployRunner = true }) {
+  return [
+    ...(!deployApi && changedSurfaces.api ? ["api"] : []),
+    ...(!deployRunner && changedSurfaces.runner ? ["runner"] : []),
+  ];
+}
+
 export function databaseChanged({ affectedPackages = [], changedFiles = [] } = {}) {
   return (
     affectedPackages.includes("@opencompany/db") ||
