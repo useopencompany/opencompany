@@ -998,7 +998,7 @@ describe("MessageBubble assistant errors", () => {
     );
     expect(screen.getByRole("link", { name: "Add access" })).toHaveAttribute(
       "href",
-      "/api/integrations/github-user/start?returnTo=%2F&owner=opencompany",
+      "/api/integrations/github-user/start?returnTo=%2F&install=true&owner=opencompany",
     );
     await userEvent.click(screen.getByRole("link", { name: "Add access" }));
     expect(screen.getByTestId("github-install-gap")).toHaveTextContent(

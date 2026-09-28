@@ -35,7 +35,7 @@ export type GitHubUserOAuthCredentialPayload = {
   refresh_token_expires_at: string;
   github_user_id: string;
   github_login: string;
-  github_installation_id: string;
+  github_installation_id?: string;
 };
 
 type DbSchema = typeof schema;
@@ -232,7 +232,7 @@ export async function connectGitHubUserIntegration(input: {
   login: string;
   name: string | null;
   email: string | null;
-  installationId: string;
+  installationId?: string;
   accessToken: string;
   refreshToken: string;
   accessTokenExpiresAt: Date;
@@ -251,7 +251,7 @@ export async function connectGitHubUserIntegration(input: {
     refresh_token_expires_at: input.refreshTokenExpiresAt.toISOString(),
     github_user_id: input.githubUserId,
     github_login: input.login,
-    github_installation_id: input.installationId,
+    ...(input.installationId ? { github_installation_id: input.installationId } : {}),
   };
 
   return connectPersonalOAuthIntegration({

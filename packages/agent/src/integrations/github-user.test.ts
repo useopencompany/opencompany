@@ -20,6 +20,7 @@ vi.mock("@opencompany/db/integrations", () => ({
 }));
 
 import {
+  buildGitHubUserAuthorizationUrl,
   buildGitHubUserInstallUrl,
   createGitHubUserIntegrationState,
   exchangeGitHubAppUserCode,
@@ -77,7 +78,7 @@ describe("GitHub user integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("signs personal state and starts the dedicated App install flow", () => {
+  it("signs personal state and separates user authorization from App installation", () => {
     expect(isGitHubUserIntegrationConfigured()).toBe(true);
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
@@ -88,6 +89,13 @@ describe("GitHub user integration", () => {
       userWorkosId: "user_1",
       returnTo: "/plugins/github",
     });
+    const authorization = new URL(buildGitHubUserAuthorizationUrl(state));
+    expect(authorization.pathname).toBe("/login/oauth/authorize");
+    expect(authorization.searchParams.get("client_id")).toBe("Iv1_user_client");
+    expect(authorization.searchParams.get("redirect_uri")).toBe(
+      "https://opencompany.example.com/api/integrations/github-user/callback",
+    );
+    expect(authorization.searchParams.get("state")).toBe(state);
     const install = new URL(buildGitHubUserInstallUrl(state));
     expect(install.href).toContain("github.com/apps/opencompany-user/installations/new");
     expect(install.searchParams.get("state")).toBe(state);
@@ -443,6 +451,33 @@ describe("GitHub user integration", () => {
       db,
       now,
     });
+  });
+
+  it("rotates an authorization-only credential without inventing an installation binding", async () => {
+    mocks.loadCredential.mockResolvedValue(storedCredential({ github_installation_id: undefined }));
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({
+        access_token: "ghu_access_new",
+        expires_in: 28_800,
+        refresh_token: "ghr_refresh_new",
+        refresh_token_expires_in: 15_897_600,
+        token_type: "bearer",
+      }),
+    );
+
+    await expect(getGitHubUserAccessToken(connection, { now })).resolves.toBe("ghu_access_new");
+    expect(mocks.rotateCredential).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: {
+          access_token: "ghu_access_new",
+          refresh_token: "ghr_refresh_new",
+          token_type: "bearer",
+          refresh_token_expires_at: "2027-03-04T12:00:00.000Z",
+          github_user_id: "42",
+          github_login: "octocat",
+        },
+      }),
+    );
   });
 
   it("shares one refresh within a process for concurrent consumers", async () => {

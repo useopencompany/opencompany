@@ -10,8 +10,9 @@ provides repository tools and authenticated Git access for coding sessions.
 
 1. Open **Plugins** in the sidebar and choose **GitHub as you**.
 2. Ask a workspace admin to install it if needed.
-3. Complete the GitHub App installation and account authorization flow.
-4. Select the repositories opencompany should be able to reach.
+3. Authorize the GitHub App to act as your GitHub identity.
+4. If the App does not already have the repositories you need, ask an organization owner to grant
+   them to its installation.
 5. Return to the Plugin page and check the connected identity and available repositories.
 
 Access is the intersection of your GitHub account's permissions and the App installations and
@@ -38,8 +39,9 @@ Follow [Cloud coding](/docs/guides/cloud-coding) for the complete path.
 
 ## Fix missing repository access
 
-Open the Plugin's authorization flow to grant access to missing repositories, then recheck the
-available repositories. Confirm the signed-in GitHub identity and any organization approval.
+Use **Add organization or account** on the Plugin page to grant access to missing repositories,
+then recheck the available repositories. Confirm the signed-in GitHub identity and any organization
+approval.
 Reconnecting the coding engine alone won't change GitHub access.
 
 The former workspace GitHub ingestion integration is retired. Use the Plugin for GitHub tools;

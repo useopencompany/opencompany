@@ -90,6 +90,12 @@ describe("company plugins", () => {
     );
 
     expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(1);
+    expect(
+      screen.getByRole("link", { name: "Install the GitHub App on another account" }),
+    ).toHaveAttribute(
+      "href",
+      "/api/integrations/github-user/start?returnTo=%2Fplugins%2Fcompany%2Fgithub&install=true",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Connect" }));
     expect(linkCompanyGitHubInstallationAction).toHaveBeenCalledWith("8");
     expect(toasts.success).toHaveBeenCalledWith("acme-labs connected.");

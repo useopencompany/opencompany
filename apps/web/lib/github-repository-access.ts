@@ -176,9 +176,13 @@ export function githubInstallGapCandidate(tool: GitHubToolView) {
 }
 
 export function githubInstallStartHref(owner?: string, returnTo = "/") {
-  const search = new URLSearchParams({ returnTo });
+  const search = new URLSearchParams({ returnTo, install: "true" });
   if (owner) search.set("owner", owner);
   return `/api/integrations/github-user/start?${search.toString()}`;
+}
+
+export function githubAuthorizationStartHref(returnTo = "/") {
+  return `/api/integrations/github-user/start?${new URLSearchParams({ returnTo }).toString()}`;
 }
 
 function consumeSharedRequest(request: SharedAccessRequest, signal?: AbortSignal) {
