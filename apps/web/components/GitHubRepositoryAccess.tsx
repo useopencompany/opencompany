@@ -9,6 +9,7 @@ import {
   fetchGitHubRepositoryAccess,
   type GitHubRepositoryAccess,
   GitHubRepositoryAccessRequestError,
+  githubAuthorizationStartHref,
   githubInstallStartHref,
 } from "@/lib/github-repository-access";
 
@@ -187,7 +188,7 @@ export function GitHubInstallGapCard({ owner, repo }: { owner: string; repo: str
           <AlertTitle>Reconnect GitHub</AlertTitle>
           <AlertDescription>{access.state.error.message}</AlertDescription>
           <a
-            href={githubInstallStartHref(owner, returnTo)}
+            href={githubAuthorizationStartHref(returnTo)}
             target="_blank"
             rel="noreferrer"
             className={`mt-2 ${buttonVariants({ variant: "outline", size: "sm" })}`}

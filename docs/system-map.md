@@ -173,8 +173,9 @@ response adapter are deleted; clients cannot select physical tables or predicate
 
 The official **GitHub as you** Plugin uses the personal `github_user` connection for
 user-authorized tools and coding-sandbox git/gh access. Plugin settings read the user token's
-reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
-confirmed outside that intersection links back through the combined install-and-authorize flow;
+reachable App installations and repositories from GitHub. Connecting an identity uses GitHub's
+user-authorization flow without changing any installation. A tool or sandbox git failure that is
+confirmed outside that intersection links separately to the App installation flow;
 the client uses bounded, backoff polling with ordinary access reads instead of depending on
 GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
 re-check may refresh the expiring user token once per install attempt.

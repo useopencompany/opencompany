@@ -101,7 +101,7 @@ describe("GitHub user ingress", () => {
     vi.restoreAllMocks();
   });
 
-  it("lets a workspace member start the personal App install and authorization flow", async () => {
+  it("lets a workspace member authorize the personal App without changing an installation", async () => {
     const response = await ingress().start(
       new Request(
         "https://api.example.com/integrations/github-user/start?returnTo=/plugins/github",
@@ -110,8 +110,23 @@ describe("GitHub user ingress", () => {
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location") ?? "");
-    expect(location.href).toContain("github.com/apps/opencompany-user/installations/new");
+    expect(location.pathname).toBe("/login/oauth/authorize");
+    expect(location.searchParams.get("client_id")).toBe("Iv1_user_client");
+    expect(location.searchParams.get("redirect_uri")).toBe(
+      "https://opencompany.example.com/api/integrations/github-user/callback",
+    );
     expect(location.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("starts installation only when repository access is explicitly requested", async () => {
+    const response = await ingress().start(
+      new Request(
+        "https://api.example.com/integrations/github-user/start?returnTo=/plugins/github&install=true",
+      ),
+    );
+
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.pathname).toBe("/apps/opencompany-user/installations/new");
   });
 
   it("targets the requested organization through GitHub's documented permissions route", async () => {
@@ -232,7 +247,7 @@ describe("GitHub user ingress", () => {
     expect(response.headers.get("location")).toBe("https://opencompany.example.com/signin");
   });
 
-  it("stores the personal token pair and refreshes plugin discovery for visible workspaces", async () => {
+  it("stores a personal authorization without requiring an installation change", async () => {
     const refresh = vi.fn(async () => undefined);
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
@@ -240,7 +255,7 @@ describe("GitHub user ingress", () => {
     });
     const response = await ingress({ refresh }).callback(
       new Request(
-        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&installation_id=123&setup_action=install`,
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code`,
       ),
     );
 
@@ -250,7 +265,6 @@ describe("GitHub user ingress", () => {
       login: "octocat",
       name: "The Octocat",
       email: null,
-      installationId: "123",
       accessToken: "ghu_access",
       refreshToken: "ghr_refresh",
       tokenType: "bearer",
@@ -266,10 +280,28 @@ describe("GitHub user ingress", () => {
     expect(location.pathname).toBe("/plugins/github");
     expect(location.searchParams.get("integration")).toBe("github_user");
     expect(location.searchParams.get("setup")).toBe("connected");
+    expect(verifyGitHubAppUserInstallation).not.toHaveBeenCalled();
+  });
+
+  it("validates an installation returned by the combined install and authorization flow", async () => {
+    const state = createGitHubUserIntegrationState({
+      userWorkosId: "user_1",
+      returnTo: "/plugins/github",
+    });
+    const response = await ingress().callback(
+      new Request(
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&installation_id=123&setup_action=install`,
+      ),
+    );
+
+    expect(response.status).toBe(302);
     expect(verifyGitHubAppUserInstallation).toHaveBeenCalledWith({
       accessToken: "ghu_access",
       installationId: "123",
     });
+    expect(connectGitHubUserIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ installationId: "123" }),
+    );
   });
 
   it("rejects an installation that is not associated with the authorized GitHub user", async () => {
@@ -289,14 +321,14 @@ describe("GitHub user ingress", () => {
     expect(connectGitHubUserIntegration).not.toHaveBeenCalled();
   });
 
-  it("requires the combined install callback grant before exchanging the code", async () => {
+  it("rejects a partial install callback before exchanging the code", async () => {
     const state = createGitHubUserIntegrationState({
       userWorkosId: "user_1",
       returnTo: "/plugins/github",
     });
     const response = await ingress().callback(
       new Request(
-        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code`,
+        `https://api.example.com/integrations/github-user/callback?state=${encodeURIComponent(state)}&code=authorization-code&setup_action=install`,
       ),
     );
 

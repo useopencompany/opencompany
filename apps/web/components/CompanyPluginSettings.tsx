@@ -26,8 +26,9 @@ import {
 import { SERVICE_MARKS } from "@/lib/service-marks";
 
 const COMPANY_GITHUB_HREF = "/plugins/company/github";
-// The same App members install for "GitHub as you"; installing or authorizing it returns here.
-const GITHUB_APP_INSTALL_HREF = `/api/integrations/github-user/start?returnTo=${encodeURIComponent(COMPANY_GITHUB_HREF)}`;
+// Personal authorization and organization installation return to the same company-plugin page.
+const GITHUB_AUTHORIZATION_HREF = `/api/integrations/github-user/start?returnTo=${encodeURIComponent(COMPANY_GITHUB_HREF)}`;
+const GITHUB_APP_INSTALL_HREF = `${GITHUB_AUTHORIZATION_HREF}&install=true`;
 const GitHubMark = SERVICE_MARKS.github;
 
 type AvailableInstallation = NonNullable<
@@ -215,7 +216,7 @@ export function CompanyGitHubPluginDetail({
                 <p className="text-[12.5px] leading-5 text-ink-subtle">
                   Sign in with GitHub first so opencompany can see which accounts you can connect.
                 </p>
-                <a href={GITHUB_APP_INSTALL_HREF} className={buttonVariants({ size: "sm" })}>
+                <a href={GITHUB_AUTHORIZATION_HREF} className={buttonVariants({ size: "sm" })}>
                   Sign in with GitHub
                 </a>
               </div>

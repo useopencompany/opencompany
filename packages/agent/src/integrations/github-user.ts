@@ -209,8 +209,16 @@ export function verifyGitHubUserIntegrationState(state: string): GitHubUserInteg
   return { ...payload, returnTo: sanitizeReturnTo(payload.returnTo) };
 }
 
-// The dedicated App has "Request user authorization (OAuth) during
-// installation" enabled, so installing and authorizing land in one callback.
+export function buildGitHubUserAuthorizationUrl(state: string) {
+  const url = new URL("https://github.com/login/oauth/authorize");
+  url.searchParams.set("client_id", requiredEnv("GITHUB_USER_APP_CLIENT_ID"));
+  url.searchParams.set("redirect_uri", githubUserCallbackUrl());
+  url.searchParams.set("state", state);
+  return url.toString();
+}
+
+// Installation is separate from personal authorization. Organization owners grant the App access
+// to repositories once; every member then authorizes the same App to act within their own access.
 export function buildGitHubUserInstallUrl(
   state: string,
   options: { suggestedTargetId?: string } = {},
@@ -709,7 +717,9 @@ async function refreshGitHubAppUserCredential(
       refresh_token_expires_at: refreshed.refreshTokenExpiresAt.toISOString(),
       github_user_id: credential.payload.github_user_id,
       github_login: credential.payload.github_login,
-      github_installation_id: credential.payload.github_installation_id,
+      ...(credential.payload.github_installation_id
+        ? { github_installation_id: credential.payload.github_installation_id }
+        : {}),
     } satisfies GitHubUserOAuthCredentialPayload,
     expiresAt: refreshed.accessTokenExpiresAt,
   };
@@ -772,8 +782,7 @@ function parseStoredTokens(
     !refreshTokenExpiresAt ||
     Number.isNaN(new Date(refreshTokenExpiresAt).getTime()) ||
     !githubUserId ||
-    !githubLogin ||
-    !githubInstallationId
+    !githubLogin
   ) {
     return null;
   }
@@ -784,7 +793,7 @@ function parseStoredTokens(
     refresh_token_expires_at: refreshTokenExpiresAt,
     github_user_id: githubUserId,
     github_login: githubLogin,
-    github_installation_id: githubInstallationId,
+    ...(githubInstallationId ? { github_installation_id: githubInstallationId } : {}),
   };
 }
 
