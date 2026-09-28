@@ -3378,7 +3378,7 @@ export function Surface({
 
               <div
                 ref={threadRef}
-                className="min-h-0 w-full flex-1 justify-center overflow-y-auto px-6"
+                className="min-h-0 w-full flex-1 justify-center overflow-y-auto scrollbar-subtle px-6"
                 onWheel={markUserScrollIntent}
                 onTouchMove={markUserScrollIntent}
                 onScroll={(event) => {
