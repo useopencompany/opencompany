@@ -97,6 +97,7 @@ describe("TaskApplicationService", () => {
       id: " comment_1 ",
       body: "  Approved — keep the original spacing.\n",
       attachmentIds: [" attachment_1 "],
+      skillIds: [" decision-brief "],
     });
 
     expect(repository.createTaskCommentAndRun).toHaveBeenCalledWith({
@@ -106,6 +107,7 @@ describe("TaskApplicationService", () => {
         id: "comment_1",
         body: "  Approved — keep the original spacing.\n",
         attachmentIds: ["attachment_1"],
+        skillIds: ["decision-brief"],
       },
     });
 
@@ -139,6 +141,13 @@ describe("TaskApplicationService", () => {
         id: "comment_1",
         body: "Approved",
         attachmentIds: ["attachment_1", "attachment_1"],
+      }),
+    ).rejects.toThrow(/unique/i);
+    await expect(
+      service.createComment(actor(), "task_1", {
+        id: "comment_1",
+        body: "Approved",
+        skillIds: ["decision-brief", "decision-brief"],
       }),
     ).rejects.toThrow(/unique/i);
     await expect(

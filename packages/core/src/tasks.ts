@@ -126,6 +126,7 @@ export type CreateTaskCommentCommand = {
   id: string;
   body: string;
   attachmentIds?: readonly string[];
+  skillIds?: readonly string[];
 };
 
 export type TaskComment = {
@@ -324,6 +325,7 @@ export class TaskApplicationService {
     requireTaskPermission(actor, TASK_WRITE_PERMISSION);
     const body = input.body;
     const attachmentIds = (input.attachmentIds ?? []).map((id) => resourceId(id, "attachmentId"));
+    const skillIds = (input.skillIds ?? []).map((id) => resourceId(id, "skillId"));
     if (!body.trim() && attachmentIds.length === 0) {
       throw new CoreError("invalid_argument", "A comment or attachment is required.");
     }
@@ -342,6 +344,15 @@ export class TaskApplicationService {
     if (new Set(attachmentIds).size !== attachmentIds.length) {
       throw new CoreError("invalid_argument", "Attachment references must be unique.");
     }
+    if (skillIds.length > 16) {
+      throw new CoreError(
+        "invalid_argument",
+        "A Task comment cannot activate more than 16 Skills.",
+      );
+    }
+    if (new Set(skillIds).size !== skillIds.length) {
+      throw new CoreError("invalid_argument", "Skill references must be unique.");
+    }
     const result = await this.repository.createTaskCommentAndRun({
       actor,
       taskId: resourceId(taskId, "taskId"),
@@ -350,6 +361,7 @@ export class TaskApplicationService {
         // Whitespace is deliberately preserved: this exact body becomes the next user Message.
         body,
         ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(skillIds.length ? { skillIds } : {}),
       },
     });
     if (!result) throw new CoreError("not_found", "Task not found.");
