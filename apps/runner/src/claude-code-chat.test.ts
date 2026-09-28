@@ -85,6 +85,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
+  isRetryablePackageInstallError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
   isUnresponsiveGuestError: vi.fn(),
 }));
@@ -275,6 +276,7 @@ vi.mock("./sandbox", () => ({
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
+  isRetryablePackageInstallError: sandboxMocks.isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError: sandboxMocks.isUnresponsiveGuestError,
 }));
@@ -535,6 +537,7 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
+    sandboxMocks.isRetryablePackageInstallError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
     sandboxMocks.isUnresponsiveGuestError.mockReturnValue(false);
     skillMocks.materializeClaudeSkillSnapshotsForSession.mockResolvedValue(undefined);
@@ -1330,6 +1333,30 @@ describe("runClaudeCodeChatTurn sandbox lifecycle", () => {
       cause: error,
       message: "Claude Code's sandbox stopped responding while the turn was being prepared.",
       diagnosticMessage: expect.stringContaining("[ensure_claude_acp] TimeoutError:"),
+    });
+
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
+  });
+
+  it("retries a transient Claude runtime download failure", async () => {
+    const error = new Error("exit status 1");
+    error.name = "CommandExitError";
+    cliMocks.ensureClaudeAcpAdapterInstalled.mockRejectedValueOnce(error);
+    sandboxMocks.isRetryablePackageInstallError.mockReturnValue(true);
+
+    await expect(
+      runClaudeCodeChatTurn({
+        turn: claudeTurn(),
+        session: claudeSession(),
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: error,
+      message: "Claude Code could not download its managed runtime.",
+      diagnosticMessage: "[ensure_claude_acp] CommandExitError: exit status 1",
     });
 
     for (const result of eventMocks.createExternalEngineProjector.mock.results) {

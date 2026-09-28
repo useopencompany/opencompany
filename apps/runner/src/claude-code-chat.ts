@@ -135,6 +135,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
   managedSandboxMetadata,
@@ -1249,6 +1250,16 @@ export async function runClaudeCodeChatTurn(input: {
       throw effectiveError;
     } else if (effectiveError instanceof CodexChatRetryableInfrastructureError) {
       throw effectiveError;
+    } else if (
+      !engineStarted &&
+      executionStage === "ensure_claude_acp" &&
+      isRetryablePackageInstallError(effectiveError)
+    ) {
+      throw new CodexChatRetryableInfrastructureError(
+        "Claude Code could not download its managed runtime.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
       // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
       // and reboots or replaces it. Failing the turn here instead would strand the session on the

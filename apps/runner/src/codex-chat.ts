@@ -121,6 +121,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
   managedSandboxMetadata,
@@ -1085,6 +1086,16 @@ export async function runCodexChatTurn(input: {
       // A transient setup failure (e.g. the fence) preserves the durable turn: the worker defers
       // and retries from scratch instead of projecting a failed assistant message.
       throw effectiveError;
+    } else if (
+      !engineStarted &&
+      executionStage === "ensure_codex_acp" &&
+      isRetryablePackageInstallError(effectiveError)
+    ) {
+      throw new CodexChatRetryableInfrastructureError(
+        "Codex could not download its managed runtime.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
       // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
       // and reboots or replaces it. Failing the turn here instead would strand the session on the
