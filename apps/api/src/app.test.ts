@@ -43,6 +43,7 @@ import {
 } from "@opencompany/core";
 import { setExceptionReporter } from "@opencompany/observability";
 import {
+  AttachmentUploadEnvelopeSchema,
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
@@ -2714,13 +2715,14 @@ describe("canonical Hono API", () => {
     const response = await app.request("/v1/attachments", { method: "POST", body: form });
     expect(response.status).toBe(201);
     expect(uploaded).toHaveLength(1);
-    const json = await response.json();
+    const json = AttachmentUploadEnvelopeSchema.parse(await response.json());
     expect(json).toMatchObject({
       data: {
         attachment: {
           id: "attachment_1",
           filename: "brief.pdf",
           kind: "document",
+          sizeBytes: 3,
         },
         replayed: false,
       },
@@ -2751,7 +2753,10 @@ describe("canonical Hono API", () => {
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({ idempotencyKey: "web-chat-attachment:pending-1" }),
     );
-    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+    const json = AttachmentUploadEnvelopeSchema.parse(await response.json());
+    expect(json).toMatchObject({
+      data: { attachment: { sizeBytes: 4 }, replayed: true },
+    });
 
     const invalidForm = new FormData();
     invalidForm.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));
