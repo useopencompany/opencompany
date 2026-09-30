@@ -24,6 +24,12 @@ interface ChatInputControllerValue {
    */
   foreignKeyboard: SharedValue<boolean>;
   consumeComposerFocusRequest: (requestId: number) => boolean;
+  /**
+   * Before a sheet or picker takes over, remembers whether the composer had focus. The composer
+   * takes it back once the sheet closes or the picker finishes.
+   */
+  holdComposerFocus: () => void;
+  takeHeldComposerFocus: () => boolean;
   dismissComposer: () => Promise<void>;
   dismissSearch: () => Promise<void>;
   requestComposerFocus: () => void;
@@ -36,6 +42,7 @@ const ChatInputControllerContext = createContext<ChatInputControllerValue | null
 export function ChatInputControllerProvider({ children }: { children: ReactNode }) {
   const composerInputRef = useRef<ComposerInputHandle>(null);
   const consumedFocusRequestRef = useRef(0);
+  const heldComposerFocusRef = useRef(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dismissSearchRequestId, setDismissSearchRequestId] = useState(0);
   const [focusRequestId, setFocusRequestId] = useState(0);
@@ -96,6 +103,14 @@ export function ChatInputControllerProvider({ children }: { children: ReactNode 
           if (requestId <= consumedFocusRequestRef.current) return false;
           consumedFocusRequestRef.current = requestId;
           return true;
+        },
+        holdComposerFocus: () => {
+          heldComposerFocusRef.current = composerInputRef.current?.isFocused() ?? false;
+        },
+        takeHeldComposerFocus: () => {
+          const held = heldComposerFocusRef.current;
+          heldComposerFocusRef.current = false;
+          return held;
         },
         dismissComposer,
         dismissSearch: async () => {

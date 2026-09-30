@@ -38,6 +38,15 @@ export default {
       },
     ],
     [
+      "expo-camera",
+      {
+        cameraPermission: CAMERA_USAGE_DESCRIPTION,
+        microphonePermission: false,
+        recordAudioAndroid: false,
+        barcodeScannerEnabled: false,
+      },
+    ],
+    [
       "expo-build-properties",
       {
         ios: {
@@ -80,7 +89,7 @@ export default {
     typedRoutes: true,
     reactCompiler: true,
     inlineModules: {
-      watchedDirectories: ["src/widgets/sidebar/native"],
+      watchedDirectories: ["src/widgets/sidebar/native", "src/shared/ui/animated-symbol"],
     },
   },
   extra: {

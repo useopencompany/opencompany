@@ -13,9 +13,9 @@ import { chatQueryKeys, invalidateConversation } from "./chat-queries";
 import { createChatSession } from "./chat-session";
 import {
   type ChatPartition,
+  type OutgoingDraft,
   queueApprovalCommand,
   queueStopCommand,
-  type StoredDraft,
 } from "./chat-store";
 import { type PendingDraftSend, useDraftSend } from "./use-draft-send";
 
@@ -28,7 +28,7 @@ interface ChatCoordinatorValue {
   pendingSends: Record<string, PendingDraftSend>;
   stoppingConversations: ReadonlySet<string>;
   sendDraft: (
-    draft: StoredDraft,
+    draft: OutgoingDraft,
     onPublished?: () => Promise<void>,
   ) => Promise<{ conversationId: string; userMessageId: string }>;
   stopRun: (id: string) => Promise<void>;
@@ -119,7 +119,7 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   }, [session, visibleId]);
 
   const sendDraft = async (
-    draft: StoredDraft,
+    draft: OutgoingDraft,
     onPublished?: () => Promise<void>,
   ): Promise<{ conversationId: string; userMessageId: string }> => {
     const queued = await draftSend.sendDraft(draft, onPublished);

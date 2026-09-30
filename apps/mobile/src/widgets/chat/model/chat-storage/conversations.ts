@@ -1,8 +1,9 @@
-import type {
-  AttachmentDto,
-  ConversationDto,
-  MessageDto,
-  TaskReadModel,
+import {
+  type AttachmentDto,
+  ConversationComposerSettingsSchema,
+  type ConversationDto,
+  type MessageDto,
+  type TaskReadModel,
 } from "@opencompany/protocol/schemas";
 import type { ChatMessage, ChatPart } from "../chat";
 import { getChatDatabase, parseJson, values, withChatTransaction } from "./database";
@@ -31,12 +32,19 @@ function partIdentity(messageId: string, part: ChatPart, index: number): string 
 const normalizePartIdentities = (messageId: string, parts: ChatPart[]): ChatPart[] =>
   parts.map((part, index) => ({ ...part, id: partIdentity(messageId, part, index) }));
 
+const composerSettingsFromJson = (value: string | null): ConversationDto["composerSettings"] => {
+  if (value === null) return null;
+  const parsed = ConversationComposerSettingsSchema.safeParse(parseJson<unknown>(value));
+  return parsed.success ? parsed.data : null;
+};
+
 const conversationFromRow = (row: ConversationRow): StoredConversation => ({
   id: row.local_id,
   kind: row.kind,
   title: row.title,
   engine: row.engine,
   model: row.model,
+  composerSettings: composerSettingsFromJson(row.composer_settings_json),
   runtime: row.runtime_json ? parseJson<ConversationDto["runtime"]>(row.runtime_json) : null,
   updatedAt: row.updated_at,
   lastViewedAt: row.last_viewed_at,
@@ -190,13 +198,14 @@ export const mergeConversationSnapshots = async (
       const keepLocal = preserved.has(conversation.id) ? 1 : 0;
       await database.runAsync(
         `INSERT INTO conversations (
-       user_id, workspace_id, local_id, title, engine, model, runtime_json,
-       updated_at, last_viewed_at, provisional, pinned_at, activity_state, has_unseen,
-       awaiting_input
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
+       user_id, workspace_id, local_id, title, engine, model, composer_settings_json,
+       runtime_json, updated_at, last_viewed_at, provisional, pinned_at, activity_state,
+       has_unseen, awaiting_input
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
      ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET
        title = CASE WHEN ? THEN conversations.title ELSE excluded.title END,
        engine = excluded.engine, model = excluded.model,
+       composer_settings_json = excluded.composer_settings_json,
        runtime_json = excluded.runtime_json, updated_at = excluded.updated_at, provisional = 0,
        pinned_at = CASE
          WHEN ? OR conversations.kind = 'task' THEN conversations.pinned_at
@@ -210,6 +219,7 @@ export const mergeConversationSnapshots = async (
         conversation.title,
         conversation.engine,
         conversation.model,
+        conversation.composerSettings ? JSON.stringify(conversation.composerSettings) : null,
         JSON.stringify(conversation.runtime),
         conversation.updatedAt,
         now,

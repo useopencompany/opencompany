@@ -1,6 +1,7 @@
 import { File } from "expo-file-system";
 import { until } from "until-async";
-import type { ChatModelId, ComposerAttachment } from "../chat-composer-context";
+import type { ComposerAttachment } from "../chat-composer-context";
+import { type ComposerSelection, parseStoredSelection } from "../composer-selection";
 import { getChatDatabase, values, waitForChatWrites, withChatTransaction } from "./database";
 import { attachmentDirectory, deleteFiles } from "./files";
 import type { AttachmentRow, ChatPartition, DraftRow, StoredDraft } from "./types";
@@ -23,7 +24,7 @@ export const getStoredDraft = async (
   await waitForChatWrites();
   const database = await getChatDatabase();
   const row = await database.getFirstAsync<DraftRow>(
-    `SELECT conversation_id, text, model_id FROM drafts
+    `SELECT conversation_id, text, model_id, selection_json FROM drafts
       WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?`,
     ...values(partition),
     conversationId,
@@ -40,7 +41,7 @@ export const getStoredDraft = async (
   return {
     conversationId,
     text: row?.text ?? "",
-    modelId: row?.model_id ?? "moonshotai/kimi-k3",
+    selection: row ? parseStoredSelection(row.selection_json, row.model_id) : null,
     attachments: attachments.map(attachmentFromRow),
   };
 };
@@ -49,18 +50,23 @@ export const saveStoredDraft = async (
   partition: ChatPartition,
   conversationId: string,
   text: string,
-  modelId: ChatModelId,
+  selection: ComposerSelection | null,
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
+    // model_id predates engines and stays NOT NULL. It mirrors the Chat model, or stays empty
+    // while the draft has no selection of its own.
     await database.runAsync(
-      `INSERT INTO drafts (user_id, workspace_id, conversation_id, text, model_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO drafts (
+         user_id, workspace_id, conversation_id, text, model_id, selection_json, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, workspace_id, conversation_id) DO UPDATE SET
-       text = excluded.text, model_id = excluded.model_id, updated_at = excluded.updated_at`,
+       text = excluded.text, model_id = excluded.model_id,
+       selection_json = excluded.selection_json, updated_at = excluded.updated_at`,
       ...values(partition),
       conversationId,
       text,
-      modelId,
+      selection?.chatModelId ?? "",
+      selection ? JSON.stringify(selection) : null,
       Date.now(),
     );
   });

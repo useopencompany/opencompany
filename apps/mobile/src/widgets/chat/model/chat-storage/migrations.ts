@@ -162,3 +162,12 @@ ALTER TABLE conversations ADD COLUMN task_display_id TEXT;
 ALTER TABLE conversations ADD COLUMN task_status TEXT;
 PRAGMA user_version = 4;
 `;
+
+// Engine selection for drafts and the server's last composer settings for conversations. Both
+// start NULL: an older draft keeps its Chat model through drafts.model_id, and an older
+// conversation hydrates its settings on the next snapshot.
+export const COMPOSER_SELECTION_SCHEMA = `
+ALTER TABLE drafts ADD COLUMN selection_json TEXT;
+ALTER TABLE conversations ADD COLUMN composer_settings_json TEXT;
+PRAGMA user_version = 5;
+`;

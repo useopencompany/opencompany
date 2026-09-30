@@ -1,6 +1,10 @@
 import { throwIfAborted } from "@/shared/lib/abort";
 import { queryClient } from "@/shared/lib/query-client";
-import type { ChatPartition } from "./chat-store";
+import {
+  type ChatPartition,
+  getConversationRunCheckpoint,
+  listQueuedRunMessageIds,
+} from "./chat-store";
 
 const root = (partition: ChatPartition) =>
   ["chat", partition.userId, partition.workspaceId] as const;
@@ -23,3 +27,13 @@ export async function invalidateConversation(partition: ChatPartition, id: strin
     queryClient.invalidateQueries({ queryKey: chatQueryKeys.run(partition, id) }),
   ]);
 }
+
+/** The Run working in a conversation, if any, and the Task replies queued behind it. */
+export const runStateQueryOptions = (partition: ChatPartition | null, id: string) => ({
+  queryKey: partition ? chatQueryKeys.run(partition, id) : ["chat", "run", "signed-out"],
+  queryFn: async () => ({
+    active: await getConversationRunCheckpoint(partition!, id),
+    queuedMessageIds: await listQueuedRunMessageIds(partition!, id),
+  }),
+  enabled: Boolean(partition),
+});

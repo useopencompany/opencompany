@@ -12,6 +12,10 @@
       "types": "./src/types.ts",
       "default": "./src/types.ts"
     },
+    "./models": {
+      "types": "./src/models.ts",
+      "default": "./src/models.ts"
+    },
     "./official-plugin-catalog": {
       "types": "./src/official-plugin-catalog.ts",
       "default": "./src/official-plugin-catalog.ts"
