@@ -36,7 +36,7 @@ export default function StackLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="chats/[chatId]" />
         <Stack.Screen
-          name="attachment-sheet"
+          name="model-sheet"
           options={{
             presentation: "formSheet",
             animation: "default",
@@ -44,7 +44,8 @@ export default function StackLayout() {
             gestureEnabled: true,
             sheetGrabberVisible: true,
             contentStyle: { backgroundColor: "transparent" },
-            sheetAllowedDetents: [0.65],
+            sheetAllowedDetents: [0.65, 1],
+            sheetExpandsWhenScrolledToEdge: true,
           }}
         />
         <Stack.Screen

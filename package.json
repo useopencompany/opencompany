@@ -87,7 +87,7 @@
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "eslint-config-next": "16.2.10",
-    "next": "16.3.3",
+    "next": "16.3.6",
     "pg": "^8.23.0",
     "vercel": "^59.11.2"
   },
@@ -183,6 +183,7 @@
   },
   "patchedDependencies": {
     "metro@0.84.4": "patches/metro@0.84.4.patch",
-    "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch"
+    "metro-runtime@0.84.4": "patches/metro-runtime@0.84.4.patch",
+    "node-forge@1.4.0": "patches/node-forge@1.4.0.patch"
   }
 }

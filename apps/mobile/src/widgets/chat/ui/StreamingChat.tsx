@@ -30,18 +30,23 @@ import type { ChatMessage as ChatMessageModel, ConnectivityState } from "../mode
 import { useChatComposer } from "../model/chat-composer-context";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
 import { useChatInputController } from "../model/chat-input-controller";
+import { runStateQueryOptions } from "../model/chat-queries";
 import {
-  getConversationRunCheckpoint,
   getPendingMessageCommand,
-  listQueuedRunMessageIds,
   listStoredConversations,
   listStoredMessages,
   markConversationViewed,
   NEW_CHAT_ID,
-  type StoredDraft,
+  type OutgoingDraft,
 } from "../model/chat-store";
 import { useMarkConversationSeen } from "../model/conversation-actions";
-import { ChatComposer, type SentMessageIdentity } from "./ChatComposer";
+import { AttachmentOverlay } from "./attachment-overlay";
+import {
+  type AttachmentAnchor,
+  ChatComposer,
+  COMPOSER_ESTIMATED_HEIGHT,
+  type SentMessageIdentity,
+} from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
@@ -88,7 +93,8 @@ export function StreamingChat({
   ]) as [string, string];
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
-  const [composerHeight, setComposerHeight] = useState(insets.bottom + 68);
+  const [composerHeight, setComposerHeight] = useState(insets.bottom + COMPOSER_ESTIMATED_HEIGHT);
+  const [attachmentAnchor, setAttachmentAnchor] = useState<AttachmentAnchor | null>(null);
   const [initialAnchorMessageId] = useState(pendingAnchorMessageId);
   const [hasSent, setHasSent] = useState(false);
   const [anchorMessageId, setAnchorMessageId] = useState<string | undefined>(
@@ -130,16 +136,7 @@ export function StreamingChat({
     },
     enabled: Boolean(coordinator.partition),
   });
-  const runQuery = useQuery({
-    queryKey: coordinator.partition
-      ? chatQueryKeys.run(coordinator.partition, chatId)
-      : ["chat", "run", "signed-out"],
-    queryFn: async () => ({
-      active: await getConversationRunCheckpoint(coordinator.partition!, chatId),
-      queuedMessageIds: await listQueuedRunMessageIds(coordinator.partition!, chatId),
-    }),
-    enabled: Boolean(coordinator.partition),
-  });
+  const runQuery = useQuery(runStateQueryOptions(coordinator.partition, chatId));
   const conversationQuery = useQuery({
     queryKey: coordinator.partition
       ? chatQueryKeys.conversations(coordinator.partition)
@@ -204,7 +201,7 @@ export function StreamingChat({
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerContainerRef,
-    insets.bottom + 68,
+    insets.bottom + COMPOSER_ESTIMATED_HEIGHT,
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   // Hold keyboard-driven list insets and scrolling while an unrelated keyboard comes and goes.
@@ -284,7 +281,7 @@ export function StreamingChat({
     />
   );
 
-  const handleSend = (draft: StoredDraft): Promise<SentMessageIdentity> => {
+  const handleSend = (draft: OutgoingDraft): Promise<SentMessageIdentity> => {
     const isFirstMessage = messages.length === 0;
     anchorOverflowedRef.current = false;
     followResponseRef.current = true;
@@ -437,6 +434,7 @@ export function StreamingChat({
           isScreenFocused={isFocused}
           isGenerating={composerIsGenerating}
           isStopping={isStopping}
+          onAttachmentPress={setAttachmentAnchor}
           onLayout={(event) => {
             setComposerHeight(event.nativeEvent.layout.height);
             onComposerLayout(event);
@@ -445,6 +443,11 @@ export function StreamingChat({
           onStop={() => coordinator.stopRun(chatId)}
         />
       </Reanimated.View>
+      <AttachmentOverlay
+        anchor={attachmentAnchor}
+        isScreenFocused={isFocused}
+        onClosed={() => setAttachmentAnchor(null)}
+      />
     </View>
   );
 }

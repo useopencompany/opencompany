@@ -8,12 +8,19 @@ import {
   CreateMessageBodySchema,
   type CreateTaskCommentBody,
   CreateTaskCommentBodySchema,
+  type MessageEngine,
+  MessageEngineSchema,
   type ResolveApprovalBody,
   ResolveApprovalBodySchema,
 } from "@opencompany/protocol/schemas";
 import { z } from "zod";
 import type { ChatPart } from "../chat";
 import type { ComposerAttachment } from "../chat-composer-context";
+import {
+  messageEngineForSelection,
+  selectedModelId,
+  selectionFromQueuedIntent,
+} from "../composer-selection";
 import { getChatDatabase, values, withChatTransaction } from "./database";
 import { attachmentFromRow } from "./drafts";
 import { ACTIVE_RUN_ORDER } from "./runs";
@@ -25,7 +32,7 @@ import {
   NEW_CHAT_ID,
   type OutboxCommand,
   type OutboxRow,
-  type StoredDraft,
+  type OutgoingDraft,
 } from "./types";
 
 const provisionalTitle = (text: string, attachments: ComposerAttachment[]): string => {
@@ -40,9 +47,14 @@ export interface QueuedMessageIdentity {
   clientMessageId: string;
 }
 
+// The settings a conversation reports back as composerSettings, kept locally so reopening the
+// conversation shows what was last sent before the next server snapshot arrives.
+const composerSettingsForEngine = (engine: MessageEngine): string | null =>
+  engine.type === "opencompany" ? null : JSON.stringify(engine.settings);
+
 export const queueMessageFromDraft = async (
   partition: ChatPartition,
-  draft: StoredDraft,
+  draft: OutgoingDraft,
   result: QueuedMessageIdentity,
 ): Promise<QueuedMessageIdentity> => {
   const sourceConversationId = draft.conversationId;
@@ -50,8 +62,10 @@ export const queueMessageFromDraft = async (
     const existingConversation = await database.getFirstAsync<{
       provisional: number;
       task_id: string | null;
+      engine: MessageEngine["type"];
+      model: string;
     }>(
-      "SELECT provisional, task_id FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
+      "SELECT provisional, task_id, engine, model FROM conversations WHERE user_id = ? AND workspace_id = ? AND local_id = ?",
       ...values(partition),
       sourceConversationId,
     );
@@ -59,6 +73,23 @@ export const queueMessageFromDraft = async (
       sourceConversationId === NEW_CHAT_ID || Boolean(existingConversation?.provisional);
     // A Task takes replies while it works: each becomes a Run queued behind the active one.
     const taskId = existingConversation?.task_id ?? null;
+    // Freeze the engine, model, and settings now: later picker changes edit the draft, never this
+    // request. A Task reply goes through its comment endpoint and carries none of them.
+    const selected = taskId ? null : messageEngineForSelection(draft.selection);
+    if (selected && !selected.ok) throw new Error(selected.error);
+    const engine = selected?.engine ?? null;
+    // An accepted conversation keeps the engine and model it started with, as on the web.
+    if (
+      engine &&
+      !isNewConversation &&
+      existingConversation &&
+      existingConversation.engine !== engine.type
+    )
+      throw new Error("This conversation uses a different engine.");
+    const model =
+      isNewConversation || !existingConversation
+        ? selectedModelId(draft.selection)
+        : existingConversation.model;
     const pending = taskId
       ? null
       : await database.getFirstAsync<{ blocked: number }>(
@@ -100,16 +131,24 @@ export const queueMessageFromDraft = async (
     if (!text && attachments.length === 0) throw new Error("A message or attachment is required.");
     const now = Date.now();
     const timestamp = new Date(now).toISOString();
+    // A provisional conversation was never accepted, so a resend may still change its engine.
     await database.runAsync(
       `INSERT INTO conversations (
-         user_id, workspace_id, local_id, title, engine, model, runtime_json,
-         updated_at, last_viewed_at, provisional
-       ) VALUES (?, ?, ?, ?, 'opencompany', ?, NULL, ?, ?, ?)
-       ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET updated_at = excluded.updated_at`,
+         user_id, workspace_id, local_id, title, engine, model, composer_settings_json,
+         runtime_json, updated_at, last_viewed_at, provisional
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+       ON CONFLICT (user_id, workspace_id, local_id) DO UPDATE SET
+         updated_at = excluded.updated_at,
+         engine = CASE WHEN conversations.provisional THEN excluded.engine ELSE conversations.engine END,
+         model = CASE WHEN conversations.provisional THEN excluded.model ELSE conversations.model END,
+         composer_settings_json = CASE WHEN conversations.task_id IS NULL
+           THEN excluded.composer_settings_json ELSE conversations.composer_settings_json END`,
       ...values(partition),
       result.conversationId,
       provisionalTitle(text, attachments.map(attachmentFromRow)),
-      draft.modelId,
+      engine?.type ?? existingConversation?.engine ?? "opencompany",
+      model,
+      engine ? composerSettingsForEngine(engine) : null,
       timestamp,
       now,
       isNewConversation ? 1 : 0,
@@ -157,9 +196,7 @@ export const queueMessageFromDraft = async (
       result.conversationId,
       result.clientMessageId,
       JSON.stringify(
-        taskId
-          ? { content: text, taskId }
-          : { content: text, model: draft.modelId, isNewConversation },
+        taskId ? { content: text, taskId } : { content: text, model, isNewConversation, engine },
       ),
       `mobile-message:${result.clientMessageId}`,
       now,
@@ -172,8 +209,12 @@ export const queueMessageFromDraft = async (
       ...values(partition),
       sourceConversationId,
     );
+    // The next new chat opens on the same engine and model, so its draft keeps the selection. An
+    // existing conversation reads its settings back from the conversation row instead.
     await database.runAsync(
-      "DELETE FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
+      sourceConversationId === NEW_CHAT_ID
+        ? "UPDATE drafts SET text = '' WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?"
+        : "DELETE FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
       ...values(partition),
       sourceConversationId,
     );
@@ -251,6 +292,7 @@ const ChatIntentSchema = z.object({
   content: z.string(),
   model: z.string(),
   isNewConversation: z.boolean(),
+  engine: MessageEngineSchema.optional(),
 });
 
 const parseMessageCommand = (
@@ -465,22 +507,34 @@ export const failMessageCommand = async (
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     const currentDraft = await database.getFirstAsync<DraftRow>(
-      "SELECT conversation_id, text, model_id FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
+      "SELECT conversation_id, text, model_id, selection_json FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
       ...values(partition),
       command.conversationId,
     );
     const text = command.intent.content;
     const restoredText = [currentDraft?.text.trim(), text.trim()].filter(Boolean).join("\n\n");
+    // Restore the rejected request's engine and settings unless the user has chosen again since.
+    // A Task reply carries none, so its draft keeps whatever it had.
+    const restoredSelection =
+      currentDraft?.selection_json ??
+      (command.target === "chat"
+        ? selectionFromQueuedIntent(
+            command.intent.engine ?? { type: "opencompany", schemaVersion: 1 },
+            command.intent.model,
+          )
+        : null);
     await database.runAsync(
-      `INSERT INTO drafts (user_id, workspace_id, conversation_id, text, model_id, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO drafts (
+         user_id, workspace_id, conversation_id, text, model_id, selection_json, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id, workspace_id, conversation_id) DO UPDATE SET
-         text = excluded.text, model_id = drafts.model_id, updated_at = excluded.updated_at`,
+         text = excluded.text, model_id = drafts.model_id,
+         selection_json = drafts.selection_json, updated_at = excluded.updated_at`,
       ...values(partition),
       command.conversationId,
       restoredText,
-      currentDraft?.model_id ??
-        (command.target === "chat" ? command.intent.model : "moonshotai/kimi-k3"),
+      currentDraft?.model_id ?? (command.target === "chat" ? command.intent.model : ""),
+      restoredSelection,
       Date.now(),
     );
     await database.runAsync(

@@ -2,12 +2,14 @@ import type {
   ConversationDto,
   CreateMessageBody,
   CreateTaskCommentBody,
+  MessageEngine,
   ResolveApprovalBody,
   RunDto,
   TaskDto,
 } from "@opencompany/protocol/schemas";
 import type { ChatMessage, ChatPart } from "../chat";
-import type { ChatModelId, ComposerAttachment } from "../chat-composer-context";
+import type { ComposerAttachment } from "../chat-composer-context";
+import type { ComposerSelection } from "../composer-selection";
 
 export const NEW_CHAT_ID = "new";
 
@@ -29,6 +31,7 @@ export interface StoredConversation {
   title: string;
   engine: ConversationDto["engine"];
   model: string;
+  composerSettings: ConversationDto["composerSettings"];
   runtime: ConversationDto["runtime"];
   updatedAt: string;
   lastViewedAt: number;
@@ -49,8 +52,14 @@ export interface StoredConversation {
 export interface StoredDraft {
   conversationId: string;
   text: string;
-  modelId: ChatModelId;
+  /** Null until the user picks something; the composer then derives it from the conversation. */
+  selection: ComposerSelection | null;
   attachments: ComposerAttachment[];
+}
+
+/** A draft at the moment it is sent, with the selection the composer resolved and showed. */
+export interface OutgoingDraft extends StoredDraft {
+  selection: ComposerSelection;
 }
 
 export type OutboxKind = "stop" | "approval" | "message";
@@ -74,7 +83,13 @@ interface MessageCommandBase extends CommandBase {
 export type MessageCommand =
   | (MessageCommandBase & {
       target: "chat";
-      intent: { content: string; model: string; isNewConversation: boolean };
+      // Frozen when queued. Intents written before engines existed have no engine and send Chat.
+      intent: {
+        content: string;
+        model: string;
+        isNewConversation: boolean;
+        engine?: MessageEngine;
+      };
       frozenBody: CreateMessageBody | null;
     })
   | (MessageCommandBase & {
@@ -110,7 +125,8 @@ export interface RunCheckpoint {
 export interface DraftRow {
   conversation_id: string;
   text: string;
-  model_id: ChatModelId;
+  model_id: string;
+  selection_json: string | null;
 }
 
 export interface AttachmentRow {
@@ -134,6 +150,7 @@ export interface ConversationRow {
   title: string;
   engine: ConversationDto["engine"];
   model: string;
+  composer_settings_json: string | null;
   runtime_json: string | null;
   updated_at: string;
   last_viewed_at: number;

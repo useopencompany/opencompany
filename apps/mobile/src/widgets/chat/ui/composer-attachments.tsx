@@ -99,6 +99,8 @@ export function ComposerAttachments({
   const [contentHeight, setContentHeight] = useState(0);
   const [displayedAttachments, setDisplayedAttachments] = useState(attachments);
   const unmountTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const rowWidthRef = useRef(0);
   const hasDisplayedAttachments = displayedAttachments.length > 0;
 
   useEffect(() => {
@@ -158,6 +160,13 @@ export function ComposerAttachments({
           contentContainerClassName="flex-row gap-2"
           horizontal
           keyboardShouldPersistTaps="handled"
+          // A new attachment joins the end of the row. Scrolling to it shows it land, which is
+          // where the camera's photo flies to.
+          onContentSizeChange={(width) => {
+            if (width > rowWidthRef.current) scrollRef.current?.scrollToEnd();
+            rowWidthRef.current = width;
+          }}
+          ref={scrollRef}
           showsHorizontalScrollIndicator={false}
         >
           {displayedAttachments.map((attachment) => (

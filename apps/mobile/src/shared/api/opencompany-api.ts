@@ -2,6 +2,8 @@ import { type RunEventStreamOptions, streamRunEvents } from "@opencompany/protoc
 import {
   AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ClaudeCodeAuthStatusEnvelopeSchema,
+  CodexAuthStatusEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
@@ -62,22 +64,27 @@ const parseApiOrigin = (): string => {
 export const API_ORIGIN = parseApiOrigin();
 
 /**
- * Public share pages are served by the web app, which runs beside the API: `api.` becomes `my.`
- * on hosted origins, and the local API on :3001 pairs with the local web app on :3443.
+ * The web app runs beside the API: `api.` becomes `my.` on hosted origins, and the local API on
+ * :3001 pairs with the local web app on :3443.
  */
-const shareOrigin = (apiOrigin: string): string | null => {
+const webOrigin = (apiOrigin: string): string | null => {
   const url = new URL(apiOrigin);
   if (url.hostname === "localhost" && url.port === "3001") return "https://localhost:3443";
   if (url.hostname.startsWith("api.")) return `https://my.${url.hostname.slice("api.".length)}`;
   return null;
 };
 
-const SHARE_ORIGIN = shareOrigin(API_ORIGIN);
+const WEB_ORIGIN = webOrigin(API_ORIGIN);
 
 export const publicShareUrl = (shareId: string): string => {
-  if (!SHARE_ORIGIN) throw new Error("Share links are unavailable for this server.");
-  return new URL(`/share/${encodeURIComponent(shareId)}`, `${SHARE_ORIGIN}/`).toString();
+  if (!WEB_ORIGIN) throw new Error("Share links are unavailable for this server.");
+  return new URL(`/share/${encodeURIComponent(shareId)}`, `${WEB_ORIGIN}/`).toString();
 };
+
+/** Where Codex and Claude Code subscriptions are connected. Null when no web app pairs with the API. */
+export const WEB_INFERENCE_SETTINGS_URL = WEB_ORIGIN
+  ? new URL("/settings/workspace/inference", `${WEB_ORIGIN}/`).toString()
+  : null;
 
 export class ApiRequestError extends Error {
   constructor(
@@ -126,6 +133,10 @@ type CreateTaskCommentBody = z.input<typeof CreateTaskCommentBodySchema>;
 type CreateTaskCommentEnvelope = z.output<typeof CreateTaskCommentEnvelopeSchema>;
 type ConversationShareEnvelope = z.output<typeof ConversationShareEnvelopeSchema>;
 type SessionPullRequestList = z.output<typeof SessionPullRequestListSchema>;
+type ClaudeCodeAuthStatusEnvelope = z.output<typeof ClaudeCodeAuthStatusEnvelopeSchema>;
+type CodexAuthStatusEnvelope = z.output<typeof CodexAuthStatusEnvelopeSchema>;
+export type ClaudeCodeAuthStatus = ClaudeCodeAuthStatusEnvelope["data"];
+export type CodexAuthStatus = CodexAuthStatusEnvelope["data"];
 export type ReadModelName = "tasks-v1" | "chat-messages-v2" | "chat-runs-v1";
 type MessagePage = z.output<typeof MessagePageSchema>;
 type AttachmentUploadEnvelope = z.output<typeof AttachmentUploadEnvelopeSchema>;
@@ -168,6 +179,10 @@ export interface AuthenticatedApi {
     signal?: AbortSignal,
   ) => Promise<CreateTaskCommentEnvelope>;
   listSessionPullRequests: (signal?: AbortSignal) => Promise<SessionPullRequestList>;
+  /** The acting user's own Claude Code subscription connection. Never includes the token. */
+  getClaudeCodeAuth: (signal?: AbortSignal) => Promise<ClaudeCodeAuthStatus>;
+  /** The acting user's own Codex connection. Never includes credentials. */
+  getCodexAuth: (signal?: AbortSignal) => Promise<CodexAuthStatus>;
   /** Every current row of an authorized read model, as a one-off snapshot rather than a stream. */
   readModelSnapshot: <Schema extends z.ZodType>(
     readModel: ReadModelName,
@@ -480,6 +495,24 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
       ),
     listSessionPullRequests: async (signal) =>
       requestJson("v1/session-pull-requests", SessionPullRequestListSchema, undefined, signal),
+    getClaudeCodeAuth: async (signal) =>
+      (
+        await requestJson<ClaudeCodeAuthStatusEnvelope>(
+          "v1/engine-auth/claude-code",
+          ClaudeCodeAuthStatusEnvelopeSchema,
+          undefined,
+          signal,
+        )
+      ).data,
+    getCodexAuth: async (signal) =>
+      (
+        await requestJson<CodexAuthStatusEnvelope>(
+          "v1/engine-auth/codex",
+          CodexAuthStatusEnvelopeSchema,
+          undefined,
+          signal,
+        )
+      ).data,
     readModelSnapshot: async (readModel, schema, query, signal) => {
       const rows = new Map<string, Record<string, unknown>>();
       let offset = "-1";

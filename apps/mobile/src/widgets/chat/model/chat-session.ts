@@ -466,8 +466,11 @@ export function createChatSession(input: {
           await queryClient.invalidateQueries({
             queryKey: chatQueryKeys.draft(current, command.conversationId),
           });
+          // A conflict explains itself, such as a coding agent that needs reconnecting.
           input.onError(
-            "Message was not accepted. Your draft has been restored.",
+            error instanceof ApiRequestError && error.code === "conflict"
+              ? `${error.message} Your draft has been restored.`
+              : "Message was not accepted. Your draft has been restored.",
             error,
             "chat.outbox.message",
           );

@@ -9,6 +9,7 @@ import { chatQueryKeys } from "./chat-queries";
 import {
   type ChatPartition,
   NEW_CHAT_ID,
+  type OutgoingDraft,
   type PendingMessageCommand,
   type QueuedMessageIdentity,
   queueMessageFromDraft,
@@ -28,7 +29,7 @@ export function useDraftSend(partition: ChatPartition | null, onQueued: () => vo
   const [pendingSends, setPendingSends] = useState<Record<string, PendingDraftSend>>({});
 
   const sendDraft = async (
-    draft: StoredDraft,
+    draft: OutgoingDraft,
     onPublished?: () => Promise<void>,
   ): Promise<QueuedMessageIdentity> => {
     if (!partition) throw new Error("Choose a workspace before sending a message.");
@@ -97,7 +98,7 @@ export function useDraftSend(partition: ChatPartition | null, onQueued: () => vo
         };
         queryClient.setQueryData(draftKey, restored);
         const [restoreError] = await until(() =>
-          saveStoredDraft(partition, sourceId, restored.text, restored.modelId),
+          saveStoredDraft(partition, sourceId, restored.text, restored.selection),
         );
         if (restoreError)
           showErrorToast("Your draft could not be saved.", restoreError, "chat.draft.restore");

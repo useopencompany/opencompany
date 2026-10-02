@@ -157,6 +157,12 @@ dependency cannot leave a silent hole behind. Prefer an override or an upstream 
 exception only when no released version is both patched and compatible, and record why in the
 script rather than in a commit message.
 
+`node-forge@1.4.0` has no released fix for GHSA-86w9-cpqp-85rv. The Bun patch in
+`patches/node-forge@1.4.0.patch` applies the nested DigestAlgorithm element-count check from
+[upstream PR 1152](https://github.com/digitalbazaar/forge/pull/1152). The Policy job tests malformed
+and valid signatures through `scripts/lib/node-forge.test.mjs`. Its advisory exception expires on
+2026-10-31. Remove both the patch and exception when a fixed version is available.
+
 Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
 These overrides update vulnerable transitive copies while preserving compatible major versions for
 other consumers. OpenTelemetry's LangChain instrumentation is updated before its core dependency;

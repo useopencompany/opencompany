@@ -33,7 +33,8 @@ async function processMessage(
         : { conversationId: command.conversationId }),
       clientMessageId: command.clientMessageId,
       content: command.intent.content,
-      engine: { type: "opencompany", schemaVersion: 1 },
+      // Intents queued before engines existed carry none and were always Chat.
+      engine: command.intent.engine ?? { type: "opencompany", schemaVersion: 1 },
       model: command.intent.model,
       ...(attachmentIds.length ? { attachmentIds } : {}),
     });
