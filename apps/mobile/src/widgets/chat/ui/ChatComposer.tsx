@@ -50,7 +50,9 @@ export const COMPOSER_HORIZONTAL_MARGIN = 12;
 // A first-frame estimate of the single-line composer, replaced by the measured height on layout.
 export const COMPOSER_ESTIMATED_HEIGHT = 110;
 const MAX_VISIBLE_LINES = 8;
-const LINE_HEIGHT = 22;
+// The system font's own line height at 17pt. The input keeps it: a fixed lineHeight puts the caret
+// of an empty line out of place until the first character lands.
+const LINE_HEIGHT = 20.5;
 const INPUT_VERTICAL_PADDING = 16;
 const CONTROLS_HEIGHT = 48;
 // The pill label grows with Dynamic Type up to this factor, so it cannot crowd out the buttons.
@@ -110,6 +112,10 @@ export function ChatComposer({
   const inputWasMountedRef = useRef(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [inputRevision, setInputRevision] = useState(0);
+  // The input scrolls only once its text fills the last visible line. While it still grows, a
+  // scrolling text view jumps to the caret for a frame before the new height lands. At the cap it
+  // no longer grows, and scrolling lets the text view keep the caret in sight.
+  const [inputScrolls, setInputScrolls] = useState(false);
   useLayoutEffect(() => {
     const justMounted = inputMounted && !inputWasMountedRef.current;
     inputWasMountedRef.current = inputMounted;
@@ -240,7 +246,7 @@ export function ChatComposer({
       {inputMounted ? (
         <TextInput
           accessibilityLabel="Message"
-          className="px-4 pt-3 pb-1 text-[17px] text-foreground leading-[22px]"
+          className="px-4 pt-3 pb-1 text-[17px] text-foreground"
           editable={isActiveConversation && !disabled}
           multiline
           nativeID="chat-composer"
@@ -251,6 +257,9 @@ export function ChatComposer({
             if (isActiveConversation) composer.setValue(text);
           }}
           onBlur={() => setInputFocused(false)}
+          onContentSizeChange={(event) =>
+            setInputScrolls(event.nativeEvent.contentSize.height > maxInputHeight - lineHeight / 2)
+          }
           onFocus={() => {
             setInputFocused(true);
             input.setKeyboardOwner("composer");
@@ -258,7 +267,7 @@ export function ChatComposer({
           placeholder="Ask opencompany"
           placeholderTextColorClassName="accent-muted-foreground"
           ref={inputRef}
-          scrollEnabled
+          scrollEnabled={inputScrolls}
           selectionColorClassName="accent-accent"
           style={{ maxHeight: maxInputHeight }}
           // A chat message is never a credential or contact field, so keep iOS AutoFill away.
@@ -390,7 +399,7 @@ export function ChatComposer({
           </View>
         ) : (
           <StyledGlassView
-            className="overflow-hidden rounded-[26px] border border-foreground/10 border-continuous"
+            className="rounded-[26px] border-continuous"
             glassEffectStyle="regular"
             isInteractive
           >

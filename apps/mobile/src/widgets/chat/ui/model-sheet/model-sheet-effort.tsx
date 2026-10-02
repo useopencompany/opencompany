@@ -1,5 +1,5 @@
 import type { CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import { Switch, Text, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useChatComposer } from "../../model/chat-composer-context";
@@ -13,6 +13,11 @@ import {
 } from "../../model/composer-selection";
 import { useConversationWorking } from "../../model/use-conversation-working";
 import { SheetRow, SheetRowSeparator, SheetSection } from "./sheet-rows";
+
+// Matches the web app's inputs: a page-colored field with an input border that turns to the ring
+// color while focused. On the sheet's grouped rows that reads as a distinct, recessed field.
+const FIELD_CLASS_NAME =
+  "rounded-[14px] border border-continuous bg-card px-3 py-2.5 text-[16px] text-foreground dark:bg-background";
 
 const EFFORT_DESCRIPTIONS: Partial<Record<CloudCodingReasoningEffort, string>> = {
   ultracode: "Extra High reasoning with dynamic workflows",
@@ -29,6 +34,9 @@ export function ModelSheetEffort() {
   const current = effectiveEffort(selection);
   const isCodex = selection.engine === "codex";
   const goal = validateGoal(selection.codex);
+  const [focusedField, setFocusedField] = useState<"objective" | "budget" | null>(null);
+  const fieldBorder = (field: "objective" | "budget", invalid: boolean) =>
+    invalid ? "border-destructive" : focusedField === field ? "border-ring" : "border-input";
   const updateCodex = (changes: Partial<ComposerSelection["codex"]>) =>
     updateSelection((value) => ({ ...value, codex: { ...value.codex, ...changes } }));
 
@@ -111,10 +119,12 @@ export function ModelSheetEffort() {
                 <TextInput
                   accessibilityHint="Required for Goal mode"
                   accessibilityLabel="Goal objective"
-                  className="min-h-[88px] rounded-[14px] border-continuous bg-background/70 px-3 py-2.5 text-[16px] text-foreground leading-[21px] dark:bg-background/40"
+                  className={`min-h-[88px] leading-[21px] ${FIELD_CLASS_NAME} ${fieldBorder("objective", Boolean(goal.objective))}`}
                   editable={!working}
                   maxLength={GOAL_OBJECTIVE_MAX_LENGTH + 200}
                   multiline
+                  onBlur={() => setFocusedField(null)}
+                  onFocus={() => setFocusedField("objective")}
                   onChangeText={(goalObjective) => updateCodex({ goalObjective })}
                   placeholder="Objective"
                   placeholderTextColorClassName="accent-muted-foreground"
@@ -135,9 +145,11 @@ export function ModelSheetEffort() {
               <View className="gap-1">
                 <TextInput
                   accessibilityLabel="Token budget, optional"
-                  className="rounded-[14px] border-continuous bg-background/70 px-3 py-2.5 text-[16px] text-foreground dark:bg-background/40"
+                  className={`${FIELD_CLASS_NAME} ${fieldBorder("budget", Boolean(goal.tokenBudget))}`}
                   editable={!working}
                   keyboardType="number-pad"
+                  onBlur={() => setFocusedField(null)}
+                  onFocus={() => setFocusedField("budget")}
                   onChangeText={(goalTokenBudget) => updateCodex({ goalTokenBudget })}
                   placeholder="Token budget (optional)"
                   placeholderTextColorClassName="accent-muted-foreground"

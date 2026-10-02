@@ -21,6 +21,7 @@ interface NativeAnimatedSymbolProps extends ViewProps {
   weight: AnimatedSymbolWeight;
   tintColor?: string;
   animated: boolean;
+  speed: number;
 }
 
 const NativeAnimatedSymbol = requireNativeView<NativeAnimatedSymbolProps>("NativeAnimatedSymbol");
@@ -33,6 +34,7 @@ function AnimatedSymbol({
   animated = true,
   name,
   size = 17,
+  speed = 1,
   style,
   tintColor,
   weight = "regular",
@@ -40,6 +42,8 @@ function AnimatedSymbol({
   animated?: boolean;
   name: SFSymbol;
   size?: number;
+  /** Playback rate of the Magic Replace transition. 2 plays it twice as fast. */
+  speed?: number;
   style?: ViewProps["style"];
   tintColor?: string;
   weight?: AnimatedSymbolWeight;
@@ -52,6 +56,7 @@ function AnimatedSymbol({
       name={name}
       pointerEvents="none"
       size={size}
+      speed={speed}
       style={[{ width: Math.ceil(size * 1.4), height: Math.ceil(size * 1.4) }, style]}
       tintColor={tintColor}
       weight={weight}

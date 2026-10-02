@@ -1,12 +1,23 @@
 import { type CameraView, type FlashMode, useCameraPermissions } from "expo-camera";
 import type { SFSymbol } from "expo-symbols";
 import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Linking, Pressable, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  AppState,
+  Linking,
+  Pressable,
+  type StyleProp,
+  Text,
+  View,
+  type ViewStyle,
+} from "react-native";
 import Reanimated, {
-  Easing,
+  type AnimatedStyle,
+  interpolate,
   useAnimatedStyle,
+  useDerivedValue,
   useReducedMotion,
-  withTiming,
+  withSpring,
 } from "react-native-reanimated";
 import { until } from "until-async";
 import { analytics, captureError } from "@/shared/lib/analytics";
@@ -24,14 +35,19 @@ const FLASH_SYMBOLS: Record<"off" | "auto" | "on", SFSymbol> = {
 };
 const FLASH_LABELS = { off: "Off", auto: "Auto", on: "On" } as const;
 const CONTROL_SIZE = 48;
-const REVEAL_TIMING = { duration: 260, easing: Easing.bezier(0.22, 1, 0.36, 1) };
+const CONTROL_GAP = 12;
+const SHUTTER_SIZE = 74;
+// Flash and Flip slide out of the options button inside one glass container, so their glass
+// stretches out of it and merges back in on the way down.
+const OPTIONS_SPRING = { duration: 320, dampingRatio: 0.82 };
 
 type CameraFailure = { kind: "unavailable" } | { kind: "capture"; message: string };
 
-function GlassCircle({
+function GlassControl({
   accessibilityLabel,
   disabled = false,
   expanded,
+  iconStyle,
   onPress,
   symbol,
   visible = true,
@@ -39,6 +55,7 @@ function GlassCircle({
   accessibilityLabel: string;
   disabled?: boolean;
   expanded?: boolean;
+  iconStyle?: StyleProp<AnimatedStyle<ViewStyle>>;
   onPress: () => void;
   symbol: SFSymbol;
   visible?: boolean;
@@ -65,34 +82,65 @@ function GlassCircle({
           }
         />
       ) : (
-        // Glass fades by switching its effect style. Fading a glass view's opacity to zero stops
-        // it from rendering at all. A faint fill keeps the button visible over a dark scene.
-        <>
-          <View
-            className={
-              visible
-                ? "absolute inset-0 rounded-full bg-white/15"
-                : "absolute inset-0 rounded-full"
-            }
-          />
-          <StyledGlassView
-            className="absolute inset-0 rounded-full"
-            colorScheme="dark"
-            glassEffectStyle={{ style: visible ? "regular" : "none", animate: true }}
-            isInteractive
-          />
-        </>
+        // A hidden control keeps its glass: it sits under the options button inside the same
+        // glass container, so its glass merges into that button and stretches out when shown.
+        <StyledGlassView
+          className="absolute inset-0 rounded-full"
+          colorScheme="dark"
+          glassEffectStyle="regular"
+          isInteractive
+        />
       )}
-      <View className="flex-1 items-center justify-center">
+      <Reanimated.View
+        className="flex-1 items-center justify-center"
+        pointerEvents="none"
+        style={iconStyle}
+      >
         <StyledAnimatedSymbol
           name={symbol}
           size={19}
-          style={{ opacity: visible ? (disabled ? 0.4 : 1) : 0 }}
+          speed={2}
+          style={{ opacity: disabled ? 0.4 : 1 }}
           tintColor="#ffffff"
           weight="semibold"
         />
-      </View>
+      </Reanimated.View>
     </Pressable>
+  );
+}
+
+/**
+ * A secondary control that slides between its own slot and the options button below it. Its
+ * icon fades in once the glass has pulled away from the button.
+ */
+function OptionControl({
+  expanded,
+  slot,
+  ...control
+}: Omit<Parameters<typeof GlassControl>[0], "iconStyle" | "visible"> & {
+  expanded: boolean;
+  slot: number;
+}) {
+  const reducedMotion = useReducedMotion();
+  const offset = slot * (CONTROL_SIZE + CONTROL_GAP);
+  const progress = useDerivedValue(() => {
+    const target = expanded ? 1 : 0;
+    return reducedMotion ? target : withSpring(target, OPTIONS_SPRING);
+  });
+  const slotStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: offset * (1 - progress.get()) }],
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(progress.get(), [0.35, 0.9], [0, 1], "clamp"),
+  }));
+  return (
+    <Reanimated.View
+      className="absolute left-0"
+      pointerEvents={expanded ? "auto" : "none"}
+      style={[{ bottom: offset }, slotStyle]}
+    >
+      <GlassControl {...control} iconStyle={iconStyle} visible={expanded} />
+    </Reanimated.View>
   );
 }
 
@@ -113,7 +161,7 @@ export function CameraPanel({
   remaining: number;
   takePhoto: (picture: { uri: string; width: number; height: number }) => Promise<AttachmentResult>;
 }) {
-  const reducedMotion = useReducedMotion();
+  const reducedTransparency = useReducedTransparency();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef<CameraView>(null);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
@@ -141,16 +189,6 @@ export function CameraPanel({
   useEffect(() => {
     if (!running) setReady(false);
   }, [running]);
-
-  const revealStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        translateY: reducedMotion
-          ? 0
-          : withTiming(controlsExpanded ? 0 : CONTROL_SIZE, REVEAL_TIMING),
-      },
-    ],
-  }));
 
   const capture = async () => {
     if (!cameraRef.current || capturing || !ready || remaining === 0) return;
@@ -252,7 +290,7 @@ export function CameraPanel({
       ) : null}
 
       <View className="absolute right-0 bottom-0 left-0 flex-row items-end justify-between px-5 pb-5">
-        <GlassCircle
+        <GlassControl
           accessibilityLabel="Back to attachment options"
           onPress={onBack}
           symbol="chevron.left"
@@ -264,45 +302,65 @@ export function CameraPanel({
           accessibilityLabel={capturing ? "Saving photo" : "Take photo"}
           accessibilityRole="button"
           accessibilityState={{ disabled: shutterDisabled, busy: capturing }}
-          className="size-[74px] items-center justify-center rounded-full border-4 border-white"
+          className="items-center justify-center"
           disabled={shutterDisabled}
           onPress={() => void capture()}
-          style={{ opacity: shutterDisabled && !capturing ? 0.45 : 1 }}
+          style={{ width: SHUTTER_SIZE, height: SHUTTER_SIZE }}
         >
-          <View className="size-[60px] items-center justify-center rounded-full bg-white">
+          {reducedTransparency ? (
+            <View className="absolute inset-0 rounded-full border-4 border-white" />
+          ) : (
+            <StyledGlassView
+              className="absolute inset-0 rounded-full"
+              colorScheme="dark"
+              glassEffectStyle="regular"
+              isInteractive
+            />
+          )}
+          <View
+            className="size-[60px] items-center justify-center rounded-full bg-white"
+            style={{ opacity: shutterDisabled && !capturing ? 0.45 : 1 }}
+          >
             {capturing ? <ActivityIndicator color="#000000" /> : null}
           </View>
         </Pressable>
-        <View className="items-center">
-          <Reanimated.View style={revealStyle}>
-            <StyledGlassContainer className="items-center gap-3 pb-3" spacing={12}>
-              <GlassCircle
-                accessibilityLabel={`Flash: ${FLASH_LABELS[flash]}`}
-                onPress={() => setFlash(nextFlash)}
-                symbol={FLASH_SYMBOLS[flash]}
-                visible={controlsExpanded}
-              />
-              <GlassCircle
-                accessibilityLabel={
-                  facing === "back" ? "Switch to front camera" : "Switch to rear camera"
-                }
-                onPress={() => setFacing(facing === "back" ? "front" : "back")}
-                symbol={
-                  facing === "back"
-                    ? "arrow.triangle.2.circlepath.camera"
-                    : "arrow.triangle.2.circlepath.camera.fill"
-                }
-                visible={controlsExpanded}
-              />
-            </StyledGlassContainer>
-          </Reanimated.View>
-          <GlassCircle
-            accessibilityLabel={controlsExpanded ? "Hide camera options" : "More camera options"}
+        <StyledGlassContainer
+          spacing={CONTROL_GAP + 4}
+          style={{
+            width: CONTROL_SIZE,
+            height: CONTROL_SIZE * 3 + CONTROL_GAP * 2,
+          }}
+          pointerEvents="box-none"
+        >
+          <OptionControl
+            accessibilityLabel={`Flash: ${FLASH_LABELS[flash]}`}
             expanded={controlsExpanded}
-            onPress={() => setControlsExpanded(!controlsExpanded)}
-            symbol={controlsExpanded ? "xmark" : "ellipsis"}
+            onPress={() => setFlash(nextFlash)}
+            slot={2}
+            symbol={FLASH_SYMBOLS[flash]}
           />
-        </View>
+          <OptionControl
+            accessibilityLabel={
+              facing === "back" ? "Switch to front camera" : "Switch to rear camera"
+            }
+            expanded={controlsExpanded}
+            onPress={() => setFacing(facing === "back" ? "front" : "back")}
+            slot={1}
+            symbol={
+              facing === "back"
+                ? "arrow.triangle.2.circlepath.camera"
+                : "arrow.triangle.2.circlepath.camera.fill"
+            }
+          />
+          <View className="absolute bottom-0 left-0">
+            <GlassControl
+              accessibilityLabel={controlsExpanded ? "Hide camera options" : "More camera options"}
+              expanded={controlsExpanded}
+              onPress={() => setControlsExpanded(!controlsExpanded)}
+              symbol={controlsExpanded ? "xmark" : "ellipsis"}
+            />
+          </View>
+        </StyledGlassContainer>
       </View>
     </View>
   );

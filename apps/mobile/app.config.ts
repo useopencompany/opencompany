@@ -89,7 +89,11 @@ export default {
     typedRoutes: true,
     reactCompiler: true,
     inlineModules: {
-      watchedDirectories: ["src/widgets/sidebar/native", "src/shared/ui/animated-symbol"],
+      watchedDirectories: [
+        "src/widgets/sidebar/native",
+        "src/shared/ui/animated-symbol",
+        "src/widgets/chat/native",
+      ],
     },
   },
   extra: {

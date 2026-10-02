@@ -27,6 +27,10 @@ class NativeAnimatedSymbol: Module {
         view.animated = animated
       }
 
+      Prop("speed") { (view: NativeAnimatedSymbolView, speed: Double) in
+        view.speed = max(0.1, speed)
+      }
+
       OnViewDidUpdateProps { (view: NativeAnimatedSymbolView) in
         view.render()
       }
@@ -43,6 +47,7 @@ final class NativeAnimatedSymbolView: ExpoView {
   var weight: UIImage.SymbolWeight = .regular
   var tint: UIColor?
   var animated = true
+  var speed: Double = 1
 
   private let imageView = UIImageView()
   private var renderedName: String?
@@ -79,7 +84,11 @@ final class NativeAnimatedSymbolView: ExpoView {
     if renderedName == nil || !animated || UIAccessibility.isReduceMotionEnabled {
       imageView.image = image
     } else {
-      imageView.setSymbolImage(image, contentTransition: .replace.magic(fallback: .replace.downUp))
+      imageView.setSymbolImage(
+        image,
+        contentTransition: .replace.magic(fallback: .replace.downUp),
+        options: .speed(speed)
+      )
     }
     renderedName = name
   }

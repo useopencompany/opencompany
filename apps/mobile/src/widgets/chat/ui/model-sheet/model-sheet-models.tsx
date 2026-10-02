@@ -1,3 +1,4 @@
+import { useNavigation } from "expo-router";
 import { Fragment } from "react";
 import { ScrollView } from "react-native";
 import { useChatComposer } from "../../model/chat-composer-context";
@@ -9,12 +10,14 @@ import {
 } from "../../model/composer-selection";
 import { ModelLogo } from "../model-logo";
 import { SheetRow, SheetRowSeparator, SheetSection } from "./sheet-rows";
-import { useCloseModelSheet } from "./use-close-model-sheet";
 
-/** The models the selected coding agent can run. Choosing one finishes with the sheet. */
+/**
+ * The models the selected coding agent can run. Choosing one returns to the sheet's overview, so
+ * effort and modes stay one tap away.
+ */
 export function ModelSheetModels() {
   const { locks, selection, updateSelection } = useChatComposer();
-  const close = useCloseModelSheet();
+  const navigation = useNavigation();
   if (selection.engine === "opencompany") return null;
   const engine = selection.engine;
   const currentModelId = selectedModelId(selection);
@@ -43,7 +46,7 @@ export function ModelSheetModels() {
                         ? { ...current, codexModelId: modelId }
                         : { ...current, claudeModelId: modelId },
                     );
-                  close();
+                  navigation.goBack();
                 }}
                 selected={selected}
                 subtitle={modelDescription(modelId)}
