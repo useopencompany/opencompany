@@ -75,9 +75,10 @@ export const saveStoredDraft = async (
 export const persistDraftAttachment = async (
   partition: ChatPartition,
   conversationId: string,
-  input: Omit<ComposerAttachment, "id" | "uri"> & { sourceUri: string },
+  input: Omit<ComposerAttachment, "uri"> & { sourceUri: string },
 ): Promise<ComposerAttachment> => {
-  const id = globalThis.crypto.randomUUID();
+  // The draft keeps the attachment's id, so its pending preview turns into the stored copy in place.
+  const { id } = input;
   const directory = attachmentDirectory();
   directory.create({ idempotent: true, intermediates: true });
   const candidateExtension = input.name.includes(".")

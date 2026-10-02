@@ -33,10 +33,6 @@ export function ModelSheetEffort() {
   const options = effortOptions(selection);
   const current = effectiveEffort(selection);
   const isCodex = selection.engine === "codex";
-  const goal = validateGoal(selection.codex);
-  const [focusedField, setFocusedField] = useState<"objective" | "budget" | null>(null);
-  const fieldBorder = (field: "objective" | "budget", invalid: boolean) =>
-    invalid ? "border-destructive" : focusedField === field ? "border-ring" : "border-input";
   const updateCodex = (changes: Partial<ComposerSelection["codex"]>) =>
     updateSelection((value) => ({ ...value, codex: { ...value.codex, ...changes } }));
 
@@ -113,61 +109,72 @@ export function ModelSheetEffort() {
               />
             }
           />
-          {selection.codex.goalModeEnabled ? (
-            <View className="gap-3 px-4 pt-1 pb-4">
-              <View className="gap-1">
-                <TextInput
-                  accessibilityHint="Required for Goal mode"
-                  accessibilityLabel="Goal objective"
-                  className={`min-h-[88px] leading-[21px] ${FIELD_CLASS_NAME} ${fieldBorder("objective", Boolean(goal.objective))}`}
-                  editable={!working}
-                  maxLength={GOAL_OBJECTIVE_MAX_LENGTH + 200}
-                  multiline
-                  onBlur={() => setFocusedField(null)}
-                  onFocus={() => setFocusedField("objective")}
-                  onChangeText={(goalObjective) => updateCodex({ goalObjective })}
-                  placeholder="Objective"
-                  placeholderTextColorClassName="accent-muted-foreground"
-                  textAlignVertical="top"
-                  // Uncontrolled: only this screen edits the field, and echoing each keystroke
-                  // back through the draft drops characters under fast typing.
-                  defaultValue={selection.codex.goalObjective}
-                />
-                {goal.objective ? (
-                  <Text
-                    accessibilityLiveRegion="polite"
-                    className="px-1 text-[13px] text-destructive"
-                  >
-                    {goal.objective}
-                  </Text>
-                ) : null}
-              </View>
-              <View className="gap-1">
-                <TextInput
-                  accessibilityLabel="Token budget, optional"
-                  className={`${FIELD_CLASS_NAME} ${fieldBorder("budget", Boolean(goal.tokenBudget))}`}
-                  editable={!working}
-                  keyboardType="number-pad"
-                  onBlur={() => setFocusedField(null)}
-                  onFocus={() => setFocusedField("budget")}
-                  onChangeText={(goalTokenBudget) => updateCodex({ goalTokenBudget })}
-                  placeholder="Token budget (optional)"
-                  placeholderTextColorClassName="accent-muted-foreground"
-                  defaultValue={selection.codex.goalTokenBudget}
-                />
-                {goal.tokenBudget ? (
-                  <Text
-                    accessibilityLiveRegion="polite"
-                    className="px-1 text-[13px] text-destructive"
-                  >
-                    {goal.tokenBudget}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-          ) : null}
+          {selection.codex.goalModeEnabled ? <GoalFields disabled={working} /> : null}
         </SheetSection>
       ) : null}
     </KeyboardAwareScrollView>
+  );
+}
+
+/**
+ * The Goal objective and token budget. They are uncontrolled: only this screen edits them, and
+ * echoing each keystroke back through the draft drops characters under fast typing. They mount
+ * with the draft's text and keep it as their starting value, since React Native re-measures an
+ * input whose `defaultValue` changes and would size it from older text.
+ */
+function GoalFields({ disabled }: { disabled: boolean }) {
+  const { selection, updateSelection } = useChatComposer();
+  const [initial] = useState(selection.codex);
+  const [focusedField, setFocusedField] = useState<"objective" | "budget" | null>(null);
+  const goal = validateGoal(selection.codex);
+  const fieldBorder = (field: "objective" | "budget", invalid: boolean) =>
+    invalid ? "border-destructive" : focusedField === field ? "border-ring" : "border-input";
+  const updateCodex = (changes: Partial<ComposerSelection["codex"]>) =>
+    updateSelection((value) => ({ ...value, codex: { ...value.codex, ...changes } }));
+
+  return (
+    <View className="gap-3 px-4 pt-1 pb-4">
+      <View className="gap-1">
+        <TextInput
+          accessibilityHint="Required for Goal mode"
+          accessibilityLabel="Goal objective"
+          className={`min-h-[88px] leading-[21px] ${FIELD_CLASS_NAME} ${fieldBorder("objective", Boolean(goal.objective))}`}
+          defaultValue={initial.goalObjective}
+          editable={!disabled}
+          maxLength={GOAL_OBJECTIVE_MAX_LENGTH + 200}
+          multiline
+          onBlur={() => setFocusedField(null)}
+          onChangeText={(goalObjective) => updateCodex({ goalObjective })}
+          onFocus={() => setFocusedField("objective")}
+          placeholder="Objective"
+          placeholderTextColorClassName="accent-muted-foreground"
+          textAlignVertical="top"
+        />
+        {goal.objective ? (
+          <Text accessibilityLiveRegion="polite" className="px-1 text-[13px] text-destructive">
+            {goal.objective}
+          </Text>
+        ) : null}
+      </View>
+      <View className="gap-1">
+        <TextInput
+          accessibilityLabel="Token budget, optional"
+          className={`${FIELD_CLASS_NAME} ${fieldBorder("budget", Boolean(goal.tokenBudget))}`}
+          defaultValue={initial.goalTokenBudget}
+          editable={!disabled}
+          keyboardType="number-pad"
+          onBlur={() => setFocusedField(null)}
+          onChangeText={(goalTokenBudget) => updateCodex({ goalTokenBudget })}
+          onFocus={() => setFocusedField("budget")}
+          placeholder="Token budget (optional)"
+          placeholderTextColorClassName="accent-muted-foreground"
+        />
+        {goal.tokenBudget ? (
+          <Text accessibilityLiveRegion="polite" className="px-1 text-[13px] text-destructive">
+            {goal.tokenBudget}
+          </Text>
+        ) : null}
+      </View>
+    </View>
   );
 }

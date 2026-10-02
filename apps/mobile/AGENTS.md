@@ -43,7 +43,10 @@ Use the `apple-design` when implementing iOS UI to get recent Apple design guide
 - `expo-camera` powers the composer's camera panel and `expo-glass-effect` its Liquid Glass
   surfaces. Use the `StyledCameraView`, `StyledGlassView`, and `StyledGlassContainer` wrappers in
   `src/shared/ui`. Never fade a glass view or its parent to zero opacity; switch
-  `glassEffectStyle` to `none` instead. Offer an opaque fallback when Reduce Transparency is on.
+  `glassEffectStyle` to `none` instead. Glass that mounts inside a parent that is still fading
+  in must start as `none` and switch to `regular` once the parent is fully shown: UIKit drops
+  glass set up at low opacity and never restores it. Offer an opaque fallback when Reduce
+  Transparency is on.
 - Wrap components with a prop ending in `Style` that is not a style (like `glassEffectStyle`)
   using `withUniwind(Component, { style: { fromClassName: "className" } })`. The automatic mode
   turns every `*Style` prop into a style array, which silently breaks the native prop.

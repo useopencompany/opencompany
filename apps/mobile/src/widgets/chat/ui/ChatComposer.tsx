@@ -45,6 +45,13 @@ export interface WindowFrame {
   height: number;
 }
 
+export interface AttachmentAnchor {
+  /** The plus button. The attachment menu grows out of it and folds back into it. */
+  button: WindowFrame;
+  /** Where the preview of the next attachment will sit once it lands in the composer. */
+  nextAttachment: WindowFrame;
+}
+
 // Horizontal margin shared with the attachment menu and camera panel, so they line up.
 export const COMPOSER_HORIZONTAL_MARGIN = 12;
 // A first-frame estimate of the single-line composer, replaced by the measured height on layout.
@@ -58,6 +65,10 @@ const CONTROLS_HEIGHT = 48;
 // The pill label grows with Dynamic Type up to this factor, so it cannot crowd out the buttons.
 const PILL_MAX_FONT_SCALE = 1.6;
 const ATTACHMENTS_HEIGHT = 120;
+// The attachment row's inset inside the composer and its previews, matching ComposerAttachments.
+const ATTACHMENTS_INSET = 10;
+const ATTACHMENT_PREVIEW_SIZE = 112;
+const ATTACHMENT_PREVIEW_GAP = 8;
 // The navigation bar and the space the transcript keeps below it.
 const TOP_CLEARANCE = 64;
 
@@ -83,7 +94,7 @@ export function ChatComposer({
   isScreenFocused: boolean;
   isGenerating: boolean;
   isStopping: boolean;
-  onAttachmentPress: (anchor: WindowFrame) => void;
+  onAttachmentPress: (anchor: AttachmentAnchor) => void;
   onLayout: (event: LayoutChangeEvent) => void;
   onSend: (draft: OutgoingDraft) => Promise<SentMessageIdentity>;
   onStop: () => Promise<void>;
@@ -97,6 +108,7 @@ export function ChatComposer({
   const reducedTransparency = useReducedTransparency();
   const inputRef = useRef<TextInput>(null);
   const plusRef = useRef<View>(null);
+  const glassRef = useRef<View>(null);
   const [layoutReady, setLayoutReady] = useState(false);
   const didHandleInitialFocusRef = useRef(false);
   const isActiveConversation = composer.conversationId === conversationId;
@@ -111,21 +123,24 @@ export function ChatComposer({
   const typedTextRef = useRef(value);
   const inputWasMountedRef = useRef(false);
   const [inputFocused, setInputFocused] = useState(false);
-  const [inputRevision, setInputRevision] = useState(0);
-  // The input scrolls only once its text fills the last visible line. While it still grows, a
-  // scrolling text view jumps to the caret for a frame before the new height lands. At the cap it
-  // no longer grows, and scrolling lets the text view keep the caret in sight.
-  const [inputScrolls, setInputScrolls] = useState(false);
+  // The text the input mounts with. React Native measures the input from a changed
+  // `defaultValue`, so passing the live draft would size it from text a keystroke or two old: on
+  // fast typing the composer shrank for a frame and the caret jumped. It also never sizes an input
+  // whose `defaultValue` has only ever been empty from the typed text, and that input stays one
+  // line tall. So an input that mounts empty takes its first typed text as its starting text, once.
+  // Otherwise the starting text changes only together with the input's key.
+  const [inputSeed, setInputSeed] = useState<{ revision: number; text: string } | null>(null);
   useLayoutEffect(() => {
     const justMounted = inputMounted && !inputWasMountedRef.current;
     inputWasMountedRef.current = inputMounted;
     if (!inputMounted || justMounted) {
       typedTextRef.current = value;
+      setInputSeed(justMounted ? { revision: 0, text: value } : null);
       return;
     }
     if (inputFocused || value === typedTextRef.current) return;
     typedTextRef.current = value;
-    if (value) setInputRevision((revision) => revision + 1);
+    if (value) setInputSeed((seed) => ({ revision: (seed?.revision ?? 0) + 1, text: value }));
     else inputRef.current?.clear();
   }, [value, inputFocused, inputMounted]);
   const { selection, locks } = composer;
@@ -204,7 +219,12 @@ export function ChatComposer({
   const goalBlocksSend = !locks.isTask && isGoalBlockingSend(selection);
   const hasContent = Boolean(value.trim()) || attachments.length > 0;
   const sendDisabled =
-    disabled || !isActiveConversation || sendMutation.isPending || !hasContent || goalBlocksSend;
+    disabled ||
+    !isActiveConversation ||
+    sendMutation.isPending ||
+    !hasContent ||
+    goalBlocksSend ||
+    composer.hasPendingAttachments;
 
   const send = () => {
     if (sendDisabled) return;
@@ -250,16 +270,14 @@ export function ChatComposer({
           editable={isActiveConversation && !disabled}
           multiline
           nativeID="chat-composer"
-          defaultValue={value}
-          key={inputRevision}
+          defaultValue={inputSeed?.text ?? value}
+          key={inputSeed?.revision ?? 0}
           onChangeText={(text) => {
             typedTextRef.current = text;
+            if (inputSeed?.text === "" && text) setInputSeed({ ...inputSeed, text });
             if (isActiveConversation) composer.setValue(text);
           }}
           onBlur={() => setInputFocused(false)}
-          onContentSizeChange={(event) =>
-            setInputScrolls(event.nativeEvent.contentSize.height > maxInputHeight - lineHeight / 2)
-          }
           onFocus={() => {
             setInputFocused(true);
             input.setKeyboardOwner("composer");
@@ -267,7 +285,6 @@ export function ChatComposer({
           placeholder="Ask opencompany"
           placeholderTextColorClassName="accent-muted-foreground"
           ref={inputRef}
-          scrollEnabled={inputScrolls}
           selectionColorClassName="accent-accent"
           style={{ maxHeight: maxInputHeight }}
           // A chat message is never a credential or contact field, so keep iOS AutoFill away.
@@ -285,8 +302,27 @@ export function ChatComposer({
           hitSlop={4}
           onPress={() => {
             plusRef.current?.measureInWindow((x, y, width, height) => {
-              analytics.capture("attachment_picker_opened");
-              onAttachmentPress({ x, y, width, height });
+              glassRef.current?.measureInWindow((glassX, glassY, glassWidth) => {
+                analytics.capture("attachment_picker_opened");
+                // The row scrolls to its newest preview, so a full row lands it at the right end.
+                // Without attachments the row opens above the input and the composer grows up.
+                const rowWidth = glassWidth - ATTACHMENTS_INSET * 2;
+                const offset = Math.min(
+                  attachments.length * (ATTACHMENT_PREVIEW_SIZE + ATTACHMENT_PREVIEW_GAP),
+                  rowWidth - ATTACHMENT_PREVIEW_SIZE,
+                );
+                const top =
+                  attachments.length > 0 ? glassY : glassY - ATTACHMENTS_HEIGHT - ATTACHMENTS_INSET;
+                onAttachmentPress({
+                  button: { x, y, width, height },
+                  nextAttachment: {
+                    x: glassX + ATTACHMENTS_INSET + offset,
+                    y: top + ATTACHMENTS_INSET,
+                    width: ATTACHMENT_PREVIEW_SIZE,
+                    height: ATTACHMENT_PREVIEW_SIZE,
+                  },
+                });
+              });
             });
           }}
           ref={plusRef}
@@ -393,19 +429,21 @@ export function ChatComposer({
       }}
     >
       <View className="py-2">
-        {reducedTransparency ? (
-          <View className="overflow-hidden rounded-[26px] border border-border border-continuous bg-card">
-            {content}
-          </View>
-        ) : (
-          <StyledGlassView
-            className="rounded-[26px] border-continuous"
-            glassEffectStyle="regular"
-            isInteractive
-          >
-            {content}
-          </StyledGlassView>
-        )}
+        <View ref={glassRef}>
+          {reducedTransparency ? (
+            <View className="overflow-hidden rounded-[26px] border border-border border-continuous bg-card">
+              {content}
+            </View>
+          ) : (
+            <StyledGlassView
+              className="rounded-[26px] border-continuous"
+              glassEffectStyle="regular"
+              isInteractive
+            >
+              {content}
+            </StyledGlassView>
+          )}
+        </View>
       </View>
     </View>
   );

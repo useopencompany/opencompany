@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createContext, use, useState } from "react";
+import { createContext, use, useEffect, useRef, useState } from "react";
+import { until } from "until-async";
 import { useAuth } from "@/features/auth";
 import { throwIfAborted } from "@/shared/lib/abort";
 import { analytics } from "@/shared/lib/analytics";
@@ -43,10 +44,22 @@ export interface ComposerLocks {
   isTask: boolean;
 }
 
+interface PendingAttachment {
+  conversationId: string;
+  attachment: ComposerAttachment;
+  /** Saved to the draft. It leaves this list once the draft query shows the stored copy. */
+  saved: boolean;
+  /** Removed by the user while it was still saving. Its stored copy is deleted once saved. */
+  removed: boolean;
+}
+
 interface ChatComposerContextValue {
   conversationId: string;
   value: string;
+  /** The draft's attachments, followed by any still being prepared and saved. */
   attachments: ComposerAttachment[];
+  /** Some attachments are still saving, so the draft cannot send yet. */
+  hasPendingAttachments: boolean;
   /** The selection the composer shows and sends, with conversation locks applied. */
   selection: ComposerSelection;
   locks: ComposerLocks;
@@ -54,6 +67,14 @@ interface ChatComposerContextValue {
   isReady: boolean;
   activateConversation: (conversationId: string) => void;
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
+  /**
+   * Shows attachments in the composer at once while `save` prepares and stores them. When `save`
+   * reports failure they leave the composer again.
+   */
+  showWhileSaving: <T extends { status: string }>(
+    attachments: ComposerAttachment[],
+    save: () => Promise<T>,
+  ) => Promise<T>;
   removeAttachment: (id: string) => Promise<void>;
   updateSelection: (update: (current: ComposerSelection) => ComposerSelection) => void;
   setValue: (value: string) => void;
@@ -76,6 +97,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
   const { profile } = useAuth();
   const { showErrorToast } = useToast();
   const [conversationId, setConversationId] = useState(NEW_CHAT_ID);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const autoModelEnabled = profile?.autoModelRoutingEnabled === true;
   const queryKey = partition
     ? chatQueryKeys.draft(partition, conversationId)
@@ -147,8 +169,90 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     }
     await queryClient.invalidateQueries({ queryKey, exact: true });
   };
+  // Attachments the user removed while they were still saving. Their stored copies are deleted as
+  // soon as the save lands.
+  const removedWhileSavingRef = useRef(new Set<string>());
+  const removedIds = new Set(
+    pendingAttachments.filter((pending) => pending.removed).map((pending) => pending.attachment.id),
+  );
+  const storedAttachments = draft.attachments.filter(
+    (attachment) => !removedIds.has(attachment.id),
+  );
+  const storedIds = new Set(draft.attachments.map((attachment) => attachment.id));
+  const pendingHere = pendingAttachments.filter(
+    (pending) =>
+      pending.conversationId === conversationId &&
+      !pending.removed &&
+      !storedIds.has(pending.attachment.id),
+  );
+  // A saved attachment stays pending until the draft query renders its stored copy, so its
+  // preview never drops out for a frame between the two.
+  useEffect(() => {
+    const isShownFromDraft = (pending: PendingAttachment) =>
+      pending.saved && !pending.removed && storedIds.has(pending.attachment.id);
+    if (pendingAttachments.some(isShownFromDraft))
+      setPendingAttachments((current) => current.filter((pending) => !isShownFromDraft(pending)));
+  }, [pendingAttachments, draft.attachments]);
+  const dropPending = (ids: Set<string>) => {
+    for (const id of ids) removedWhileSavingRef.current.delete(id);
+    setPendingAttachments((current) =>
+      current.filter((pending) => !ids.has(pending.attachment.id)),
+    );
+  };
+  const showWhileSaving = async <T extends { status: string }>(
+    attachments: ComposerAttachment[],
+    save: () => Promise<T>,
+  ): Promise<T> => {
+    const ids = new Set(attachments.map((attachment) => attachment.id));
+    setPendingAttachments((current) => [
+      ...current,
+      ...attachments.map((attachment) => ({
+        conversationId,
+        attachment,
+        saved: false,
+        removed: false,
+      })),
+    ]);
+    const result = await save();
+    if (result.status !== "added" || !partition) {
+      dropPending(ids);
+      return result;
+    }
+    const removed = new Set([...ids].filter((id) => removedWhileSavingRef.current.has(id)));
+    setPendingAttachments((current) =>
+      current.map((pending) =>
+        ids.has(pending.attachment.id) && !removed.has(pending.attachment.id)
+          ? { ...pending, saved: true }
+          : pending,
+      ),
+    );
+    if (removed.size > 0) {
+      const [removeError] = await until(async () => {
+        for (const id of removed) await removeStoredAttachment(partition, id);
+        await queryClient.invalidateQueries({ queryKey, exact: true });
+      });
+      if (removeError)
+        showErrorToast(
+          "A removed attachment could not be deleted.",
+          removeError,
+          "chat.attachment.remove",
+        );
+      dropPending(removed);
+    }
+    return result;
+  };
   const removeAttachment = async (id: string): Promise<void> => {
     if (!partition) return;
+    if (pendingHere.some((pending) => pending.attachment.id === id)) {
+      removedWhileSavingRef.current.add(id);
+      setPendingAttachments((current) =>
+        current.map((pending) =>
+          pending.attachment.id === id ? { ...pending, removed: true } : pending,
+        ),
+      );
+      analytics.capture("attachment_removed");
+      return;
+    }
     await removeStoredAttachment(partition, id);
     analytics.capture("attachment_removed");
     await queryClient.invalidateQueries({ queryKey, exact: true });
@@ -158,7 +262,8 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
       value={{
         conversationId,
         value: draft.text,
-        attachments: draft.attachments,
+        attachments: [...storedAttachments, ...pendingHere.map((pending) => pending.attachment)],
+        hasPendingAttachments: pendingHere.some((pending) => !pending.saved),
         selection,
         locks: {
           engineAndModel: Boolean(conversation && !conversation.provisional),
@@ -168,6 +273,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         isReady: !partition || draftQuery.isFetched,
         activateConversation: setConversationId,
         addAttachments,
+        showWhileSaving,
         removeAttachment,
         updateSelection: (update) => {
           // Build on the latest cached draft, not this render's copy, so edits made within one

@@ -2,7 +2,6 @@ import { type CameraView, type FlashMode, useCameraPermissions } from "expo-came
 import type { SFSymbol } from "expo-symbols";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   AppState,
   Linking,
   Pressable,
@@ -25,7 +24,12 @@ import { useReducedTransparency } from "@/shared/lib/use-reduced-transparency";
 import { StyledAnimatedSymbol } from "@/shared/ui/animated-symbol";
 import { StyledCameraView } from "@/shared/ui/styled-camera-view";
 import { StyledGlassContainer, StyledGlassView } from "@/shared/ui/styled-glass-view";
-import type { AttachmentResult } from "../model/use-attachment-sources";
+
+export interface CapturedPicture {
+  uri: string;
+  width: number;
+  height: number;
+}
 
 const FLASH_SEQUENCE: FlashMode[] = ["off", "auto", "on"];
 const FLASH_SYMBOLS: Record<"off" | "auto" | "on", SFSymbol> = {
@@ -40,6 +44,7 @@ const SHUTTER_SIZE = 74;
 // Flash and Flip slide out of the options button inside one glass container, so their glass
 // stretches out of it and merges back in on the way down.
 const OPTIONS_SPRING = { duration: 320, dampingRatio: 0.82 };
+const GLASS_REVEAL_SECONDS = 0.2;
 
 type CameraFailure = { kind: "unavailable" } | { kind: "capture"; message: string };
 
@@ -47,6 +52,7 @@ function GlassControl({
   accessibilityLabel,
   disabled = false,
   expanded,
+  glass,
   iconStyle,
   onPress,
   symbol,
@@ -55,6 +61,7 @@ function GlassControl({
   accessibilityLabel: string;
   disabled?: boolean;
   expanded?: boolean;
+  glass: boolean;
   iconStyle?: StyleProp<AnimatedStyle<ViewStyle>>;
   onPress: () => void;
   symbol: SFSymbol;
@@ -87,7 +94,11 @@ function GlassControl({
         <StyledGlassView
           className="absolute inset-0 rounded-full"
           colorScheme="dark"
-          glassEffectStyle="regular"
+          glassEffectStyle={{
+            style: glass ? "regular" : "none",
+            animate: true,
+            animationDuration: GLASS_REVEAL_SECONDS,
+          }}
           isInteractive
         />
       )}
@@ -146,20 +157,22 @@ function OptionControl({
 
 /**
  * The live camera inside the attachment overlay. It opens on the rear camera with flash off and
- * stops whenever it is not the active panel or the app leaves the foreground.
+ * stops whenever it is not the active panel or the app leaves the foreground. A capture freezes
+ * the preview on the shutter press and hands the photo over once the camera delivers it.
  */
 export function CameraPanel({
   active,
+  glass,
   onBack,
   onCaptured,
   remaining,
-  takePhoto,
 }: {
   active: boolean;
+  /** Whether the controls show their glass. Off while the panel fades in or out. */
+  glass: boolean;
   onBack: () => void;
-  onCaptured: () => void;
+  onCaptured: (picture: CapturedPicture) => void;
   remaining: number;
-  takePhoto: (picture: { uri: string; width: number; height: number }) => Promise<AttachmentResult>;
 }) {
   const reducedTransparency = useReducedTransparency();
   const [permission, requestPermission] = useCameraPermissions();
@@ -190,29 +203,33 @@ export function CameraPanel({
     if (!running) setReady(false);
   }, [running]);
 
+  const setPreviewPaused = (camera: CameraView, paused: boolean) =>
+    void until(() => (paused ? camera.pausePreview() : camera.resumePreview())).then(([error]) => {
+      if (error) captureError("camera_preview_toggle_failed", error, { paused });
+    });
+
   const capture = async () => {
-    if (!cameraRef.current || capturing || !ready || remaining === 0) return;
+    const camera = cameraRef.current;
+    if (!camera || capturing || !ready || remaining === 0) return;
     setCapturing(true);
     setFailure(null);
+    // Hold the frame the shutter caught while the camera finishes the photo, so the press feels
+    // instant. The held frame is what flies into the composer.
+    setPreviewPaused(camera, true);
     const [captureError_, picture] = await until(async () => {
-      const result = await cameraRef.current?.takePictureAsync({ quality: 0.85 });
+      const result = await camera.takePictureAsync({ quality: 0.85 });
       if (!result) throw new Error("The camera returned no photo.");
       return result;
     });
     if (captureError_) {
       captureError("camera_capture_failed", captureError_);
+      setPreviewPaused(camera, false);
       setFailure({ kind: "capture", message: "The photo could not be taken. Try again." });
       setCapturing(false);
       return;
     }
-    const result = await takePhoto(picture);
-    setCapturing(false);
-    if (result.status === "failed") {
-      setFailure({ kind: "capture", message: result.message });
-      return;
-    }
     analytics.capture("camera_photo_captured", { facing, flash });
-    onCaptured();
+    onCaptured({ uri: picture.uri, width: picture.width, height: picture.height });
   };
 
   const nextFlash = FLASH_SEQUENCE[(FLASH_SEQUENCE.indexOf(flash) + 1) % 3] as typeof flash;
@@ -271,10 +288,6 @@ export function CameraPanel({
             </Pressable>
           ) : null}
         </View>
-      ) : !permission || (running && !ready) ? (
-        <View className="absolute inset-0 items-center justify-center pb-24">
-          <ActivityIndicator color="#ffffff" />
-        </View>
       ) : null}
 
       {failure?.kind === "capture" ? (
@@ -289,9 +302,17 @@ export function CameraPanel({
         </View>
       ) : null}
 
-      <View className="absolute right-0 bottom-0 left-0 flex-row items-end justify-between px-5 pb-5">
+      {/* Controls leave with the shutter press, so only the held frame flies to the composer. */}
+      <View
+        className={
+          capturing
+            ? "hidden"
+            : "absolute right-0 bottom-0 left-0 flex-row items-center justify-between px-5 pb-5"
+        }
+      >
         <GlassControl
           accessibilityLabel="Back to attachment options"
+          glass={glass}
           onPress={onBack}
           symbol="chevron.left"
         />
@@ -299,9 +320,9 @@ export function CameraPanel({
           accessibilityHint={
             remaining === 0 ? "A message holds up to five attachments." : undefined
           }
-          accessibilityLabel={capturing ? "Saving photo" : "Take photo"}
+          accessibilityLabel="Take photo"
           accessibilityRole="button"
-          accessibilityState={{ disabled: shutterDisabled, busy: capturing }}
+          accessibilityState={{ disabled: shutterDisabled }}
           className="items-center justify-center"
           disabled={shutterDisabled}
           onPress={() => void capture()}
@@ -313,54 +334,66 @@ export function CameraPanel({
             <StyledGlassView
               className="absolute inset-0 rounded-full"
               colorScheme="dark"
-              glassEffectStyle="regular"
+              glassEffectStyle={{
+                style: glass ? "regular" : "none",
+                animate: true,
+                animationDuration: GLASS_REVEAL_SECONDS,
+              }}
               isInteractive
             />
           )}
           <View
-            className="size-[60px] items-center justify-center rounded-full bg-white"
-            style={{ opacity: shutterDisabled && !capturing ? 0.45 : 1 }}
-          >
-            {capturing ? <ActivityIndicator color="#000000" /> : null}
-          </View>
+            className="size-[60px] rounded-full bg-white"
+            style={{ opacity: shutterDisabled ? 0.45 : 1 }}
+          />
         </Pressable>
-        <StyledGlassContainer
-          spacing={CONTROL_GAP + 4}
-          style={{
-            width: CONTROL_SIZE,
-            height: CONTROL_SIZE * 3 + CONTROL_GAP * 2,
-          }}
-          pointerEvents="box-none"
-        >
-          <OptionControl
-            accessibilityLabel={`Flash: ${FLASH_LABELS[flash]}`}
-            expanded={controlsExpanded}
-            onPress={() => setFlash(nextFlash)}
-            slot={2}
-            symbol={FLASH_SYMBOLS[flash]}
-          />
-          <OptionControl
-            accessibilityLabel={
-              facing === "back" ? "Switch to front camera" : "Switch to rear camera"
-            }
-            expanded={controlsExpanded}
-            onPress={() => setFacing(facing === "back" ? "front" : "back")}
-            slot={1}
-            symbol={
-              facing === "back"
-                ? "arrow.triangle.2.circlepath.camera"
-                : "arrow.triangle.2.circlepath.camera.fill"
-            }
-          />
-          <View className="absolute bottom-0 left-0">
-            <GlassControl
-              accessibilityLabel={controlsExpanded ? "Hide camera options" : "More camera options"}
+        {/* Sized like one control so the options button lines up with Back and the shutter. The
+            container rises above it for Flash and Flip. */}
+        <View style={{ width: CONTROL_SIZE, height: CONTROL_SIZE }}>
+          <StyledGlassContainer
+            className="absolute bottom-0 left-0"
+            spacing={CONTROL_GAP + 4}
+            style={{
+              width: CONTROL_SIZE,
+              height: CONTROL_SIZE * 3 + CONTROL_GAP * 2,
+            }}
+            pointerEvents="box-none"
+          >
+            <OptionControl
+              glass={glass}
+              accessibilityLabel={`Flash: ${FLASH_LABELS[flash]}`}
               expanded={controlsExpanded}
-              onPress={() => setControlsExpanded(!controlsExpanded)}
-              symbol={controlsExpanded ? "xmark" : "ellipsis"}
+              onPress={() => setFlash(nextFlash)}
+              slot={2}
+              symbol={FLASH_SYMBOLS[flash]}
             />
-          </View>
-        </StyledGlassContainer>
+            <OptionControl
+              glass={glass}
+              accessibilityLabel={
+                facing === "back" ? "Switch to front camera" : "Switch to rear camera"
+              }
+              expanded={controlsExpanded}
+              onPress={() => setFacing(facing === "back" ? "front" : "back")}
+              slot={1}
+              symbol={
+                facing === "back"
+                  ? "arrow.triangle.2.circlepath.camera"
+                  : "arrow.triangle.2.circlepath.camera.fill"
+              }
+            />
+            <View className="absolute bottom-0 left-0">
+              <GlassControl
+                glass={glass}
+                accessibilityLabel={
+                  controlsExpanded ? "Hide camera options" : "More camera options"
+                }
+                expanded={controlsExpanded}
+                onPress={() => setControlsExpanded(!controlsExpanded)}
+                symbol={controlsExpanded ? "xmark" : "ellipsis"}
+              />
+            </View>
+          </StyledGlassContainer>
+        </View>
       </View>
     </View>
   );

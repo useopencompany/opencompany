@@ -42,10 +42,10 @@ import {
 import { useMarkConversationSeen } from "../model/conversation-actions";
 import { AttachmentOverlay } from "./attachment-overlay";
 import {
+  type AttachmentAnchor,
   ChatComposer,
   COMPOSER_ESTIMATED_HEIGHT,
   type SentMessageIdentity,
-  type WindowFrame,
 } from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
@@ -94,7 +94,7 @@ export function StreamingChat({
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
   const [composerHeight, setComposerHeight] = useState(insets.bottom + COMPOSER_ESTIMATED_HEIGHT);
-  const [attachmentAnchor, setAttachmentAnchor] = useState<WindowFrame | null>(null);
+  const [attachmentAnchor, setAttachmentAnchor] = useState<AttachmentAnchor | null>(null);
   const [initialAnchorMessageId] = useState(pendingAnchorMessageId);
   const [hasSent, setHasSent] = useState(false);
   const [anchorMessageId, setAnchorMessageId] = useState<string | undefined>(

@@ -15,19 +15,16 @@ export type AttachmentResult =
   | { status: "canceled" }
   | { status: "failed"; title: string; message: string };
 
-let nextAttachmentSequence = 0;
-
-const createAttachmentId = (uri: string): string => {
-  nextAttachmentSequence += 1;
-  return `${Date.now()}-${nextAttachmentSequence}-${uri}`;
-};
+// The id also names the attachment's stored file, so it has to be filename safe.
+const createAttachmentId = (): string => globalThis.crypto.randomUUID();
 
 /**
  * Picks, validates, prepares, and durably stores draft attachments for the active conversation.
- * Every source ends in the same persistence path, so limits and conversions match.
+ * Every source ends in the same persistence path, so limits and conversions match. Photos show in
+ * the composer as soon as they are chosen or taken and save in the background.
  */
 export function useAttachmentSources() {
-  const { addAttachments, attachments: currentAttachments } = useChatComposer();
+  const { addAttachments, attachments: currentAttachments, showWhileSaving } = useChatComposer();
   const remaining = Math.max(0, MAX_CHAT_ATTACHMENTS - currentAttachments.length);
 
   const persist = async (attachments: ComposerAttachment[]): Promise<AttachmentResult> => {
@@ -83,9 +80,9 @@ export function useAttachmentSources() {
       analytics.capture("attachment_source_canceled", { source: "photos" });
       return { status: "canceled" };
     }
-    return persist(
-      result.assets.map((asset) => ({
-        id: createAttachmentId(asset.uri),
+    const photos = result.assets.map(
+      (asset): ComposerAttachment => ({
+        id: createAttachmentId(),
         kind: "image",
         uri: asset.uri,
         name: asset.fileName ?? "Photo",
@@ -93,8 +90,9 @@ export function useAttachmentSources() {
         ...(asset.fileSize ? { size: asset.fileSize } : {}),
         width: asset.width,
         height: asset.height,
-      })),
+      }),
     );
+    return showWhileSaving(photos, () => persist(photos));
   };
 
   const pickFiles = async (): Promise<AttachmentResult> => {
@@ -119,7 +117,7 @@ export function useAttachmentSources() {
     }
     return persist(
       result.assets.map((asset) => ({
-        id: createAttachmentId(asset.uri),
+        id: createAttachmentId(),
         kind: asset.mimeType?.startsWith("image/") ? "image" : "file",
         uri: asset.uri,
         name: asset.name,
@@ -129,25 +127,25 @@ export function useAttachmentSources() {
     );
   };
 
-  const addCameraPhoto = async (picture: {
+  const addCameraPhoto = (picture: {
     uri: string;
     width: number;
     height: number;
   }): Promise<AttachmentResult> => {
-    const [sizeError, size] = await until(async () => new File(picture.uri).size ?? 0);
-    if (sizeError) captureError("attachment_prepare_failed", sizeError, { source: "camera" });
-    return persist([
-      {
-        id: createAttachmentId(picture.uri),
-        kind: "image",
-        uri: picture.uri,
-        name: "Photo.jpg",
-        mimeType: "image/jpeg",
-        size: size ?? 0,
-        width: picture.width,
-        height: picture.height,
-      },
-    ]);
+    const photo: ComposerAttachment = {
+      id: createAttachmentId(),
+      kind: "image",
+      uri: picture.uri,
+      name: "Photo.jpg",
+      mimeType: "image/jpeg",
+      width: picture.width,
+      height: picture.height,
+    };
+    return showWhileSaving([photo], async () => {
+      const [sizeError, size] = await until(async () => new File(picture.uri).size ?? 0);
+      if (sizeError) captureError("attachment_prepare_failed", sizeError, { source: "camera" });
+      return persist([{ ...photo, size: size ?? 0 }]);
+    });
   };
 
   return { remaining, pickPhotos, pickFiles, addCameraPhoto };
