@@ -3,6 +3,7 @@ import { captureConnectionAddedAnalytics } from "@opencompany/agent/integrations
 import { ExpiringOAuthReauthRequired } from "@opencompany/agent/integrations/expiring-oauth-access-token";
 import {
   appendGitHubUserIntegrationStatus,
+  buildGitHubUserAuthorizationUrl,
   buildGitHubUserInstallUrl,
   createGitHubUserIntegrationState,
   exchangeGitHubAppUserCode,
@@ -56,6 +57,7 @@ async function handleStart(input: GitHubUserIngressInput, request: Request): Pro
   const url = new URL(request.url);
   const returnTo = url.searchParams.get("returnTo") ?? "/settings";
   const owner = url.searchParams.get("owner")?.trim();
+  const install = url.searchParams.get("install") === "true" || Boolean(owner);
 
   if (!isGitHubUserIntegrationConfigured()) {
     return statusRedirect(session, returnTo, "error", "not_configured");
@@ -65,6 +67,9 @@ async function handleStart(input: GitHubUserIngressInput, request: Request): Pro
     userWorkosId: session.userId,
     returnTo,
   });
+  if (!install) {
+    return sessionRedirect(session, buildGitHubUserAuthorizationUrl(state));
+  }
   let suggestedTargetId: string | undefined;
   if (owner) {
     try {
@@ -176,27 +181,29 @@ async function handleCallback(input: GitHubUserIngressInput, request: Request): 
     return statusRedirect(session, state.returnTo, "error", "missing_code");
   }
   const installationId = url.searchParams.get("installation_id")?.trim();
-  if (!installationId) {
+  const setupAction = url.searchParams.get("setup_action");
+  if (setupAction && !installationId) {
     return statusRedirect(session, state.returnTo, "error", "missing_installation_id");
   }
-  const setupAction = url.searchParams.get("setup_action");
-  if (setupAction !== "install" && setupAction !== "update") {
+  if (installationId && setupAction !== "install" && setupAction !== "update") {
     return statusRedirect(session, state.returnTo, "error", "invalid_installation_action");
   }
 
   try {
     const tokens = await exchangeGitHubAppUserCode(code);
-    try {
-      await verifyGitHubAppUserInstallation({
-        accessToken: tokens.accessToken,
-        installationId,
-      });
-    } catch (error) {
-      logger.warn("GitHub App installation was not available to the authorized user", {
-        event: "opencompany.github_user_installation_not_authorized",
-        error_message: error instanceof Error ? error.message : String(error),
-      });
-      return statusRedirect(session, state.returnTo, "error", "installation_not_authorized");
+    if (installationId) {
+      try {
+        await verifyGitHubAppUserInstallation({
+          accessToken: tokens.accessToken,
+          installationId,
+        });
+      } catch (error) {
+        logger.warn("GitHub App installation was not available to the authorized user", {
+          event: "opencompany.github_user_installation_not_authorized",
+          error_message: error instanceof Error ? error.message : String(error),
+        });
+        return statusRedirect(session, state.returnTo, "error", "installation_not_authorized");
+      }
     }
     const identity = await fetchGitHubUserIdentity(tokens.accessToken);
     const connection = await connectGitHubUserIntegration({
@@ -205,7 +212,7 @@ async function handleCallback(input: GitHubUserIngressInput, request: Request): 
       login: identity.login,
       name: identity.name,
       email: identity.email,
-      installationId,
+      ...(installationId ? { installationId } : {}),
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       accessTokenExpiresAt: tokens.accessTokenExpiresAt,

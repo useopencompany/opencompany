@@ -1,9 +1,13 @@
-import type { SkillCatalogItemDto } from "@opencompany/protocol";
+import type { SkillCatalogItemDto, WorkflowDto } from "@opencompany/protocol";
 import Link from "next/link";
 import { WorkflowEditor } from "@/components/WorkflowEditor";
 import { currentUser } from "@/lib/auth";
 import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
-import { getHeadlessWorkflow, getHeadlessWorkflowMemory } from "@/lib/headless-automation-server";
+import {
+  getHeadlessWorkflow,
+  getHeadlessWorkflowMemory,
+  listHeadlessWorkflows,
+} from "@/lib/headless-automation-server";
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
@@ -27,6 +31,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     members,
     slackBotSettings,
     companyGitHub,
+    workflows,
   ] = await Promise.all([
     getHeadlessWorkflow(slug),
     getHeadlessWorkflowMemory(slug),
@@ -36,6 +41,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     listWorkspaceMembersAction(),
     getSlackBotWorkspaceSettingsAction(),
     getCompanyGitHubPluginForTriggersAction(),
+    listHeadlessWorkflows(),
   ]);
 
   if (!workflow) {
@@ -92,6 +98,21 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
       skillCatalog={skillCatalog.filter(
         (skill: SkillCatalogItemDto) => workflow.scope === "personal" || skill.scope !== "personal",
       )}
+      // A company workflow runs as whoever fires it, so it can only hand off to company workflows:
+      // a teammate's run could not see anyone's personal one.
+      workflowCatalog={workflows
+        .filter(
+          (candidate: WorkflowDto) =>
+            candidate.slug !== workflow.slug &&
+            candidate.archivedAt === null &&
+            (workflow.scope === "personal" || candidate.scope === "company"),
+        )
+        .map((candidate: WorkflowDto) => ({
+          id: candidate.slug,
+          name: candidate.name,
+          description: candidate.description,
+          active: candidate.status === "active",
+        }))}
       eventProviders={eventProviders}
       slackBotSettings={slackBotSettings}
       owner={{ name: owner.name, avatarUrl: owner.avatarUrl }}

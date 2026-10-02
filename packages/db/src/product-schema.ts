@@ -310,6 +310,9 @@ export type HarnessWorkflowStep = {
   skillIds: string[];
   skillBundleIds: string[];
   pluginSkillBundleIds?: string[];
+  // Workflow slugs this step's instructions mention as `@workflow/<slug>`: the only workflows
+  // the run may start while it is on this step.
+  handoffWorkflowIds?: string[];
 };
 
 export type HarnessSpec = {
@@ -340,6 +343,9 @@ export type HarnessSpec = {
     steps?: HarnessWorkflowStep[];
     currentStepIndex?: number;
     completedStepCount?: number;
+    // How many workflow handoffs led to this run. Absent for a run a person, schedule, or event
+    // started. Bounds handoff chains; see MAX_WORKFLOW_HANDOFF_DEPTH.
+    handoffDepth?: number;
     lastCompletedStepOutcome?: {
       reportedOutcome: TaskReportedOutcome | null;
       outcomeComment: string | null;
@@ -581,7 +587,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   taskActionApprovalPending?: true;
   approvalContinuation?: boolean;
-  mentions?: Array<{ kind: "skill"; id: string }>;
+  mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   taskResultMode?: TaskResultMode;
   reasoningEffort?: CloudCodingReasoningEffort;
   planModeReasoningEffort?: CodexReasoningEffort | null;
@@ -602,6 +608,7 @@ export type CodexChatInteractionStatus = "pending" | "resolved" | "canceled";
 export type ChatMessageDebugTrace = {
   schemaVersion?: "opencompany.chat.debug.v1" | "goat.chat.debug.v1" | "goat.codex_chat.debug.v1";
   model?: string;
+  mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   aborted?: boolean;
   finishReason?: string;
   uiMessageParts?: unknown[];

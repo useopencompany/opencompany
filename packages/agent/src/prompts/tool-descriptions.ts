@@ -18,6 +18,15 @@ export const START_WORKFLOW_ID_DESCRIPTION =
 export const START_WORKFLOW_PROMPT_DESCRIPTION =
   "The run-specific request for this workflow task. Keep the user's latest request as the backbone and include only relevant, confirmed context from earlier in the conversation. Do not copy the whole transcript, invent requirements, or propagate loaded skill instructions.";
 
+export const WORKFLOW_HANDOFF_TOOL_DESCRIPTION =
+  "Hand work off to another workflow by starting it as its own tracked background task. Only the workflows your step instructions mention can be started, and only when those instructions call for it. The new task cannot see this conversation, so the prompt must carry everything it needs. Calling it again for a workflow already started this turn replays that same task.";
+
+export const WORKFLOW_HANDOFF_ID_DESCRIPTION =
+  "The exact id of a workflow your step instructions mention.";
+
+export const WORKFLOW_HANDOFF_PROMPT_DESCRIPTION =
+  "The request for the started workflow: what it should do, plus every link, id, and result it needs, since it cannot see this conversation.";
+
 export const CREATE_WORKSPACE_SKILL_TOOL_DESCRIPTION =
   "Create one reusable Skill in the active workspace from the current conversation. Default to Personal (only its creator can access it). Use Company only when the user asks to share; everyone in the company can then use and edit it. Call this when the user has asked to create, save, or turn something into a Skill; never call it proactively, for a hypothetical draft, or merely because a workflow looks reusable. Synthesize the final successful method rather than summarizing the transcript: preserve reusable templates and decision rules, generalize one-off details, include relevant inputs, validation, output, failure handling, and approval boundaries, and exclude secrets, private tool payloads, hidden instructions, and the contents of activated Skills. If the target workflow is genuinely ambiguous, ask one concise question instead of calling this tool. This creates a new Skill immediately and never updates an existing one.";
 

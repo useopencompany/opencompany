@@ -109,12 +109,12 @@ The official GitHub Plugin uses a personal GitHub App. Put `GITHUB_USER_APP_SLUG
 ID and secret in prod `/runner` as well so sandbox sessions can refresh the same expiring user
 credential. The public callback remains
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/integrations/github-user/callback`, relayed by web to the
-API. The App must request Contents, Issues, and Pull requests read/write plus Actions, Checks,
-Commit statuses, and Metadata read, with expiring user tokens and user authorization during
-installation enabled. Set
-its Setup URL to
-`${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/plugins/github` and enable redirect-on-update so App
-updates return to opencompany.
+API. Members authorize the App through its OAuth web flow; that authorization is separate from the
+organization owner granting the App repository access. The App must request Contents, Issues, and
+Pull requests read/write plus Actions, Checks, Commit statuses, and Metadata read, with expiring
+user tokens and user authorization during installation enabled. With that option enabled, GitHub
+uses the callback URL after installation and does not allow a separate Setup URL. The Plugin UI
+polls GitHub after installation changes, so it does not depend on a post-install redirect.
 
 The company GitHub plugin reuses that App for workspace-level events. Set the App's webhook URL to
 `${OPENCOMPANY_NEXT_PUBLIC_APP_URL}/api/webhooks/github` with content type `application/json`,

@@ -15,7 +15,10 @@ import { getAvailableHarnessTools } from "./integrations/google-data";
 import { resolveSkillMentions, type SkillMentionRef, type WorkspaceSkill } from "./skills";
 import { resolveWorkflowStepModelSelection } from "./workflow-model-options";
 import { DEFAULT_WORKFLOW_SCHEDULE_PROMPT } from "./workflow-schedule-defaults";
-import { extractWorkflowSkillMentionRefs } from "./workflow-skill-mentions";
+import {
+  extractWorkflowMentionIds,
+  extractWorkflowSkillMentionRefs,
+} from "./workflow-skill-mentions";
 import {
   resolveWorkflowMention,
   WorkflowMentionError,
@@ -76,6 +79,7 @@ export function compileWorkflowHarnessSpec(input: {
   tools: TaskToolName[];
   description: string;
   skillAccess?: "company" | "actor";
+  handoffDepth?: number;
 }): WorkflowHarnessSpec {
   const skillById = new Map(input.skills.map((skill) => [skill.id, skill]));
   for (const skill of input.skills) {
@@ -93,6 +97,10 @@ export function compileWorkflowHarnessSpec(input: {
     if (index === 0) {
       for (const skillId of invokedSkillIds) stepSkillIds.add(skillId);
     }
+    // A workflow never hands off to itself: that would be an unbounded loop by construction.
+    const handoffWorkflowIds = extractWorkflowMentionIds(step.instructions).filter(
+      (workflowId) => workflowId !== input.workflow.id,
+    );
     const stepSkills = [...stepSkillIds]
       .map((skillId) => skillById.get(skillId))
       .filter((skill): skill is WorkspaceSkill => Boolean(skill));
@@ -122,6 +130,7 @@ export function compileWorkflowHarnessSpec(input: {
       pluginSkillBundleIds: stepSkills.flatMap((skill) =>
         skill.sourceKind === "plugin" ? [skill.bundleId] : [],
       ),
+      ...(handoffWorkflowIds.length ? { handoffWorkflowIds } : {}),
     };
   });
   const firstStep = steps[0];
@@ -157,6 +166,7 @@ export function compileWorkflowHarnessSpec(input: {
       steps,
       currentStepIndex: 0,
       completedStepCount: 0,
+      ...(input.handoffDepth ? { handoffDepth: input.handoffDepth } : {}),
     },
   };
 }
@@ -170,6 +180,7 @@ export async function createTaskFromWorkflow(
     description: string;
     attachments?: ChatMessageAttachment[];
     attachmentTexts?: Record<string, string> | null;
+    handoffDepth?: number;
   },
   dependencies: {
     createTask: (input: {
@@ -201,6 +212,7 @@ export async function createTaskFromWorkflow(
       workflow,
       description: input.description,
       ...(input.skillMentions ? { skillMentions: input.skillMentions } : {}),
+      ...(input.handoffDepth ? { handoffDepth: input.handoffDepth } : {}),
     },
     dependencies.preparation,
   );
@@ -240,6 +252,7 @@ export async function prepareWorkflowRunForUser(
     workflow: WorkspaceWorkflow;
     skillMentions?: SkillMentionRef[];
     description: string;
+    handoffDepth?: number;
   },
   dependencyOverrides: Partial<WorkflowPreparationDependencies> = {},
 ): Promise<{
@@ -303,6 +316,7 @@ export async function prepareWorkflowRunForUser(
     tools,
     description,
     skillAccess,
+    ...(input.handoffDepth ? { handoffDepth: input.handoffDepth } : {}),
   });
 
   return { description, stepSelections, harnessSpec };

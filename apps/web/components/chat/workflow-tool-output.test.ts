@@ -1,6 +1,6 @@
 import { CODEX_MCP_TOOL_NAME } from "@opencompany/agent-runtime";
 import { describe, expect, it } from "vitest";
-import { workflowCardOutputFromTool } from "./workflow-tool-output";
+import { startedTaskOutputFromTool, workflowCardOutputFromTool } from "./workflow-tool-output";
 
 const workflow = {
   name: "Weekly recruiting heatmap",
@@ -73,6 +73,54 @@ describe("workflowCardOutputFromTool", () => {
             ],
           }),
         },
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("startedTaskOutputFromTool", () => {
+  const started = {
+    taskId: "task_7",
+    taskDisplayId: "TASK-7",
+    taskName: "Review PR #7",
+    status: "queued",
+    prompt: "Review https://github.com/o/r/pull/7.",
+  };
+
+  it.each([
+    { server: "opencompany", tool: "start_workflow", arguments: { workflowId: "review-pr" } },
+    { toolName: "mcp__opencompany__start_workflow", arguments: { workflowId: "review-pr" } },
+    { server: "opencompany", tool: "workflows", arguments: { command: "run" } },
+  ])("promotes a Task a coding engine started to a Task card: %o", (input) => {
+    expect(
+      startedTaskOutputFromTool({
+        name: CODEX_MCP_TOOL_NAME,
+        state: "output-available",
+        input,
+        output: {
+          status: "completed",
+          result: JSON.stringify({ content: [{ type: "text", text: JSON.stringify(started) }] }),
+        },
+      }),
+    ).toEqual(started);
+  });
+
+  it("ignores other host tools and unfinished calls", () => {
+    const output = { status: "completed", result: JSON.stringify(started) };
+    expect(
+      startedTaskOutputFromTool({
+        name: CODEX_MCP_TOOL_NAME,
+        state: "output-available",
+        input: { server: "opencompany", tool: "wiki" },
+        output,
+      }),
+    ).toBeNull();
+    expect(
+      startedTaskOutputFromTool({
+        name: CODEX_MCP_TOOL_NAME,
+        state: "input-available",
+        input: { server: "opencompany", tool: "start_workflow" },
+        output,
       }),
     ).toBeNull();
   });

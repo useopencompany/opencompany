@@ -18,7 +18,7 @@ describe("connectGitHubUserIntegration", () => {
     vi.unstubAllEnvs();
   });
 
-  it("upserts one personal github_user row and encrypts the rotating token pair", async () => {
+  it("upserts one personal github_user row without coupling authorization to an installation", async () => {
     const encryptionKey = Buffer.alloc(32, 7);
     vi.stubEnv("INTEGRATION_CREDENTIAL_ENCRYPTION_KEY", encryptionKey.toString("base64"));
     const now = new Date("2026-09-01T12:00:00.000Z");
@@ -46,7 +46,6 @@ describe("connectGitHubUserIntegration", () => {
         login: "octocat",
         name: "The Octocat",
         email: null,
-        installationId: "123",
         accessToken: "ghu_access",
         refreshToken: "ghr_refresh",
         accessTokenExpiresAt,
@@ -95,7 +94,6 @@ describe("connectGitHubUserIntegration", () => {
       refresh_token_expires_at: refreshTokenExpiresAt.toISOString(),
       github_user_id: "42",
       github_login: "octocat",
-      github_installation_id: "123",
     });
   });
 });

@@ -532,6 +532,25 @@ export function commandExitResult(error: unknown) {
   };
 }
 
+// Managed coding runtimes are installed lazily when a sandbox template is behind the runner's
+// pinned version. Registry connections can fail after npm has already removed the old package,
+// so treating that command exit as a terminal engine failure strands a turn before the engine
+// starts. Keep this classification narrow to network failures reported by package installers;
+// invalid pins and verification failures remain terminal and need an operator fix.
+export function isRetryablePackageInstallError(error: unknown) {
+  const result = commandExitResult(error);
+  if (!result) return false;
+  const output = `${result.stdout}\n${result.stderr}`;
+  return (
+    /\b(?:EAI_AGAIN|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ENOTFOUND|ETIMEDOUT|ERR_SOCKET_TIMEOUT)\b/iu.test(
+      output,
+    ) ||
+    /\b(?:fetch|network|socket)\b[^\n]*(?:abort|closed|fail|reset|timed?\s*out|timeout)/iu.test(
+      output,
+    )
+  );
+}
+
 function readRecordProperty(
   record: Record<string, unknown>,
   key: string,

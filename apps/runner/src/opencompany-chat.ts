@@ -3,8 +3,8 @@ import {
   CHAT_MAX_STEPS_WITH_SANDBOX,
   createProductChatToolContext,
   prepareProductChatStep,
-  TASK_SYSTEM_BLOCK,
   TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
+  taskSystemBlock,
 } from "@opencompany/agent/chat-agent";
 import type {
   ChatUiMessage,
@@ -28,6 +28,7 @@ import { guardKimiOutput, KimiToolCallLeakError } from "@opencompany/agent/kimi-
 import { resolveProductLanguageModel } from "@opencompany/agent/language-model";
 import { createProductChatSystemPrompt } from "@opencompany/agent/prompts";
 import { createSubagentBudget } from "@opencompany/agent/subagent";
+import { workflowHandoffGrant } from "@opencompany/agent/workflow-handoffs";
 import {
   readWorkflowMemory,
   updateWorkflowMemory,
@@ -1511,7 +1512,7 @@ async function resolveProductChatRuntime(input: {
     : [];
   const taskSystemBlocks = taskContext
     ? [
-        TASK_SYSTEM_BLOCK,
+        taskSystemBlock(workflowHandoffGrant(taskContext.harnessSpec)?.workflowIds),
         TASK_UNTRUSTED_CONTENT_SAFETY_BLOCK,
         // Injected so a repeating workflow starts with what it already knows instead of spending a
         // tool call reading memory on every run.

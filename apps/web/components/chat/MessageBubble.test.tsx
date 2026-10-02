@@ -35,6 +35,31 @@ afterEach(() => {
   presentationMocks.load.mockReset();
 });
 
+it("keeps confirmed Skill and integration references highlighted in a user message", () => {
+  const message: ChatUiMessage = {
+    id: "user_mentions",
+    role: "user",
+    metadata: {
+      mentions: [{ kind: "skill", id: "skill_installation_research", name: "research" }],
+    },
+    parts: [
+      {
+        type: "text",
+        text: "Use /research with [Slack](/plugins/slack), but leave /api as text.",
+      },
+    ],
+  };
+
+  const { container } = render(<MessageBubble message={message} taskLookup={emptyTaskLookup} />);
+
+  expect(container.querySelectorAll('[data-opencompany-chat-mention="skill"]')).toHaveLength(1);
+  expect(container.querySelector('[data-opencompany-chat-mention="skill"]')).toHaveTextContent(
+    "/research",
+  );
+  expect(screen.getByRole("link", { name: "Slack" })).toHaveAttribute("href", "/plugins/slack");
+  expect(container).toHaveTextContent("leave /api as text");
+});
+
 it("keeps a disconnected plugin card visible beside the assistant's final reply", () => {
   const message: ChatUiMessage = {
     id: "assistant_plugin_connection",
@@ -973,7 +998,7 @@ describe("MessageBubble assistant errors", () => {
     );
     expect(screen.getByRole("link", { name: "Add access" })).toHaveAttribute(
       "href",
-      "/api/integrations/github-user/start?returnTo=%2F&owner=opencompany",
+      "/api/integrations/github-user/start?returnTo=%2F&install=true&owner=opencompany",
     );
     await userEvent.click(screen.getByRole("link", { name: "Add access" }));
     expect(screen.getByTestId("github-install-gap")).toHaveTextContent(

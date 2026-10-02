@@ -55,6 +55,7 @@ const migrationPaths = [
   "0276_sandbox_size_tiers.sql",
   "0279_goat_awaiting_input_state.sql",
   "0286_coding_chat_steering.sql",
+  "0313_user_message_skill_mentions.sql",
 ].map((filename) => path.join(repositoryRoot, "drizzle", filename));
 const dialect = new PgDialect();
 
@@ -88,10 +89,11 @@ describe("Postgres Chat repositories", () => {
       );
       INSERT INTO goat.codex_chat_turns (
         id, user_workos_id, codex_chat_session_id, chat_session_id,
-        user_message_id, assistant_message_id, prompt
+        user_message_id, assistant_message_id, prompt, settings
       ) VALUES (
         'migration_run', 'migration_user', 'migration_runtime', 'migration_conversation',
-        'migration_message', 'migration_assistant', 'Preserve me'
+        'migration_message', 'migration_assistant', 'Preserve me',
+        '{"mentions":[{"kind":"skill","id":"legacy-review","name":"review"}]}'::jsonb
       );
     `);
       for (const migrationPath of migrationPaths) {
@@ -115,8 +117,14 @@ describe("Postgres Chat repositories", () => {
       const migrated = await database.query<{ id: string; event_sequence: number }>(`
       SELECT id, event_sequence FROM goat.codex_chat_turns WHERE id = 'migration_run'
     `);
-      const migratedProjection = await database.query<{ id: string; content: string }>(`
-      SELECT id, content FROM goat.message_read_model_v1 WHERE id = 'migration_message'
+      const migratedProjection = await database.query<{
+        id: string;
+        content: string;
+        presentation_summary: { mentions?: Array<{ id: string }> } | null;
+      }>(`
+      SELECT id, content, presentation_summary
+      FROM goat.message_read_model_v1
+      WHERE id = 'migration_message'
     `);
       const migratedConversationProjection = await database.query<{
         runtime_status: string | null;
@@ -130,7 +138,8 @@ describe("Postgres Chat repositories", () => {
       legacySurvivedMigration =
         migrated.rows[0]?.id === "migration_run" &&
         migrated.rows[0].event_sequence === 0 &&
-        migratedProjection.rows[0]?.content === "Preserve me";
+        migratedProjection.rows[0]?.content === "Preserve me" &&
+        migratedProjection.rows[0]?.presentation_summary?.mentions?.[0]?.id === "legacy-review";
       legacyRuntimeSurvivedMigration =
         migratedConversationProjection.rows[0]?.runtime_status === "queued" &&
         migratedConversationProjection.rows[0]?.active_run_id === null &&
@@ -224,6 +233,43 @@ describe("Postgres Chat repositories", () => {
         conversationId: "task_conversation_1",
       }),
     ).resolves.toMatchObject({ conversationId: "task_conversation_1" });
+  });
+
+  it("projects Skill mention metadata with the triggering user message", async () => {
+    await seedStandaloneReviewSkill(database);
+    const created = await service.createMessage(actor(), {
+      idempotencyKey: "persist-skill-mention",
+      content: "Use /review for this.",
+      engine: "opencompany",
+      model: "provider/model",
+      mentions: [{ kind: "skill", id: "skill_review", name: "review" }],
+    });
+
+    await expect(
+      database.query<{
+        debug_trace: { mentions: Array<{ kind: string; id: string; name?: string }> };
+        presentation_summary: {
+          mentions: Array<{ kind: string; id: string; name?: string }>;
+        };
+      }>(
+        `SELECT message.debug_trace, projection.presentation_summary
+         FROM goat.chat_messages AS message
+         JOIN goat.message_read_model_v1 AS projection ON projection.id = message.id
+         WHERE message.id = $1`,
+        [created.messageId],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          debug_trace: {
+            mentions: [{ kind: "skill", id: "skill_review", name: "review" }],
+          },
+          presentation_summary: {
+            mentions: [{ kind: "skill", id: "skill_review", name: "review" }],
+          },
+        },
+      ],
+    });
   });
 
   it("files a new conversation under the project the first message names", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import type { PullRequestState } from "@opencompany/core/pull-requests";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { listSessionPullRequests, type SessionPullRequest } from "./session-pull-requests";
 
 /**
@@ -19,48 +19,73 @@ export type SessionPullRequestsByConversation = ReadonlyMap<string, SessionPullR
 
 const EMPTY: SessionPullRequestsByConversation = new Map();
 
-export function useSessionPullRequests(): SessionPullRequestsByConversation {
-  const [byConversation, setByConversation] = useState<SessionPullRequestsByConversation>(EMPTY);
+/**
+ * One poll for the whole tab, however many badges read it. The sidebar and every Task card in a
+ * chat share this store, so showing a PR in a second place never doubles the requests. Polling
+ * starts with the first subscriber and stops with the last.
+ */
+const store = {
+  snapshot: EMPTY,
+  listeners: new Set<() => void>(),
+  stop: null as (() => void) | null,
+};
 
-  useEffect(() => {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | null = null;
+function subscribe(listener: () => void) {
+  store.listeners.add(listener);
+  store.stop ??= startPolling();
+  return () => {
+    store.listeners.delete(listener);
+    if (store.listeners.size > 0) return;
+    store.stop?.();
+    store.stop = null;
+  };
+}
 
-    const poll = async () => {
-      if (controller.signal.aborted) return;
-      if (document.visibilityState === "visible") {
-        try {
-          const links = await listSessionPullRequests({
-            fetch: (url, init) => fetch(url, { ...init, signal: controller.signal }),
-          });
-          if (controller.signal.aborted) return;
-          setByConversation(indexByConversation(links));
-        } catch {
-          // The badge is ambient: a failed poll leaves the last known states on screen and the
-          // next tick tries again. Surfacing this would put an error in front of the reader for
-          // something they did not ask for and cannot act on.
-        }
+function startPolling() {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const poll = async () => {
+    if (controller.signal.aborted) return;
+    if (document.visibilityState === "visible") {
+      try {
+        const links = await listSessionPullRequests({
+          fetch: (url, init) => fetch(url, { ...init, signal: controller.signal }),
+        });
+        if (controller.signal.aborted) return;
+        store.snapshot = indexByConversation(links);
+        for (const listener of store.listeners) listener();
+      } catch {
+        // The badge is ambient: a failed poll leaves the last known states on screen and the
+        // next tick tries again. Surfacing this would put an error in front of the reader for
+        // something they did not ask for and cannot act on.
       }
-      if (!controller.signal.aborted) timer = setTimeout(poll, POLL_INTERVAL_MS);
-    };
+    }
+    if (!controller.signal.aborted) timer = setTimeout(poll, POLL_INTERVAL_MS);
+  };
 
+  void poll();
+  // Coming back to a tab that has been hidden for a while should not wait out the interval.
+  const onVisible = () => {
+    if (document.visibilityState !== "visible") return;
+    if (timer) clearTimeout(timer);
     void poll();
-    // Coming back to a tab that has been hidden for a while should not wait out the interval.
-    const onVisible = () => {
-      if (document.visibilityState !== "visible") return;
-      if (timer) clearTimeout(timer);
-      void poll();
-    };
-    document.addEventListener("visibilitychange", onVisible);
+  };
+  document.addEventListener("visibilitychange", onVisible);
 
-    return () => {
-      controller.abort();
-      if (timer) clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
+  return () => {
+    controller.abort();
+    if (timer) clearTimeout(timer);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+}
 
-  return byConversation;
+export function useSessionPullRequests(): SessionPullRequestsByConversation {
+  return useSyncExternalStore(
+    subscribe,
+    () => store.snapshot,
+    () => EMPTY,
+  );
 }
 
 /**

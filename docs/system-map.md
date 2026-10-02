@@ -71,8 +71,21 @@ surface; `POST /v1/tasks` remains the producer for manual Task creation outside 
 An opencompany Task turn uses the same host-tool contract and runtime tool composition as an
 interactive opencompany turn, with Workflow and schedule tools restricted to main Chat
 conversations. The persisted host service checks the conversation kind on every call, so a Task
-cannot start a Workflow or manage schedules even through a direct tool request. Task bootstraps omit
-these tools and their routing instructions. The Task context adds autonomous-run instructions,
+cannot manage Workflows or schedules even through a direct tool request. Task bootstraps omit
+these tools and their routing instructions. The one exception is a workflow handoff, described
+below.
+
+A workflow step can hand work off to another workflow by mentioning it as `@workflow/<slug>` in
+its instructions; the editor's `@` menu inserts these as `#handle` chips. Harness compilation pins
+each step's mentions (never the workflow itself) into `handoffWorkflowIds`, and a run on that step
+gets `start_workflow` limited to those workflows that its actor can currently run, through native
+host tools and the Codex/Claude Code MCP bridge alike. The host re-reads the Task's current step
+on every call, so a mention is the whole allowlist. The started run records `handoffDepth` one
+level deeper than its starter; at `MAX_WORKFLOW_HANDOFF_DEPTH` (3) a run can no longer hand off,
+which bounds workflows that mention each other. Starts are keyed per turn and workflow, so a
+retried call replays the same Task. The started Task renders as a card in the starter's
+transcript with its live status and, once it opens one, its pull request state from the same
+shared poll as the sidebar badge. The Task context adds autonomous-run instructions,
 larger call budgets, and the headless action catalog. All Task engines support one-time approval of
 connected actions set to Ask; headless callers without a durable Task still deny these requests.
 The opencompany engine uses its existing AI SDK approval continuation: the Run and Task pause for
@@ -160,8 +173,9 @@ response adapter are deleted; clients cannot select physical tables or predicate
 
 The official **GitHub as you** Plugin uses the personal `github_user` connection for
 user-authorized tools and coding-sandbox git/gh access. Plugin settings read the user token's
-reachable App installations and repositories from GitHub. A tool or sandbox git failure that is
-confirmed outside that intersection links back through the combined install-and-authorize flow;
+reachable App installations and repositories from GitHub. Connecting an identity uses GitHub's
+user-authorization flow without changing any installation. A tool or sandbox git failure that is
+confirmed outside that intersection links separately to the App installation flow;
 the client uses bounded, backoff polling with ordinary access reads instead of depending on
 GitHub's setup redirect, which can omit OAuth state for an existing installation. An explicit
 re-check may refresh the expiring user token once per install attempt.

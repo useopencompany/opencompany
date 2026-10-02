@@ -2,7 +2,7 @@
 
 import type { Editor } from "@tiptap/core";
 import { Suggestion } from "@tiptap/suggestion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Workflow } from "lucide-react";
 import {
   type ContextReferenceOption,
   fetchContextReferenceCatalog,
@@ -13,13 +13,23 @@ import { ContextReferenceOptionContent } from "./ContextReference";
 import { createSuggestionRenderer } from "./EditorSuggestionMenu";
 import { skillMentionContent } from "./SkillMentionNode";
 import { filterSkillMentionItems } from "./SkillMentionSuggestion";
+import {
+  filterWorkflowMentionItems,
+  type WorkflowMentionItem,
+  workflowMentionContent,
+} from "./WorkflowMentionNode";
 
 type Item =
   | { kind: "reference"; reference: ContextReferenceOption }
   | { kind: "skill"; skill: SkillCatalogItem }
+  | { kind: "workflow"; workflow: WorkflowMentionItem }
   | { kind: "status"; label: string };
 
-export function createContextReferenceSuggestion(editor: Editor, skills: SkillCatalogItem[]) {
+export function createContextReferenceSuggestion(
+  editor: Editor,
+  skills: SkillCatalogItem[],
+  workflows: readonly WorkflowMentionItem[] = [],
+) {
   let catalog: ReturnType<typeof fetchContextReferenceCatalog> | null = null;
   return Suggestion<Item>({
     editor,
@@ -34,6 +44,9 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
           (reference): Item => ({ kind: "reference", reference }),
         ),
         ...filterSkillMentionItems(skills, query).map((skill): Item => ({ kind: "skill", skill })),
+        ...filterWorkflowMentionItems(workflows, query).map(
+          (workflow): Item => ({ kind: "workflow", workflow }),
+        ),
       ];
       if (result.error) items.push({ kind: "status", label: result.error });
       if (!items.length)
@@ -48,13 +61,15 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
       const content =
         props.kind === "skill"
           ? skillMentionContent(props.skill)
-          : [
-              {
-                type: "contextReference",
-                attrs: { href: props.reference.href, label: props.reference.label },
-              },
-              { type: "text", text: " " },
-            ];
+          : props.kind === "workflow"
+            ? workflowMentionContent(props.workflow)
+            : [
+                {
+                  type: "contextReference",
+                  attrs: { href: props.reference.href, label: props.reference.label },
+                },
+                { type: "text", text: " " },
+              ];
       editor.chain().focus().insertContentAt(range, content).run();
     },
     render: createSuggestionRenderer<Item>({
@@ -67,7 +82,9 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
           ? item.reference.href
           : item.kind === "skill"
             ? item.skill.id
-            : item.label,
+            : item.kind === "workflow"
+              ? `workflow:${item.workflow.id}`
+              : item.label,
       renderItem: (item) =>
         item.kind === "status" ? (
           <span role="status" className="text-xs text-ink-subtle">
@@ -75,6 +92,20 @@ export function createContextReferenceSuggestion(editor: Editor, skills: SkillCa
           </span>
         ) : item.kind === "reference" ? (
           <ContextReferenceOptionContent reference={item.reference} />
+        ) : item.kind === "workflow" ? (
+          <>
+            <Workflow size={20} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium text-ink">
+                {item.workflow.name}
+              </span>
+              <span className="block truncate text-xs text-ink-subtle">
+                {item.workflow.active
+                  ? "Workflow · this step can start it"
+                  : "Workflow · draft, activate it to start it from here"}
+              </span>
+            </span>
+          </>
         ) : (
           <>
             <Sparkles size={20} />

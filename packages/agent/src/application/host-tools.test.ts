@@ -21,6 +21,7 @@ const context: ChatHostContext = {
   automationToolsEnabled: true,
   skillToolsEnabled: true,
   slackChannelEnabled: false,
+  workflowHandoff: null,
   subagentsEnabled: false,
 };
 
@@ -161,11 +162,92 @@ describe("opencompany Chat Task host tools", () => {
         }),
       ).resolves.toEqual({
         ok: false,
-        error: "Tasks cannot start workflows. Use a main chat instead.",
+        error:
+          operation === "workflows"
+            ? "Tasks cannot start workflows. Use a main chat instead."
+            : 'This task can only start workflows its step instructions mention, and "research" is not one of them.',
       });
       expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
     },
   );
+
+  describe("workflow handoffs from a task", () => {
+    const handoffContext: ChatHostContext = {
+      ...context,
+      taskConversation: true,
+      automationToolsEnabled: false,
+      workflowHandoff: { workflowIds: ["review-pr"], depth: 1 },
+    };
+
+    it("offers only the mentioned workflows the actor can run", async () => {
+      const dependencies = testDependencies({
+        loadContext: vi.fn(async () => handoffContext),
+        listWorkflowCatalog: vi.fn(async () => [
+          { id: "review-pr", name: "Review PR", description: "Review a pull request." },
+          { id: "weekly-report", name: "Weekly report", description: "" },
+        ]),
+      });
+
+      await expect(
+        executeChatHostToolService({
+          command: { operation: "bootstrap", sessionId: "runtime_1", runId: "run_1" },
+          dependencies,
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        result: {
+          automationToolsEnabled: false,
+          workflows: [
+            { id: "review-pr", name: "Review PR", description: "Review a pull request." },
+          ],
+        },
+      });
+    });
+
+    it("starts a mentioned workflow one level deeper than the run that started it", async () => {
+      const createWorkflowTask = vi.fn(async () => taskResult);
+      const dependencies = testDependencies({
+        loadContext: vi.fn(async () => handoffContext),
+        createWorkflowTask,
+      });
+
+      await expect(
+        executeChatHostToolService({
+          command: {
+            operation: "start_workflow",
+            sessionId: "runtime_1",
+            runId: "run_1",
+            input: { workflowId: "review-pr", prompt: "Review https://github.com/o/r/pull/7." },
+          },
+          dependencies,
+        }),
+      ).resolves.toEqual({ ok: true, result: taskResult });
+      expect(createWorkflowTask).toHaveBeenCalledWith({
+        actorId: "user_1",
+        workspaceId: "workspace_1",
+        mention: { id: "review-pr" },
+        description: "Review https://github.com/o/r/pull/7.",
+        handoffDepth: 2,
+      });
+    });
+
+    it("rejects a workflow the step does not mention before any side effect", async () => {
+      const dependencies = testDependencies({ loadContext: vi.fn(async () => handoffContext) });
+
+      await expect(
+        executeChatHostToolService({
+          command: {
+            operation: "start_workflow",
+            sessionId: "runtime_1",
+            runId: "run_1",
+            input: { workflowId: "weekly-report", prompt: "Send the report." },
+          },
+          dependencies,
+        }),
+      ).resolves.toMatchObject({ ok: false, error: expect.stringContaining("weekly-report") });
+      expect(dependencies.createWorkflowTask).not.toHaveBeenCalled();
+    });
+  });
 
   it("keeps the acting member when a task resolves plugin Skills and restricts standalone Skills to company scope", async () => {
     const dependencies = testDependencies({

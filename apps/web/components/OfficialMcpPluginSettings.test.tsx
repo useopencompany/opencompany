@@ -2751,7 +2751,7 @@ describe("Linear plugin settings", () => {
     );
     expect(screen.getByRole("link", { name: "Add organization or account" })).toHaveAttribute(
       "href",
-      "/api/integrations/github-user/start?returnTo=%2Fplugins%2Fgithub",
+      "/api/integrations/github-user/start?returnTo=%2Fplugins%2Fgithub&install=true",
     );
     await userEvent.click(screen.getByRole("link", { name: "Add organization or account" }));
     expect(screen.getByTestId("github-installation-pending")).toHaveTextContent(

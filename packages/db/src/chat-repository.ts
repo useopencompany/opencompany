@@ -768,17 +768,22 @@ export class PostgresChatRepository implements ChatRepository {
     const resolvedAttachments = await this.resolveAttachments(input.actor, attachmentIds);
     const attachmentsJson = stringifyPostgresJson(resolvedAttachments.attachments);
     const attachmentTextsJson = serializeAttachmentTexts(resolvedAttachments.attachmentTexts);
+    const userMessageDebugTraceJson = stringifyPostgresJson(
+      input.command.mentions?.length ? { mentions: input.command.mentions } : null,
+    );
     const settingsJson = stringifyPostgresJson({
       ...(input.command.settings ?? {}),
       ...(input.command.mentions?.length ? { mentions: input.command.mentions } : {}),
     });
-    const resolvedMentionSkills = await this.resolveMentionedSkills(
-      input.actor,
-      input.command.mentions?.flatMap((mention) =>
-        mention.kind === "skill" ? [mention.id] : [],
-      ) ?? [],
+    const resolvedMentionSkills = await resolveMentionedSkillsForConversation({
+      execute: this.execute,
+      actor: input.actor,
+      mentionedSkillIds:
+        input.command.mentions?.flatMap((mention) =>
+          mention.kind === "skill" ? [mention.id] : [],
+        ) ?? [],
       conversationId,
-    );
+    });
     if (
       new Set(resolvedMentionSkills.map((skill) => skill.name)).size !==
       resolvedMentionSkills.length
@@ -1169,12 +1174,13 @@ export class PostgresChatRepository implements ChatRepository {
       ),
       inserted_user_message AS (
         INSERT INTO goat.chat_messages (
-          id, session_id, role, content, task_id, attachments, attachment_texts,
+          id, session_id, role, content, task_id, debug_trace, attachments, attachment_texts,
           created_at, updated_at
         )
         SELECT
           reservation.message_id, target_chat.id, 'user', ${input.command.content},
-          target_chat.task_id, ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb,
+          target_chat.task_id, ${userMessageDebugTraceJson}::jsonb,
+          ${attachmentsJson}::jsonb, ${attachmentTextsJson}::jsonb,
           ${now}, ${now}
         FROM winner AS reservation
         JOIN target_chat ON true
@@ -2130,18 +2136,25 @@ export class PostgresChatRepository implements ChatRepository {
     return this.options.resolveAttachments({ actor, attachmentIds });
   }
 
-  private async resolveMentionedSkills(
-    actor: Actor,
-    mentionedSkillIds: readonly string[],
-    conversationId: string,
-  ): Promise<ResolvedWorkspaceSkill[]> {
-    const skillIds = [...new Set(mentionedSkillIds)];
-    if (skillIds.length === 0) return [];
-    const skillIdList = sql.join(
-      skillIds.map((id) => sql`${id}`),
-      sql`, `,
-    );
-    const candidates = await this.rows<ResolvedWorkspaceSkill>(sql`
+  private async rows<Row>(query: SQL): Promise<Row[]> {
+    return rowsFromExecute<Row>(await this.execute(query));
+  }
+}
+
+export async function resolveMentionedSkillsForConversation(input: {
+  execute: ChatSqlExecute;
+  actor: Actor;
+  mentionedSkillIds: readonly string[];
+  conversationId: string;
+}): Promise<ResolvedWorkspaceSkill[]> {
+  const skillIds = [...new Set(input.mentionedSkillIds)];
+  if (skillIds.length === 0) return [];
+  const skillIdList = sql.join(
+    skillIds.map((id) => sql`${id}`),
+    sql`, `,
+  );
+  const candidates = rowsFromExecute<ResolvedWorkspaceSkill>(
+    await input.execute(sql`
       SELECT
         installation.id AS id,
         installation.scope,
@@ -2157,10 +2170,10 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = installation.bundle_id
        AND bundle.workspace_id = installation.workspace_id
-      WHERE installation.workspace_id = ${actor.workspaceId}
+      WHERE installation.workspace_id = ${input.actor.workspaceId}
         AND installation.enabled
         AND installation.archived_at IS NULL
-        AND (installation.scope = 'company' OR (installation.created_by_user_id = ${actor.userId} AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${conversationId} AND session.kind = 'task')))
+        AND (installation.scope = 'company' OR (installation.created_by_user_id = ${input.actor.userId} AND NOT EXISTS (SELECT 1 FROM goat.chat_sessions session WHERE session.id = ${input.conversationId} AND session.kind = 'task')))
         AND (installation.name IN (${skillIdList}) OR installation.id IN (${skillIdList}))
       UNION ALL
       SELECT
@@ -2181,25 +2194,21 @@ export class PostgresChatRepository implements ChatRepository {
       JOIN goat.skill_bundles AS bundle
         ON bundle.id = plugin_skill.skill_bundle_id
        AND bundle.workspace_id = plugin_skill.workspace_id
-      WHERE plugin_skill.workspace_id = ${actor.workspaceId}
+      WHERE plugin_skill.workspace_id = ${input.actor.workspaceId}
         AND plugin.status = 'enabled'
-        AND plugin.owner_user_id = ${actor.userId}
+        AND plugin.owner_user_id = ${input.actor.userId}
         AND plugin_skill.skill_name IN (${skillIdList})
-    `);
-    const catalog = resolveSkillCandidates(
-      candidates.filter((candidate) => candidate.sourceKind === "standalone"),
-      candidates.filter((candidate) => candidate.sourceKind === "plugin"),
-    ).skills;
-    return skillIds.map((id) => {
-      const skill = selectSkill(catalog, id);
-      if (!skill) throw new CoreError("not_found", "A selected skill is unavailable.");
-      return skill;
-    });
-  }
-
-  private async rows<Row>(query: SQL): Promise<Row[]> {
-    return rowsFromExecute<Row>(await this.execute(query));
-  }
+    `),
+  );
+  const catalog = resolveSkillCandidates(
+    candidates.filter((candidate) => candidate.sourceKind === "standalone"),
+    candidates.filter((candidate) => candidate.sourceKind === "plugin"),
+  ).skills;
+  return skillIds.map((id) => {
+    const skill = selectSkill(catalog, id);
+    if (!skill) throw new CoreError("not_found", "A selected skill is unavailable.");
+    return skill;
+  });
 }
 
 function normalizeEngineQuestionAnswers(

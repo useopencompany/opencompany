@@ -66,7 +66,11 @@ old instance during that window. A failed or partial backend release leaves the 
 and the database surface unfinished so the next release retries it.
 
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
-deployment, and health checks. Do not bypass preflight or branch protection.
+deployment, and health checks. Do not bypass preflight or branch protection. The API and runner
+toggles can leave a Render surface on its current deployment only when nothing since that surface's
+last successful SHA changes it; planning fails otherwise. A skipped surface keeps running older
+shared packages than the rest of the release, which breaks contracts such as stored credential
+shapes between the API and the runner.
 
 ## Configuration ownership
 

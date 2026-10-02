@@ -61,6 +61,7 @@ describe("persisted workflow host tools", () => {
           taskConversation: false,
           skillToolsEnabled: true,
           slackChannelEnabled: false,
+          workflowHandoff: null,
           subagentsEnabled: false,
         })),
       },
