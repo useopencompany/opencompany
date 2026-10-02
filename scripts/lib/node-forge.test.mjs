@@ -3,8 +3,10 @@ import { constants, generateKeyPairSync, privateEncrypt } from "node:crypto";
 import { createRequire } from "node:module";
 import { test } from "node:test";
 
-const require = createRequire(import.meta.url);
-const forge = require("node-forge");
+const mobileRequire = createRequire(new URL("../../apps/mobile/package.json", import.meta.url));
+const expoRequire = createRequire(mobileRequire.resolve("expo/package.json"));
+const cliRequire = createRequire(expoRequire.resolve("@expo/cli"));
+const forge = cliRequire("node-forge");
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
   publicExponent: 3,
