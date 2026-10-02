@@ -83,9 +83,6 @@ export function AttachmentOverlay({
   const [presented, setPresented] = useState<AttachmentAnchor | null>(null);
   const [mode, setMode] = useState<"menu" | "camera">("menu");
   const [cameraMounted, setCameraMounted] = useState(false);
-  // The camera's controls get their glass once the panel is fully shown. UIKit drops glass that
-  // is set up under a nearly transparent parent and never brings it back, and the panel fades in.
-  const [cameraGlass, setCameraGlass] = useState(false);
   // Leaving goes straight from the menu or camera to the plus button, or for a captured photo,
   // to its place in the composer.
   const [exit, setExit] = useState<{
@@ -127,7 +124,6 @@ export function AttachmentOverlay({
   const finishClose = () => {
     setPresented(null);
     setCameraMounted(false);
-    setCameraGlass(false);
     setExit(null);
     setDissolved(false);
     onClosed();
@@ -139,7 +135,6 @@ export function AttachmentOverlay({
       finishClose();
       return;
     }
-    setCameraGlass(false);
     setExit({ from: mode, to });
   };
   const close = ({ immediate = false }: { immediate?: boolean } = {}) => {
@@ -275,12 +270,21 @@ export function AttachmentOverlay({
     return { opacity: interpolate(exitProgress.get(), [0, 0.5], [1, 0], "clamp") };
   });
 
+  // The controls never fade in, so their glass is there as soon as the growing shell uncovers
+  // them. They fade only on the way out, after their glass has switched off.
+  const cameraControlsStyle = useAnimatedStyle(() => {
+    if (exit && toButton)
+      return { opacity: interpolate(exitProgress.get(), [0, 0.5], [1, 0], "clamp") };
+    if (exit || mode === "camera") return { opacity: 1 };
+    return { opacity: interpolate(stage.get(), [1.5, CAMERA], [0, 1], "clamp") };
+  });
+
   const choose = async (source: AttachmentSource) => {
     analytics.capture("attachment_source_selected", { source });
     if (source === "camera") {
       setMode("camera");
       setCameraMounted(true);
-      animateTo(CAMERA, () => setCameraGlass(true));
+      animateTo(CAMERA);
       return;
     }
     // System pickers present over the app, so the overlay leaves first. The composer takes its
@@ -294,7 +298,6 @@ export function AttachmentOverlay({
 
   const backToMenu = () => {
     setMode("menu");
-    setCameraGlass(false);
     animateTo(MENU, () => setCameraMounted(false));
   };
 
@@ -340,14 +343,16 @@ export function AttachmentOverlay({
           accessibilityViewIsModal={mode === "camera"}
           className="absolute inset-0 overflow-hidden border-continuous"
           pointerEvents={mode === "camera" ? "auto" : "none"}
-          style={[cornerStyle, cameraStyle]}
+          style={cornerStyle}
         >
           <Reanimated.View
             style={[{ width: cameraFrame.width, height: cameraFrame.height }, cameraContentStyle]}
           >
             <CameraPanel
               active={mode === "camera" && isScreenFocused}
-              glass={cameraGlass}
+              cameraStyle={cameraStyle}
+              controlsStyle={cameraControlsStyle}
+              glass={mode === "camera" && !exit}
               onBack={backToMenu}
               onCaptured={landPhoto}
               remaining={sources.remaining}
