@@ -9,6 +9,16 @@ import { spawnSync } from "node:child_process";
 // itself an error, so a fixed dependency cannot leave a silent hole behind.
 const acceptedAdvisories = [
   {
+    ghsa: "GHSA-86w9-cpqp-85rv",
+    package: "node-forge",
+    // No patched release exists. patches/node-forge@1.4.0.patch applies the nested
+    // DigestAlgorithm element-count fix from digitalbazaar/forge#1152, commit
+    // ceba34402e329f0365134f23fe19898756527d65. The package is used by Expo tooling.
+    // scripts/lib/node-forge.test.mjs verifies rejection and valid signatures in CI.
+    // Remove the patch and exception when node-forge publishes the fix.
+    expiresOn: "2026-10-31",
+  },
+  {
     ghsa: "GHSA-vcc3-ghjq-m6fr",
     package: "decode-uri-component",
     // Reached only through expo-router@57 > query-string@7, which pins `decode-uri-component@^0.2.2`.
