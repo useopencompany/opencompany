@@ -67,6 +67,7 @@ export function workflowActivationDisabledReason(steps: Pick<WorkflowStep, "inst
 }
 
 export type WorkflowEventFilterValue = {
+  pairs?: { key: string; value: string }[];
   id: string;
   name: string;
   key?: string;
@@ -1076,6 +1077,31 @@ function workflowEventFilters(filters: Record<string, WorkflowEventFilterValue>)
       if (!/^[a-z][a-z0-9_]*$/u.test(id)) {
         throw new CoreError("invalid_argument", "Workflow event filter ID is invalid.");
       }
+      if (
+        value.pairs &&
+        (!Array.isArray(value.pairs) || value.pairs.length === 0 || value.pairs.length > 16)
+      ) {
+        throw new CoreError("invalid_argument", "Choose between 1 and 16 exact tag pairs.");
+      }
+      const pairs = value.pairs?.map((pair) => {
+        if (
+          typeof pair.key !== "string" ||
+          !pair.key.trim() ||
+          pair.key.length > 64 ||
+          typeof pair.value !== "string" ||
+          !pair.value.trim() ||
+          pair.value.length > 256
+        )
+          throw new CoreError(
+            "invalid_argument",
+            "Exact tag keys and values must be non-empty and bounded.",
+          );
+        // Exact matches retain the authored bytes, including meaningful whitespace.
+        return { key: pair.key, value: pair.value };
+      });
+      if (pairs && new Set(pairs.map((pair) => pair.key)).size !== pairs.length) {
+        throw new CoreError("invalid_argument", "Tag keys must be unique.");
+      }
       const key = value.key?.trim();
       const metadataEntries = Object.entries(value.metadata ?? {});
       if (metadataEntries.length > 16) {
@@ -1084,6 +1110,7 @@ function workflowEventFilters(filters: Record<string, WorkflowEventFilterValue>)
       return [
         id,
         {
+          ...(pairs ? { pairs } : {}),
           id: bounded(value.id, 256, "Workflow event filter value"),
           name: bounded(value.name, 256, "Workflow event filter name"),
           ...(key ? { key: bounded(key, 64, "Workflow event filter key") } : {}),

@@ -1,7 +1,11 @@
 "use client";
 
 import { scheduleSummary } from "@opencompany/agent-runtime";
-import type { CompanyGitHubPluginDto, WorkflowScope } from "@opencompany/protocol";
+import type {
+  CompanyGitHubPluginDto,
+  CompanySentryPluginDto,
+  WorkflowScope,
+} from "@opencompany/protocol";
 import { Button } from "@opencompany/ui/components/button";
 import {
   Dialog,
@@ -39,6 +43,7 @@ import {
   createHeadlessWorkflow,
   updateHeadlessWorkflow,
 } from "@/lib/headless-automation-commands";
+import type { sentryTemplateDefinition } from "@/lib/sentry-template-setup";
 import { supportedTimezones } from "@/lib/timezones";
 import {
   loadWorkflowEventFilterOptions,
@@ -53,6 +58,7 @@ import {
   type WorkflowTemplateMissingPlugin,
   type WorkflowTemplateOutcomePlugin,
 } from "@/lib/workflow-templates";
+import { SentryTemplateSetup } from "./SentryTemplateSetup";
 
 const TEMPLATE_ICONS: Record<WorkflowTemplateIcon, LucideIcon> = {
   ship: Rocket,
@@ -84,11 +90,13 @@ export function WorkflowTemplatesButton({
   missingPlugins,
   /** The company GitHub connection an event template's trigger binds to, when one is linked. */
   companyGitHub,
+  companySentry,
   /** Visibility the clone is created with, so a template follows the list filter like "New workflow" does. */
   scope,
 }: {
   missingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
   companyGitHub?: CompanyGitHubPluginDto | null;
+  companySentry?: CompanySentryPluginDto | null;
   scope: WorkflowScope;
 }) {
   const router = useRouter();
@@ -96,13 +104,23 @@ export function WorkflowTemplatesButton({
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   const [setup, setSetup] = useState<EventTemplateSetup | null>(null);
   const companyAccounts = companyGitHubEventAccounts(companyGitHub);
+  const [sentrySetup, setSentrySetup] = useState<WorkflowTemplate | null>(null);
 
-  const startFromTemplate = async (template: WorkflowTemplate, trigger?: WorkflowTriggerInput) => {
+  const startFromTemplate = async (
+    template: WorkflowTemplate,
+    trigger?: WorkflowTriggerInput,
+    definition?: ReturnType<typeof sentryTemplateDefinition>,
+  ) => {
     if (pendingTemplateId) return;
     setPendingTemplateId(template.id);
     try {
       router.push(
-        await createWorkflowFromTemplate(template, scope, trigger ?? scheduleTrigger(template)),
+        await createWorkflowFromTemplate(
+          template,
+          scope,
+          trigger ?? scheduleTrigger(template),
+          definition,
+        ),
       );
     } catch (cause) {
       setPendingTemplateId(null);
@@ -115,6 +133,10 @@ export function WorkflowTemplatesButton({
   // An event template cannot be cloned straight from the card: its trigger needs an account and a
   // repository first, so it opens a setup step instead of a draft.
   const openTemplate = (template: WorkflowTemplate) => {
+    if (template.setup?.startsWith("sentry")) {
+      setSentrySetup(template);
+      return;
+    }
     if (template.trigger.kind === "schedule") {
       void startFromTemplate(template);
       return;
@@ -136,21 +158,38 @@ export function WorkflowTemplatesButton({
         onOpenChange={(next) => {
           setOpen(next);
           // Reopening the gallery should show the gallery, not the setup step it was closed on.
-          if (!next) setSetup(null);
+          if (!next) {
+            setSetup(null);
+            setSentrySetup(null);
+          }
         }}
       >
         <DialogContent className="max-h-[calc(100vh-4rem)] max-w-[560px] gap-5 overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[15px]">
-              {setup ? setup.template.name : "Workflow templates"}
+              {sentrySetup?.name ?? (setup ? setup.template.name : "Workflow templates")}
             </DialogTitle>
             <DialogDescription className="text-[12.5px] leading-5 text-ink-subtle">
-              {setup
+              {setup || sentrySetup
                 ? "Choose what this workflow watches. It opens as a draft you can edit."
                 : "Each one opens as a draft you can edit. Nothing runs until you activate it."}
             </DialogDescription>
           </DialogHeader>
-          {setup ? (
+          {sentrySetup ? (
+            <SentryTemplateSetup
+              template={sentrySetup}
+              plugin={companySentry ?? null}
+              pending={pendingTemplateId === sentrySetup.id}
+              onBack={() => setSentrySetup(null)}
+              onUse={(definition) =>
+                void startFromTemplate(
+                  sentrySetup,
+                  definition.triggers[0] as WorkflowTriggerInput,
+                  definition,
+                )
+              }
+            />
+          ) : setup ? (
             <EventTemplateSetupStep
               setup={setup}
               pending={pendingTemplateId === setup.template.id}
@@ -169,7 +208,10 @@ export function WorkflowTemplatesButton({
                   // to, so the card stays inert and its setup hint says what to connect first.
                   disabled={
                     (pendingTemplateId !== null && pendingTemplateId !== template.id) ||
-                    (template.trigger.kind === "event" && companyAccounts.length === 0)
+                    (template.setup?.startsWith("sentry")
+                      ? companySentry?.connection?.status !== "connected" ||
+                        !companySentry.connection.verifiedAt
+                      : template.trigger.kind === "event" && companyAccounts.length === 0)
                   }
                   onUse={() => openTemplate(template)}
                 />
@@ -410,7 +452,10 @@ type WorkflowTriggerInput =
       provider: string;
       event: string;
       integrationId: string;
-      filters: Record<string, { id: string; name: string }>;
+      filters: Record<
+        string,
+        { id: string; name: string; pairs?: { key: string; value: string }[] }
+      >;
       prompt: string;
     };
 
@@ -434,6 +479,7 @@ async function createWorkflowFromTemplate(
   template: WorkflowTemplate,
   scope: WorkflowScope,
   trigger: WorkflowTriggerInput,
+  definition?: ReturnType<typeof sentryTemplateDefinition>,
 ) {
   const workflow = await createHeadlessWorkflow({
     name: template.name,
@@ -450,15 +496,24 @@ async function createWorkflowFromTemplate(
           // The create call already minted a step id; reusing it keeps the draft to a single step.
           id: workflow.steps[0]?.id ?? globalThis.crypto.randomUUID(),
           title: template.step.title,
-          model: "",
-          instructions: template.step.instructions,
+          model: definition?.step.model ?? template.step.model ?? "",
+          ...((definition?.step.runtimeModel ?? template.step.runtimeModel)
+            ? { runtimeModel: definition?.step.runtimeModel ?? template.step.runtimeModel }
+            : {}),
+          ...((definition?.step.reasoningEffort ?? template.step.reasoningEffort)
+            ? { reasoningEffort: definition?.step.reasoningEffort ?? template.step.reasoningEffort }
+            : {}),
+          instructions: definition?.step.instructions ?? template.step.instructions,
         },
       ],
       // A draft never fires, so the trigger can be prefilled and left switched on: the workflow
       // starts running when the owner reviews the instructions and activates it.
       status: "draft",
       trigger,
-      triggers: [{ id: `trigger-${globalThis.crypto.randomUUID()}`, ...trigger }],
+      triggers: (definition?.triggers ?? [trigger]).map((item) => ({
+        id: `trigger-${globalThis.crypto.randomUUID()}`,
+        ...item,
+      })) as never,
     });
   } catch (cause) {
     await archiveHeadlessWorkflow(workflow.id, { expectedVersion: workflow.version }).catch(

@@ -1,9 +1,13 @@
+// @hono/zod-openapi 1.5.2 declares its z export through an undeclared namespace.
+// Use the direct Zod types for the Sentry contracts while preserving OpenAPI initialization.
+
 import { z } from "@hono/zod-openapi";
 import {
   normalizeWikiToolInput,
   WIKI_TOOL_INPUT_JSON_SCHEMA,
   type WikiToolInput,
 } from "@opencompany/wiki/tool";
+import { z as sentryZ } from "zod";
 import { API_VERSION, PROTOCOL_VERSION } from "./version";
 
 export const ResourceIdSchema = z.string().min(1).max(256).openapi({ example: "run_019fed53" });
@@ -296,6 +300,13 @@ export const WorkflowStepSchema = z
 
 const WorkflowEventFilterValueSchema = z
   .object({
+    pairs: z
+      .array(
+        z.object({ key: z.string().min(1).max(64), value: z.string().min(1).max(256) }).strict(),
+      )
+      .min(1)
+      .max(16)
+      .optional(),
     id: z.string().min(1).max(256),
     name: z.string().min(1).max(256),
     key: z.string().min(1).max(64).optional(),
@@ -1197,6 +1208,22 @@ export const PluginCapabilityDefinitionSchema = z
 
 export const PluginEventFilterDefinitionSchema = z
   .discriminatedUnion("kind", [
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        required: z.boolean(),
+        kind: z.literal("text"),
+      })
+      .strict(),
+    z
+      .object({
+        id: z.string().min(1).max(64),
+        label: z.string().min(1).max(120),
+        required: z.boolean(),
+        kind: z.literal("tag_pairs"),
+      })
+      .strict(),
     z
       .object({
         id: z.string().min(1).max(64),
@@ -4701,3 +4728,97 @@ export const SlackProvisioningCompleteBodySchema = z
       .regex(/^[a-zA-Z0-9_-]+$/),
   })
   .strict();
+
+export const SentryPermissionModeSchema = sentryZ.enum(["on", "ask", "off"]);
+export const SentryProjectSchema = sentryZ.object({
+  id: sentryZ.string().regex(/^\d+$/),
+  slug: sentryZ.string(),
+  name: sentryZ.string(),
+});
+export const SentryConnectBodySchema = sentryZ
+  .object({
+    installationId: sentryZ.uuid().toLowerCase(),
+    code: sentryZ.string().min(1).max(512),
+    region: sentryZ.enum(["us", "eu"]),
+  })
+  .strict();
+export const SentrySettingsBodySchema = sentryZ
+  .object({
+    projectIds: sentryZ.array(sentryZ.string().regex(/^\d+$/)).min(1).max(100),
+    cooldownMinutes: sentryZ.number().int().min(0).max(10080),
+    dailyCap: sentryZ.number().int().min(0).max(1000),
+    capabilityModes: sentryZ
+      .partialRecord(sentryZ.enum(["read", "write"]), SentryPermissionModeSchema)
+      .optional(),
+    toolModes: sentryZ.record(sentryZ.string(), SentryPermissionModeSchema).optional(),
+  })
+  .strict();
+export const SentryFixSetupBodySchema = sentryZ
+  .object({
+    repository: sentryZ.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+    baseBranch: sentryZ.string().min(1).max(256),
+    engine: sentryZ.enum(["codex", "claude-code"]),
+  })
+  .strict();
+export const CompanySentryPluginSchema = sentryZ.object({
+  configured: sentryZ.boolean(),
+  canManage: sentryZ.boolean(),
+  installUrl: sentryZ.url().nullable(),
+  connection: sentryZ
+    .object({
+      integrationId: sentryZ.string(),
+      workspaceId: sentryZ.string(),
+      installationId: sentryZ.uuid(),
+      organizationId: sentryZ.string(),
+      organizationSlug: sentryZ.string(),
+      region: sentryZ.enum(["us", "eu"]),
+      selectedProjectIds: sentryZ.array(sentryZ.string()),
+      cooldownMinutes: sentryZ.number(),
+      dailyCap: sentryZ.number(),
+      verifiedAt: sentryZ.iso.datetime({ offset: true }).nullable(),
+      lastReceivedAt: sentryZ.iso.datetime({ offset: true }).nullable(),
+      status: sentryZ.string(),
+      capabilityModes: sentryZ.record(sentryZ.string(), SentryPermissionModeSchema),
+      toolModes: sentryZ.record(sentryZ.string(), SentryPermissionModeSchema),
+    })
+    .nullable(),
+  events: sentryZ.array(PluginEventDefinitionSchema),
+  usage: sentryZ.number(),
+  tools: sentryZ.array(sentryZ.object({ id: sentryZ.string(), mode: SentryPermissionModeSchema })),
+  outcomes: sentryZ.array(
+    sentryZ.object({
+      id: sentryZ.string(),
+      receivedAt: sentryZ.iso.datetime({ offset: true }),
+      status: sentryZ.string(),
+      reason: sentryZ.string().nullable(),
+      runStatus: sentryZ.string().nullable(),
+      runReason: sentryZ.string().nullable(),
+      issueId: sentryZ.string().nullable(),
+      taskId: sentryZ.string().nullable(),
+    }),
+  ),
+});
+export const CompanySentryPluginEnvelopeSchema = sentryZ
+  .object({
+    data: CompanySentryPluginSchema,
+    meta: ProtocolMetadataSchema,
+  })
+  .openapi("CompanySentryPluginEnvelope");
+export const SentryProjectsEnvelopeSchema = sentryZ
+  .object({
+    data: sentryZ.object({
+      projects: sentryZ.array(SentryProjectSchema),
+      nextCursor: sentryZ.string().nullable(),
+    }),
+    meta: ProtocolMetadataSchema,
+  })
+  .openapi("SentryProjectsEnvelope");
+export const SentryFixSetupEnvelopeSchema = sentryZ
+  .object({
+    data: SentryFixSetupBodySchema,
+    meta: ProtocolMetadataSchema,
+  })
+  .openapi("SentryFixSetupEnvelope");
+export type CompanySentryPluginDto = sentryZ.infer<typeof CompanySentryPluginSchema>;
+export type SentryProjectDto = sentryZ.infer<typeof SentryProjectSchema>;
+export type SentrySettingsDto = sentryZ.infer<typeof SentrySettingsBodySchema>;

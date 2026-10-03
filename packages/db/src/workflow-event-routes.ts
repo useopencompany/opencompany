@@ -44,7 +44,7 @@ export type WorkflowEventTriggerRoute = {
   harnessSpec: HarnessSpec;
   provider: string;
   event: string;
-  filters: Record<string, { id: string }>;
+  filters: Record<string, { id: string; pairs?: { key: string; value: string }[] }>;
   activatedAt?: Date;
   legacyTriageStateId?: string;
 };
@@ -391,7 +391,20 @@ export function parseWorkflowEventConfig(value: unknown) {
     const filters = Object.fromEntries(
       Object.entries(filtersRecord).flatMap(([id, filter]) => {
         const filterId = asNonEmptyString(asRecord(filter)?.id);
-        return filterId ? [[id, { id: filterId }]] : [];
+        return filterId
+          ? [
+              [
+                id,
+                {
+                  ...(provider === "sentry" ? asRecord(filter) : {}),
+                  id: filterId,
+                  ...(Array.isArray(asRecord(filter)?.pairs)
+                    ? { pairs: asRecord(filter)!.pairs as { key: string; value: string }[] }
+                    : {}),
+                },
+              ],
+            ]
+          : [];
       }),
     );
     if (Object.keys(filters).length !== Object.keys(filtersRecord).length) return null;

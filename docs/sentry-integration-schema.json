@@ -1,0 +1,21 @@
+{
+  "elements": [
+    {
+      "type": "alert-rule-action",
+      "title": "Run opencompany workflow",
+      "settings": {
+        "type": "alert-rule-settings",
+        "uri": "/integrations/sentry/alert-action",
+        "description": "Choose an active shared workflow with an enabled Sentry alert trigger for this project.",
+        "required_fields": [
+          {
+            "type": "select",
+            "label": "Workflow",
+            "name": "destination",
+            "uri": "/integrations/sentry/alert-action/options"
+          }
+        ]
+      }
+    }
+  ]
+}

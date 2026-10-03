@@ -3,6 +3,7 @@
 import { scheduleSummary } from "@opencompany/agent-runtime";
 import type {
   CompanyGitHubPluginDto,
+  CompanySentryPluginDto,
   SkillBundleFileMetadataDto,
   SkillImportCandidateDto,
   SkillImportFileMetadataDto,
@@ -700,6 +701,7 @@ export function WorkflowsRoute({
   ownerNames,
   templateMissingPlugins,
   companyGitHub,
+  companySentry,
 }: {
   workflows: WorkflowListItem[];
   workspaceId: string;
@@ -713,6 +715,7 @@ export function WorkflowsRoute({
   templateMissingPlugins: Record<string, WorkflowTemplateMissingPlugin[]> | null;
   /** The company GitHub connection an event template's trigger binds to, when one is linked. */
   companyGitHub: CompanyGitHubPluginDto | null;
+  companySentry?: CompanySentryPluginDto | null;
 }) {
   const router = useRouter();
   const data = useAppData();
@@ -779,6 +782,7 @@ export function WorkflowsRoute({
                 <WorkflowTemplatesButton
                   missingPlugins={templateMissingPlugins}
                   companyGitHub={companyGitHub}
+                  companySentry={companySentry ?? null}
                   scope={scopeFilter === "all" ? "company" : scopeFilter}
                 />
                 <Button size="sm" onClick={() => setCreating(true)} className="shadow-sm">

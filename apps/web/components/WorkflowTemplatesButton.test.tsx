@@ -1,3 +1,4 @@
+import { sentryPluginFixture } from "@/test/sentry";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -12,6 +13,11 @@ const commandsMock = vi.hoisted(() => ({
   updateHeadlessWorkflow: vi.fn(),
   archiveHeadlessWorkflow: vi.fn(),
 }));
+const sentryMock = vi.hoisted(() => ({
+  listSentryProjectsAction: vi.fn(),
+  validateSentryFixAction: vi.fn(),
+}));
+vi.mock("@/lib/sentry-actions", () => sentryMock);
 const filtersMock = vi.hoisted(() => ({ loadWorkflowEventFilterOptions: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
@@ -278,5 +284,43 @@ describe("WorkflowTemplatesButton", () => {
     );
     expect(routerMock.push).not.toHaveBeenCalled();
     expect(toastMock.error).toHaveBeenCalledWith("Workflow update failed");
+  });
+});
+
+it("clones both Sentry triggers as a draft and archives a partially initialized draft on failure", async () => {
+  sentryMock.listSentryProjectsAction.mockResolvedValue({
+    projects: [{ id: "1", name: "Web", slug: "web" }],
+    nextCursor: null,
+  });
+  const companySentry = sentryPluginFixture();
+  commandsMock.createHeadlessWorkflow.mockResolvedValue(createdWorkflow());
+  commandsMock.updateHeadlessWorkflow
+    .mockReset()
+    .mockRejectedValue(new Error("Conditions rejected"));
+  commandsMock.archiveHeadlessWorkflow.mockReset().mockResolvedValue({});
+  render(
+    <WorkflowTemplatesButton missingPlugins={{}} companySentry={companySentry} scope="company" />,
+  );
+  await useTemplate("Investigate Sentry issues");
+  const project = await screen.findByRole("combobox", { name: "Sentry project" });
+  await waitFor(() => expect(screen.getByRole("option", { name: "Web" })).toBeEnabled());
+  await userEvent.selectOptions(project, "1");
+  await userEvent.type(screen.getByRole("textbox", { name: "Sentry environment" }), "production");
+  await userEvent.click(screen.getByRole("button", { name: "Create draft" }));
+  await waitFor(() =>
+    expect(commandsMock.archiveHeadlessWorkflow).toHaveBeenCalledWith("workflow_1", {
+      expectedVersion: 1,
+    }),
+  );
+  expect(commandsMock.updateHeadlessWorkflow.mock.calls[0]![1]).toMatchObject({
+    status: "draft",
+    steps: [{ model: "kimi-k2.6" }],
+    triggers: [
+      {
+        event: "issue.created",
+        filters: { project: { id: "1" }, environment: { id: "production" } },
+      },
+      { event: "issue.regressed", filters: { environment: { id: "production" } } },
+    ],
   });
 });

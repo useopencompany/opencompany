@@ -38,9 +38,65 @@ export const COMPANY_GITHUB_EVENTS = [
 
 export type CompanyGitHubEventId = (typeof COMPANY_GITHUB_EVENTS)[number]["id"];
 
+export const COMPANY_SENTRY_PROVIDER = "sentry" as const;
+export const COMPANY_SENTRY_INTEGRATION_PROVIDER = "sentry" as const;
+const SENTRY_PROJECT_FILTER = {
+  id: "project",
+  label: "Project",
+  required: true,
+  kind: "integration_resource",
+  resourceType: "project",
+} as const;
+const SENTRY_CONDITIONS = [
+  SENTRY_PROJECT_FILTER,
+  {
+    id: "priority",
+    label: "Priority",
+    required: false,
+    kind: "choice",
+    options: [
+      { id: "high", name: "High" },
+      { id: "medium", name: "Medium" },
+      { id: "low", name: "Low" },
+    ],
+  },
+  { id: "environment", label: "Environment", required: false, kind: "text" },
+  { id: "tags", label: "Exact tags", required: false, kind: "tag_pairs" },
+] satisfies PluginEventDefinition["filters"];
+export const COMPANY_SENTRY_EVENTS: readonly PluginEventDefinition[] = [
+  {
+    id: "issue.created",
+    label: "Error issue created",
+    description:
+      "Matches the first occurrence. An issue created in staging does not later qualify as a new production issue. Priority is Sentry's triage priority, not error severity.",
+    delivery: "webhook",
+    filters: SENTRY_CONDITIONS,
+  },
+  {
+    id: "issue.regressed",
+    label: "Issue regressed",
+    description:
+      "A resolved issue regresses. Conditions use a representative occurrence at or before notification time. Manual reopening does not trigger a run.",
+    delivery: "webhook",
+    filters: SENTRY_CONDITIONS,
+  },
+  {
+    id: "issue_alert.triggered",
+    label: "Issue alert triggered",
+    description:
+      "Run the workflow selected in a Sentry alert action. Sentry controls thresholds and conditions.",
+    delivery: "webhook",
+    filters: [SENTRY_PROJECT_FILTER],
+  },
+];
+
 const COMPANY_PLUGINS: Readonly<
   Record<string, { integrationProvider: string; events: readonly PluginEventDefinition[] }>
 > = {
+  [COMPANY_SENTRY_PROVIDER]: {
+    integrationProvider: COMPANY_SENTRY_INTEGRATION_PROVIDER,
+    events: COMPANY_SENTRY_EVENTS,
+  },
   [COMPANY_GITHUB_PROVIDER]: {
     integrationProvider: COMPANY_GITHUB_INTEGRATION_PROVIDER,
     events: COMPANY_GITHUB_EVENTS,

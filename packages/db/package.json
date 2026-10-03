@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./test-sentry-schema": {
+      "types": "./src/test-sentry-schema.ts",
+      "default": "./src/test-sentry-schema.ts"
+    },
+    "./sentry": {
+      "types": "./src/sentry.ts",
+      "default": "./src/sentry.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"

@@ -83,6 +83,7 @@ import {
   DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "@/lib/workflow-schedule-defaults";
+import { ExactTagConditions } from "./SentryConditions";
 
 const AUTOSAVE_DELAY_MS = 1200;
 // Stable identity so the autosave effect is not re-run — and its error banner cleared — on every
@@ -101,7 +102,13 @@ export type WorkflowTriggerDraft =
       integrationId: string;
       filters: Record<
         string,
-        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+        {
+          id: string;
+          name: string;
+          key?: string;
+          metadata?: Record<string, string>;
+          pairs?: { key: string; value: string }[];
+        }
       >;
       prompt: string;
     }
@@ -1167,6 +1174,36 @@ function EventFilterPicker({
           ? [selected]
           : [];
 
+  if (filter.kind === "tag_pairs" || filter.kind === "text") {
+    const update = (value: typeof selected) =>
+      onChange({
+        ...trigger,
+        filters: value
+          ? { ...trigger.filters, [filter.id]: value }
+          : Object.fromEntries(Object.entries(trigger.filters).filter(([id]) => id !== filter.id)),
+      });
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <span className="text-xs text-ink-subtle">{filter.label}</span>
+        {filter.kind === "tag_pairs" ? (
+          <ExactTagConditions value={selected} disabled={!canEdit} onChange={update} />
+        ) : (
+          <Input
+            aria-label={filter.label}
+            disabled={!canEdit}
+            maxLength={256}
+            value={selected?.id ?? ""}
+            placeholder="Any environment"
+            onChange={(event) =>
+              update(
+                event.target.value ? { id: event.target.value, name: event.target.value } : null,
+              )
+            }
+          />
+        )}
+      </div>
+    );
+  }
   return (
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[12px] font-medium text-ink-subtle">{filter.label}</span>

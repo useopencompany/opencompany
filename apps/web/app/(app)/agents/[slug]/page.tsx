@@ -6,6 +6,7 @@ import { getCompanyAgent } from "@/lib/company-agents-server";
 import { getCompanyGitHubPluginForTriggersAction } from "@/lib/company-plugin-actions";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getCompanySentryPluginAction } from "@/lib/sentry-actions";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
 import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
@@ -18,13 +19,15 @@ export default async function CompanyAgentPage({ params }: { params: Promise<{ s
   const agent = await getCompanyAgent(slug);
   if (!agent) notFound();
 
-  const [skillCatalog, personalAccounts, plugins, members, companyGitHub] = await Promise.all([
-    listHeadlessSkillCatalog(),
-    getPersonalAccounts(),
-    listHeadlessPlugins(),
-    listWorkspaceMembersAction(),
-    getCompanyGitHubPluginForTriggersAction(),
-  ]);
+  const [skillCatalog, personalAccounts, plugins, members, companyGitHub, companySentry] =
+    await Promise.all([
+      listHeadlessSkillCatalog(),
+      getPersonalAccounts(),
+      listHeadlessPlugins(),
+      listWorkspaceMembersAction(),
+      getCompanyGitHubPluginForTriggersAction(),
+      getCompanySentryPluginAction(),
+    ]);
 
   const isOwner = agent.ownerUserId === context.user.workosUserId;
   const owner = members.find(
@@ -39,7 +42,12 @@ export default async function CompanyAgentPage({ params }: { params: Promise<{ s
       skillCatalog={skillCatalog.filter((skill: SkillCatalogItemDto) => skill.scope !== "personal")}
       // Event triggers bind to the viewer's own connections while editing, and only the owner can
       // edit, so the provider list is exactly the owner's, plus the workspace's company plugins.
-      eventProviders={workflowEventProviderOptions({ plugins, personalAccounts, companyGitHub })}
+      eventProviders={workflowEventProviderOptions({
+        plugins,
+        personalAccounts,
+        companyGitHub,
+        companySentry,
+      })}
     />
   );
 }
