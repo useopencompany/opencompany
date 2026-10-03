@@ -1,3 +1,4 @@
+const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { withSentryConfig } = require("@sentry/react-native/metro");
@@ -8,9 +9,20 @@ const { withUniwindConfig } = require("uniwind/metro");
 /** @type {import('expo/metro-config').MetroConfig} */
 let config = getDefaultConfig(__dirname);
 
-config.watchFolders.push(
-  fs.realpathSync(path.resolve(__dirname, "node_modules/react-native-worklets/.worklets")),
+const workletsDirectory = fs.realpathSync(
+  path.resolve(__dirname, "node_modules/react-native-worklets/.worklets"),
 );
+config.watchFolders.push(workletsDirectory);
+
+const workletsCacheVersionFile = path.join(workletsDirectory, ".metro-cache-version");
+const hasGeneratedWorklets = fs.readdirSync(workletsDirectory).some((file) => file.endsWith(".js"));
+// Expo overrides resetCache, so invalidate transforms with a token stored beside their
+// generated files. Worklets ships dummy.md even when no generated JavaScript exists.
+if (!hasGeneratedWorklets || !fs.existsSync(workletsCacheVersionFile)) {
+  fs.writeFileSync(workletsCacheVersionFile, randomUUID());
+}
+// Keep transforms separate across worktrees and renew them after generated files disappear.
+config.cacheVersion = `${config.cacheVersion}:${workletsDirectory}:${fs.readFileSync(workletsCacheVersionFile, "utf8")}`;
 
 config = withUniwindConfig(config, {
   cssEntryFile: "./src/global.css",
