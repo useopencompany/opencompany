@@ -171,3 +171,10 @@ ALTER TABLE drafts ADD COLUMN selection_json TEXT;
 ALTER TABLE conversations ADD COLUMN composer_settings_json TEXT;
 PRAGMA user_version = 5;
 `;
+
+// Mentions the composer's tags carry beyond their text: skills, workflows, and the ad-hoc Task.
+// NULL for drafts written before tags existed, which hold plain text only.
+export const DRAFT_MENTIONS_SCHEMA = `
+ALTER TABLE drafts ADD COLUMN mentions_json TEXT;
+PRAGMA user_version = 6;
+`;

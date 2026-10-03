@@ -1,11 +1,12 @@
 import type { ResolveApprovalBody } from "@opencompany/protocol/schemas";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { MarkdownStyle } from "react-native-enriched-markdown";
 import { StreamdownText } from "react-native-streamdown";
 import { StyledImage } from "@/shared/ui/styled-image";
 import { StyledSymbolView } from "@/shared/ui/styled-symbol-view";
 import type { ApprovalPart, ChatMessage as ChatMessageModel, ChatPart } from "../model/chat";
+import { referenceLabelRanges } from "../model/quick-actions/composer-segments";
 import { AssistantMessageActions } from "./assistant-message-actions";
 import { ShimmerText } from "./ShimmerText";
 
@@ -13,6 +14,23 @@ function orderedMessageParts(message: ChatMessageModel, text: string): ChatPart[
   if (message.parts.length > 0) return message.parts;
   if (!text) return [];
   return [{ id: `text:${message.id}:fallback`, type: "text", text }];
+}
+
+/** A sent message shows plugin and repository mentions as their labels, not as Markdown links. */
+function formatUserMessageText(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const range of referenceLabelRanges(text)) {
+    if (range.start > cursor) nodes.push(text.slice(cursor, range.start));
+    nodes.push(
+      <Text className="font-medium text-accent" key={range.start}>
+        {range.label}
+      </Text>,
+    );
+    cursor = range.end;
+  }
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes;
 }
 
 function AttachmentRow({ part }: { part: Extract<ChatPart, { type: "attachment" }> }) {
@@ -185,7 +203,7 @@ export function ChatMessage({
         {message.content ? (
           <View className="rounded-[20px] border-continuous bg-primary px-4 py-[11px]">
             <Text selectable className="text-[16px] text-primary-foreground leading-[22px]">
-              {message.content}
+              {formatUserMessageText(message.content)}
             </Text>
           </View>
         ) : null}

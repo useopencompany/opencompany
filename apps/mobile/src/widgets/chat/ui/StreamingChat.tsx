@@ -5,10 +5,12 @@ import {
 } from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useQuery } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Text, useWindowDimensions, View } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import Reanimated, {
   FadeIn,
   FadeOut,
@@ -40,17 +42,28 @@ import {
   type OutgoingDraft,
 } from "../model/chat-store";
 import { useMarkConversationSeen } from "../model/conversation-actions";
+import {
+  type QuickActionItem,
+  useQuickActionMenu,
+} from "../model/quick-actions/quick-action-catalog";
+import type { QuickActionTrigger } from "../native/native-composer-input";
 import { AttachmentOverlay } from "./attachment-overlay";
 import {
   type AttachmentAnchor,
   ChatComposer,
   COMPOSER_ESTIMATED_HEIGHT,
+  COMPOSER_OUTER_PADDING_TOP,
+  type ComposerQuickActions,
   type SentMessageIdentity,
+  TOP_CLEARANCE,
 } from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
+import { QuickActionMenu } from "./quick-action-menu";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
 const CHAT_TOP_CLEARANCE = 70;
+// The space between the quick action menu and the composer's glass.
+const QUICK_ACTION_MENU_GAP = 8;
 const ANCHOR_MAX_SIZE = 76;
 const STATUS_ENTERING = new Keyframe({
   0: { opacity: 0, transform: [{ translateY: 4 }] },
@@ -105,6 +118,9 @@ export function StreamingChat({
   const followResponseRef = useRef(true);
   const listRef = useRef<LegendListRef>(null);
   const composerContainerRef = useRef<View>(null);
+  const quickActionsRef = useRef<ComposerQuickActions>(null);
+  const [quickActionTrigger, setQuickActionTrigger] = useState<QuickActionTrigger | null>(null);
+  const keyboardStateHeight = useKeyboardState((state) => state.height);
   const markdownStyle = useChatMarkdownStyle();
   const coordinator = useChatCoordinator();
   const composer = useChatComposer();
@@ -211,6 +227,39 @@ export function StreamingChat({
     (Boolean(composer.value.trim()) || composer.attachments.length > 0);
   // A Task queues replies behind its working Run: a written reply shows Send, an empty one Stop.
   const composerIsGenerating = isGenerating && !(isTask && hasDraft);
+
+  const quickActions = useQuickActionMenu({
+    partition: coordinator.partition,
+    trigger: quickActionTrigger,
+    mentions: composer.conversationId === chatId ? composer.mentions : [],
+  });
+  // The menu gives way to anything that takes over the screen or the keyboard.
+  const quickActionMenuOpen =
+    Boolean(quickActionTrigger) &&
+    isFocused &&
+    !input.drawerOpen &&
+    !attachmentAnchor &&
+    (quickActions.items.length > 0 || Boolean(quickActions.error));
+  const quickActionTriggerCharacter = quickActionTrigger?.trigger;
+  useEffect(() => {
+    if (quickActionMenuOpen && quickActionTriggerCharacter)
+      analytics.capture("quick_action_menu_opened", { trigger: quickActionTriggerCharacter });
+  }, [quickActionMenuOpen, quickActionTriggerCharacter]);
+  const pickQuickAction = (item: QuickActionItem) => {
+    void Haptics.selectionAsync();
+    analytics.capture("quick_action_selected", {
+      trigger: quickActionTriggerCharacter ?? null,
+      kind: item.token.kind,
+    });
+    quickActionsRef.current?.insertToken(item.token);
+  };
+  // The menu floats above the composer's glass. It sits outside the measured composer, so the
+  // transcript's inset never changes and opening it scrolls nothing.
+  const composerKeyboardLift =
+    input.keyboardOwner === "composer" ? Math.max(0, keyboardStateHeight - insets.bottom) : 0;
+  const quickActionMenuBottom = composerHeight - COMPOSER_OUTER_PADDING_TOP + QUICK_ACTION_MENU_GAP;
+  const quickActionMenuMaxHeight =
+    windowHeight - insets.top - TOP_CLEARANCE - quickActionMenuBottom - composerKeyboardLift;
 
   useLayoutEffect(() => {
     if (!pendingSend) return;
@@ -403,7 +452,7 @@ export function StreamingChat({
         pointerEvents="box-none"
         style={composerKeyboardStyle}
       >
-        {statusMessage ? (
+        {statusMessage && !quickActionMenuOpen ? (
           <Reanimated.View
             className="absolute inset-x-0 items-center"
             entering={statusEntering}
@@ -439,8 +488,25 @@ export function StreamingChat({
             setComposerHeight(event.nativeEvent.layout.height);
             onComposerLayout(event);
           }}
+          onQuickActionTriggerChange={setQuickActionTrigger}
           onSend={handleSend}
           onStop={() => coordinator.stopRun(chatId)}
+          onSubmitHighlighted={() => {
+            const first = quickActions.items[0];
+            if (quickActionMenuOpen && first) pickQuickAction(first);
+          }}
+          quickActionsRef={quickActionsRef}
+          submitsHighlighted={quickActionMenuOpen && quickActions.items.length > 0}
+        />
+        <QuickActionMenu
+          bottom={quickActionMenuBottom}
+          error={quickActions.error}
+          header={quickActions.header}
+          items={quickActions.items}
+          maxHeight={quickActionMenuMaxHeight}
+          onPick={pickQuickAction}
+          onRetry={quickActions.retry}
+          open={quickActionMenuOpen}
         />
       </Reanimated.View>
       <AttachmentOverlay

@@ -17,6 +17,7 @@ import {
   queueApprovalCommand,
   queueStopCommand,
 } from "./chat-store";
+import { prefetchQuickActions } from "./quick-actions/quick-action-catalog";
 import { type PendingDraftSend, useDraftSend } from "./use-draft-send";
 
 export { chatQueryKeys } from "./chat-queries";
@@ -110,8 +111,11 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (online && foreground) session?.start();
-    else session?.pause();
+    if (online && foreground && session) {
+      session.start();
+      // Warm the composer's quick action menus so they open without a spinner.
+      prefetchQuickActions(api, session.partition);
+    } else session?.pause();
     return () => session?.pause();
   }, [session, online, foreground]);
   useEffect(() => {
