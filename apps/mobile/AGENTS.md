@@ -38,7 +38,12 @@ Use the `apple-design` when implementing iOS UI to get recent Apple design guide
   `experiments.inlineModules.watchedDirectories` in `app.config.ts`, and each Swift file, class,
   and registered `Name` must match. Current modules: the sidebar header
   (`src/widgets/sidebar/native`), the Magic Replace symbol (`src/shared/ui/animated-symbol`), and
-  the photo picker pre-warm (`src/widgets/chat/native`).
+  in `src/widgets/chat/native` the photo picker pre-warm and the composer input
+  (`NativeComposerInput`). The composer input is a `UITextView` that holds quick action tags as single
+  attachment characters, so a tag is atomic. Send it commands only after its first `onLayout`;
+  commands sent from the commit that mounts it are dropped. Its text view must stay a direct child
+  of the Expo view, because keyboard-controller reads the focused input's `nativeID` from the text
+  view's superview.
   Adding a module or a native package needs `bun run prebuild:ios` and a rebuild.
 - `expo-camera` powers the composer's camera panel and `expo-glass-effect` its Liquid Glass
   surfaces. Use the `StyledCameraView`, `StyledGlassView`, and `StyledGlassContainer` wrappers in
@@ -59,6 +64,8 @@ Chats, drafts, attachments, and the outbox live in the `opencompany-chat.db` SQL
 nullable columns so rows written by older builds keep working, bump the version, and raise the
 "newer than this app" guard. Version 5 added `drafts.selection_json` (engine, model, and settings
 per draft) and `conversations.composer_settings_json` (the server's last composer settings).
+Version 6 added `drafts.mentions_json`: the skill, workflow, and Task mentions behind the draft's
+tags. Draft text stores tags serialized, and `parseDraftSegments` turns them back into tags.
 Outbox message intents freeze the engine payload when queued; intents without one are Chat.
 
 ## Routing

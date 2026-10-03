@@ -10,6 +10,8 @@ import {
   CreateTaskCommentBodySchema,
   type MessageEngine,
   MessageEngineSchema,
+  type MessageMention,
+  MessageMentionSchema,
   type ResolveApprovalBody,
   ResolveApprovalBodySchema,
 } from "@opencompany/protocol/schemas";
@@ -21,6 +23,7 @@ import {
   selectedModelId,
   selectionFromQueuedIntent,
 } from "../composer-selection";
+import { type ComposerMention, parseStoredMentions } from "../quick-actions/composer-segments";
 import { getChatDatabase, values, withChatTransaction } from "./database";
 import { attachmentFromRow } from "./drafts";
 import { ACTIVE_RUN_ORDER } from "./runs";
@@ -129,6 +132,13 @@ export const queueMessageFromDraft = async (
     }
     const text = draft.text.trim();
     if (!text && attachments.length === 0) throw new Error("A message or attachment is required.");
+    // Only skills travel as message mentions. Workflow and Task tags start a Task instead, and a
+    // Task reply goes through its comment endpoint, which takes no mentions.
+    const mentions: MessageMention[] = taskId
+      ? []
+      : draft.mentions.flatMap((mention) =>
+          mention.kind === "skill" ? [{ kind: "skill", id: mention.id, name: mention.name }] : [],
+        );
     const now = Date.now();
     const timestamp = new Date(now).toISOString();
     // A provisional conversation was never accepted, so a resend may still change its engine.
@@ -196,7 +206,15 @@ export const queueMessageFromDraft = async (
       result.conversationId,
       result.clientMessageId,
       JSON.stringify(
-        taskId ? { content: text, taskId } : { content: text, model, isNewConversation, engine },
+        taskId
+          ? { content: text, taskId }
+          : {
+              content: text,
+              model,
+              isNewConversation,
+              engine,
+              ...(mentions.length > 0 ? { mentions } : {}),
+            },
       ),
       `mobile-message:${result.clientMessageId}`,
       now,
@@ -213,7 +231,7 @@ export const queueMessageFromDraft = async (
     // existing conversation reads its settings back from the conversation row instead.
     await database.runAsync(
       sourceConversationId === NEW_CHAT_ID
-        ? "UPDATE drafts SET text = '' WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?"
+        ? "UPDATE drafts SET text = '', mentions_json = NULL WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?"
         : "DELETE FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
       ...values(partition),
       sourceConversationId,
@@ -293,6 +311,7 @@ const ChatIntentSchema = z.object({
   model: z.string(),
   isNewConversation: z.boolean(),
   engine: MessageEngineSchema.optional(),
+  mentions: z.array(MessageMentionSchema).optional(),
 });
 
 const parseMessageCommand = (
@@ -501,18 +520,40 @@ export const acceptMessageCommand = async (
   });
 };
 
+/** Keeps every mention once, so a restored draft brings back the tags of both texts it joins. */
+export const mergeMentions = (
+  current: ComposerMention[],
+  restored: ComposerMention[],
+): ComposerMention[] => [
+  ...current,
+  ...restored.filter(
+    (mention) =>
+      !current.some((existing) => existing.kind === mention.kind && existing.id === mention.id),
+  ),
+];
+
 export const failMessageCommand = async (
   partition: ChatPartition,
   command: MessageCommand,
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
     const currentDraft = await database.getFirstAsync<DraftRow>(
-      "SELECT conversation_id, text, model_id, selection_json FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
+      "SELECT conversation_id, text, model_id, selection_json, mentions_json FROM drafts WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?",
       ...values(partition),
       command.conversationId,
     );
     const text = command.intent.content;
     const restoredText = [currentDraft?.text.trim(), text.trim()].filter(Boolean).join("\n\n");
+    const restoredMentions = mergeMentions(
+      parseStoredMentions(currentDraft?.mentions_json ?? null),
+      command.target === "chat"
+        ? (command.intent.mentions ?? []).map((mention) => ({
+            kind: "skill" as const,
+            id: mention.id,
+            name: mention.name ?? mention.id,
+          }))
+        : [],
+    );
     // Restore the rejected request's engine and settings unless the user has chosen again since.
     // A Task reply carries none, so its draft keeps whatever it had.
     const restoredSelection =
@@ -525,16 +566,19 @@ export const failMessageCommand = async (
         : null);
     await database.runAsync(
       `INSERT INTO drafts (
-         user_id, workspace_id, conversation_id, text, model_id, selection_json, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         user_id, workspace_id, conversation_id, text, model_id, selection_json, mentions_json,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (user_id, workspace_id, conversation_id) DO UPDATE SET
          text = excluded.text, model_id = drafts.model_id,
-         selection_json = drafts.selection_json, updated_at = excluded.updated_at`,
+         selection_json = drafts.selection_json, mentions_json = excluded.mentions_json,
+         updated_at = excluded.updated_at`,
       ...values(partition),
       command.conversationId,
       restoredText,
       currentDraft?.model_id ?? (command.target === "chat" ? command.intent.model : ""),
       restoredSelection,
+      restoredMentions.length > 0 ? JSON.stringify(restoredMentions) : null,
       Date.now(),
     );
     await database.runAsync(

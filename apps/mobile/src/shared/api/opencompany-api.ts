@@ -9,14 +9,19 @@ import {
   ConversationShareEnvelopeSchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateTaskBodySchema,
   CreateTaskCommentBodySchema,
   CreateTaskCommentEnvelopeSchema,
+  CreateTaskEnvelopeSchema,
   type ErrorEnvelope,
   ErrorEnvelopeSchema,
+  type GitHubRepositoryAccessDto,
+  GitHubRepositoryAccessSchema,
   type IdentityDto,
   IdentityEnvelopeSchema,
   type IdentityUserDto,
   type IdentityWorkspaceDto,
+  InvokeWorkflowBodySchema,
   MessagePageSchema,
   MessagePresentationEnvelopeSchema,
   ResolveApprovalBodySchema,
@@ -131,6 +136,46 @@ type UpdateConversationBody = z.input<typeof UpdateConversationBodySchema>;
 type UpdateTaskBody = z.input<typeof UpdateTaskBodySchema>;
 type CreateTaskCommentBody = z.input<typeof CreateTaskCommentBodySchema>;
 type CreateTaskCommentEnvelope = z.output<typeof CreateTaskCommentEnvelopeSchema>;
+type CreateTaskBody = z.input<typeof CreateTaskBodySchema>;
+type CreateTaskEnvelope = z.output<typeof CreateTaskEnvelopeSchema>;
+type InvokeWorkflowBody = z.input<typeof InvokeWorkflowBodySchema>;
+// The composer's mention catalogs read a few fields of large, growing resources. The protocol's
+// strict schemas reject any field this build does not know, and the API ships new ones ahead of the
+// app, so these validate only what the menu uses and let the rest through.
+const PluginCatalogEnvelopeSchema = z.object({
+  data: z.array(
+    z
+      .object({ name: z.string().min(1), status: z.enum(["enabled", "disabled", "archived"]) })
+      .loose(),
+  ),
+});
+const SkillCatalogEnvelopeSchema = z.object({
+  data: z.array(
+    z
+      .object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        scope: z.enum(["personal", "company"]).nullable(),
+      })
+      .loose(),
+  ),
+});
+const WorkflowCatalogPageSchema = z.object({
+  data: z.array(
+    z
+      .object({
+        slug: z.string().min(1),
+        name: z.string().min(1),
+        status: z.string(),
+        steps: z.array(z.object({ instructions: z.string() }).loose()),
+      })
+      .loose(),
+  ),
+  nextCursor: z.string().nullable(),
+});
+export type PluginCatalogItem = z.output<typeof PluginCatalogEnvelopeSchema>["data"][number];
+export type SkillCatalogItem = z.output<typeof SkillCatalogEnvelopeSchema>["data"][number];
+export type WorkflowCatalogItem = z.output<typeof WorkflowCatalogPageSchema>["data"][number];
 type ConversationShareEnvelope = z.output<typeof ConversationShareEnvelopeSchema>;
 type SessionPullRequestList = z.output<typeof SessionPullRequestListSchema>;
 type ClaudeCodeAuthStatusEnvelope = z.output<typeof ClaudeCodeAuthStatusEnvelopeSchema>;
@@ -178,6 +223,26 @@ export interface AuthenticatedApi {
     body: CreateTaskCommentBody,
     signal?: AbortSignal,
   ) => Promise<CreateTaskCommentEnvelope>;
+  /** Starts an ad-hoc Task. The server answers with the Task and its Conversation. */
+  createTask: (
+    body: CreateTaskBody,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) => Promise<CreateTaskEnvelope>;
+  /** Starts a saved workflow as a Task. `workflowId` is the workflow's slug. */
+  invokeWorkflow: (
+    workflowId: string,
+    body: InvokeWorkflowBody,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) => Promise<CreateTaskEnvelope>;
+  /** Installed Plugins in the active workspace, archived ones included. */
+  listPlugins: (signal?: AbortSignal) => Promise<PluginCatalogItem[]>;
+  listSkillCatalog: (signal?: AbortSignal) => Promise<SkillCatalogItem[]>;
+  /** Every workflow the actor can see, across all pages. */
+  listWorkflows: (signal?: AbortSignal) => Promise<WorkflowCatalogItem[]>;
+  /** The GitHub App installations and repositories the actor can reach as themselves. */
+  listGitHubRepositories: (signal?: AbortSignal) => Promise<GitHubRepositoryAccessDto>;
   listSessionPullRequests: (signal?: AbortSignal) => Promise<SessionPullRequestList>;
   /** The acting user's own Claude Code subscription connection. Never includes the token. */
   getClaudeCodeAuth: (signal?: AbortSignal) => Promise<ClaudeCodeAuthStatus>;
@@ -493,6 +558,71 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
         },
         signal,
       ),
+    createTask: async (body, idempotencyKey, signal) =>
+      requestJson(
+        "v1/tasks",
+        CreateTaskEnvelopeSchema,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(CreateTaskBodySchema.parse(body)),
+        },
+        signal,
+      ),
+    invokeWorkflow: async (workflowId, body, idempotencyKey, signal) =>
+      requestJson(
+        `v1/workflows/${encodeURIComponent(workflowId)}/invoke`,
+        CreateTaskEnvelopeSchema,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(InvokeWorkflowBodySchema.parse(body)),
+        },
+        signal,
+      ),
+    listPlugins: async (signal) =>
+      (await requestJson("v1/plugins", PluginCatalogEnvelopeSchema, undefined, signal)).data,
+    listSkillCatalog: async (signal) =>
+      (await requestJson("v1/skills/catalog", SkillCatalogEnvelopeSchema, undefined, signal)).data,
+    listWorkflows: async (signal) => {
+      const workflows: WorkflowCatalogItem[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await requestJson(
+          "v1/workflows",
+          WorkflowCatalogPageSchema,
+          undefined,
+          signal,
+          {
+            cursor,
+            limit: 100,
+          },
+        );
+        workflows.push(...page.data);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return workflows;
+    },
+    listGitHubRepositories: async (signal) => {
+      // This route lives outside /v1 and redirects a request it cannot identify to the web sign-in
+      // page instead of answering 401. Follow no redirect: an HTML sign-in page is not data. The
+      // session itself is still valid, so this never signs the user out.
+      const response = await request(
+        "integrations/github-user/installations",
+        { redirect: "manual" },
+        signal,
+      );
+      if (response.status === 0 || (response.status >= 300 && response.status < 400))
+        throw new ApiRequestError(
+          "GitHub repositories could not be loaded for this session.",
+          401,
+          "authentication_required",
+          false,
+          undefined,
+          null,
+        );
+      return parseJsonResponse(response, GitHubRepositoryAccessSchema);
+    },
     listSessionPullRequests: async (signal) =>
       requestJson("v1/session-pull-requests", SessionPullRequestListSchema, undefined, signal),
     getClaudeCodeAuth: async (signal) =>

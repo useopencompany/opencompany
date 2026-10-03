@@ -8,6 +8,7 @@ import type { ChatMessage } from "./chat";
 import { chatQueryKeys } from "./chat-queries";
 import {
   type ChatPartition,
+  mergeMentions,
   NEW_CHAT_ID,
   type OutgoingDraft,
   type PendingMessageCommand,
@@ -73,6 +74,7 @@ export function useDraftSend(partition: ChatPartition | null, onQueued: () => vo
       ...current,
       ...draft,
       text: "",
+      mentions: [],
       attachments: [],
     }));
 
@@ -94,12 +96,11 @@ export function useDraftSend(partition: ChatPartition | null, onQueued: () => vo
           ...currentDraft,
           ...draft,
           text: [draft.text, currentDraft?.text].filter(Boolean).join("\n\n"),
+          mentions: mergeMentions(draft.mentions, currentDraft?.mentions ?? []),
           attachments: [...draft.attachments, ...(currentDraft?.attachments ?? [])],
         };
         queryClient.setQueryData(draftKey, restored);
-        const [restoreError] = await until(() =>
-          saveStoredDraft(partition, sourceId, restored.text, restored.selection),
-        );
+        const [restoreError] = await until(() => saveStoredDraft(partition, sourceId, restored));
         if (restoreError)
           showErrorToast("Your draft could not be saved.", restoreError, "chat.draft.restore");
         captureError("message_send_failed", error, { is_new_chat: sourceId === NEW_CHAT_ID });

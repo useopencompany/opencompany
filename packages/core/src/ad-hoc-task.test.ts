@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { descriptionFromAdHocTaskPrompt, hasAdHocTaskToken } from "@/lib/ad-hoc-task";
+import { descriptionFromAdHocTaskPrompt, hasAdHocTaskToken } from "./ad-hoc-task";
 
 describe("opencompany ad-hoc task mention", () => {
   it("recognizes the reserved token at a word boundary", () => {
