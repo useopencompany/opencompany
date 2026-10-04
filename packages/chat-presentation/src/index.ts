@@ -1,7 +1,7 @@
-import {
-  type PresentationDeltaFrameDto,
-  parsePresentationDeltaFrame,
-} from "@opencompany/protocol/events";
+import { type PresentationFrameDto, parsePresentationFrame } from "@opencompany/protocol/events";
+
+export { REASONING_UPDATE_MAX_TEXT_LENGTH } from "@opencompany/protocol/events";
+
 import { createClient, type RedisClientType } from "redis";
 
 export const CHAT_PRESENTATION_STREAM_TTL_SECONDS = 5 * 60;
@@ -18,7 +18,7 @@ const CONNECT_TIMEOUT_MS = 2 * SOCKET_CONNECT_TIMEOUT_MS;
 
 export type ChatPresentationEntry = {
   streamId: string;
-  frame: PresentationDeltaFrameDto;
+  frame: PresentationFrameDto;
 };
 
 export type ChatPresentationReadResult = {
@@ -28,7 +28,7 @@ export type ChatPresentationReadResult = {
 };
 
 export interface ChatPresentationPublisher {
-  publish(frame: PresentationDeltaFrameDto): void;
+  publish(frame: PresentationFrameDto): void;
 }
 
 export interface ChatPresentationReader {
@@ -45,7 +45,9 @@ export class RedisChatPresentationStream
   implements ChatPresentationPublisher, ChatPresentationReader
 {
   private clientPromise: Promise<RedisClient> | null = null;
-  private readonly pendingFrames = new Map<string, PresentationDeltaFrameDto>();
+  // Frames waiting to be written, in publish order per Run. A reader appends live reasoning where
+  // it arrives relative to the text around it, so frames of different kinds never reorder.
+  private readonly pendingFrames = new Map<string, PresentationFrameDto[]>();
   private drainPromise: Promise<void> | null = null;
   private unavailableUntil = 0;
   private outageReported = false;
@@ -63,17 +65,21 @@ export class RedisChatPresentationStream
     },
   ) {}
 
-  publish(frame: PresentationDeltaFrameDto) {
+  publish(frame: PresentationFrameDto) {
     if (this.closed) return;
-    let parsed: PresentationDeltaFrameDto;
+    let parsed: PresentationFrameDto;
     try {
-      parsed = parsePresentationDeltaFrame(frame);
+      parsed = parsePresentationFrame(frame);
     } catch (error) {
       this.reportOutage("publish", error);
       return;
     }
-    const pending = this.pendingFrames.get(parsed.runId);
-    this.pendingFrames.set(parsed.runId, coalesceFrames(pending, parsed));
+    const pending = this.pendingFrames.get(parsed.runId) ?? [];
+    const tail = pending.at(-1);
+    const coalesced = tail ? coalesceFrames(tail, parsed) : null;
+    if (coalesced) pending[pending.length - 1] = coalesced;
+    else pending.push(parsed);
+    this.pendingFrames.set(parsed.runId, pending);
     this.startDrain();
   }
 
@@ -94,7 +100,7 @@ export class RedisChatPresentationStream
       const entries: ChatPresentationEntry[] = [];
       for (const message of messages) {
         try {
-          const frame = parsePresentationDeltaFrame(JSON.parse(String(message.message.frame)));
+          const frame = parsePresentationFrame(JSON.parse(String(message.message.frame)));
           if (frame.runId === input.runId) entries.push({ streamId: message.id, frame });
         } catch (error) {
           this.reportOutage("read", error);
@@ -129,7 +135,7 @@ export class RedisChatPresentationStream
 
   private async drain() {
     while (!this.closed && this.pendingFrames.size > 0) {
-      const frames = [...this.pendingFrames.values()];
+      const frames = [...this.pendingFrames.values()].flat();
       this.pendingFrames.clear();
       for (const frame of frames) {
         await this.runCommand("publish", async (client) => {
@@ -227,25 +233,41 @@ function streamKey(runId: string) {
   return `opencompany:chat:presentation:v1:${Buffer.from(runId).toString("base64url")}`;
 }
 
+/**
+ * Folds a frame into the one queued just before it when the reader cannot tell the difference:
+ * adjacent text deltas join, and a newer snapshot of the same reasoning block replaces the older.
+ * Returns null when the frame must be queued on its own.
+ */
 function coalesceFrames(
-  pending: PresentationDeltaFrameDto | undefined,
-  next: PresentationDeltaFrameDto,
-) {
+  pending: PresentationFrameDto,
+  next: PresentationFrameDto,
+): PresentationFrameDto | null {
   if (
-    pending?.attemptNumber !== next.attemptNumber ||
-    pending.payload.messageId !== next.payload.messageId ||
-    pending.payload.endOffset !== next.payload.startOffset
+    pending.attemptNumber !== next.attemptNumber ||
+    pending.payload.messageId !== next.payload.messageId
+  ) {
+    return null;
+  }
+  if (pending.type === "message.presentation_delta" && next.type === "message.presentation_delta") {
+    if (pending.payload.endOffset !== next.payload.startOffset) return null;
+    return {
+      ...next,
+      payload: {
+        ...next.payload,
+        startOffset: pending.payload.startOffset,
+        delta: pending.payload.delta + next.payload.delta,
+      },
+    };
+  }
+  if (
+    pending.type === "message.reasoning_updated" &&
+    next.type === "message.reasoning_updated" &&
+    pending.payload.itemId === next.payload.itemId &&
+    pending.payload.parentToolCallId === next.payload.parentToolCallId
   ) {
     return next;
   }
-  return {
-    ...next,
-    payload: {
-      ...next.payload,
-      startOffset: pending.payload.startOffset,
-      delta: pending.payload.delta + next.payload.delta,
-    },
-  };
+  return null;
 }
 
 async function withTimeout<T>(

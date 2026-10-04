@@ -25,6 +25,22 @@ apps/runner ---- fenced Run claims, Attempts, Events, settlement --+
 - `apps/web` renders the product and owns the WorkOS browser shell. It has no Chat persistence or
   execution path.
 
+## Presentation frames
+
+Runners publish transient frames to a per-Run Redis stream, and `GET /v1/runs/{runId}/events`
+interleaves them with durable Events. Frames advance only the `presentationCursor`, never the
+durable cursor, and they expire with the stream. The persisted message presentation stays canonical.
+
+- `message.presentation_delta` carries opencompany answer text by offset.
+- `message.reasoning_updated` carries the full current text of one reasoning block, its `itemId`,
+  its sibling `position`, and `parentToolCallId` for a subagent's block. The opencompany engine
+  sends streaming snapshots on the 50ms cadence. Codex and Claude Code send each finished block,
+  after redaction. The API sends these frames only to readers that pass `includeReasoning=1`,
+  because installed clients reject frame types they do not know.
+
+Deploy the API and protocol readers before runners that publish a new frame type, then release
+clients that request it.
+
 ## Configuration
 
 The browser uses `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN`; Server Components use `OPENCOMPANY_API_ORIGIN`. Production

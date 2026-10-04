@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "uniwind";
 
+/* React Native takes one family name, so `font-mono` names the face code blocks use. */
+@theme {
+  --font-mono: "Menlo";
+}
+
 @utility screen-shadow-light {
   box-shadow: -4px 0 20px -2px rgba(0, 0, 0, 0.09);
 }

@@ -66,6 +66,9 @@ export class HeadlessChatUiProjector {
   }
 
   project(event: RunStreamEventDto): UIMessageChunk[] {
+    // Web does not request live reasoning; Electric delivers persisted reasoning instead.
+    if (event.type === "message.reasoning_updated") return [];
+
     if (event.type === "message.presentation_delta") {
       const { startOffset, endOffset, delta } = event.payload;
       if (startOffset > this.text.length || endOffset <= this.text.length) return [];

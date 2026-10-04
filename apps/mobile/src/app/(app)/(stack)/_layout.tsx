@@ -74,6 +74,33 @@ export default function StackLayout() {
             ],
           }}
         />
+        {["tool-sheet", "reasoning-sheet"].map((name) => (
+          <Stack.Screen
+            key={name}
+            name={name}
+            options={{
+              presentation: "formSheet",
+              animation: "default",
+              title: name === "tool-sheet" ? "Tool call" : "Reasoning",
+              headerShown: true,
+              headerTransparent: true,
+              gestureEnabled: true,
+              sheetGrabberVisible: true,
+              contentStyle: { backgroundColor },
+              sheetAllowedDetents: [0.5, 1],
+              sheetExpandsWhenScrolledToEdge: true,
+              unstable_headerLeftItems: () => [],
+              unstable_headerRightItems: () => [
+                {
+                  type: "button",
+                  label: "Close",
+                  icon: { type: "sfSymbol", name: "xmark" },
+                  onPress: () => router.dismiss(),
+                },
+              ],
+            }}
+          />
+        ))}
         <Stack.Screen
           name="settings-sheet"
           options={{
