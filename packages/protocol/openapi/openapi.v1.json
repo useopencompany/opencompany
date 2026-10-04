@@ -1095,6 +1095,26 @@
           "instructions": {
             "type": "string",
             "maxLength": 20000
+          },
+          "repository": {
+            "type": "object",
+            "properties": {
+              "fullName": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+              },
+              "baseBranch": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "fullName",
+              "baseBranch"
+            ],
+            "additionalProperties": false,
+            "description": "The repository and base branch a coding step works in."
           }
         },
         "required": [

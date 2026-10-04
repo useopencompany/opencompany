@@ -3,6 +3,7 @@ import type {
   CompanySentryPluginDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
+import type { WorkflowStep } from "@/lib/headless-automation-types";
 import type { IntegrationAccountView } from "@/lib/integration-state";
 import {
   OFFICIAL_MCP_PLUGIN_METADATA,
@@ -12,9 +13,9 @@ import {
 import {
   COMPANY_GITHUB_EVENT_PROVIDER,
   companyGitHubEventAccounts,
+  companySentryEventAccounts,
 } from "@/lib/workflow-event-triggers";
 import { DEFAULT_WORKFLOW_MODEL_TOKEN } from "@/lib/workflow-model-options";
-import { companySentryEventAccounts } from "./workflow-event-triggers";
 
 // Templates answer the blank-editor problem: a founder opens Workflows with nothing to react to and
 // has to invent both the job and the prompt. Each one is a complete, running-quality workflow they
@@ -76,6 +77,38 @@ export type WorkflowTemplate = {
     reasoningEffort?: string;
   };
 };
+
+export type WorkflowTemplateTriggerInput =
+  | { type: "schedule"; cron: string; timezone: string; prompt: string; enabled: true }
+  | {
+      type: "event";
+      provider: string;
+      event: string;
+      integrationId: string;
+      filters: Record<
+        string,
+        { id: string; name: string; pairs?: { key: string; value: string }[] }
+      >;
+      prompt: string;
+    };
+
+/**
+ * Everything a clone writes into its draft. Each template's setup resolves to this before cloning,
+ * so creating the draft never needs to know which kind of template it came from.
+ */
+export type PreparedWorkflowTemplate = {
+  step: Omit<WorkflowStep, "id">;
+  triggers: [WorkflowTemplateTriggerInput, ...WorkflowTemplateTriggerInput[]];
+};
+
+export function prepareWorkflowTemplate(
+  template: WorkflowTemplate,
+  triggers: PreparedWorkflowTemplate["triggers"],
+  step: Partial<Omit<WorkflowStep, "id">> = {},
+): PreparedWorkflowTemplate {
+  const { model, ...rest } = { ...template.step, ...step };
+  return { step: { ...rest, model: model ?? "" }, triggers };
+}
 
 export const WORKFLOW_TEMPLATES: readonly WorkflowTemplate[] = [
   {

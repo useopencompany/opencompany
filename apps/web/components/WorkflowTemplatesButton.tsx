@@ -43,7 +43,6 @@ import {
   createHeadlessWorkflow,
   updateHeadlessWorkflow,
 } from "@/lib/headless-automation-commands";
-import type { sentryTemplateDefinition } from "@/lib/sentry-template-setup";
 import { supportedTimezones } from "@/lib/timezones";
 import {
   loadWorkflowEventFilterOptions,
@@ -52,11 +51,14 @@ import {
 import { companyGitHubEventAccounts } from "@/lib/workflow-event-triggers";
 import { DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE } from "@/lib/workflow-schedule-defaults";
 import {
+  type PreparedWorkflowTemplate,
+  prepareWorkflowTemplate,
   WORKFLOW_TEMPLATES,
   type WorkflowTemplate,
   type WorkflowTemplateIcon,
   type WorkflowTemplateMissingPlugin,
   type WorkflowTemplateOutcomePlugin,
+  type WorkflowTemplateTriggerInput,
 } from "@/lib/workflow-templates";
 import { SentryTemplateSetup } from "./SentryTemplateSetup";
 
@@ -108,20 +110,12 @@ export function WorkflowTemplatesButton({
 
   const startFromTemplate = async (
     template: WorkflowTemplate,
-    trigger?: WorkflowTriggerInput,
-    definition?: ReturnType<typeof sentryTemplateDefinition>,
+    prepared: PreparedWorkflowTemplate,
   ) => {
     if (pendingTemplateId) return;
     setPendingTemplateId(template.id);
     try {
-      router.push(
-        await createWorkflowFromTemplate(
-          template,
-          scope,
-          trigger ?? scheduleTrigger(template),
-          definition,
-        ),
-      );
+      router.push(await createWorkflowFromTemplate(template, scope, prepared));
     } catch (cause) {
       setPendingTemplateId(null);
       toast.error(
@@ -138,7 +132,10 @@ export function WorkflowTemplatesButton({
       return;
     }
     if (template.trigger.kind === "schedule") {
-      void startFromTemplate(template);
+      void startFromTemplate(
+        template,
+        prepareWorkflowTemplate(template, [scheduleTrigger(template)]),
+      );
       return;
     }
     setSetup({ template, trigger: template.trigger, accounts: companyAccounts });
@@ -181,20 +178,19 @@ export function WorkflowTemplatesButton({
               plugin={companySentry ?? null}
               pending={pendingTemplateId === sentrySetup.id}
               onBack={() => setSentrySetup(null)}
-              onUse={(definition) =>
-                void startFromTemplate(
-                  sentrySetup,
-                  definition.triggers[0] as WorkflowTriggerInput,
-                  definition,
-                )
-              }
+              onUse={(prepared) => void startFromTemplate(sentrySetup, prepared)}
             />
           ) : setup ? (
             <EventTemplateSetupStep
               setup={setup}
               pending={pendingTemplateId === setup.template.id}
               onBack={() => setSetup(null)}
-              onUse={(trigger) => void startFromTemplate(setup.template, trigger)}
+              onUse={(trigger) =>
+                void startFromTemplate(
+                  setup.template,
+                  prepareWorkflowTemplate(setup.template, [trigger]),
+                )
+              }
             />
           ) : (
             <div className="grid gap-2.5">
@@ -319,7 +315,7 @@ function EventTemplateSetupStep({
   setup: EventTemplateSetup;
   pending: boolean;
   onBack: () => void;
-  onUse: (trigger: WorkflowTriggerInput) => void;
+  onUse: (trigger: WorkflowTemplateTriggerInput) => void;
 }) {
   const [integrationId, setIntegrationId] = useState(setup.accounts[0]!.integrationId);
   // Both the list and the choice are stamped with the account they belong to, so switching accounts
@@ -445,21 +441,7 @@ type RepositoryList =
   | { ok: true; options: WorkflowEventFilterOption[] }
   | { ok: false; error: string };
 
-type WorkflowTriggerInput =
-  | { type: "schedule"; cron: string; timezone: string; prompt: string; enabled: true }
-  | {
-      type: "event";
-      provider: string;
-      event: string;
-      integrationId: string;
-      filters: Record<
-        string,
-        { id: string; name: string; pairs?: { key: string; value: string }[] }
-      >;
-      prompt: string;
-    };
-
-function scheduleTrigger(template: WorkflowTemplate): WorkflowTriggerInput {
+function scheduleTrigger(template: WorkflowTemplate): WorkflowTemplateTriggerInput {
   if (template.trigger.kind !== "schedule") {
     throw new Error("This template needs a trigger to be chosen before it can be used.");
   }
@@ -478,8 +460,7 @@ function scheduleTrigger(template: WorkflowTemplate): WorkflowTriggerInput {
 async function createWorkflowFromTemplate(
   template: WorkflowTemplate,
   scope: WorkflowScope,
-  trigger: WorkflowTriggerInput,
-  definition?: ReturnType<typeof sentryTemplateDefinition>,
+  { step, triggers }: PreparedWorkflowTemplate,
 ) {
   const workflow = await createHeadlessWorkflow({
     name: template.name,
@@ -491,29 +472,16 @@ async function createWorkflowFromTemplate(
       expectedVersion: workflow.version,
       name: template.name,
       description: template.description,
-      steps: [
-        {
-          // The create call already minted a step id; reusing it keeps the draft to a single step.
-          id: workflow.steps[0]?.id ?? globalThis.crypto.randomUUID(),
-          title: template.step.title,
-          model: definition?.step.model ?? template.step.model ?? "",
-          ...((definition?.step.runtimeModel ?? template.step.runtimeModel)
-            ? { runtimeModel: definition?.step.runtimeModel ?? template.step.runtimeModel }
-            : {}),
-          ...((definition?.step.reasoningEffort ?? template.step.reasoningEffort)
-            ? { reasoningEffort: definition?.step.reasoningEffort ?? template.step.reasoningEffort }
-            : {}),
-          instructions: definition?.step.instructions ?? template.step.instructions,
-        },
-      ],
-      // A draft never fires, so the trigger can be prefilled and left switched on: the workflow
+      // The create call already minted a step id; reusing it keeps the draft to a single step.
+      steps: [{ id: workflow.steps[0]?.id ?? globalThis.crypto.randomUUID(), ...step }],
+      // A draft never fires, so the triggers can be prefilled and left switched on: the workflow
       // starts running when the owner reviews the instructions and activates it.
       status: "draft",
-      trigger,
-      triggers: (definition?.triggers ?? [trigger]).map((item) => ({
+      trigger: triggers[0],
+      triggers: triggers.map((trigger) => ({
         id: `trigger-${globalThis.crypto.randomUUID()}`,
-        ...item,
-      })) as never,
+        ...trigger,
+      })),
     });
   } catch (cause) {
     await archiveHeadlessWorkflow(workflow.id, { expectedVersion: workflow.version }).catch(

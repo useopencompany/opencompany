@@ -1,3 +1,8 @@
+import {
+  TASK_GOAL_MAX_LENGTH,
+  TASK_WRITE_PERMISSION,
+  TaskApplicationService,
+} from "@opencompany/core";
 import { disconnectSentry, getSentryConnection } from "@opencompany/db/sentry";
 import { snapshotSentryTestSchema } from "@opencompany/db/test-sentry-schema";
 import { sql } from "drizzle-orm";
@@ -62,11 +67,35 @@ async function fixture() {
       sql`INSERT INTO goat.sentry_issue_runs (event_run_id,receipt_id,integration_id,workspace_id,workflow_id,issue_id,project_id,trigger_filters) VALUES (${id},${id},'connection_1','workspace_1','workflow_1',${issueId},'1',${JSON.stringify(filters)}::jsonb) ON CONFLICT DO NOTHING`,
     );
   }
-  const createTask = vi.fn(async (tx: { execute: typeof db.execute }, event: { id: string }) => {
-    const taskId = `task_${event.id}`;
-    await tx.execute(sql`INSERT INTO goat.tasks(id) VALUES (${taskId})`);
-    return { taskId };
-  });
+  // The schema has no Task tables, so the repository records a bare row. Task validation, including
+  // the goal limit, is the real service's.
+  const createTask = vi.fn(
+    async (tx: { execute: typeof db.execute }, event: { id: string; goal: string }) => {
+      const taskId = `task_${event.id}`;
+      await new TaskApplicationService({
+        async createTaskAndRun() {
+          await tx.execute(sql`INSERT INTO goat.tasks(id) VALUES (${taskId})`);
+          return { task: { id: taskId } };
+        },
+      } as never).createTask(
+        {
+          userId: "user_1",
+          workspaceId: "workspace_1",
+          role: "member",
+          permissions: [TASK_WRITE_PERMISSION],
+          authenticationMethod: "service",
+        },
+        {
+          idempotencyKey: `workflow-event:${event.id}`,
+          goal: event.goal,
+          engine: "opencompany",
+          model: "fixture-model",
+          source: "workflow",
+        },
+      );
+      return { taskId };
+    },
+  );
   const next = (date = now) =>
     createNextWorkflowEventTask(date, { db: db as never, createTask: createTask as never });
   async function reason(id: string) {
@@ -217,6 +246,56 @@ it("routes from persisted evidence without refetching on retries and does not mi
       ).rows,
     ).toEqual([{ status: "processed", reason: "routed 1 workflow deliveries" }]);
     expect(await f.next(new Date())).toMatchObject({ status: "created" });
+  } finally {
+    await f.database.close();
+  }
+});
+
+it("fits a maximal prompt, occurrence data and prior results into one accepted Task goal", async () => {
+  const f = await fixture();
+  try {
+    await f.database.exec("UPDATE goat.sentry_connections SET cooldown_minutes=0");
+    await f.enqueue("prior");
+    expect(await f.next()).toMatchObject({ status: "created" });
+    await f.db.execute(
+      sql`UPDATE goat.tasks SET status='succeeded', result=${"r".repeat(5_000)}, session_id='session_prior' WHERE id='task_prior'`,
+    );
+    await f.database.exec(
+      "INSERT INTO goat.session_pull_requests VALUES ('https://github.com/acme/web/pull/7','session_prior')",
+    );
+    await f.database.exec(
+      `UPDATE goat.workflows SET automation_triggers=jsonb_set(automation_triggers,'{0,prompt}','"${"p".repeat(8_000)}"')`,
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        throw new Error("Persisted evidence must not be refetched");
+      }),
+    );
+    const issue = { id: "42", title: "Error", project: { id: "1", slug: "web" } };
+    const evidence = {
+      issue,
+      eventType: "issue.created",
+      occurrence: {
+        eventID: "a".repeat(32),
+        dateCreated: "2026-10-03T11:00:00Z",
+        environment: "production",
+        message: "m".repeat(2_000),
+        breadcrumbs: Array.from({ length: 10 }, () => "b".repeat(2_000)),
+      },
+      unavailableReason: null,
+    };
+    await f.db.execute(
+      sql`INSERT INTO goat.sentry_webhook_receipts(id,installation_id,resource,payload,event_at,next_attempt_at,evidence) VALUES ('receipt',${installationId},'issue',${JSON.stringify({ action: "created", installation: { uuid: installationId }, data: { issue: { ...issue, issueCategory: "error" } } })}::jsonb,${now},${now},${JSON.stringify(evidence)}::jsonb)`,
+    );
+    expect(await processNextSentryReceipt(now, f.db)).toBe(true);
+
+    expect(await f.next(new Date())).toMatchObject({ status: "created" });
+    const goal = f.createTask.mock.calls.at(-1)![1].goal;
+    expect(goal.length).toBeLessThanOrEqual(TASK_GOAL_MAX_LENGTH);
+    expect(goal).toContain("</sentry_event_data>");
+    expect(goal).toContain("https://github.com/acme/web/pull/7");
+    expect(goal.endsWith("</sentry_prior_task_data>")).toBe(true);
   } finally {
     await f.database.close();
   }

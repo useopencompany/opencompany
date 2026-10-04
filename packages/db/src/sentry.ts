@@ -16,7 +16,6 @@ export type SentryConnection = {
   cooldownMinutes: number;
   dailyCap: number;
   verifiedAt: Date | null;
-  lastReceivedAt: Date | null;
   userWorkosId: string;
   status: "connected" | "disconnected" | "needs_reauth" | "sync_failed";
   capabilityModes: Record<string, "on" | "ask" | "off">;

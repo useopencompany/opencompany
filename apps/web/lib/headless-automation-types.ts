@@ -7,6 +7,7 @@ export type WorkflowStep = {
   runtimeModel?: string;
   reasoningEffort?: string;
   instructions: string;
+  repository?: { fullName: string; baseBranch: string };
 };
 
 export type WorkflowTrigger =

@@ -4,9 +4,9 @@ import { Button } from "@opencompany/ui/components/button";
 import { Input } from "@opencompany/ui/components/input";
 import { useEffect, useState } from "react";
 import { listSentryProjectsAction, validateSentryFixAction } from "@/lib/sentry-actions";
-import { sentryTemplateDefinition } from "@/lib/sentry-template-setup";
+import { prepareSentryTemplate } from "@/lib/sentry-template-setup";
 import { supportedTimezones } from "@/lib/timezones";
-import type { WorkflowTemplate } from "@/lib/workflow-templates";
+import type { PreparedWorkflowTemplate, WorkflowTemplate } from "@/lib/workflow-templates";
 import { ExactTagConditions } from "./SentryConditions";
 export function SentryTemplateSetup({
   template,
@@ -19,7 +19,7 @@ export function SentryTemplateSetup({
   plugin: CompanySentryPluginDto | null;
   pending: boolean;
   onBack: () => void;
-  onUse: (definition: ReturnType<typeof sentryTemplateDefinition>) => void;
+  onUse: (prepared: PreparedWorkflowTemplate) => void;
 }) {
   const [projects, setProjects] = useState<SentryProjectDto[] | null>(null);
   const [projectId, setProjectId] = useState("");
@@ -69,7 +69,7 @@ export function SentryTemplateSetup({
       if (template.setup === "sentry-fix")
         await validateSentryFixAction({ engine, repository, baseBranch });
       onUse(
-        sentryTemplateDefinition(template, {
+        prepareSentryTemplate(template, {
           integrationId: plugin.connection.integrationId,
           project,
           environment,

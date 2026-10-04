@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { sentryTemplateDefinition } from "./sentry-template-setup";
+import { prepareSentryTemplate } from "./sentry-template-setup";
 import { WORKFLOW_TEMPLATES } from "./workflow-templates";
 
 const setup = {
@@ -13,7 +13,7 @@ function template(id: string) {
   return WORKFLOW_TEMPLATES.find((template) => template.id === id)!;
 }
 it("prefills creation and regression with the same saved conditions and a concrete normal model", () => {
-  const definition = sentryTemplateDefinition(template("investigate-sentry-issues"), setup);
+  const definition = prepareSentryTemplate(template("investigate-sentry-issues"), setup);
   expect(definition.triggers).toMatchObject([
     {
       event: "issue.created",
@@ -31,7 +31,7 @@ it("prefills creation and regression with the same saved conditions and a concre
 it.each(["codex", "claude-code"] as const)(
   "persists %s and explicit repository and branch in a single coding step",
   (engine) => {
-    const definition = sentryTemplateDefinition(template("propose-sentry-fix"), {
+    const definition = prepareSentryTemplate(template("propose-sentry-fix"), {
       ...setup,
       engine,
       repository: "acme/service",
@@ -40,17 +40,13 @@ it.each(["codex", "claude-code"] as const)(
     expect(definition.step).toMatchObject({
       model: engine,
       runtimeModel: engine === "codex" ? "openai/gpt-5.6-sol" : "anthropic/claude-sonnet-5",
+      repository: { fullName: "acme/service", baseBranch: "release/stable" },
     });
-    expect(definition.step.instructions).toContain(
-      'Sentry fix configuration: {"repository":"acme/service","baseBranch":"release/stable","engine":"' +
-        engine +
-        '"}',
-    );
-    expect(definition.step.instructions).toContain("Never assign, resolve or archive");
+    expect(definition.step.instructions).toBe(template("propose-sentry-fix").step.instructions);
   },
 );
 it("saves the chosen daily wall clock and timezone without event triggers or writes", () => {
-  const definition = sentryTemplateDefinition(template("daily-sentry-review"), {
+  const definition = prepareSentryTemplate(template("daily-sentry-review"), {
     ...setup,
     time: "09:00",
     timezone: "Europe/Berlin",
@@ -68,11 +64,11 @@ it("saves the chosen daily wall clock and timezone without event triggers or wri
   expect(definition.step.instructions).toContain("Selected Sentry project ID: 1");
 });
 it("rejects incomplete fix configuration, duplicate tags and invalid timezones before cloning", () => {
-  expect(() => sentryTemplateDefinition(template("propose-sentry-fix"), setup)).toThrow(
+  expect(() => prepareSentryTemplate(template("propose-sentry-fix"), setup)).toThrow(
     "Choose a coding engine",
   );
   expect(() =>
-    sentryTemplateDefinition(template("investigate-sentry-issues"), {
+    prepareSentryTemplate(template("investigate-sentry-issues"), {
       ...setup,
       tags: [
         { key: "a", value: "b" },
@@ -81,7 +77,7 @@ it("rejects incomplete fix configuration, duplicate tags and invalid timezones b
     }),
   ).toThrow("unique");
   expect(() =>
-    sentryTemplateDefinition(template("daily-sentry-review"), {
+    prepareSentryTemplate(template("daily-sentry-review"), {
       ...setup,
       time: "09:00",
       timezone: "bad",

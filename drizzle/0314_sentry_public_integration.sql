@@ -23,7 +23,6 @@ CREATE TABLE goat.sentry_connections (
   daily_cap integer NOT NULL DEFAULT 25,
   revoked_at timestamptz,
   verified_at timestamptz,
-  last_received_at timestamptz,
   CONSTRAINT sentry_connections_limits_check CHECK (cooldown_minutes BETWEEN 0 AND 10080 AND daily_cap BETWEEN 0 AND 1000)
 );
 --> statement-breakpoint
@@ -44,6 +43,8 @@ CREATE TABLE goat.sentry_webhook_receipts (
 );
 --> statement-breakpoint
 CREATE INDEX sentry_webhook_receipts_pending_idx ON goat.sentry_webhook_receipts(status, next_attempt_at);
+--> statement-breakpoint
+CREATE INDEX sentry_webhook_receipts_installation_idx ON goat.sentry_webhook_receipts(installation_id, received_at);
 --> statement-breakpoint
 CREATE TABLE goat.sentry_issue_runs (
   event_run_id text PRIMARY KEY REFERENCES goat.workflow_event_runs(id) ON DELETE CASCADE,

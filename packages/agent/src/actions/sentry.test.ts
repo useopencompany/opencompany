@@ -213,3 +213,51 @@ it("drops trace nodes whose only project identity is an inaccessible slug", () =
     ),
   ).toEqual({ children: [{ project_id: 1, span_id: "b" }] });
 });
+function assigneePages(pages: Record<string, unknown[]>) {
+  return vi.fn(async (url: URL, init: RequestInit) => {
+    if (String(url).endsWith("organizations/acme/issues/42/") && init.method === "GET")
+      return Response.json({ id: "42", title: "Error", project: { id: "1", slug: "web" } });
+    if (init.method === "PUT") return Response.json({ id: "42" });
+    const cursor = url.searchParams.get("cursor") ?? "first";
+    const next = cursor === "first" ? "page2" : null;
+    return Response.json(pages[cursor] ?? [], {
+      headers: next
+        ? {
+            Link: `<${url.origin}${url.pathname}?cursor=${next}>; rel="next"; results="true"; cursor="${next}"`,
+          }
+        : {},
+    });
+  });
+}
+it("lists assignees as the exact values assign_issue accepts, skipping pending invitations", async () => {
+  vi.stubGlobal(
+    "fetch",
+    assigneePages({
+      first: [
+        { email: "ada@acme.test", user: { id: "7", name: "Ada" } },
+        { email: "invited@acme.test", user: null },
+      ],
+    }),
+  );
+  await expect(
+    executeSentryTool(connection, "list_assignees", { projectId: "1" }),
+  ).resolves.toMatchObject({
+    data: [{ assignee: "user:7", kind: "user", name: "Ada" }],
+    nextCursor: "page2",
+  });
+});
+it("assigns a team discovered on a later page and rejects one on no page", async () => {
+  const fetcher = assigneePages({ first: [{ id: "3", slug: "web" }], page2: [{ id: "9" }] });
+  vi.stubGlobal("fetch", fetcher);
+  await expect(
+    executeSentryTool(connection, "assign_issue", { issueId: "42", assignee: "team:9" }),
+  ).resolves.toMatchObject({ unavailable: false });
+  const update = fetcher.mock.calls.find(([, init]) => init.method === "PUT")!;
+  expect(JSON.parse(String(update[1].body))).toEqual({ assignedTo: "team:9" });
+
+  fetcher.mockClear();
+  await expect(
+    executeSentryTool(connection, "assign_issue", { issueId: "42", assignee: "team:10" }),
+  ).rejects.toThrow("not an eligible member or team");
+  expect(fetcher.mock.calls.some(([, init]) => init.method === "PUT")).toBe(false);
+});

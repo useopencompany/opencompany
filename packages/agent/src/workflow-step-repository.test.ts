@@ -4,11 +4,7 @@ import {
   isCodexConnectedForUser,
 } from "./application/engine-auth-status";
 import { listGitHubUserRepositoryAccess } from "./integrations/github-user";
-import {
-  readSentryFixSetup,
-  sentryFixInstructions,
-  validateSentryFixSetup,
-} from "./sentry-workflow";
+import { validateWorkflowStepRepository } from "./workflow-step-repository";
 
 vi.mock("./application/engine-auth-status", () => ({
   isCodexConnectedForUser: vi.fn(),
@@ -19,11 +15,8 @@ vi.mock("./integrations/github-user", () => ({
   getGitHubUserAccessToken: vi.fn(async () => "fixture-github"),
   listGitHubUserRepositoryAccess: vi.fn(),
 }));
-const setup = {
-  repository: "acme/service",
-  baseBranch: "release/stable",
-  engine: "codex" as const,
-};
+const repository = { fullName: "acme/service", baseBranch: "release/stable" };
+const setup = { userWorkosId: "user", engine: "codex", repository };
 beforeEach(() => {
   vi.mocked(isCodexConnectedForUser).mockResolvedValue(true);
   vi.mocked(isClaudeCodeConnectedForUser).mockResolvedValue(true);
@@ -49,11 +42,16 @@ afterEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
-it("persists explicit repository, branch and engine and verifies repository permissions and the branch", async () => {
-  expect(readSentryFixSetup(sentryFixInstructions("Investigate", setup))).toEqual(setup);
+it("verifies repository permissions and the branch", async () => {
+  await expect(validateWorkflowStepRepository({ ...setup, activation: true })).resolves.toEqual(
+    repository,
+  );
+});
+it("requires a coding engine for a step that works in a repository", async () => {
   await expect(
-    validateSentryFixSetup({ userWorkosId: "user", setup, activation: true }),
-  ).resolves.toEqual(setup);
+    validateWorkflowStepRepository({ ...setup, engine: "kimi-k2.6", activation: true }),
+  ).rejects.toThrow("must use Codex or Claude Code");
+  expect(fetch).not.toHaveBeenCalled();
 });
 it.each(["codex", "claude-code"] as const)(
   "requires the chosen %s account at activation",
@@ -62,11 +60,7 @@ it.each(["codex", "claude-code"] as const)(
       engine === "codex" ? isCodexConnectedForUser : isClaudeCodeConnectedForUser,
     ).mockResolvedValue(false);
     await expect(
-      validateSentryFixSetup({
-        userWorkosId: "user",
-        setup: { ...setup, engine },
-        activation: true,
-      }),
+      validateWorkflowStepRepository({ ...setup, engine, activation: true }),
     ).rejects.toThrow("before activating");
     expect(fetch).not.toHaveBeenCalled();
   },
@@ -82,7 +76,7 @@ it("rejects insufficient push and PR permissions without changing them", async (
       },
     ],
   } as never);
-  await expect(validateSentryFixSetup({ userWorkosId: "user", setup })).rejects.toThrow(
+  await expect(validateWorkflowStepRepository(setup)).rejects.toThrow(
     "Contents and Pull requests write access",
   );
   expect(fetch).not.toHaveBeenCalled();
@@ -92,11 +86,7 @@ it("rejects inaccessible repositories and nonexistent base branches", async () =
     "fetch",
     vi.fn(async () => new Response(null, { status: 404 })),
   );
-  await expect(validateSentryFixSetup({ userWorkosId: "user", setup })).rejects.toThrow(
-    "base branch does not exist",
-  );
+  await expect(validateWorkflowStepRepository(setup)).rejects.toThrow("base branch does not exist");
   vi.mocked(listGitHubUserRepositoryAccess).mockResolvedValue({ installations: [] } as never);
-  await expect(validateSentryFixSetup({ userWorkosId: "user", setup })).rejects.toThrow(
-    "cannot access",
-  );
+  await expect(validateWorkflowStepRepository(setup)).rejects.toThrow("cannot access");
 });

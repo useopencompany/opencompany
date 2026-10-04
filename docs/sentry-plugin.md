@@ -18,7 +18,9 @@ Create a public integration in Sentry with installation verification enabled. Co
 The redirect carries `installationId` and a one-time `code`. The authenticated admin confirms the
 current workspace and region. The API exchanges the grant, discovers its single authorized
 organization, encrypts credentials, and keeps the connection incomplete until the admin chooses
-projects and saves settings. It then verifies installation with Sentry. Installation ownership
+projects and saves settings. It commits the settings, then verifies installation with Sentry
+without holding the connection row lock, so webhook ingress never waits on a Sentry request. A
+disconnect that lands during verification wins. Installation ownership
 persists across disconnection. A different workspace cannot claim it. Disconnect before changing
 the workspace's organization. Historical Tasks remain available.
 
@@ -48,8 +50,10 @@ before routing, so retries use the same evidence. Missing context is an explicit
 retry up to eight attempts with bounded exponential delay.
 
 The API verifies HMAC against the raw body and stores a durable receipt before returning 202.
-It performs no event enrichment on ingress. The runner claims receipts with leases and routes
-through the shared workflow event queue and Task worker. Exact payload redeliveries deduplicate;
+It performs no event enrichment on ingress and does not write the connection row; the last receipt
+time shown in settings is read from receipts. A dedicated runner worker claims receipts with
+leases, enriches them, and routes them into the shared workflow event queue. A slow Sentry request
+therefore delays only other Sentry receipts, never Task creation for any provider. Exact payload redeliveries deduplicate;
 a later regression with new notification data remains eligible. Alert settings store both
 workflow and trigger IDs in `destination`. Configuration and delivery require an active shared
 workflow with an enabled alert trigger for the installation and selected project.
@@ -63,8 +67,10 @@ normal billing. Disconnection records a durable revocation cutoff. Queued delive
 even if the same installation reconnects before the worker claims them.
 
 Tasks receive bounded issue and occurrence data, the trigger reason, and summaries from the
-latest three completed Tasks for that issue in the workspace. Prior summaries and available PR
-links occupy at most 6,000 characters. Agents must treat provider content and previous results as
+latest three completed Tasks for that issue in the workspace. Everything shares the 10,000-character
+Task goal limit. Routing caps the prompt and occurrence data at 7,500 characters, and prior
+summaries with available PR links fill the remainder, up to 6,000 characters. A Task with no
+previous results gets no history block. Agents must treat provider content and previous results as
 data, never instructions.
 
 ## Gateway tools and scopes
@@ -100,9 +106,10 @@ the partial draft using the existing template flow.
   triggers, and uses the normal workflow model. Findings include impact, evidence, likely cause,
   uncertainty, and next action.
 - Propose a Sentry fix also selects Codex or Claude Code, repository, and base branch. Setup checks
-  repository access and branch existence. Activation checks the coding account, GitHub account,
-  Contents write and Pull requests write permissions. Saved instructions contain explicit
-  repository and branch values. One coding step investigates, fixes, checks, and opens a draft PR
+  repository access and branch existence. The step stores the repository and base branch as typed
+  data, and each run's prompt names them explicitly, whatever the instructions say. Activation
+  checks the coding account, GitHub account, Contents write and Pull requests write permissions
+  for any step with a repository. Switching the step to a non-coding model drops the repository. One coding step investigates, fixes, checks, and opens a draft PR
   only when the change is justified and verified.
 - Daily Sentry review defaults to 09:00 in the selected timezone. It reviews unresolved issues
   active in the preceding 24 hours and recommends the top five. It performs no writes.
@@ -129,6 +136,7 @@ Before publication, explicitly authorize a live end-to-end test, provision crede
 hosted refresh and receipt latency, and submit the tested integration for Sentry review. General
 availability depends on Sentry publication approval. Monitor structured
 `opencompany.sentry_receipt_processed`, `opencompany.sentry_enrichment_failed`,
+`opencompany.sentry_receipt_worker_failed`,
 `opencompany.sentry_run_suppressed`, `opencompany.sentry_task_started`,
 `opencompany.sentry_refresh_failed`, and `opencompany.sentry_catalog_failed` events, gateway
 permission failures, and integration refresh failures. Inspect durable receipt and delivery

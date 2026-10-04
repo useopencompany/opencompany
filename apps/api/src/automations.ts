@@ -1,6 +1,6 @@
 import { normalizeScheduleDefinition } from "@opencompany/agent/schedule-rules";
-import { readSentryFixSetup, validateSentryFixSetup } from "@opencompany/agent/sentry-workflow";
 import { SkillMentionError } from "@opencompany/agent/skills";
+import { validateWorkflowStepRepository } from "@opencompany/agent/workflow-step-repository";
 import { refineWorkflowTaskTitle } from "@opencompany/agent/workflow-task-title";
 import {
   prepareWorkflowRunForUser,
@@ -51,12 +51,13 @@ export function createAutomationServices(input: AutomationServicesInput) {
   const planner: AutomationExecutionPlanner = {
     prepareWorkflow: async ({ actor, workflow, prompt, skillIds }) => {
       for (const step of workflow.steps) {
-        const setup = readSentryFixSetup(step.instructions);
-        if (setup) {
-          if (step.model !== setup.engine)
-            throw new Error("Sentry fix coding engine must match the saved setup.");
-          await validateSentryFixSetup({ userWorkosId: actor.userId, setup, activation: true });
-        }
+        if (step.repository)
+          await validateWorkflowStepRepository({
+            userWorkosId: actor.userId,
+            engine: step.model,
+            repository: step.repository,
+            activation: true,
+          });
       }
       const prepared = await prepareWorkflow({
         actor,

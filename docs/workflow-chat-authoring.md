@@ -63,5 +63,5 @@ before merge.
 Sentry company workflows use the admin-selected projects. Each event trigger requires one
 project. Creation and regression accept priority, environment, and exact tag pairs. Creation
 checks the first occurrence, so an issue created in staging cannot later qualify as a new
-production issue. Templates create drafts, and fix templates save their coding engine, repository,
-and base branch explicitly. See [Sentry workflows](./sentry-plugin.md).
+production issue. Templates create drafts. Fix templates save their coding engine on the step and
+the repository and base branch as typed step data, which each run's prompt names explicitly. See [Sentry workflows](./sentry-plugin.md).

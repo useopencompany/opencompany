@@ -4,11 +4,13 @@ import {
   exchangeSentryGrant,
   SentryEnvelopeSchema,
   SentryProjectSchema,
+  sentryAccessToken,
   sentryApi,
   sentryConfigured,
   sentryRequest,
   verifySentrySignature,
 } from "@opencompany/agent/integrations/sentry";
+import { validateWorkflowStepRepository } from "@opencompany/agent/workflow-step-repository";
 import { type Actor, COMPANY_SENTRY_EVENTS } from "@opencompany/core";
 import {
   integrations,
@@ -20,12 +22,14 @@ import {
   disconnectSentry,
   findSentryInstallation,
   getSentryConnection,
+  type SentryConnection,
   sentryRows,
 } from "@opencompany/db/sentry";
 import { listCompanyWorkflowEventTriggerRoutes } from "@opencompany/db/workflow-event-routes";
 import {
   CompanySentryPluginSchema,
   SentryConnectBodySchema,
+  type SentryFixSetupDto,
   SentrySettingsBodySchema,
 } from "@opencompany/protocol";
 import { eq, sql } from "drizzle-orm";
@@ -53,6 +57,19 @@ function requireAdmin(actor: Actor) {
       "Only workspace admins can manage Sentry connections and shared permissions.",
     );
 }
+// Locks the connection row and confirms it is still the installation the caller loaded.
+async function lockCurrentConnection(tx: DbLike, actor: Actor, connection: SentryConnection) {
+  await tx.execute(
+    sql`SELECT integration_id FROM goat.sentry_connections WHERE integration_id = ${connection.integrationId} FOR UPDATE`,
+  );
+  const latest = await getSentryConnection(actor.workspaceId, tx);
+  if (
+    !latest ||
+    latest.installationId !== connection.installationId ||
+    latest.status === "disconnected"
+  )
+    throw new ApiError(409, "conflict", "Sentry disconnected while setup was in progress.");
+}
 export function createSentryService(db: DbLike) {
   async function get(actor: Actor) {
     const connection = await getSentryConnection(actor.workspaceId, db);
@@ -63,6 +80,14 @@ export function createSentryService(db: DbLike) {
           ),
         )[0]?.count ?? 0)
       : 0;
+    // Derived from receipts so webhook ingress never writes the connection row.
+    const lastReceivedAt = connection
+      ? (sentryRows<{ receivedAt: string | Date | null }>(
+          await db.execute(
+            sql`SELECT max(received_at) AS "receivedAt" FROM goat.sentry_webhook_receipts WHERE installation_id = ${connection.installationId}`,
+          ),
+        )[0]?.receivedAt ?? null)
+      : null;
     const outcomes = connection
       ? sentryRows(
           await db.execute(
@@ -80,7 +105,7 @@ export function createSentryService(db: DbLike) {
         ? {
             ...connection,
             verifiedAt: connection.verifiedAt?.toISOString() ?? null,
-            lastReceivedAt: connection.lastReceivedAt?.toISOString() ?? null,
+            lastReceivedAt: lastReceivedAt ? new Date(lastReceivedAt).toISOString() : null,
           }
         : null,
       tools: connection
@@ -228,19 +253,11 @@ export function createSentryService(db: DbLike) {
             "Project does not belong to this Sentry organization.",
           );
       }
-      // Persist setup before marking Sentry's installation installed. On a remote failure it remains
-      // visibly incomplete and cannot route events. Retrying settings safely retries verification.
+      // Webhook ingress and Task admission lock the same connection row, so no Sentry request may
+      // run while it is held. Settings commit first. Until verification completes, the connection
+      // stays visibly incomplete and cannot route events; retrying settings retries verification.
       await db.transaction(async (tx: DbLike) => {
-        await tx.execute(
-          sql`SELECT integration_id FROM goat.sentry_connections WHERE integration_id = ${connection.integrationId} FOR UPDATE`,
-        );
-        const latest = await getSentryConnection(actor.workspaceId, tx);
-        if (
-          !latest ||
-          latest.installationId !== connection.installationId ||
-          latest.status === "disconnected"
-        )
-          throw new ApiError(409, "conflict", "Sentry disconnected while setup was in progress.");
+        await lockCurrentConnection(tx, actor, connection);
         await tx
           .update(sentryConnections)
           .set({
@@ -257,16 +274,18 @@ export function createSentryService(db: DbLike) {
             ...(input.toolModes ? { toolModes: input.toolModes } : {}),
           })
           .where(eq(integrations.id, connection.integrationId));
-        if (!latest?.verifiedAt) {
-          const { sentryAccessToken } = await import("@opencompany/agent/integrations/sentry");
-          await sentryRequest(
-            `sentry-app-installations/${connection.installationId}/`,
-            { status: "installed" },
-            await sentryAccessToken(connection, { db: tx }),
-            undefined,
-            "PUT",
-          );
-        }
+      });
+      if (!connection.verifiedAt)
+        await sentryRequest(
+          `sentry-app-installations/${connection.installationId}/`,
+          { status: "installed" },
+          await sentryAccessToken(connection, { db }),
+          undefined,
+          "PUT",
+        );
+      // A disconnect that landed during the request wins over the verification.
+      await db.transaction(async (tx: DbLike) => {
+        await lockCurrentConnection(tx, actor, connection);
         await tx
           .update(sentryConnections)
           .set({ verifiedAt: new Date() })
@@ -277,6 +296,16 @@ export function createSentryService(db: DbLike) {
           .where(eq(integrations.id, connection.integrationId));
       });
       return get(actor);
+    },
+    // Checks the fix template's repository before the draft exists. Activation repeats the check
+    // and also requires the coding account.
+    async validateFixSetup(actor: Actor, setup: SentryFixSetupDto) {
+      await validateWorkflowStepRepository({
+        userWorkosId: actor.userId,
+        engine: setup.engine,
+        repository: { fullName: setup.repository, baseBranch: setup.baseBranch },
+      });
+      return setup;
     },
     async disconnect(actor: Actor) {
       requireAdmin(actor);
@@ -327,10 +356,6 @@ export function createSentryService(db: DbLike) {
             eventAt: new Date(timestamp * 1000),
           })
           .onConflictDoNothing();
-        await tx
-          .update(sentryConnections)
-          .set({ lastReceivedAt: new Date() })
-          .where(eq(sentryConnections.installationId, payload.installation.uuid));
         if (resource === "installation" && payload.action === "deleted")
           await disconnectSentry(payload.installation.uuid, tx);
       });

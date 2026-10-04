@@ -1,9 +1,9 @@
-import type {
-  WorkflowEventFilterValue,
-  WorkflowStep,
-  WorkflowTriggerInput,
-} from "@opencompany/core";
-import type { WorkflowTemplate } from "./workflow-templates";
+import {
+  type PreparedWorkflowTemplate,
+  prepareWorkflowTemplate,
+  type WorkflowTemplate,
+  type WorkflowTemplateTriggerInput,
+} from "./workflow-templates";
 export type SentryTemplateSetupValues = {
   integrationId: string;
   project: { id: string; name: string };
@@ -16,18 +16,19 @@ export type SentryTemplateSetupValues = {
   time?: string;
   timezone?: string;
 };
-export function sentryTemplateDefinition(
+export function prepareSentryTemplate(
   template: WorkflowTemplate,
   setup: SentryTemplateSetupValues,
-): { triggers: WorkflowTriggerInput[]; step: Omit<WorkflowStep, "id"> } {
+): PreparedWorkflowTemplate {
   if (
     !template.setup?.startsWith("sentry") ||
     !setup.integrationId ||
     !/^\d+$/.test(setup.project.id)
   )
     throw new Error("Choose a selected Sentry project.");
-  const step = { ...template.step, model: template.step.model ?? "kimi-k2.6" };
-  const filters: Record<string, WorkflowEventFilterValue> = { project: setup.project };
+  const filters: Extract<WorkflowTemplateTriggerInput, { type: "event" }>["filters"] = {
+    project: setup.project,
+  };
   if (setup.priority) {
     if (!["high", "medium", "low"].includes(setup.priority))
       throw new Error("Choose a supported priority.");
@@ -52,10 +53,9 @@ export function sentryTemplateDefinition(
       throw new Error("Choose a valid timezone.");
     }
     const [hour, minute] = setup.time.split(":").map(Number);
-    step.instructions += `\n\nSelected Sentry project ID: ${setup.project.id}. Organization connection: ${setup.integrationId}. Query is: is:unresolved lastSeen:-24h. Use an explicit UTC range covering the preceding 24 hours.`;
-    return {
-      step,
-      triggers: [
+    return prepareWorkflowTemplate(
+      template,
+      [
         {
           type: "schedule",
           cron: `${minute} ${hour} * * *`,
@@ -64,32 +64,37 @@ export function sentryTemplateDefinition(
           enabled: true,
         },
       ],
-    };
+      {
+        instructions: `${template.step.instructions}\n\nSelected Sentry project ID: ${setup.project.id}. Organization connection: ${setup.integrationId}. Query is: is:unresolved lastSeen:-24h. Use an explicit UTC range covering the preceding 24 hours.`,
+      },
+    );
   }
   if (template.trigger.kind !== "event") throw new Error("Sentry event template has no event.");
-  if (template.setup === "sentry-fix") {
-    if (
-      !setup.engine ||
-      !setup.repository ||
-      !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(setup.repository) ||
-      !setup.baseBranch?.trim()
-    )
-      throw new Error("Choose a coding engine, repository and base branch.");
-    step.model = setup.engine;
-    step.runtimeModel =
-      setup.engine === "codex" ? "openai/gpt-5.6-sol" : "anthropic/claude-sonnet-5";
-    step.reasoningEffort = "high";
-    step.instructions += `\n\nSentry fix configuration: ${JSON.stringify({ repository: setup.repository, baseBranch: setup.baseBranch, engine: setup.engine })}\nUse repository ${setup.repository} and base branch ${setup.baseBranch}. These are explicit values, do not infer a different repository or base branch.`;
-  }
-  return {
-    step,
-    triggers: [template.trigger.event, ...(template.additionalEvents ?? [])].map((event) => ({
-      type: "event",
-      provider: "sentry",
-      event,
-      integrationId: setup.integrationId,
-      filters,
-      prompt: template.trigger.prompt,
-    })),
-  };
+  const { trigger } = template;
+  const eventTrigger = (event: string): WorkflowTemplateTriggerInput => ({
+    type: "event",
+    provider: "sentry",
+    event,
+    integrationId: setup.integrationId,
+    filters,
+    prompt: trigger.prompt,
+  });
+  const triggers: PreparedWorkflowTemplate["triggers"] = [
+    eventTrigger(trigger.event),
+    ...(template.additionalEvents ?? []).map(eventTrigger),
+  ];
+  if (template.setup !== "sentry-fix") return prepareWorkflowTemplate(template, triggers);
+  if (
+    !setup.engine ||
+    !setup.repository ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(setup.repository) ||
+    !setup.baseBranch?.trim()
+  )
+    throw new Error("Choose a coding engine, repository and base branch.");
+  return prepareWorkflowTemplate(template, triggers, {
+    model: setup.engine,
+    runtimeModel: setup.engine === "codex" ? "openai/gpt-5.6-sol" : "anthropic/claude-sonnet-5",
+    reasoningEffort: "high",
+    repository: { fullName: setup.repository, baseBranch: setup.baseBranch },
+  });
 }

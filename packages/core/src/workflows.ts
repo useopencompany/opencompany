@@ -50,7 +50,25 @@ export type WorkflowStep = {
   runtimeModel?: string;
   reasoningEffort?: string;
   instructions: string;
+  // The repository and base branch a coding step works in. Activation checks access to them, and
+  // the step's prompt names them explicitly.
+  repository?: WorkflowStepRepository;
 };
+
+export type WorkflowStepRepository = { fullName: string; baseBranch: string };
+
+// GitHub `owner/name`, and a branch name free of the characters and sequences git refuses.
+export const WORKFLOW_STEP_REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+export function workflowStepBaseBranchValid(value: string) {
+  return (
+    value.length > 0 &&
+    value.length <= 256 &&
+    !/[\s~^:?*\[\\]/.test(value) &&
+    !value.includes("..") &&
+    !value.startsWith("-") &&
+    !value.endsWith(".")
+  );
+}
 
 // The prompt a trigger carries when the author wrote no instructions of their own for it. These
 // are placeholders, not instructions: a schedule run substitutes the first step's instructions for
@@ -1022,8 +1040,19 @@ function workflowSteps(steps: WorkflowStep[]) {
       ...(reasoningEffort
         ? { reasoningEffort: bounded(reasoningEffort, 64, "Workflow reasoning effort") }
         : {}),
+      ...(step.repository ? { repository: workflowStepRepository(step.repository) } : {}),
     };
   });
+}
+
+function workflowStepRepository(repository: WorkflowStepRepository): WorkflowStepRepository {
+  if (!WORKFLOW_STEP_REPOSITORY_PATTERN.test(repository.fullName)) {
+    throw new CoreError("invalid_argument", "Choose a GitHub repository as owner/name.");
+  }
+  if (!workflowStepBaseBranchValid(repository.baseBranch)) {
+    throw new CoreError("invalid_argument", "Choose a valid base branch.");
+  }
+  return { fullName: repository.fullName, baseBranch: repository.baseBranch };
 }
 
 function workflowTrigger(trigger: WorkflowTriggerInput): NormalizedWorkflowTriggerInput {
@@ -1325,7 +1354,12 @@ function workflowWithModelOverrides(
       },
     ]);
     if (normalized) {
-      byId.set(step.id, { ...normalized, title: step.title, instructions: step.instructions });
+      byId.set(step.id, {
+        ...normalized,
+        title: step.title,
+        instructions: step.instructions,
+        ...(step.repository ? { repository: step.repository } : {}),
+      });
     }
   }
   return { ...workflow, steps: workflow.steps.map((step) => byId.get(step.id) ?? step) };

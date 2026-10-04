@@ -1569,6 +1569,11 @@ export function StepCard({
           ) : null}
         </div>
       </div>
+      {step.repository ? (
+        <p className="text-[12px] text-ink-subtle">
+          Works in {step.repository.fullName} from {step.repository.baseBranch}
+        </p>
+      ) : null}
       <section className="rounded-xl border border-border bg-surface px-3.5 py-3">
         {canEdit ? (
           <MarkdownEditor
@@ -2027,7 +2032,16 @@ function workflowStepWithPatch(step: WorkflowStep, patch: WorkflowStepPatch): Wo
     instructions: next.instructions,
     ...(next.runtimeModel ? { runtimeModel: next.runtimeModel } : {}),
     ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+    // Only a coding runtime can work in a repository, so switching away drops the target.
+    ...(next.repository && workflowStepUsesCodingRuntime(next.model)
+      ? { repository: next.repository }
+      : {}),
   };
+}
+
+function workflowStepUsesCodingRuntime(model: string) {
+  const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+  return Boolean(option && isWorkflowCloudRuntime(option.engine));
 }
 
 function serializeWorkflowDraft(draft: WorkflowDraft) {

@@ -120,6 +120,8 @@ export type WorkflowStep = {
   runtimeModel?: AgentModelId;
   reasoningEffort?: CloudCodingReasoningEffort;
   instructions: string;
+  // The repository and base branch a coding step works in.
+  repository?: { fullName: string; baseBranch: string };
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
 export type ExternalArtifactSourceType = "github" | "skills.sh";
@@ -6516,7 +6518,6 @@ export const sentryConnections = productSchema.table(
     dailyCap: integer("daily_cap").notNull().default(25),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
-    lastReceivedAt: timestamp("last_received_at", { withTimezone: true }),
   },
   (table) => ({
     regionCheck: check("sentry_connections_region_check", sql`${table.region} IN ('us', 'eu')`),
@@ -6553,6 +6554,10 @@ export const sentryWebhookReceipts = productSchema.table(
   },
   (table) => ({
     pendingIdx: index("sentry_webhook_receipts_pending_idx").on(table.status, table.nextAttemptAt),
+    installationIdx: index("sentry_webhook_receipts_installation_idx").on(
+      table.installationId,
+      table.receivedAt,
+    ),
   }),
 );
 

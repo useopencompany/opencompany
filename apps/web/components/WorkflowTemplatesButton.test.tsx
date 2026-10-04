@@ -324,3 +324,42 @@ it("clones both Sentry triggers as a draft and archives a partially initialized 
     ],
   });
 });
+
+it("clones the Sentry fix template with its repository as typed step data", async () => {
+  sentryMock.listSentryProjectsAction.mockResolvedValue({
+    projects: [{ id: "1", name: "Web", slug: "web" }],
+    nextCursor: null,
+  });
+  sentryMock.validateSentryFixAction.mockResolvedValue({});
+  commandsMock.createHeadlessWorkflow.mockReset().mockResolvedValue(createdWorkflow());
+  commandsMock.updateHeadlessWorkflow.mockReset().mockResolvedValue({ version: 2 });
+  render(
+    <WorkflowTemplatesButton
+      missingPlugins={{}}
+      companySentry={sentryPluginFixture()}
+      scope="company"
+    />,
+  );
+  await useTemplate("Propose a Sentry fix");
+  await waitFor(() => expect(screen.getByRole("option", { name: "Web" })).toBeEnabled());
+  await userEvent.selectOptions(screen.getByLabelText("Sentry project"), "1");
+  await userEvent.type(screen.getByLabelText("Fix repository"), "acme/service");
+  await userEvent.type(screen.getByLabelText("Fix base branch"), "release/stable");
+  await userEvent.click(screen.getByRole("button", { name: "Create draft" }));
+
+  await waitFor(() => expect(commandsMock.updateHeadlessWorkflow).toHaveBeenCalled());
+  const update = commandsMock.updateHeadlessWorkflow.mock.calls[0]![1];
+  expect(update.steps).toEqual([
+    expect.objectContaining({
+      id: "step_1",
+      model: "codex",
+      repository: { fullName: "acme/service", baseBranch: "release/stable" },
+    }),
+  ]);
+  expect(update.steps[0].instructions).not.toContain("acme/service");
+  expect(update.trigger).toMatchObject({ type: "event", event: "issue.created" });
+  expect(update.triggers.map((trigger: { event: string }) => trigger.event)).toEqual([
+    "issue.created",
+    "issue.regressed",
+  ]);
+});

@@ -18,12 +18,15 @@ import {
   enqueueWorkflowEventRuns,
   listCompanyWorkflowEventTriggerRoutes,
 } from "@opencompany/db/workflow-event-routes";
-import { createLogger } from "@opencompany/observability";
+import { captureException, createLogger } from "@opencompany/observability";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb } from "./db";
+import { createPollingWorker } from "./polling-worker";
+import { SENTRY_EVENT_GOAL_MAX_LENGTH } from "./sentry-task-context";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "sentry-events" });
+const SENTRY_RECEIPT_POLL_INTERVAL_MS = 1_000;
 type DbLike = any;
 const Evidence = z.object({
   issue: SentryIssueSchema,
@@ -31,6 +34,30 @@ const Evidence = z.object({
   unavailableReason: z.string().nullable(),
   eventType: z.string(),
 });
+// Enrichment calls Sentry, so it runs apart from the shared workflow event worker. A slow Sentry
+// request then delays only other Sentry receipts, never Task creation for any provider.
+export function startSentryReceiptWorker(input: { onRouted?: () => void } = {}) {
+  return createPollingWorker({
+    pollIntervalMs: SENTRY_RECEIPT_POLL_INTERVAL_MS,
+    poll: async ({ signal, stopping }) => {
+      let processed = false;
+      while (!stopping()) {
+        signal.throwIfAborted();
+        if (!(await processNextSentryReceipt())) break;
+        processed = true;
+      }
+      if (processed) input.onRouted?.();
+    },
+    onError: (error) => {
+      captureException(error, { event: "opencompany.sentry_receipt_worker_failed" });
+      logger.error("Sentry receipt worker failed", {
+        event: "opencompany.sentry_receipt_worker_failed",
+        error,
+      });
+    },
+  });
+}
+
 export async function processNextSentryReceipt(now = new Date(), db: DbLike = getDb()) {
   const leaseUntil = new Date(now.getTime() + 120_000);
   const [claimedReceipt] = sentryRows<{
@@ -222,6 +249,7 @@ export async function processNextSentryReceipt(now = new Date(), db: DbLike = ge
             routes: [route],
             deliveryId: receipt.id,
             eventAt: receipt.eventAt,
+            goalMaxLength: SENTRY_EVENT_GOAL_MAX_LENGTH,
             context: {
               tag: "sentry_event_data",
               lines: [

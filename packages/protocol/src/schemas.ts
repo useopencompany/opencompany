@@ -294,6 +294,14 @@ export const WorkflowStepSchema = z
     runtimeModel: z.string().min(1).max(256).optional(),
     reasoningEffort: z.string().min(1).max(64).optional(),
     instructions: z.string().max(20_000),
+    repository: z
+      .object({
+        fullName: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+        baseBranch: z.string().min(1).max(256),
+      })
+      .strict()
+      .optional()
+      .openapi({ description: "The repository and base branch a coding step works in." }),
   })
   .strict()
   .openapi("WorkflowStep");
@@ -4822,3 +4830,4 @@ export const SentryFixSetupEnvelopeSchema = sentryZ
 export type CompanySentryPluginDto = sentryZ.infer<typeof CompanySentryPluginSchema>;
 export type SentryProjectDto = sentryZ.infer<typeof SentryProjectSchema>;
 export type SentrySettingsDto = sentryZ.infer<typeof SentrySettingsBodySchema>;
+export type SentryFixSetupDto = sentryZ.infer<typeof SentryFixSetupBodySchema>;

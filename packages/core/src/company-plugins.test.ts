@@ -22,6 +22,9 @@ describe("company plugins", () => {
     ]);
     expect(companyPluginEvent("github-app", "issue.closed")).toBeNull();
     expect(companyPluginEventKeys()).toEqual([
+      "sentry:sentry:issue.created",
+      "sentry:sentry:issue.regressed",
+      "sentry:sentry:issue_alert.triggered",
       "github-app:github_app:issue.opened",
       "github-app:github_app:pull_request.opened",
     ]);

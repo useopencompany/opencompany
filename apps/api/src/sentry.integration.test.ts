@@ -122,6 +122,74 @@ it("binds to an authenticated admin, stores encrypted credentials, and verifies 
     await f.database.close();
   }
 });
+function signedIssueWebhook(issueId: string) {
+  const raw = JSON.stringify({
+    action: "created",
+    installation: { uuid: installationId },
+    data: { issue: { id: issueId } },
+  });
+  return new Request("https://app.example/webhooks/sentry", {
+    method: "POST",
+    body: raw,
+    headers: {
+      "sentry-hook-signature": createHmac("sha256", "fixture-secret").update(raw).digest("hex"),
+      "sentry-hook-resource": "issue",
+      "sentry-hook-timestamp": "1791028800",
+    },
+  });
+}
+// PGlite runs one transaction at a time, so a webhook awaited inside the verification request
+// would never finish if settings still held its transaction open.
+function verificationFetch(onVerify: () => Promise<void>) {
+  return vi.fn(async (url: URL, init: RequestInit) => {
+    if (url.pathname.endsWith("projects/acme/1/"))
+      return Response.json({ id: "1", slug: "web", name: "Web", organization: { slug: "acme" } });
+    if (url.host === "sentry.io" && init.method === "PUT") {
+      await onVerify();
+      return Response.json({ status: "installed" });
+    }
+    return new Response(null, { status: 400 });
+  });
+}
+const projectSettings = { projectIds: ["1"], cooldownMinutes: 30, dailyCap: 25 };
+it("acknowledges webhooks while settings waits on Sentry verification and derives the last receipt", async () => {
+  const f = await fixture();
+  try {
+    await f.bind();
+    vi.stubGlobal(
+      "fetch",
+      verificationFetch(async () => {
+        expect((await f.service.webhook(signedIssueWebhook("42"))).status).toBe(202);
+      }),
+    );
+    const saved = await f.service.settings(admin, projectSettings);
+    expect(saved.connection).toMatchObject({ status: "connected", selectedProjectIds: ["1"] });
+    expect(saved.connection?.lastReceivedAt).toEqual(expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/));
+  } finally {
+    await f.database.close();
+  }
+});
+it("keeps a connection disconnected when disconnection lands during verification", async () => {
+  const f = await fixture();
+  try {
+    await f.bind();
+    vi.stubGlobal(
+      "fetch",
+      verificationFetch(async () => {
+        await f.service.disconnect(admin);
+      }),
+    );
+    await expect(f.service.settings(admin, projectSettings)).rejects.toThrow(
+      "disconnected while setup",
+    );
+    expect(await getSentryConnection("workspace_1", f.db)).toMatchObject({
+      status: "disconnected",
+      verifiedAt: null,
+    });
+  } finally {
+    await f.database.close();
+  }
+});
 it("rejects a second workspace claiming an installation and rejects members changing any shared settings", async () => {
   const f = await fixture();
   try {

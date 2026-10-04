@@ -256,9 +256,19 @@ export async function executeSentryTool(
         unavailable: false,
       });
     }
-    case "list_assignees":
-      path = `projects/${org}/${projectId}/${params.kind === "teams" ? "teams" : "members"}/`;
-      break;
+    case "list_assignees": {
+      const { assignees, ...page } = await readSentryAssignees(
+        connection,
+        projectId!,
+        params.kind === "teams" ? "team" : "user",
+        {
+          limit: Number(params.limit),
+          ...(params.cursor ? { cursor: String(params.cursor) } : {}),
+        },
+        options,
+      );
+      return boundedSentryResult({ data: assignees, ...page, unavailable: false });
+    }
     case "search_issues":
       path = `organizations/${org}/issues/`;
       query.set("project", projectId!);
@@ -313,18 +323,8 @@ export async function executeSentryTool(
       connection.selectedProjectIds.forEach((id) => query.append("project", id));
       break;
     case "assign_issue": {
-      const [kind, id] = String(params.assignee).split(":");
-      const assignees = (
-        await sentryApi(
-          connection,
-          `projects/${org}/${issue!.project.id}/${kind === "team" ? "teams" : "members"}/`,
-          new URLSearchParams({ per_page: "100" }),
-          options,
-        )
-      ).data;
       if (
-        !Array.isArray(assignees) ||
-        !assignees.some((value) => String(kind === "user" ? value.user?.id : value.id) === id)
+        !(await isSentryAssignee(connection, issue!.project.id, String(params.assignee), options))
       )
         throw new ActionInvalidParamsError(
           "Assignee is not an eligible member or team of this project. List project assignees first.",
@@ -389,6 +389,102 @@ export async function executeSentryTool(
     throw error;
   }
 }
+// Members without a user are pending invitations, which Sentry cannot assign.
+const SentryMemberSchema = z
+  .object({
+    email: z.string().nullish(),
+    user: z
+      .object({
+        id: z.union([z.string(), z.number()]).transform(String),
+        name: z.string().nullish(),
+        email: z.string().nullish(),
+      })
+      .passthrough()
+      .nullish(),
+  })
+  .passthrough();
+const SentryTeamSchema = z
+  .object({
+    id: z.union([z.string(), z.number()]).transform(String),
+    slug: z.string().nullish(),
+    name: z.string().nullish(),
+  })
+  .passthrough();
+type SentryAssigneeKind = "user" | "team";
+// `assignee` is the exact value assign_issue accepts, so discovery and validation agree.
+type SentryAssignee = { assignee: string; kind: SentryAssigneeKind; name: string };
+
+// One page of a project's assignable members or teams.
+async function readSentryAssignees(
+  connection: SentryConnection,
+  projectId: string,
+  kind: SentryAssigneeKind,
+  page: { cursor?: string; limit: number },
+  options: { signal?: AbortSignal; db?: any } = {},
+): Promise<{ assignees: SentryAssignee[]; nextCursor: string | null; source: string }> {
+  const query = new URLSearchParams({ per_page: String(page.limit) });
+  if (page.cursor) query.set("cursor", page.cursor);
+  const response = await sentryApi(
+    connection,
+    `projects/${encodeURIComponent(connection.organizationSlug)}/${projectId}/${kind === "team" ? "teams" : "members"}/`,
+    query,
+    options,
+  );
+  let assignees: SentryAssignee[];
+  if (kind === "team") {
+    assignees = z
+      .array(SentryTeamSchema)
+      .parse(response.data)
+      .map((team) => ({
+        assignee: `team:${team.id}`,
+        kind,
+        name: team.name || team.slug || team.id,
+      }));
+  } else {
+    assignees = z
+      .array(SentryMemberSchema)
+      .parse(response.data)
+      .flatMap(({ email, user }) =>
+        user
+          ? [
+              {
+                assignee: `user:${user.id}`,
+                kind,
+                name: user.name || user.email || email || user.id,
+              },
+            ]
+          : [],
+      );
+  }
+  return { assignees, nextCursor: response.nextCursor, source: response.source };
+}
+
+// Reads every page, so an assignee listed past the first page stays eligible.
+async function isSentryAssignee(
+  connection: SentryConnection,
+  projectId: string,
+  assignee: string,
+  options: { signal?: AbortSignal; db?: any },
+) {
+  const kind: SentryAssigneeKind = assignee.startsWith("team:") ? "team" : "user";
+  const seen = new Set<string>();
+  let cursor: string | undefined;
+  while (true) {
+    const result = await readSentryAssignees(
+      connection,
+      projectId,
+      kind,
+      { limit: 100, ...(cursor ? { cursor } : {}) },
+      options,
+    );
+    if (result.assignees.some((candidate) => candidate.assignee === assignee)) return true;
+    cursor = result.nextCursor ?? undefined;
+    if (!cursor) return false;
+    if (seen.has(cursor)) throw new Error("Sentry assignee pagination did not advance.");
+    seen.add(cursor);
+  }
+}
+
 // Drop a foreign node and all its children. Some trace nodes identify projects by slug rather than
 // id, so unknown identities also fail closed. Root containers have no project and are traversed.
 export function filterSentryTrace(value: unknown, allowed: ReadonlySet<string>): unknown {

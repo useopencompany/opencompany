@@ -23,7 +23,6 @@ import type { GoogleDriveMcpService } from "@opencompany/agent/integrations/goog
 import type { RenderProviderState } from "@opencompany/agent/integrations/render-mcp";
 import type { SlackMcpService } from "@opencompany/agent/integrations/slack-mcp-server";
 import type { McpService } from "@opencompany/agent/mcp-http";
-import { SentryFixSetupSchema, validateSentryFixSetup } from "@opencompany/agent/sentry-workflow";
 import { InternalWorkflowCommandRequestSchema } from "@opencompany/agent/workflow-tool";
 import { captureProductServerEvent } from "@opencompany/analytics/product/server";
 import type { BillingApplicationService } from "@opencompany/billing/application-service";
@@ -2521,10 +2520,7 @@ export function createApiApp(input: CreateApiAppInput) {
     validateSentryFix: async (c) =>
       c.json(
         {
-          data: await validateSentryFixSetup({
-            userWorkosId: actorFrom(c).userId,
-            setup: SentryFixSetupSchema.parse(c.req.valid("json")),
-          }),
+          data: await sentry().validateFixSetup(actorFrom(c), c.req.valid("json")),
           meta,
         },
         200,
