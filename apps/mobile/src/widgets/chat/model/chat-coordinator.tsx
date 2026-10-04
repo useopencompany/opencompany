@@ -1,6 +1,6 @@
 import type { ResolveApprovalBody } from "@opencompany/protocol/schemas";
 import * as Network from "expo-network";
-import { router } from "expo-router";
+import { router, useGlobalSearchParams, usePathname } from "expo-router";
 import { createContext, type ReactNode, use, useEffect, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { useAuth } from "@/features/auth";
@@ -13,6 +13,7 @@ import { chatQueryKeys, invalidateConversation } from "./chat-queries";
 import { createChatSession } from "./chat-session";
 import {
   type ChatPartition,
+  NEW_CHAT_ID,
   type OutgoingDraft,
   queueApprovalCommand,
   queueStopCommand,
@@ -22,10 +23,12 @@ import { type PendingDraftSend, useDraftSend } from "./use-draft-send";
 
 export { chatQueryKeys } from "./chat-queries";
 
+/** Detail sheets read a conversation's live activity, so it stays observed while they are open. */
+export const DETAIL_SHEET_PATHS = ["/tool-sheet", "/reasoning-sheet"] as const;
+
 interface ChatCoordinatorValue {
   partition: ChatPartition | null;
   connectivity: ConnectivityState;
-  setVisibleConversation: (id: string | null) => void;
   pendingSends: Record<string, PendingDraftSend>;
   stoppingConversations: ReadonlySet<string>;
   sendDraft: (
@@ -55,8 +58,24 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
   const [connectivity, setConnectivity] = useState<ConnectivityState>("online");
   const [online, setOnline] = useState<boolean | null>(null);
   const [foreground, setForeground] = useState(AppState.currentState === "active");
-  const [visibleId, setVisibleId] = useState<string | null>(null);
-  const visibleIdRef = useRef<string | null>(null);
+  // The open chat, or the chat behind an open detail sheet. Any other screen, including the
+  // model and share sheets, observes nothing.
+  const pathname = usePathname();
+  const params = useGlobalSearchParams<{ chatId?: string; conversationId?: string }>();
+  const visibleId =
+    pathname === "/"
+      ? NEW_CHAT_ID
+      : pathname.startsWith("/chats/") && typeof params.chatId === "string"
+        ? params.chatId
+        : DETAIL_SHEET_PATHS.some((path) => pathname === path) &&
+            typeof params.conversationId === "string"
+          ? params.conversationId
+          : null;
+  // A send that creates a chat checks, once it is queued, whether its draft is still on screen.
+  const visibleIdRef = useRef(visibleId);
+  useEffect(() => {
+    visibleIdRef.current = visibleId;
+  }, [visibleId]);
   const makeSession = () =>
     user && workspace
       ? createChatSession({
@@ -186,10 +205,6 @@ function ChatSessionProvider({ children }: { children: ReactNode }) {
         connectivity: online === false ? "offline" : connectivity,
         pendingSends: draftSend.pendingSends,
         stoppingConversations,
-        setVisibleConversation: (id) => {
-          visibleIdRef.current = id;
-          setVisibleId(id);
-        },
         sendDraft,
         stopRun,
         resolveApproval,

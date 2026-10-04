@@ -43,7 +43,7 @@ import {
 } from "./chat-store";
 import { orderedPartsFromPresentation, textFromParts } from "./message-presentation";
 import { processChatCommand } from "./process-chat-command";
-import { projectRunEvent } from "./run-projection";
+import { preserveLiveReasoning, projectRunEvent } from "./run-projection";
 import { seenChangeGuard, sidebarChangeGuard } from "./sidebar-change-guard";
 
 // A Task conversation is not served by the chat resources, so its transcript and Runs come from
@@ -108,6 +108,13 @@ const abortableDelay = async (milliseconds: number, signal: AbortSignal): Promis
     const timer = setTimeout(finish, milliseconds);
     signal.addEventListener("abort", finish, { once: true });
   });
+
+// Transient frames arrive about every 50ms per Run, and a replay after a reconnect can deliver
+// hundreds at once. Writing the projection at most this often keeps a long turn's transcript,
+// with its complete tool payloads, from being rewritten for every frame.
+const TRANSIENT_WRITE_INTERVAL_MS = 50;
+
+const TERMINAL_EVENT_TYPES = new Set(["run.completed", "run.failed", "run.canceled"]);
 
 const STRUCTURAL_EVENT_TYPES = new Set([
   "message.created",
@@ -177,9 +184,10 @@ export function createChatSession(input: {
     content: string,
     signal: AbortSignal,
     active?: Awaited<ReturnType<typeof getConversationRunCheckpoint>>,
+    options: { fresh?: boolean } = {},
   ) => {
     const current = scope(signal);
-    const cached = await getMessagePresentationCache(current, messageId);
+    const cached = options.fresh ? null : await getMessagePresentationCache(current, messageId);
     const result = await input.api.getMessagePresentation(
       conversationId,
       messageId,
@@ -187,11 +195,12 @@ export function createChatSession(input: {
       signal,
     );
     if (result.status === "not-modified") return active;
-    const parts = orderedPartsFromPresentation({
+    const canonicalParts = orderedPartsFromPresentation({
       content: active?.content ?? content,
       messageId,
       presentation: result.data.presentation,
     });
+    const parts = active ? preserveLiveReasoning(canonicalParts, active.parts) : canonicalParts;
     const canonicalText = textFromParts(parts);
     if (
       active?.content &&
@@ -347,12 +356,42 @@ export function createChatSession(input: {
       if (!checkpoint || checkpoint.runId === streamedRunId) return;
       streamedRunId = checkpoint.runId;
       let projection = checkpoint;
+      let lastWriteAt = 0;
+      let unwritten = false;
+      let trailingWrite: ReturnType<typeof setTimeout> | null = null;
+      const write = async () => {
+        if (trailingWrite) clearTimeout(trailingWrite);
+        trailingWrite = null;
+        unwritten = false;
+        lastWriteAt = Date.now();
+        await applyRunProjection(current, projection);
+        await invalidateConversation(current, id);
+      };
+      // The last frame before a quiet stretch, such as a long tool call, still shows on time.
+      const scheduleTrailingWrite = () => {
+        if (trailingWrite) return;
+        trailingWrite = setTimeout(
+          () => {
+            trailingWrite = null;
+            if (!unwritten || signal.aborted) return;
+            void until(write).then(([error]) => {
+              if (error)
+                reportError(signal, "This chat could not be updated.", error, "chat.stream.write");
+            });
+          },
+          Math.max(0, TRANSIENT_WRITE_INTERVAL_MS - (Date.now() - lastWriteAt)),
+        );
+      };
+      signal.addEventListener("abort", () => trailingWrite && clearTimeout(trailingWrite), {
+        once: true,
+      });
       for await (const event of input.api.streamRunEvents({
         runId: checkpoint.runId,
         ...(checkpoint.cursor ? { cursor: checkpoint.cursor } : {}),
         ...(checkpoint.presentationCursor
           ? { presentationCursor: checkpoint.presentationCursor }
           : {}),
+        includeReasoning: true,
         signal,
         maxReconnectAttempts: 0,
         onReconnect: () => markConnectionFailure(signal),
@@ -368,13 +407,26 @@ export function createChatSession(input: {
               projection.content,
               signal,
               projection,
+              // A settled Run replaces the live projection with the canonical presentation. A
+              // replay after a reconnect can leave the projection behind a presentation this
+              // device already fetched, so the ETag would answer "not modified" and keep it.
+              { fresh: TERMINAL_EVENT_TYPES.has(event.type) },
             )) ?? projection;
         }
-        await applyRunProjection(current, projection);
-        await invalidateConversation(current, id);
+        // A frame that arrives inside the interval is written with the next event, or when the
+        // stream ends. Durable events always write, so their cursor is never held back.
+        unwritten = true;
+        const transient =
+          event.type === "message.presentation_delta" || event.type === "message.reasoning_updated";
+        if (transient && Date.now() - lastWriteAt < TRANSIENT_WRITE_INTERVAL_MS) {
+          scheduleTrailingWrite();
+          continue;
+        }
+        await write();
       }
-      // The protocol iterator decides when the response is terminal, including historical pauses.
       throwIfAborted(signal);
+      if (unwritten) await write();
+      // The protocol iterator decides when the response is terminal, including historical pauses.
       await refreshConversation(id, signal);
     }
   };

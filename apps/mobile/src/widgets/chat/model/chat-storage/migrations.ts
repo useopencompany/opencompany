@@ -178,3 +178,12 @@ export const DRAFT_MENTIONS_SCHEMA = `
 ALTER TABLE drafts ADD COLUMN mentions_json TEXT;
 PRAGMA user_version = 6;
 `;
+
+// Cached presentations predate reasoning, nested traces, and complete tool payloads. Dropping
+// their ETags makes the next online load fetch each one in full. Revisions stay, so a transcript
+// sync cannot replace the cached parts with plain text before that fetch lands, and messages,
+// drafts, and the outbox are untouched.
+export const PRESENTATION_DETAIL_SCHEMA = `
+UPDATE messages SET presentation_etag = NULL;
+PRAGMA user_version = 7;
+`;

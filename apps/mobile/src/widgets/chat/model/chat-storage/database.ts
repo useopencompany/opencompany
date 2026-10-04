@@ -5,6 +5,7 @@ import {
   DRAFT_MENTIONS_SCHEMA,
   LEGACY_SCHEMA,
   MESSAGE_PRESENTATION_CACHE_SCHEMA,
+  PRESENTATION_DETAIL_SCHEMA,
   SIDEBAR_METADATA_SCHEMA,
   SINGLE_ID_SCHEMA,
 } from "./migrations";
@@ -19,7 +20,7 @@ async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
   await database.execAsync("PRAGMA journal_mode = WAL;");
   const row = await database.getFirstAsync<{ user_version: number }>("PRAGMA user_version");
   const version = row?.user_version ?? 0;
-  if (version > 6) throw new Error("The local chat database is newer than this app.");
+  if (version > 7) throw new Error("The local chat database is newer than this app.");
   if (version < 2) {
     // Foreign keys must be disabled outside the transaction while replacing referenced tables.
     await database.execAsync("PRAGMA foreign_keys = OFF;");
@@ -54,6 +55,11 @@ async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
   if (version < 6) {
     await database.withTransactionAsync(async () => {
       await database.execAsync(DRAFT_MENTIONS_SCHEMA);
+    });
+  }
+  if (version < 7) {
+    await database.withTransactionAsync(async () => {
+      await database.execAsync(PRESENTATION_DETAIL_SCHEMA);
     });
   }
   return database;

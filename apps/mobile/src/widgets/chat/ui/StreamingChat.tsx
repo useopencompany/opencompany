@@ -28,7 +28,12 @@ import { analytics } from "@/shared/lib/analytics";
 import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
 import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
 import { useToast } from "@/shared/ui/toast";
-import type { ChatMessage as ChatMessageModel, ConnectivityState } from "../model/chat";
+import type {
+  ChatMessage as ChatMessageModel,
+  ConnectivityState,
+  ReasoningPart,
+  ToolPart,
+} from "../model/chat";
 import { useChatComposer } from "../model/chat-composer-context";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
 import { useChatInputController } from "../model/chat-input-controller";
@@ -120,6 +125,8 @@ export function StreamingChat({
   const composerContainerRef = useRef<View>(null);
   const quickActionsRef = useRef<ComposerQuickActions>(null);
   const [quickActionTrigger, setQuickActionTrigger] = useState<QuickActionTrigger | null>(null);
+  // Turns the reader unfolded. Kept for as long as this conversation stays mounted.
+  const [expandedTraces, setExpandedTraces] = useState<ReadonlySet<string>>(new Set());
   const keyboardStateHeight = useKeyboardState((state) => state.height);
   const markdownStyle = useChatMarkdownStyle();
   const coordinator = useChatCoordinator();
@@ -268,12 +275,12 @@ export function StreamingChat({
     setAnchorMessageId(pendingSend.message.id);
   }, [pendingSend?.message.id]);
 
+  // The coordinator observes the chat from the route, so a detail sheet opened over it keeps
+  // the same observation running.
   useLayoutEffect(() => {
     if (!isFocused) return;
     composer.activateConversation(chatId);
-    coordinator.setVisibleConversation(chatId);
     if (coordinator.partition) void markConversationViewed(coordinator.partition, chatId);
-    return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
 
   // Opening a conversation acknowledges its unread result. Sidebar previews never take focus, so
@@ -306,8 +313,30 @@ export function StreamingChat({
     ]);
   };
 
+  const openPart = (messageId: string, part: ToolPart | ReasoningPart) => {
+    void input.dismissComposer();
+    analytics.capture(part.type === "tool" ? "chat_tool_details_opened" : "chat_reasoning_opened");
+    router.push({
+      pathname: part.type === "tool" ? "/tool-sheet" : "/reasoning-sheet",
+      params: { conversationId: chatId, messageId, partId: part.id },
+    });
+  };
+
   const renderItem = ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
     <ChatMessage
+      isWorking={run?.assistantMessageId === item.id && run.status === "running"}
+      onOpenPart={(part) => openPart(item.id, part)}
+      onToggleTrace={() => {
+        // The tapped disclosure stays where it is; following the end would push it off screen.
+        followResponseRef.current = false;
+        setFollowing(false);
+        setExpandedTraces((current) => {
+          const next = new Set(current);
+          if (!next.delete(item.id)) next.add(item.id);
+          return next;
+        });
+      }}
+      traceExpanded={expandedTraces.has(item.id)}
       isTerminal={
         item.role === "assistant" &&
         item.id !== sendingMessage?.id &&
@@ -405,6 +434,7 @@ export function StreamingChat({
             extraData={[
               theme,
               run,
+              expandedTraces,
               runQuery.data?.queuedMessageIds,
               coordinator.connectivity,
               sendingMessage?.id,

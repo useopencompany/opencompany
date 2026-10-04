@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   CHAT_MAX_STEPS,
   CHAT_MAX_STEPS_WITH_SANDBOX,
@@ -44,7 +45,10 @@ import {
   resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
-import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
+import {
+  type ChatPresentationPublisher,
+  REASONING_UPDATE_MAX_TEXT_LENGTH,
+} from "@opencompany/chat-presentation";
 import { ensureMonthlyIncludedUsage } from "@opencompany/db/billing";
 import { hasPositiveCreditBalance } from "@opencompany/db/credits";
 import {
@@ -459,6 +463,19 @@ export async function runProductChatTurn(input: {
                   },
                 });
               },
+              presentReasoning: (reasoning: ReasoningPresentation) => {
+                input.presentationPublisher?.publish({
+                  runId: turn.id,
+                  attemptNumber: turn.attempts,
+                  schemaVersion: 1,
+                  occurredAt: new Date().toISOString(),
+                  type: "message.reasoning_updated",
+                  payload: {
+                    messageId: turn.assistantMessageId,
+                    ...reasoning,
+                  },
+                });
+              },
             }
           : {}),
       },
@@ -623,11 +640,19 @@ export function createSteeringTraceChannel() {
 
 export type SteeringTraceChannel = ReturnType<typeof createSteeringTraceChannel>;
 
+export type ReasoningPresentation = {
+  itemId: string;
+  position: number;
+  text: string;
+  state: "streaming" | "done";
+};
+
 export async function consumeProductChatStream(input: {
   fullStream: AsyncIterable<unknown>;
   signal: AbortSignal;
   sink: Pick<ProductChatProjector, "project" | "recordStepUsage"> & {
     present?: (input: { startOffset: number; endOffset: number; delta: string }) => void;
+    presentReasoning?: (input: ReasoningPresentation) => void;
   };
   flushIntervalMs?: number;
   presentationFlushIntervalMs?: number;
@@ -690,6 +715,37 @@ export async function consumeProductChatStream(input: {
     lastPresentationAt = currentTime;
     input.sink.present({ startOffset, endOffset: content.length, delta });
   };
+  // Live reasoning is throttled per block on the same cadence as text. Each frame carries the
+  // block's full text, so a skipped frame only delays what the next one shows.
+  const lastReasoningPresentedAt = new Map<string, number>();
+  const presentReasoning = (index: number, force = false) => {
+    if (!input.sink.presentReasoning) return;
+    const part = partAt(parts, index);
+    const itemId = typeof part?.itemId === "string" ? part.itemId : null;
+    const text = typeof part?.text === "string" ? part.text : "";
+    if (!itemId || !text || text.length > REASONING_UPDATE_MAX_TEXT_LENGTH) return;
+    const currentTime = now();
+    const lastAt = lastReasoningPresentedAt.get(itemId);
+    if (!force && lastAt !== undefined && currentTime - lastAt < presentationFlushIntervalMs) {
+      return;
+    }
+    lastReasoningPresentedAt.set(itemId, currentTime);
+    input.sink.presentReasoning({
+      itemId,
+      position: index,
+      text,
+      state: part?.state === "done" ? "done" : "streaming",
+    });
+  };
+  const appendReasoningPart = (part: Record<string, unknown>) =>
+    appendPart({
+      type: "reasoning",
+      text: "",
+      state: "streaming",
+      // A stable identity lets a live reader merge streamed snapshots into the persisted block.
+      itemId: `reasoning_${randomUUID()}`,
+      ...providerMetadataFrom(part),
+    });
   const appendPart = (part: ProductChatUiPart) => {
     parts.push(part);
     dirty = true;
@@ -777,29 +833,12 @@ export async function consumeProductChatStream(input: {
         }
       } else if (part.type === "reasoning-start") {
         const id = readString(part.id);
-        if (id) {
-          reasoningPartIndexes.set(
-            id,
-            appendPart({
-              type: "reasoning",
-              text: "",
-              state: "streaming",
-              ...providerMetadataFrom(part),
-            }),
-          );
-        }
+        if (id) reasoningPartIndexes.set(id, appendReasoningPart(part));
       } else if (part.type === "reasoning-delta") {
         const id = readString(part.id);
         const text = readStringAllowEmpty(part.text);
         if (id && text !== null) {
-          const index =
-            reasoningPartIndexes.get(id) ??
-            appendPart({
-              type: "reasoning",
-              text: "",
-              state: "streaming",
-              ...providerMetadataFrom(part),
-            });
+          const index = reasoningPartIndexes.get(id) ?? appendReasoningPart(part);
           reasoningPartIndexes.set(id, index);
           const existing = partAt(parts, index);
           replacePart(index, {
@@ -808,6 +847,7 @@ export async function consumeProductChatStream(input: {
             state: "streaming",
             ...providerMetadataFrom(part),
           });
+          presentReasoning(index);
           await flush(false);
         }
       } else if (part.type === "reasoning-end") {
@@ -818,6 +858,7 @@ export async function consumeProductChatStream(input: {
             state: "done",
             ...providerMetadataFrom(part),
           });
+          presentReasoning(index, true);
         }
       } else if (part.type === "tool-input-start") {
         const toolCallId = readString(part.id);

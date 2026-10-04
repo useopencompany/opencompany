@@ -44,7 +44,7 @@ describe("orderedPartsFromPresentation", () => {
     ]);
   });
 
-  it("omits model reasoning while preserving the surrounding response", () => {
+  it("keeps model reasoning in place with its stable identity", () => {
     const parts = orderedPartsFromPresentation({
       content: "Answer.",
       messageId: "message_1",
@@ -56,6 +56,16 @@ describe("orderedPartsFromPresentation", () => {
       },
     });
 
-    expect(parts).toEqual([{ id: "text:item_1", type: "text", text: "Answer." }]);
+    expect(parts).toEqual([
+      {
+        id: "reasoning:reasoning_1",
+        type: "reasoning",
+        itemId: "reasoning_1",
+        text: "Private reasoning",
+        streaming: false,
+        sourceIndex: 0,
+      },
+      { id: "text:item_1", type: "text", text: "Answer.", itemId: "item_1" },
+    ]);
   });
 });
