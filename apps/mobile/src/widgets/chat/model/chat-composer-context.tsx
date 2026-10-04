@@ -24,6 +24,12 @@ import {
   resolveComposerSelection,
   selectedModelId,
 } from "./composer-selection";
+import {
+  type ComposerMention,
+  type ComposerSegment,
+  parseDraftSegments,
+  serializeSegments,
+} from "./quick-actions/composer-segments";
 
 export interface ComposerAttachment {
   id: string;
@@ -55,7 +61,12 @@ interface PendingAttachment {
 
 interface ChatComposerContextValue {
   conversationId: string;
+  /** The draft as it will be sent, with tags serialized into text. */
   value: string;
+  /** The skills, workflow, and Task the draft's tags carry. */
+  mentions: ComposerMention[];
+  /** The draft as composer content, with its tags restored. For hydrating the input. */
+  segments: ComposerSegment[];
   /** The draft's attachments, followed by any still being prepared and saved. */
   attachments: ComposerAttachment[];
   /** Some attachments are still saving, so the draft cannot send yet. */
@@ -77,7 +88,7 @@ interface ChatComposerContextValue {
   ) => Promise<T>;
   removeAttachment: (id: string) => Promise<void>;
   updateSelection: (update: (current: ComposerSelection) => ComposerSelection) => void;
-  setValue: (value: string) => void;
+  setContent: (segments: ComposerSegment[]) => void;
 }
 
 const ChatComposerContext = createContext<ChatComposerContextValue | null>(null);
@@ -123,12 +134,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
   const conversation = conversationId === NEW_CHAT_ID ? undefined : conversationQuery.data;
   const saveDraftMutation = useMutation({
     mutationFn: (input: { partition: NonNullable<typeof partition>; draft: StoredDraft }) =>
-      saveStoredDraft(
-        input.partition,
-        input.draft.conversationId,
-        input.draft.text,
-        input.draft.selection,
-      ),
+      saveStoredDraft(input.partition, input.draft.conversationId, input.draft),
     onError: (error, input) => {
       if (!input.partition.signal?.aborted)
         showErrorToast(
@@ -138,7 +144,13 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         );
     },
   });
-  const emptyDraft: StoredDraft = { conversationId, text: "", selection: null, attachments: [] };
+  const emptyDraft: StoredDraft = {
+    conversationId,
+    text: "",
+    mentions: [],
+    selection: null,
+    attachments: [],
+  };
   const draft = draftQuery.data ?? emptyDraft;
   const resolveSelection = (stored: ComposerSelection | null) => {
     const resolved = resolveComposerSelection(stored, conversationSource(conversation));
@@ -149,7 +161,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
       : resolved;
   };
   const selection = resolveSelection(draft.selection);
-  const editDraft = (changes: Partial<Pick<StoredDraft, "text" | "selection">>) => {
+  const editDraft = (changes: Partial<Pick<StoredDraft, "text" | "mentions" | "selection">>) => {
     if (!partition) return;
     // Cancel a stale disk read before publishing an edit. The query cache is the live draft;
     // SQLite owns persistence, and successful writes never hydrate older text over newer edits.
@@ -262,6 +274,8 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
       value={{
         conversationId,
         value: draft.text,
+        mentions: draft.mentions,
+        segments: parseDraftSegments(draft.text, draft.mentions),
         attachments: [...storedAttachments, ...pendingHere.map((pending) => pending.attachment)],
         hasPendingAttachments: pendingHere.some((pending) => !pending.saved),
         selection,
@@ -288,7 +302,7 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
               model_id: selectedModelId(next),
             });
         },
-        setValue: (text) => editDraft({ text }),
+        setContent: (segments) => editDraft(serializeSegments(segments)),
       }}
     >
       {children}

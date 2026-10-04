@@ -7,6 +7,32 @@ export interface TextPart {
   id: string;
   type: "text";
   text: string;
+  /** The engine's message identity. Adjacent text with different items stays separate messages. */
+  itemId?: string;
+}
+
+/**
+ * Where a part sits among its siblings in the server's presentation. Live parts that only exist
+ * on this device have none; a live reasoning frame uses it to land before later activity.
+ */
+interface PresentationPosition {
+  sourceIndex?: number;
+}
+
+export interface ReasoningPart extends PresentationPosition {
+  id: string;
+  type: "reasoning";
+  itemId: string;
+  text: string;
+  streaming: boolean;
+  /** The Run attempt that streamed this text. Absent once a canonical presentation replaced it. */
+  attempt?: number;
+}
+
+export interface SteeringPart extends PresentationPosition {
+  id: string;
+  type: "steering";
+  text: string;
 }
 
 export interface AttachmentPart {
@@ -16,16 +42,32 @@ export interface AttachmentPart {
   localUri?: string;
 }
 
-export interface ToolPart {
+export type ToolStatus = "running" | "waiting" | "completed" | "failed" | "denied" | "interrupted";
+
+export interface ToolPart extends PresentationPosition {
   id: string;
   type: "tool";
   toolCallId: string;
+  /** The tool's registered name, such as `web_search` or `codex_command`. */
   name: string;
+  /** Label and detail a lifecycle event carried before the full presentation arrived. */
   label?: string;
   detail?: string;
-  status: "running" | "completed" | "failed";
+  status: ToolStatus;
+  /** The raw AI SDK part state, such as `output-available`. */
+  state?: string;
+  /** Identity fields from the part envelope (title, kind, server, tool). Never tool arguments. */
+  metadata?: Record<string, unknown>;
+  /**
+   * Complete arguments and result. An absent key means the value is unknown on this device; a
+   * present `null` is a value the tool really sent.
+   */
+  input?: unknown;
+  output?: unknown;
   summary?: string;
   error?: string;
+  /** A subagent's own trace, in order. */
+  children?: ChatPart[];
 }
 
 export interface ApprovalPart {
@@ -60,6 +102,8 @@ export interface NoticePart {
 
 export type ChatPart =
   | TextPart
+  | ReasoningPart
+  | SteeringPart
   | AttachmentPart
   | ToolPart
   | ApprovalPart

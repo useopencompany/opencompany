@@ -9,6 +9,26 @@ import { spawnSync } from "node:child_process";
 // itself an error, so a fixed dependency cannot leave a silent hole behind.
 const acceptedAdvisories = [
   {
+    ghsa: "GHSA-vfj7-8cjw-p6xm",
+    package: "braces",
+    // No patched release exists; 3.0.3 is still the latest. micromatch brings it into
+    // Metro and fast-glob tooling. The stack-exhaustion attack requires a deeply
+    // nested brace pattern; these tools currently consume repository-defined globs.
+    // Remove this exception when a patched compatible release is available, and
+    // re-review it before exposing these tools to untrusted glob patterns.
+    expiresOn: "2026-10-31",
+  },
+  {
+    ghsa: "GHSA-ch52-4w7c-c8xp",
+    package: "http-cache-semantics",
+    // No patched release exists; 4.2.0 is still the latest. This copy is reached
+    // through cacheable-request > got > @electron/get in desktop packaging.
+    // The max-stale flaw affects shared HTTP caches; our use is an artifact
+    // downloader, not a cache shared by application users. Remove this exception
+    // when a patched compatible release is available, and re-review any new use.
+    expiresOn: "2026-10-31",
+  },
+  {
     ghsa: "GHSA-86w9-cpqp-85rv",
     package: "node-forge",
     // No patched release exists. patches/node-forge@1.4.0.patch applies the nested

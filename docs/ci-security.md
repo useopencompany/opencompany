@@ -157,6 +157,13 @@ dependency cannot leave a silent hole behind. Prefer an override or an upstream 
 exception only when no released version is both patched and compatible, and record why in the
 script rather than in a commit message.
 
+Two tooling advisories currently have no patched release. `braces@3.0.3` is reached through
+micromatch in Metro and fast-glob tooling; GHSA-vfj7-8cjw-p6xm requires a deeply nested brace pattern.
+`http-cache-semantics@4.2.0` is reached through Electron's artifact downloader; GHSA-ch52-4w7c-c8xp
+affects shared HTTP caches. Their named exceptions expire on 2026-10-31. Replace them with compatible
+patched releases when available, and re-review before accepting untrusted glob patterns or adding
+another HTTP-cache consumer.
+
 `node-forge@1.4.0` has no released fix for GHSA-86w9-cpqp-85rv. The Bun patch in
 `patches/node-forge@1.4.0.patch` applies the nested DigestAlgorithm element-count check from
 [upstream PR 1152](https://github.com/digitalbazaar/forge/pull/1152). The Policy job tests malformed

@@ -3,6 +3,7 @@ import type {
   CreateMessageBody,
   CreateTaskCommentBody,
   MessageEngine,
+  MessageMention,
   ResolveApprovalBody,
   RunDto,
   TaskDto,
@@ -10,6 +11,7 @@ import type {
 import type { ChatMessage, ChatPart } from "../chat";
 import type { ComposerAttachment } from "../chat-composer-context";
 import type { ComposerSelection } from "../composer-selection";
+import type { ComposerMention } from "../quick-actions/composer-segments";
 
 export const NEW_CHAT_ID = "new";
 
@@ -51,7 +53,10 @@ export interface StoredConversation {
 
 export interface StoredDraft {
   conversationId: string;
+  /** The serialized composer text: tags appear as the text they send. */
   text: string;
+  /** What the text's skill, workflow, and Task tags send beyond their text. */
+  mentions: ComposerMention[];
   /** Null until the user picks something; the composer then derives it from the conversation. */
   selection: ComposerSelection | null;
   attachments: ComposerAttachment[];
@@ -89,6 +94,8 @@ export type MessageCommand =
         model: string;
         isNewConversation: boolean;
         engine?: MessageEngine;
+        // Intents queued before skill tags existed carry none.
+        mentions?: MessageMention[];
       };
       frozenBody: CreateMessageBody | null;
     })
@@ -127,6 +134,7 @@ export interface DraftRow {
   text: string;
   model_id: string;
   selection_json: string | null;
+  mentions_json: string | null;
 }
 
 export interface AttachmentRow {

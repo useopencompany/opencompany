@@ -2283,12 +2283,15 @@ export const streamRunEventsRoute = createRoute({
     query: z.object({
       cursor: CursorSchema.optional(),
       presentationCursor: PresentationCursorSchema.optional(),
+      // Opt-in so installed clients that predate live reasoning never receive a frame type their
+      // bundled parser rejects.
+      includeReasoning: z.enum(["0", "1"]).optional(),
     }),
   },
   responses: {
     200: {
       description:
-        "Typed durable Run Events plus optional transient presentation deltas. Only durable events carry SSE IDs.",
+        "Typed durable Run Events plus optional transient presentation frames: text deltas, and reasoning updates when `includeReasoning=1`. Only durable events carry SSE IDs.",
       content: {
         "text/event-stream": {
           schema: RunStreamEventSchema,

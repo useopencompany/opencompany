@@ -1,17 +1,12 @@
+import { descriptionFromAdHocTaskPrompt } from "@opencompany/core/ad-hoc-task";
 import { useMutation } from "@tanstack/react-query";
 import { router } from "expo-router";
 import type { Ref } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  type LayoutChangeEvent,
-  Pressable,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from "react-native";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { type LayoutChangeEvent, Pressable, Text, useWindowDimensions, View } from "react-native";
 import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useCSSVariable } from "uniwind";
 import { until } from "until-async";
 import { analytics } from "@/shared/lib/analytics";
 import { useReducedTransparency } from "@/shared/lib/use-reduced-transparency";
@@ -30,6 +25,20 @@ import {
   modelLabel,
   selectedModelId,
 } from "../model/composer-selection";
+import {
+  type ComposerTokenSegment,
+  serializeSegments,
+} from "../model/quick-actions/composer-segments";
+import {
+  backgroundTaskSource,
+  useStartBackgroundTask,
+} from "../model/quick-actions/use-start-background-task";
+import {
+  NativeComposerInput,
+  type NativeComposerInputRef,
+  type QuickActionTrigger,
+  type QuickActionTriggerCharacter,
+} from "../native/native-composer-input";
 import { ComposerAttachments } from "./composer-attachments";
 import { ModelLogo } from "./model-logo";
 
@@ -70,7 +79,18 @@ const ATTACHMENTS_INSET = 10;
 const ATTACHMENT_PREVIEW_SIZE = 112;
 const ATTACHMENT_PREVIEW_GAP = 8;
 // The navigation bar and the space the transcript keeps below it.
-const TOP_CLEARANCE = 64;
+export const TOP_CLEARANCE = 64;
+// The composer's vertical padding above the glass, shared with the quick action menu's anchor.
+export const COMPOSER_OUTER_PADDING_TOP = 8;
+const ALL_TRIGGERS: QuickActionTriggerCharacter[] = ["@", "/", "#"];
+// A Task cannot start a Task, and its replies go through the comment endpoint, which takes no
+// skill mentions. Web gates both the same way.
+const TASK_TRIGGERS: QuickActionTriggerCharacter[] = ["@"];
+
+/** What the quick action menu asks of the composer's input. */
+export interface ComposerQuickActions {
+  insertToken: (token: ComposerTokenSegment) => void;
+}
 
 export function ChatComposer({
   autoFocus,
@@ -85,6 +105,10 @@ export function ChatComposer({
   onLayout,
   onSend,
   onStop,
+  onQuickActionTriggerChange,
+  onSubmitHighlighted,
+  quickActionsRef,
+  submitsHighlighted,
 }: {
   autoFocus: boolean;
   bottomInset: number;
@@ -98,63 +122,80 @@ export function ChatComposer({
   onLayout: (event: LayoutChangeEvent) => void;
   onSend: (draft: OutgoingDraft) => Promise<SentMessageIdentity>;
   onStop: () => Promise<void>;
+  onQuickActionTriggerChange: (trigger: QuickActionTrigger | null) => void;
+  /** Return was pressed while the menu shows a highlighted row. */
+  onSubmitHighlighted: () => void;
+  quickActionsRef: Ref<ComposerQuickActions>;
+  submitsHighlighted: boolean;
 }) {
-  const { showErrorToast } = useToast();
+  const { showToast, showErrorToast } = useToast();
   const composer = useChatComposer();
   const input = useChatInputController();
   const insets = useSafeAreaInsets();
   const { height: windowHeight, fontScale } = useWindowDimensions();
   const keyboardHeight = useKeyboardState((state) => state.height);
   const reducedTransparency = useReducedTransparency();
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<NativeComposerInputRef>(null);
   const plusRef = useRef<View>(null);
   const glassRef = useRef<View>(null);
-  const [layoutReady, setLayoutReady] = useState(false);
+  const [textColor, placeholderColor, accentColor] = useCSSVariable([
+    "--color-foreground",
+    "--color-muted-foreground",
+    "--color-accent",
+  ]) as [string, string, string];
+  // The native input takes commands only once Fabric has mounted it, which its first layout
+  // confirms. A command sent from the commit that creates it never arrives.
+  const [inputReady, setInputReady] = useState(false);
   const didHandleInitialFocusRef = useRef(false);
   const isActiveConversation = composer.conversationId === conversationId;
   const attachments = isActiveConversation ? composer.attachments : [];
   const value = isActiveConversation ? composer.value : "";
-  // The input owns its text while the user types: echoing keystrokes back through React drops
-  // characters under fast input, and a render can briefly carry an older value. So text only flows
-  // into the native view while the input is blurred, which is when conversations switch and failed
-  // sends restore. The input mounts once the draft has loaded, so hydration never remounts it and
-  // new-chat focus lands on the input that stays. Sending clears the input directly.
+  // The input owns its content while the user types: echoing keystrokes back through React drops
+  // characters under fast input, and a render can briefly carry an older value. So content only
+  // flows into the native view while it is blurred, which is when conversations switch and failed
+  // sends restore. The input mounts once the draft has loaded, so new-chat focus lands on the
+  // input that stays. Sending clears the input directly.
   const inputMounted = composer.isReady;
   const typedTextRef = useRef(value);
-  const inputWasMountedRef = useRef(false);
+  const inputWasReadyRef = useRef(false);
+  const inputFocusedRef = useRef(false);
   const [inputFocused, setInputFocused] = useState(false);
-  // The text the input mounts with. React Native measures the input from a changed
-  // `defaultValue`, so passing the live draft would size it from text a keystroke or two old: on
-  // fast typing the composer shrank for a frame and the caret jumped. It also never sizes an input
-  // whose `defaultValue` has only ever been empty from the typed text, and that input stays one
-  // line tall. So an input that mounts empty takes its first typed text as its starting text, once.
-  // Otherwise the starting text changes only together with the input's key.
-  const [inputSeed, setInputSeed] = useState<{ revision: number; text: string } | null>(null);
+  const inputCommand = (command: (input: NativeComposerInputRef) => Promise<void>) => {
+    const current = inputRef.current;
+    if (!current) return;
+    void until(() => command(current)).then(([error]) => {
+      if (error) showErrorToast("The message field did not respond.", error, "chat.composer.input");
+    });
+  };
+  if (!inputMounted && inputReady) setInputReady(false);
   useLayoutEffect(() => {
-    const justMounted = inputMounted && !inputWasMountedRef.current;
-    inputWasMountedRef.current = inputMounted;
-    if (!inputMounted || justMounted) {
+    if (!inputReady) {
       typedTextRef.current = value;
-      setInputSeed(justMounted ? { revision: 0, text: value } : null);
+      inputWasReadyRef.current = false;
       return;
     }
-    if (inputFocused || value === typedTextRef.current) return;
+    const justReady = !inputWasReadyRef.current;
+    inputWasReadyRef.current = true;
+    if (!justReady && (inputFocused || value === typedTextRef.current)) return;
     typedTextRef.current = value;
-    if (value) setInputSeed((seed) => ({ revision: (seed?.revision ?? 0) + 1, text: value }));
-    else inputRef.current?.clear();
-  }, [value, inputFocused, inputMounted]);
+    const segments = isActiveConversation ? composer.segments : [];
+    inputCommand((input) => input.setContent(segments));
+  }, [value, inputFocused, inputReady]);
+  useImperativeHandle(quickActionsRef, () => ({
+    insertToken: (token) => inputCommand((input) => input.insertToken(token)),
+  }));
   const { selection, locks } = composer;
 
   const focusInput = () => {
     input.setKeyboardOwner("composer");
-    inputRef.current?.focus();
+    inputCommand((input) => input.focus());
   };
   useLayoutEffect(() => {
     if (!isScreenFocused || !isActiveConversation) return;
     const handle: ComposerInputHandle = {
-      blur: () => inputRef.current?.blur(),
+      blur: () => inputCommand((input) => input.blur()),
       focus: focusInput,
-      isFocused: () => inputRef.current?.isFocused() ?? false,
+      isFocused: () => inputFocusedRef.current,
     };
     input.composerInputRef.current = handle;
     return () => {
@@ -181,12 +222,14 @@ export function ChatComposer({
       ),
   });
 
+  const startTaskMutation = useStartBackgroundTask();
+
   useLayoutEffect(() => {
     if (
       !isScreenFocused ||
       !isActiveConversation ||
       !composer.isReady ||
-      !layoutReady ||
+      !inputReady ||
       input.drawerOpen
     )
       return;
@@ -204,7 +247,7 @@ export function ChatComposer({
   }, [
     autoFocus,
     composer.isReady,
-    layoutReady,
+    inputReady,
     input.drawerOpen,
     input.focusRequestId,
     isActiveConversation,
@@ -212,8 +255,8 @@ export function ChatComposer({
   ]);
 
   useEffect(() => {
-    if ((!isActiveConversation || !isScreenFocused) && inputRef.current?.isFocused())
-      inputRef.current.blur();
+    if ((!isActiveConversation || !isScreenFocused) && inputFocusedRef.current)
+      inputCommand((input) => input.blur());
   }, [isActiveConversation, isScreenFocused]);
 
   const goalBlocksSend = !locks.isTask && isGoalBlockingSend(selection);
@@ -222,17 +265,57 @@ export function ChatComposer({
     disabled ||
     !isActiveConversation ||
     sendMutation.isPending ||
+    startTaskMutation.isPending ||
     !hasContent ||
     goalBlocksSend ||
     composer.hasPendingAttachments;
 
   const send = () => {
     if (sendDisabled) return;
+    const draft = {
+      conversationId,
+      text: value,
+      mentions: composer.mentions,
+      selection,
+      attachments,
+    };
+    const taskSource = backgroundTaskSource(draft);
+    if (taskSource) {
+      startTask(draft, taskSource.kind);
+      return;
+    }
     // Clear in the tap itself. The request carries its own copy of the text and selection.
     typedTextRef.current = "";
-    inputRef.current?.clear();
-    composer.setValue("");
-    sendMutation.mutate({ conversationId, text: value, selection, attachments });
+    inputCommand((input) => input.clear());
+    composer.setContent([]);
+    sendMutation.mutate(draft);
+  };
+
+  // `#task` and `#workflow` start a background Task instead of sending a message, as on web.
+  const startTask = (draft: OutgoingDraft, kind: "task" | "workflow") => {
+    if (kind === "task" && !descriptionFromAdHocTaskPrompt(draft.text)) {
+      showToast("Describe the Task you want to start.");
+      return;
+    }
+    if (kind === "task" && draft.attachments.length > 0) {
+      showToast("Attachments are not supported when starting a background task yet.");
+      return;
+    }
+    const segments = composer.segments;
+    // Like a sent message, a started Task closes the keyboard: its chat opens next.
+    void input.dismissComposer();
+    typedTextRef.current = "";
+    inputCommand((input) => input.clear());
+    composer.setContent([]);
+    startTaskMutation.mutate(draft, {
+      onError: () => {
+        // Bring the draft back unless the user has started a new one meanwhile.
+        if (typedTextRef.current) return;
+        typedTextRef.current = draft.text;
+        inputCommand((input) => input.setContent(segments));
+        composer.setContent(segments);
+      },
+    });
   };
 
   // Grow through eight lines, then scroll inside the input. Large Dynamic Type sizes and a raised
@@ -264,31 +347,38 @@ export function ChatComposer({
         </View>
       ) : null}
       {inputMounted ? (
-        <TextInput
-          accessibilityLabel="Message"
-          className="px-4 pt-3 pb-1 text-[17px] text-foreground"
+        <NativeComposerInput
           editable={isActiveConversation && !disabled}
-          multiline
+          inputAccessibilityLabel="Message"
+          maxHeight={maxInputHeight}
+          // keyboard-controller finds the composer by this ID to extend the interactive
+          // dismissal area up to the composer's top edge.
           nativeID="chat-composer"
-          defaultValue={inputSeed?.text ?? value}
-          key={inputSeed?.revision ?? 0}
-          onChangeText={(text) => {
-            typedTextRef.current = text;
-            if (inputSeed?.text === "" && text) setInputSeed({ ...inputSeed, text });
-            if (isActiveConversation) composer.setValue(text);
+          onBlur={() => {
+            inputFocusedRef.current = false;
+            setInputFocused(false);
           }}
-          onBlur={() => setInputFocused(false)}
+          onLayout={() => setInputReady(true)}
+          onChangeContent={(segments) => {
+            typedTextRef.current = serializeSegments(segments).text;
+            if (isActiveConversation) composer.setContent(segments);
+          }}
           onFocus={() => {
+            inputFocusedRef.current = true;
             setInputFocused(true);
             input.setKeyboardOwner("composer");
           }}
+          onSubmitHighlighted={onSubmitHighlighted}
+          onTriggerChange={onQuickActionTriggerChange}
           placeholder="Ask opencompany"
-          placeholderTextColorClassName="accent-muted-foreground"
+          placeholderColor={placeholderColor}
           ref={inputRef}
-          selectionColorClassName="accent-accent"
-          style={{ maxHeight: maxInputHeight }}
-          // A chat message is never a credential or contact field, so keep iOS AutoFill away.
-          textContentType="none"
+          selectionColor={accentColor}
+          style={{ minHeight: lineHeight + INPUT_VERTICAL_PADDING }}
+          submitsHighlighted={submitsHighlighted}
+          textColor={textColor}
+          tokenColor={accentColor}
+          triggers={locks.isTask ? TASK_TRIGGERS : ALL_TRIGGERS}
         />
       ) : (
         <View style={{ height: lineHeight + INPUT_VERTICAL_PADDING }} />
@@ -418,7 +508,6 @@ export function ChatComposer({
   return (
     <View
       onLayout={(event) => {
-        setLayoutReady(true);
         onLayout(event);
       }}
       pointerEvents="box-none"
@@ -428,7 +517,7 @@ export function ChatComposer({
         paddingHorizontal: COMPOSER_HORIZONTAL_MARGIN,
       }}
     >
-      <View className="py-2">
+      <View style={{ paddingVertical: COMPOSER_OUTER_PADDING_TOP }}>
         <View ref={glassRef}>
           {reducedTransparency ? (
             <View className="overflow-hidden rounded-[26px] border border-border border-continuous bg-card">

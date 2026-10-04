@@ -19,6 +19,8 @@ including the primary flow and an obvious error or empty state. Every UI or UX c
 include current screenshots or a short screen recording in the pull request so reviewers can assess
 the result without running the branch. Capture the real product and show the relevant states. This
 requirement applies equally to maintainer-authored and external pull requests.
+Store new PR screenshots and recordings in `docs/pr-assets/<change-name>/`. Keep existing assets at
+their current paths to preserve PR links.
 
 ## Commit Identity and Email Privacy
 

@@ -75,7 +75,7 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
-  PresentationDeltaEventSchema,
+  PresentationEventSchema,
   RunEventSchema,
   V1_BROWSER_REQUEST_HEADERS,
   type V1RouteHandlers,
@@ -1936,6 +1936,7 @@ export function createApiApp(input: CreateApiAppInput) {
       const runId = c.req.valid("param").runId;
       const queryCursor = c.req.valid("query").cursor;
       const queryPresentationCursor = c.req.valid("query").presentationCursor;
+      const includeReasoning = c.req.valid("query").includeReasoning === "1";
       const headerCursor = c.req.valid("header")["last-event-id"];
       if (queryCursor && headerCursor && queryCursor !== headerCursor) {
         throw new ApiError(400, "invalid_request", "Conflicting event cursors were provided.");
@@ -1951,11 +1952,12 @@ export function createApiApp(input: CreateApiAppInput) {
         throw new ApiError(400, "invalid_request", "The event cursor is invalid.");
       }
       const initialRun = await input.chat.getRun(actor, runId);
-      // Only the opencompany engine publishes presentation frames (the runner wires the hot
-      // publisher for that engine alone), and a run's engine never changes. Coding-engine
-      // streams skip the Redis hot path and wake on the durable-event cadence instead of the
-      // presentation cadence.
-      const presentation = initialRun.engine === "opencompany" ? input.presentation : undefined;
+      // The opencompany engine publishes text deltas and reasoning; coding engines publish only
+      // reasoning, since their text already streams as durable content updates. A coding-engine
+      // stream that did not ask for reasoning skips the Redis hot path and wakes on the
+      // durable-event cadence instead of the presentation cadence. A run's engine never changes.
+      const presentation =
+        initialRun.engine === "opencompany" || includeReasoning ? input.presentation : undefined;
       // A cursor may already point at the final durable event. In that case the response body is
       // intentionally empty, so the shared client needs the authenticated status snapshot to
       // distinguish terminal exhaustion from an early network disconnect.
@@ -2015,7 +2017,13 @@ export function createApiApp(input: CreateApiAppInput) {
                   durableWake = true;
                   break;
                 }
-                const dto = PresentationDeltaEventSchema.parse({
+                // Older installed clients reject frame types they do not know, so reasoning goes
+                // only to readers that asked for it. Skipping still advances their cursor.
+                if (entry.frame.type === "message.reasoning_updated" && !includeReasoning) {
+                  presentationStreamId = entry.streamId;
+                  continue;
+                }
+                const dto = PresentationEventSchema.parse({
                   ...entry.frame,
                   presentationCursor: encodePresentationCursor(entry.streamId),
                 });

@@ -32,6 +32,10 @@
       "types": "./src/wiki-commands.ts",
       "default": "./src/wiki-commands.ts"
     },
+    "./ad-hoc-task": {
+      "types": "./src/ad-hoc-task.ts",
+      "default": "./src/ad-hoc-task.ts"
+    },
     "./attachments": {
       "types": "./src/attachments.ts",
       "default": "./src/attachments.ts"

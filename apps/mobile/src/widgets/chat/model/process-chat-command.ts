@@ -37,6 +37,7 @@ async function processMessage(
       engine: command.intent.engine ?? { type: "opencompany", schemaVersion: 1 },
       model: command.intent.model,
       ...(attachmentIds.length ? { attachmentIds } : {}),
+      ...(command.intent.mentions?.length ? { mentions: command.intent.mentions } : {}),
     });
     await freezeMessageCommand(partition, command.id, body);
   }

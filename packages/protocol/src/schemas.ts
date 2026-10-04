@@ -4414,6 +4414,7 @@ export type UpdateConversationBody = z.infer<typeof UpdateConversationBodySchema
 export type MessageDto = z.infer<typeof MessageSchema>;
 export type RunDto = z.infer<typeof RunSchema>;
 export type MessageEngine = z.infer<typeof MessageEngineSchema>;
+export type MessageMention = z.infer<typeof MessageMentionSchema>;
 export type ChatReadModel = z.infer<typeof ChatReadModelSchema>;
 export type ReadModel = z.infer<typeof ReadModelSchema>;
 export type TaskDto = z.infer<typeof TaskSchema>;

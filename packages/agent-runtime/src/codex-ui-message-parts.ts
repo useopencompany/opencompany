@@ -36,7 +36,13 @@ export type CodexCommandToolOutput = {
 };
 
 export type CodexUiTextPart = { type: "text"; text: string; itemId?: string };
-export type CodexUiReasoningPart = { type: "reasoning"; text: string; state: "done" };
+// `itemId` identifies the block for live readers. Parts persisted before it existed have none.
+export type CodexUiReasoningPart = {
+  type: "reasoning";
+  text: string;
+  state: "done";
+  itemId?: string;
+};
 // A user message injected into this turn while it was already running (ACP steering). It renders
 // inline at the point the engine received it, so the transcript shows what the turn was told and
 // when, rather than attributing the redirection to nothing.
@@ -181,7 +187,10 @@ export function applyCodexEventToUiMessageParts(
     case "reasoning.completed": {
       const text = readString(event.payload.text);
       if (!text?.trim()) return unchanged(parts);
-      return changed([...parts, { type: "reasoning", text, state: "done" }]);
+      // Every event stays its own block. ACP reuses a thought's message id across its chunks, so
+      // a repeated id is suffixed to keep each block's identity unique within the turn.
+      const itemId = uniqueReasoningItemId(parts, readString(event.payload.itemId));
+      return changed([...parts, { type: "reasoning", text, state: "done", itemId }]);
     }
     case "steering.delivered": {
       const text = readString(event.payload.text);
@@ -456,6 +465,17 @@ export function finalizeCodexUiMessageParts(
   return didChange ? changed(next) : unchanged(parts);
 }
 
+function uniqueReasoningItemId(parts: readonly CodexUiMessagePart[], itemId: string | null) {
+  const base = itemId ?? `reasoning-${parts.length}`;
+  const taken = new Set(
+    parts.flatMap((part) => (part.type === "reasoning" && part.itemId ? [part.itemId] : [])),
+  );
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}:${suffix}`)) suffix += 1;
+  return `${base}:${suffix}`;
+}
+
 export function codexUiMessagePartsContent(parts: readonly CodexUiMessagePart[]): string {
   return parts
     .filter((part): part is CodexUiTextPart => part.type === "text")
@@ -479,7 +499,12 @@ export function parseCodexUiMessageParts(value: unknown): CodexUiMessagePart[] {
       continue;
     }
     if (part.type === "reasoning" && typeof part.text === "string") {
-      parts.push({ type: "reasoning", text: part.text, state: "done" });
+      parts.push({
+        type: "reasoning",
+        text: part.text,
+        state: "done",
+        ...(typeof part.itemId === "string" ? { itemId: part.itemId } : {}),
+      });
       continue;
     }
     if (part.type === CHAT_STEERING_DATA_PART_TYPE) {

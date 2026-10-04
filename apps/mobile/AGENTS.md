@@ -38,7 +38,12 @@ Use the `apple-design` when implementing iOS UI to get recent Apple design guide
   `experiments.inlineModules.watchedDirectories` in `app.config.ts`, and each Swift file, class,
   and registered `Name` must match. Current modules: the sidebar header
   (`src/widgets/sidebar/native`), the Magic Replace symbol (`src/shared/ui/animated-symbol`), and
-  the photo picker pre-warm (`src/widgets/chat/native`).
+  in `src/widgets/chat/native` the photo picker pre-warm and the composer input
+  (`NativeComposerInput`). The composer input is a `UITextView` that holds quick action tags as single
+  attachment characters, so a tag is atomic. Send it commands only after its first `onLayout`;
+  commands sent from the commit that mounts it are dropped. Its text view must stay a direct child
+  of the Expo view, because keyboard-controller reads the focused input's `nativeID` from the text
+  view's superview.
   Adding a module or a native package needs `bun run prebuild:ios` and a rebuild.
 - `expo-camera` powers the composer's camera panel and `expo-glass-effect` its Liquid Glass
   surfaces. Use the `StyledCameraView`, `StyledGlassView`, and `StyledGlassContainer` wrappers in
@@ -47,6 +52,9 @@ Use the `apple-design` when implementing iOS UI to get recent Apple design guide
   in must start as `none` and switch to `regular` once the parent is fully shown: UIKit drops
   glass set up at low opacity and never restores it. Offer an opaque fallback when Reduce
   Transparency is on.
+- In a form sheet with fractional detents, make the scroll view the screen's root view. A sheet
+  tracks only a scroll view it finds there; one wrapped in another view stops painting when the
+  sheet changes detent. The chat detail sheets (`tool-sheet`, `reasoning-sheet`) follow this.
 - Wrap components with a prop ending in `Style` that is not a style (like `glassEffectStyle`)
   using `withUniwind(Component, { style: { fromClassName: "className" } })`. The automatic mode
   turns every `*Style` prop into a style array, which silently breaks the native prop.
@@ -59,6 +67,9 @@ Chats, drafts, attachments, and the outbox live in the `opencompany-chat.db` SQL
 nullable columns so rows written by older builds keep working, bump the version, and raise the
 "newer than this app" guard. Version 5 added `drafts.selection_json` (engine, model, and settings
 per draft) and `conversations.composer_settings_json` (the server's last composer settings).
+Version 6 added `drafts.mentions_json`: the skill, workflow, and Task mentions behind the draft's
+tags. Version 7 clears every `messages.presentation_etag` once, so cached presentations refetch
+with reasoning, nested traces, and complete tool payloads. Draft text stores tags serialized, and `parseDraftSegments` turns them back into tags.
 Outbox message intents freeze the engine payload when queued; intents without one are Chat.
 
 ## Routing

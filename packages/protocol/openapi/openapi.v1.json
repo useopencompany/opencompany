@@ -7408,6 +7408,9 @@
           },
           {
             "$ref": "#/components/schemas/PresentationDeltaEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ReasoningUpdateEvent"
           }
         ]
       },
@@ -8670,6 +8673,99 @@
               "startOffset",
               "endOffset",
               "delta"
+            ],
+            "additionalProperties": false
+          },
+          "presentationCursor": {
+            "type": "string",
+            "pattern": "^p1:[1-9][0-9]*-[0-9]+$/u",
+            "example": "p1:1786449600000-0",
+            "description": "Opaque, best-effort cursor within the transient presentation window."
+          }
+        },
+        "required": [
+          "runId",
+          "attemptNumber",
+          "schemaVersion",
+          "occurredAt",
+          "type",
+          "payload",
+          "presentationCursor"
+        ],
+        "additionalProperties": false
+      },
+      "ReasoningUpdateEvent": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "message.reasoning_updated"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "itemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "parentToolCallId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "position": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 262144
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "streaming",
+                  "done"
+                ]
+              }
+            },
+            "required": [
+              "messageId",
+              "itemId",
+              "position",
+              "text",
+              "state"
             ],
             "additionalProperties": false
           },
@@ -21736,6 +21832,18 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            "required": false,
+            "name": "includeReasoning",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "pattern": "^v1:[1-9][0-9]*$/u",
               "example": "v1:42",
               "description": "Opaque, versioned event cursor."
@@ -21748,7 +21856,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Typed durable Run Events plus optional transient presentation deltas. Only durable events carry SSE IDs.",
+            "description": "Typed durable Run Events plus optional transient presentation frames: text deltas, and reasoning updates when `includeReasoning=1`. Only durable events carry SSE IDs.",
             "content": {
               "text/event-stream": {
                 "schema": {
