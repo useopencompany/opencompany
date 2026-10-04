@@ -41,7 +41,7 @@
     "format": "biome check --write .",
     "format:check": "biome check .",
     "typecheck": "turbo typecheck",
-    "test": "bun --bun turbo test",
+    "test": "bun turbo run test --concurrency=2 -- --maxWorkers=2",
     "test:watch": "turbo test -- --watch",
     "secrets:check": "trufflehog git file://. --since-commit origin/main --branch HEAD --results=verified,unknown --fail --no-update",
     "dependencies:audit": "node scripts/audit-dependencies.mjs",

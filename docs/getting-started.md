@@ -86,3 +86,6 @@ user when needed. See [Environment variables](./env-vars.md) for the variable co
 For changes touching the runner, create the relevant task or cloud coding turn and verify its
 durable status in the UI. For billing work, run `bun run setup:stripe` and confirm the local Stripe
 listener forwards a signed event through `/api/stripe/webhook` to the API-owned handler.
+
+For mobile development or an authorized device check, use the
+[mobile environment reference](mobile-development.md#identify-the-active-environment).
