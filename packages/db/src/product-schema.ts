@@ -587,6 +587,7 @@ export const CODEX_CHAT_EVENT_TYPES: readonly CodexChatEventType[] =
 export type CodexChatTurnSettings = {
   taskActionApprovalPending?: true;
   approvalContinuation?: boolean;
+  taskStepLimitContinuations?: number;
   mentions?: Array<{ kind: "skill"; id: string; name?: string }>;
   taskResultMode?: TaskResultMode;
   reasoningEffort?: CloudCodingReasoningEffort;
