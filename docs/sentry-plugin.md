@@ -16,9 +16,10 @@ Create a public integration in Sentry with installation verification enabled. Co
 - UI schema: [sentry-integration-schema.json](./sentry-integration-schema.json).
 
 The redirect carries `installationId` and a one-time `code`. The authenticated admin confirms the
-current workspace and region. The API exchanges the grant, discovers its single authorized
-organization, encrypts credentials, and keeps the connection incomplete until the admin chooses
-projects and saves settings. It commits the settings, then verifies installation with Sentry
+current workspace and region. The API exchanges the grant and reads the organization from the
+installation metadata. It validates the organization identity and hosted region, encrypts
+credentials, and keeps the connection incomplete until the admin chooses projects and saves
+settings. It commits the settings, then verifies installation with Sentry
 without holding the connection row lock, so webhook ingress never waits on a Sentry request. A
 disconnect that lands during verification wins. Installation ownership
 persists across disconnection. A different workspace cannot claim it. Disconnect before changing
@@ -44,8 +45,9 @@ conditions must match one occurrence. Priority means triage priority, not severi
 
 Creation uses the first occurrence and verifies its timestamp against `firstSeen`. An issue
 created in staging does not later become a new production issue. Regression chooses the latest
-listed occurrence at or before notification time. It represents the regression context rather
-than an exact causal event. The receipt pins its ID before fetching details and stores the context
+listed occurrence in the preceding 90 days at or before notification time. It represents the
+regression context rather than an exact causal event. The receipt pins its ID before fetching
+details and stores the context
 before routing, so retries use the same evidence. Missing context is an explicit unmatched outcome. Transient enrichment failures
 retry up to eight attempts with bounded exponential delay.
 
@@ -127,12 +129,12 @@ permissions, project restrictions, durable receipts, routing, suppression, and t
 PGlite serializes transactions on one connection, so these tests do not establish distributed
 Postgres race behavior. Test against a branch-isolated Postgres database before launch.
 
-Browser verification requires `bun run setup`, a working Docker engine for Electric, and the
-running product through its Tailscale HTTPS preview. Capture connection, conditions, template,
-and delivery outcome states there. No live Sentry installation, alert, coding PR, or review
-submission has been exercised for this implementation, per the user's instruction.
+Browser verification uses `bun run setup` with a branch-isolated Neon database, Docker for
+Electric, and the running product. Capture connection, conditions, template, and delivery
+states. See the [2026-10-07 test record](./pr-assets/sentry-integration/verification.md) for live
+Sentry evidence, fixes, and remaining verification gaps.
 
-Before publication, explicitly authorize a live end-to-end test, provision credentials, verify
+Before publication, complete the remaining end-to-end checks, verify
 hosted refresh and receipt latency, and submit the tested integration for Sentry review. General
 availability depends on Sentry publication approval. Monitor structured
 `opencompany.sentry_receipt_processed`, `opencompany.sentry_enrichment_failed`,

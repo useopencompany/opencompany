@@ -1,3 +1,4 @@
+import { UpdateWorkflowBodySchema } from "@opencompany/protocol";
 import { expect, it } from "vitest";
 import { prepareSentryTemplate } from "./sentry-template-setup";
 import { WORKFLOW_TEMPLATES } from "./workflow-templates";
@@ -83,4 +84,20 @@ it("rejects incomplete fix configuration, duplicate tags and invalid timezones b
       timezone: "bad",
     }),
   ).toThrow("valid timezone");
+});
+
+it("accepts catalog projects with metadata while keeping saved filters within the API contract", () => {
+  const project = { id: "1", name: "Web", slug: "web", platform: "javascript" };
+  const definition = prepareSentryTemplate(template("investigate-sentry-issues"), {
+    ...setup,
+    project,
+  });
+  expect(
+    UpdateWorkflowBodySchema.pick({ triggers: true }).safeParse({
+      triggers: definition.triggers.map((trigger, index) => ({
+        ...trigger,
+        id: `trigger_${index}`,
+      })),
+    }).success,
+  ).toBe(true);
 });

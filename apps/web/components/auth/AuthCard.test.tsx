@@ -37,6 +37,20 @@ describe("desktop sign-in recovery", () => {
     expect(signInWithGoogle).toHaveBeenCalledTimes(2);
   });
 
+  it("passes the Sentry return path to Google sign-in and account creation", () => {
+    const returnPathname = "/integrations/sentry/setup?installationId=install-1&code=grant-1";
+    const { container } = render(
+      <AuthCard mode="sign-in" lastUsedMethod={null} returnPathname={returnPathname} />,
+    );
+    expect(container.querySelector('input[name="returnPathname"]')).toHaveValue(returnPathname);
+    expect(
+      new URL(
+        screen.getByRole("link", { name: "Create an account" }).getAttribute("href")!,
+        "https://opencompany.example",
+      ).searchParams.get("returnPathname"),
+    ).toBe(returnPathname);
+  });
+
   it("keeps ordinary browser sign-in unchanged", () => {
     render(<AuthCard mode="sign-in" lastUsedMethod={null} />);
     expect(screen.getByRole("button", { name: "Continue with Google" })).toBeEnabled();

@@ -339,6 +339,9 @@ it("selects regression evidence before the notification, excluding newer occurre
       vi.fn(async (url: URL) => {
         if (url.pathname.endsWith("/events/")) {
           expect(url.searchParams.get("end")).toBe(now.toISOString());
+          expect(url.searchParams.get("start")).toBe(
+            new Date(now.getTime() - 90 * 86_400_000).toISOString(),
+          );
           return Response.json([
             { eventID: "a".repeat(32), dateCreated: "2026-10-03T12:01:00Z" },
             { eventID: id, dateCreated: "2026-10-03T11:59:00Z" },

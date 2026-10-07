@@ -27,7 +27,7 @@ export function prepareSentryTemplate(
   )
     throw new Error("Choose a selected Sentry project.");
   const filters: Extract<WorkflowTemplateTriggerInput, { type: "event" }>["filters"] = {
-    project: setup.project,
+    project: { id: setup.project.id, name: setup.project.name },
   };
   if (setup.priority) {
     if (!["high", "medium", "low"].includes(setup.priority))

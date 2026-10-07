@@ -338,7 +338,13 @@ export async function selectOccurrence(
         const response = await sentryApi(
           connection,
           `${sentryIssuePath(connection, issueId)}events/`,
-          new URLSearchParams({ end: eventAt.toISOString(), per_page: "100" }),
+          new URLSearchParams({
+            // Sentry requires start and end together. Use a bounded 90-day
+            // search window and exclude occurrences after notification.
+            start: new Date(eventAt.getTime() - 90 * 86_400_000).toISOString(),
+            end: eventAt.toISOString(),
+            per_page: "100",
+          }),
           { db },
         );
         const events = z.array(SentryOccurrenceSchema).parse(response.data);

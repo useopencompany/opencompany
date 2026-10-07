@@ -51,7 +51,7 @@ async function fixture() {
     });
   return { database, db, service, bind };
 }
-it("binds to an authenticated admin, stores encrypted credentials, and verifies only after project setup", async () => {
+it("binds using installation metadata when organization enumeration is empty and verifies after project setup", async () => {
   const f = await fixture();
   try {
     vi.stubGlobal(
@@ -66,8 +66,19 @@ it("binds to an authenticated admin, stores encrypted credentials, and verifies 
             refreshToken: "fixture-refresh",
             expiresAt: "2099-01-01T00:00:00Z",
           });
-        if (url.host === "de.sentry.io" && url.pathname.endsWith("organizations/"))
-          return Response.json([{ id: "123", slug: "acme" }]);
+        if (url.pathname.endsWith("organizations/")) return Response.json([]);
+        if (url.pathname.endsWith(`/sentry-app-installations/${installationId}/`))
+          return Response.json({
+            uuid: installationId,
+            app: { slug: "fixture-integration" },
+            organization: { id: 123, slug: "acme" },
+          });
+        if (url.host === "de.sentry.io" && url.pathname.endsWith("organizations/acme/"))
+          return Response.json({
+            id: "123",
+            slug: "acme",
+            links: { regionUrl: "https://de.sentry.io" },
+          });
         if (url.pathname.endsWith("projects/acme/1/"))
           return Response.json({
             id: "1",
@@ -122,6 +133,53 @@ it("binds to an authenticated admin, stores encrypted credentials, and verifies 
     await f.database.close();
   }
 });
+it.each(["installation", "app", "organization", "region"] as const)(
+  "does not bind when Sentry returns a different %s",
+  async (mismatch) => {
+    const f = await fixture();
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: URL) => {
+          if (url.pathname.endsWith("/authorizations/"))
+            return Response.json({
+              token: "fixture-access",
+              refreshToken: "fixture-refresh",
+              expiresAt: "2099-01-01T00:00:00Z",
+            });
+          if (url.pathname.endsWith(`/sentry-app-installations/${installationId}/`))
+            return Response.json({
+              uuid:
+                mismatch === "installation"
+                  ? "b8e5d37a-696c-4c54-adb5-b3f28d64c7de"
+                  : installationId,
+              app: { slug: mismatch === "app" ? "another-app" : "fixture-integration" },
+              organization: { id: 123, slug: "acme" },
+            });
+          if (url.pathname.endsWith("organizations/acme/"))
+            return Response.json({
+              id: mismatch === "organization" ? "456" : "123",
+              slug: "acme",
+              links: {
+                regionUrl: mismatch === "region" ? "https://us.sentry.io" : "https://de.sentry.io",
+              },
+            });
+          return new Response(null, { status: 400 });
+        }),
+      );
+      await expect(
+        f.service.connect(admin, { installationId, code: "fixture-grant", region: "eu" }),
+      ).rejects.toThrow(
+        mismatch === "installation" || mismatch === "app"
+          ? "different app installation"
+          : "Choose the region",
+      );
+      expect(await getSentryConnection(admin.workspaceId, f.db)).toBeNull();
+    } finally {
+      await f.database.close();
+    }
+  },
+);
 function signedIssueWebhook(issueId: string) {
   const raw = JSON.stringify({
     action: "created",

@@ -191,22 +191,57 @@ export function createSentryService(db: DbLike) {
         const tokens = await exchangeSentryGrant(input.installationId, input.code);
         if (new Date(tokens.expiresAt) <= new Date())
           throw new ApiError(409, "conflict", "Sentry returned expired installation credentials.");
-        const response = await sentryRequest(
-          "organizations/",
-          new URLSearchParams(),
+        const installationResponse = await sentryRequest(
+          `sentry-app-installations/${encodeURIComponent(input.installationId)}/`,
+          undefined,
           tokens.token,
-          input.region === "eu" ? "https://de.sentry.io/api/0/" : "https://us.sentry.io/api/0/",
+          "https://sentry.io/api/0/",
         );
-        const organizations = z
-          .array(z.object({ id: z.string(), slug: z.string().regex(/^[a-zA-Z0-9_-]+$/) }))
-          .parse(response.data);
-        if (organizations.length !== 1)
+        // Sentry app tokens can read their installation but do not enumerate organizations.
+        const installation = z
+          .object({
+            uuid: z.uuid().toLowerCase(),
+            app: z.object({ slug: z.string() }),
+            organization: z.object({
+              id: z
+                .union([z.string().regex(/^\d+$/), z.number().int().positive()])
+                .transform(String),
+              slug: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+            }),
+          })
+          .parse(installationResponse.data);
+        if (
+          installation.uuid !== input.installationId ||
+          installation.app.slug !== process.env.SENTRY_APP_SLUG
+        )
+          throw new ApiError(409, "conflict", "Sentry returned a different app installation.");
+        const regionalBase =
+          input.region === "eu" ? "https://de.sentry.io/api/0/" : "https://us.sentry.io/api/0/";
+        const organizationResponse = await sentryRequest(
+          `organizations/${encodeURIComponent(installation.organization.slug)}/`,
+          undefined,
+          tokens.token,
+          regionalBase,
+        );
+        const organization = z
+          .object({
+            id: z.string().regex(/^\d+$/),
+            slug: z.string(),
+            links: z.object({
+              regionUrl: z.enum(["https://de.sentry.io", "https://us.sentry.io"]),
+            }),
+          })
+          .parse(organizationResponse.data);
+        if (
+          organization.id !== installation.organization.id ||
+          organization.slug !== installation.organization.slug ||
+          `${organization.links.regionUrl}/api/0/` !== regionalBase
+        )
           throw new ApiError(
             409,
             "conflict",
-            "Sentry must authorize exactly one organization in the selected region.",
+            "Choose the region hosting this Sentry installation's organization.",
           );
-        const organization = organizations[0]!;
         await bindSentryConnection({
           ...input,
           workspaceId: actor.workspaceId,
