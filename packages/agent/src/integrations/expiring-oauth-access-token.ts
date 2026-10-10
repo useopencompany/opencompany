@@ -11,7 +11,9 @@ import type { IntegrationProvider } from "@opencompany/db/product-schema";
 
 const REFRESH_SKEW_MS = 60_000;
 const REFRESH_LEASE_MS = 30_000;
-const ROTATION_WAIT_DELAYS_MS = [0, 25, 50, 100, 200, 400, 800] as const;
+// Another process owns the 30-second lease. Live provider refreshes can take longer
+// than the initial fast polls, so wait for that lease before reporting contention.
+const ROTATION_WAIT_DELAYS_MS = [0, 25, 50, 100, 200, 400, ...Array<number>(30).fill(1_000)];
 
 type DbLike = any;
 

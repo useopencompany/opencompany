@@ -879,6 +879,12 @@ function workflowStep(value: unknown): WorkflowStep {
   if (!isRecord(value)) throw new Error("Workflow storage contains an invalid step.");
   const runtimeModel = stringValue(value.runtimeModel);
   const reasoningEffort = stringValue(value.reasoningEffort);
+  const repository = isRecord(value.repository)
+    ? {
+        fullName: requiredString(value.repository.fullName, "repository.fullName"),
+        baseBranch: requiredString(value.repository.baseBranch, "repository.baseBranch"),
+      }
+    : null;
   return {
     id: requiredString(value.id, "id"),
     title: requiredString(value.title, "title", true),
@@ -886,6 +892,7 @@ function workflowStep(value: unknown): WorkflowStep {
     instructions: requiredString(value.instructions, "instructions", true),
     ...(runtimeModel ? { runtimeModel } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(repository ? { repository } : {}),
   };
 }
 

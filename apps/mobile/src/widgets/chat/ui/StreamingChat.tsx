@@ -5,10 +5,12 @@ import {
 } from "@legendapp/list/keyboard";
 import type { LegendListRef, LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useQuery } from "@tanstack/react-query";
+import * as Haptics from "expo-haptics";
 import { router } from "expo-router";
 import { useIsFocused } from "expo-router/react-navigation";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Linking, Text, useWindowDimensions, View } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import Reanimated, {
   FadeIn,
   FadeOut,
@@ -26,26 +28,47 @@ import { analytics } from "@/shared/lib/analytics";
 import { StyledKeyboardGestureArea } from "@/shared/ui/styled-keyboard-gesture-area";
 import { StyledLinearGradient } from "@/shared/ui/styled-linear-gradient";
 import { useToast } from "@/shared/ui/toast";
-import type { ChatMessage as ChatMessageModel, ConnectivityState } from "../model/chat";
+import type {
+  ChatMessage as ChatMessageModel,
+  ConnectivityState,
+  ReasoningPart,
+  ToolPart,
+} from "../model/chat";
 import { useChatComposer } from "../model/chat-composer-context";
 import { chatQueryKeys, useChatCoordinator } from "../model/chat-coordinator";
 import { useChatInputController } from "../model/chat-input-controller";
+import { runStateQueryOptions } from "../model/chat-queries";
 import {
-  getConversationRunCheckpoint,
   getPendingMessageCommand,
-  listQueuedRunMessageIds,
   listStoredConversations,
   listStoredMessages,
   markConversationViewed,
   NEW_CHAT_ID,
-  type StoredDraft,
+  type OutgoingDraft,
 } from "../model/chat-store";
 import { useMarkConversationSeen } from "../model/conversation-actions";
-import { ChatComposer, type SentMessageIdentity } from "./ChatComposer";
+import {
+  type QuickActionItem,
+  useQuickActionMenu,
+} from "../model/quick-actions/quick-action-catalog";
+import type { QuickActionTrigger } from "../native/native-composer-input";
+import { AttachmentOverlay } from "./attachment-overlay";
+import {
+  type AttachmentAnchor,
+  ChatComposer,
+  COMPOSER_ESTIMATED_HEIGHT,
+  COMPOSER_OUTER_PADDING_TOP,
+  type ComposerQuickActions,
+  type SentMessageIdentity,
+  TOP_CLEARANCE,
+} from "./ChatComposer";
 import { ChatMessage } from "./ChatMessage";
+import { QuickActionMenu } from "./quick-action-menu";
 import { useChatMarkdownStyle } from "./use-chat-markdown-style";
 
 const CHAT_TOP_CLEARANCE = 70;
+// The space between the quick action menu and the composer's glass.
+const QUICK_ACTION_MENU_GAP = 8;
 const ANCHOR_MAX_SIZE = 76;
 const STATUS_ENTERING = new Keyframe({
   0: { opacity: 0, transform: [{ translateY: 4 }] },
@@ -88,7 +111,8 @@ export function StreamingChat({
   ]) as [string, string];
   const listStyle = useResolveClassNames("flex-1");
   const listContentStyle = useResolveClassNames("px-[18px] pb-5");
-  const [composerHeight, setComposerHeight] = useState(insets.bottom + 68);
+  const [composerHeight, setComposerHeight] = useState(insets.bottom + COMPOSER_ESTIMATED_HEIGHT);
+  const [attachmentAnchor, setAttachmentAnchor] = useState<AttachmentAnchor | null>(null);
   const [initialAnchorMessageId] = useState(pendingAnchorMessageId);
   const [hasSent, setHasSent] = useState(false);
   const [anchorMessageId, setAnchorMessageId] = useState<string | undefined>(
@@ -99,6 +123,11 @@ export function StreamingChat({
   const followResponseRef = useRef(true);
   const listRef = useRef<LegendListRef>(null);
   const composerContainerRef = useRef<View>(null);
+  const quickActionsRef = useRef<ComposerQuickActions>(null);
+  const [quickActionTrigger, setQuickActionTrigger] = useState<QuickActionTrigger | null>(null);
+  // Turns the reader unfolded. Kept for as long as this conversation stays mounted.
+  const [expandedTraces, setExpandedTraces] = useState<ReadonlySet<string>>(new Set());
+  const keyboardStateHeight = useKeyboardState((state) => state.height);
   const markdownStyle = useChatMarkdownStyle();
   const coordinator = useChatCoordinator();
   const composer = useChatComposer();
@@ -130,16 +159,7 @@ export function StreamingChat({
     },
     enabled: Boolean(coordinator.partition),
   });
-  const runQuery = useQuery({
-    queryKey: coordinator.partition
-      ? chatQueryKeys.run(coordinator.partition, chatId)
-      : ["chat", "run", "signed-out"],
-    queryFn: async () => ({
-      active: await getConversationRunCheckpoint(coordinator.partition!, chatId),
-      queuedMessageIds: await listQueuedRunMessageIds(coordinator.partition!, chatId),
-    }),
-    enabled: Boolean(coordinator.partition),
-  });
+  const runQuery = useQuery(runStateQueryOptions(coordinator.partition, chatId));
   const conversationQuery = useQuery({
     queryKey: coordinator.partition
       ? chatQueryKeys.conversations(coordinator.partition)
@@ -204,7 +224,7 @@ export function StreamingChat({
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerContainerRef,
-    insets.bottom + 68,
+    insets.bottom + COMPOSER_ESTIMATED_HEIGHT,
   );
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef });
   // Hold keyboard-driven list insets and scrolling while an unrelated keyboard comes and goes.
@@ -215,6 +235,39 @@ export function StreamingChat({
   // A Task queues replies behind its working Run: a written reply shows Send, an empty one Stop.
   const composerIsGenerating = isGenerating && !(isTask && hasDraft);
 
+  const quickActions = useQuickActionMenu({
+    partition: coordinator.partition,
+    trigger: quickActionTrigger,
+    mentions: composer.conversationId === chatId ? composer.mentions : [],
+  });
+  // The menu gives way to anything that takes over the screen or the keyboard.
+  const quickActionMenuOpen =
+    Boolean(quickActionTrigger) &&
+    isFocused &&
+    !input.drawerOpen &&
+    !attachmentAnchor &&
+    (quickActions.items.length > 0 || Boolean(quickActions.error));
+  const quickActionTriggerCharacter = quickActionTrigger?.trigger;
+  useEffect(() => {
+    if (quickActionMenuOpen && quickActionTriggerCharacter)
+      analytics.capture("quick_action_menu_opened", { trigger: quickActionTriggerCharacter });
+  }, [quickActionMenuOpen, quickActionTriggerCharacter]);
+  const pickQuickAction = (item: QuickActionItem) => {
+    void Haptics.selectionAsync();
+    analytics.capture("quick_action_selected", {
+      trigger: quickActionTriggerCharacter ?? null,
+      kind: item.token.kind,
+    });
+    quickActionsRef.current?.insertToken(item.token);
+  };
+  // The menu floats above the composer's glass. It sits outside the measured composer, so the
+  // transcript's inset never changes and opening it scrolls nothing.
+  const composerKeyboardLift =
+    input.keyboardOwner === "composer" ? Math.max(0, keyboardStateHeight - insets.bottom) : 0;
+  const quickActionMenuBottom = composerHeight - COMPOSER_OUTER_PADDING_TOP + QUICK_ACTION_MENU_GAP;
+  const quickActionMenuMaxHeight =
+    windowHeight - insets.top - TOP_CLEARANCE - quickActionMenuBottom - composerKeyboardLift;
+
   useLayoutEffect(() => {
     if (!pendingSend) return;
     anchorOverflowedRef.current = false;
@@ -222,12 +275,12 @@ export function StreamingChat({
     setAnchorMessageId(pendingSend.message.id);
   }, [pendingSend?.message.id]);
 
+  // The coordinator observes the chat from the route, so a detail sheet opened over it keeps
+  // the same observation running.
   useLayoutEffect(() => {
     if (!isFocused) return;
     composer.activateConversation(chatId);
-    coordinator.setVisibleConversation(chatId);
     if (coordinator.partition) void markConversationViewed(coordinator.partition, chatId);
-    return () => coordinator.setVisibleConversation(null);
   }, [chatId, isFocused]);
 
   // Opening a conversation acknowledges its unread result. Sidebar previews never take focus, so
@@ -260,8 +313,30 @@ export function StreamingChat({
     ]);
   };
 
+  const openPart = (messageId: string, part: ToolPart | ReasoningPart) => {
+    void input.dismissComposer();
+    analytics.capture(part.type === "tool" ? "chat_tool_details_opened" : "chat_reasoning_opened");
+    router.push({
+      pathname: part.type === "tool" ? "/tool-sheet" : "/reasoning-sheet",
+      params: { conversationId: chatId, messageId, partId: part.id },
+    });
+  };
+
   const renderItem = ({ item }: LegendListRenderItemProps<ChatMessageModel>) => (
     <ChatMessage
+      isWorking={run?.assistantMessageId === item.id && run.status === "running"}
+      onOpenPart={(part) => openPart(item.id, part)}
+      onToggleTrace={() => {
+        // The tapped disclosure stays where it is; following the end would push it off screen.
+        followResponseRef.current = false;
+        setFollowing(false);
+        setExpandedTraces((current) => {
+          const next = new Set(current);
+          if (!next.delete(item.id)) next.add(item.id);
+          return next;
+        });
+      }}
+      traceExpanded={expandedTraces.has(item.id)}
       isTerminal={
         item.role === "assistant" &&
         item.id !== sendingMessage?.id &&
@@ -284,7 +359,7 @@ export function StreamingChat({
     />
   );
 
-  const handleSend = (draft: StoredDraft): Promise<SentMessageIdentity> => {
+  const handleSend = (draft: OutgoingDraft): Promise<SentMessageIdentity> => {
     const isFirstMessage = messages.length === 0;
     anchorOverflowedRef.current = false;
     followResponseRef.current = true;
@@ -359,6 +434,7 @@ export function StreamingChat({
             extraData={[
               theme,
               run,
+              expandedTraces,
               runQuery.data?.queuedMessageIds,
               coordinator.connectivity,
               sendingMessage?.id,
@@ -406,7 +482,7 @@ export function StreamingChat({
         pointerEvents="box-none"
         style={composerKeyboardStyle}
       >
-        {statusMessage ? (
+        {statusMessage && !quickActionMenuOpen ? (
           <Reanimated.View
             className="absolute inset-x-0 items-center"
             entering={statusEntering}
@@ -437,14 +513,37 @@ export function StreamingChat({
           isScreenFocused={isFocused}
           isGenerating={composerIsGenerating}
           isStopping={isStopping}
+          onAttachmentPress={setAttachmentAnchor}
           onLayout={(event) => {
             setComposerHeight(event.nativeEvent.layout.height);
             onComposerLayout(event);
           }}
+          onQuickActionTriggerChange={setQuickActionTrigger}
           onSend={handleSend}
           onStop={() => coordinator.stopRun(chatId)}
+          onSubmitHighlighted={() => {
+            const first = quickActions.items[0];
+            if (quickActionMenuOpen && first) pickQuickAction(first);
+          }}
+          quickActionsRef={quickActionsRef}
+          submitsHighlighted={quickActionMenuOpen && quickActions.items.length > 0}
+        />
+        <QuickActionMenu
+          bottom={quickActionMenuBottom}
+          error={quickActions.error}
+          header={quickActions.header}
+          items={quickActions.items}
+          maxHeight={quickActionMenuMaxHeight}
+          onPick={pickQuickAction}
+          onRetry={quickActions.retry}
+          open={quickActionMenuOpen}
         />
       </Reanimated.View>
+      <AttachmentOverlay
+        anchor={attachmentAnchor}
+        isScreenFocused={isFocused}
+        onClosed={() => setAttachmentAnchor(null)}
+      />
     </View>
   );
 }

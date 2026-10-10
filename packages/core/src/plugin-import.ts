@@ -142,6 +142,8 @@ export type PluginEventFilterDefinition = {
 } & (
   | { kind: "integration_resource"; resourceType: string }
   | { kind: "choice"; options: { id: string; name: string }[] }
+  | { kind: "text" }
+  | { kind: "tag_pairs" }
 );
 
 export type PluginEventDelivery = "webhook" | "poll";

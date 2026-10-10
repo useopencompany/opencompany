@@ -41,6 +41,7 @@ import {
   CompanyAgentUpdateEnvelopeSchema,
   CompanyGitHubAvailableInstallationsEnvelopeSchema,
   CompanyGitHubPluginEnvelopeSchema,
+  CompanySentryPluginEnvelopeSchema,
   CompleteInfisicalAuthBodySchema,
   ConnectCompanyAgentSlackBodySchema,
   ConversationEnvelopeSchema,
@@ -145,6 +146,11 @@ import {
   SaveOnboardingProfileBodySchema,
   SaveOnboardingWorkspaceBodySchema,
   ScanOnboardingRepositoryBodySchema,
+  SentryConnectBodySchema,
+  SentryFixSetupBodySchema,
+  SentryFixSetupEnvelopeSchema,
+  SentryProjectsEnvelopeSchema,
+  SentrySettingsBodySchema,
   SessionPullRequestListSchema,
   SetCapabilitySessionBudgetBodySchema,
   SetIntegrationCapabilityModeBodySchema,
@@ -2277,12 +2283,15 @@ export const streamRunEventsRoute = createRoute({
     query: z.object({
       cursor: CursorSchema.optional(),
       presentationCursor: PresentationCursorSchema.optional(),
+      // Opt-in so installed clients that predate live reasoning never receive a frame type their
+      // bundled parser rejects.
+      includeReasoning: z.enum(["0", "1"]).optional(),
     }),
   },
   responses: {
     200: {
       description:
-        "Typed durable Run Events plus optional transient presentation deltas. Only durable events carry SSE IDs.",
+        "Typed durable Run Events plus optional transient presentation frames: text deltas, and reasoning updates when `includeReasoning=1`. Only durable events carry SSE IDs.",
       content: {
         "text/event-stream": {
           schema: RunStreamEventSchema,
@@ -3451,6 +3460,105 @@ export const disconnectSlackBotRoute = createRoute({
   },
 });
 
+export const getCompanySentryPluginRoute = createRoute({
+  method: "get",
+  path: "/v1/company-plugins/sentry",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Sentry company integration getCompanySentryPlugin.",
+      content: { "application/json": { schema: CompanySentryPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const listSentryProjectsRoute = createRoute({
+  method: "get",
+  path: "/v1/company-plugins/sentry/projects",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    query: z.object({
+      all: z.enum(["true", "false"]).optional(),
+      cursor: z.string().max(256).optional(),
+    }),
+  },
+  responses: {
+    200: {
+      description: "Sentry company integration listSentryProjects.",
+      content: { "application/json": { schema: SentryProjectsEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const connectSentryRoute = createRoute({
+  method: "post",
+  path: "/v1/company-plugins/sentry/connect",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: SentryConnectBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Sentry company integration connectSentry.",
+      content: { "application/json": { schema: CompanySentryPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const saveSentrySettingsRoute = createRoute({
+  method: "put",
+  path: "/v1/company-plugins/sentry/settings",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: SentrySettingsBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Sentry company integration saveSentrySettings.",
+      content: { "application/json": { schema: CompanySentryPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const disconnectSentryRoute = createRoute({
+  method: "delete",
+  path: "/v1/company-plugins/sentry",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  responses: {
+    200: {
+      description: "Sentry company integration disconnectSentry.",
+      content: { "application/json": { schema: CompanySentryPluginEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
+export const validateSentryFixRoute = createRoute({
+  method: "post",
+  path: "/v1/company-plugins/sentry/validate-fix",
+  tags: ["Integrations"],
+  security: actorSecurity,
+  request: {
+    body: { required: true, content: { "application/json": { schema: SentryFixSetupBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: "Sentry company integration validateSentryFix.",
+      content: { "application/json": { schema: SentryFixSetupEnvelopeSchema } },
+    },
+    default: errorResponse,
+  },
+});
+
 export const getCompanyGitHubPluginRoute = createRoute({
   method: "get",
   path: "/v1/company-plugins/github",
@@ -4229,6 +4337,12 @@ export type V1RouteHandlers = {
   disconnectSlackProvisioning: RouteHandler<typeof disconnectSlackProvisioningRoute>;
   getSlackBotWorkspaceSettings: RouteHandler<typeof getSlackBotWorkspaceSettingsRoute>;
   disconnectSlackBot: RouteHandler<typeof disconnectSlackBotRoute>;
+  getCompanySentryPlugin: RouteHandler<typeof getCompanySentryPluginRoute>;
+  listSentryProjects: RouteHandler<typeof listSentryProjectsRoute>;
+  connectSentry: RouteHandler<typeof connectSentryRoute>;
+  saveSentrySettings: RouteHandler<typeof saveSentrySettingsRoute>;
+  disconnectSentry: RouteHandler<typeof disconnectSentryRoute>;
+  validateSentryFix: RouteHandler<typeof validateSentryFixRoute>;
   getCompanyGitHubPlugin: RouteHandler<typeof getCompanyGitHubPluginRoute>;
   listCompanyGitHubAvailableInstallations: RouteHandler<
     typeof listCompanyGitHubAvailableInstallationsRoute
@@ -4451,6 +4565,12 @@ export function createV1Router(
       .openapi(disconnectSlackProvisioningRoute, handlers.disconnectSlackProvisioning)
       .openapi(getSlackBotWorkspaceSettingsRoute, handlers.getSlackBotWorkspaceSettings)
       .openapi(disconnectSlackBotRoute, handlers.disconnectSlackBot)
+      .openapi(getCompanySentryPluginRoute, handlers.getCompanySentryPlugin)
+      .openapi(listSentryProjectsRoute, handlers.listSentryProjects)
+      .openapi(connectSentryRoute, handlers.connectSentry)
+      .openapi(saveSentrySettingsRoute, handlers.saveSentrySettings)
+      .openapi(disconnectSentryRoute, handlers.disconnectSentry)
+      .openapi(validateSentryFixRoute, handlers.validateSentryFix)
       .openapi(getCompanyGitHubPluginRoute, handlers.getCompanyGitHubPlugin)
       .openapi(
         listCompanyGitHubAvailableInstallationsRoute,
@@ -5884,6 +6004,76 @@ const contractDocumentHandlers: V1RouteHandlers = {
       200,
     ),
   disconnectSlackBot: (c) => c.json({ data: { updated: true as const }, meta }, 200),
+  getCompanySentryPlugin: (c) =>
+    c.json(
+      {
+        data: {
+          configured: false,
+          canManage: false,
+          installUrl: null,
+          connection: null,
+          events: [],
+          usage: 0,
+          tools: [],
+          outcomes: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  listSentryProjects: (c) => c.json({ data: { projects: [], nextCursor: null }, meta }, 200),
+  connectSentry: (c) =>
+    c.json(
+      {
+        data: {
+          configured: false,
+          canManage: false,
+          installUrl: null,
+          connection: null,
+          events: [],
+          usage: 0,
+          tools: [],
+          outcomes: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  saveSentrySettings: (c) =>
+    c.json(
+      {
+        data: {
+          configured: false,
+          canManage: false,
+          installUrl: null,
+          connection: null,
+          events: [],
+          usage: 0,
+          tools: [],
+          outcomes: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  disconnectSentry: (c) =>
+    c.json(
+      {
+        data: {
+          configured: false,
+          canManage: false,
+          installUrl: null,
+          connection: null,
+          events: [],
+          usage: 0,
+          tools: [],
+          outcomes: [],
+        },
+        meta,
+      },
+      200,
+    ),
+  validateSentryFix: (c) => c.json({ data: c.req.valid("json"), meta }, 200),
   getCompanyGitHubPlugin: (c) =>
     c.json(
       { data: { configured: true, canManage: true, installations: [], events: [] }, meta },

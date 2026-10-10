@@ -33,6 +33,9 @@ export async function alwaysAllowAction(input: {
     throw new Error("This action does not support a standing permission.");
   }
 
+  if (permission.provider === "sentry" && role !== "admin")
+    throw new Error("Only workspace admins can persist shared Sentry permissions.");
+
   // A standing permission is saved as narrowly as the action allows. Every plugin action is one
   // discovered MCP tool, so approving it grants that tool and nothing else — approving a label
   // write can no longer hand over automatic trashing from the same capability group. This is also

@@ -52,7 +52,7 @@ const screenNameFor = (segments: string[]): string => {
   if (segments.includes("workspace-selection")) return "workspace_selection";
   if (segments.includes("account-unavailable")) return "account_unavailable";
   if (segments.includes("settings-sheet")) return "settings";
-  if (segments.includes("attachment-sheet")) return "attachment_picker";
+  if (segments.includes("model-sheet")) return "model_picker";
   if (segments.includes("share-sheet")) return "share_chat";
   if (segments.includes("camera")) return "camera";
   if (segments.includes("chats")) return "chat";

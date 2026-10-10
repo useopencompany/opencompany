@@ -102,6 +102,12 @@ services:
         sync: false
       - key: GITHUB_USER_APP_CLIENT_SECRET
         sync: false
+      - key: SENTRY_APP_CLIENT_ID
+        sync: false
+      - key: SENTRY_APP_CLIENT_SECRET
+        sync: false
+      - key: SENTRY_APP_SLUG
+        sync: false
       - key: GITHUB_USER_APP_STATE_SECRET
         sync: false
       # Google-family OAuth ingress moved to the API in the #1203 4a2 cutover
@@ -409,6 +415,12 @@ services:
       - key: GITHUB_USER_APP_CLIENT_ID
         sync: false
       - key: GITHUB_USER_APP_CLIENT_SECRET
+        sync: false
+      - key: SENTRY_APP_CLIENT_ID
+        sync: false
+      - key: SENTRY_APP_CLIENT_SECRET
+        sync: false
+      - key: SENTRY_APP_SLUG
         sync: false
       # Google OAuth client, used by the runner to refresh Gmail/Calendar access tokens.
       - key: GOOGLE_OAUTH_CLIENT_ID

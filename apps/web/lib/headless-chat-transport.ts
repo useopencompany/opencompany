@@ -282,7 +282,10 @@ export class HeadlessChatTransport<UI_MESSAGE extends UIMessage>
             state.content = projector.content;
             state.textSegment = projector.segment;
             state.activeToolCalls = projector.toolCallCheckpoint;
-            if (event.type === "message.presentation_delta") {
+            if (
+              event.type === "message.presentation_delta" ||
+              event.type === "message.reasoning_updated"
+            ) {
               state.presentationCursor = event.presentationCursor;
             } else {
               state.cursor = event.cursor;

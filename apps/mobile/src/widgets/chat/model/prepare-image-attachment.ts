@@ -42,10 +42,16 @@ const renderJpeg = async ({
   }
 };
 
+// Camera captures and some library photos are JPEGs over the upload limit. Re-encoding them
+// shrinks them the same way as a converted HEIC instead of rejecting the attachment.
+const isOversizedJpeg = (attachment: ComposerAttachment): boolean =>
+  attachment.mimeType?.toLowerCase() === "image/jpeg" &&
+  (attachment.size ?? 0) > CHAT_IMAGE_MAX_BYTES;
+
 export const prepareImageAttachment = async (
   attachment: ComposerAttachment,
 ): Promise<ComposerAttachment> => {
-  if (!isHeicAttachment(attachment)) return attachment;
+  if (!isHeicAttachment(attachment) && !isOversizedJpeg(attachment)) return attachment;
 
   let result = await renderJpeg({
     compress: INITIAL_JPEG_QUALITY,

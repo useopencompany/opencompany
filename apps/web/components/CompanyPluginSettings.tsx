@@ -61,6 +61,14 @@ export function CompanyPluginsRoute({ github }: { github: CompanyGitHubPluginDto
           company agents and workflows can use them.
         </p>
         <ul className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
+          <li className="rounded-lg px-2 py-2.5">
+            <IntentPrefetchLink href="/plugins/company/sentry" className="flex flex-col gap-1">
+              <span className="text-sm font-medium">Sentry</span>
+              <span className="text-xs text-ink-subtle">
+                Investigate error issues and propose verified fixes.
+              </span>
+            </IntentPrefetchLink>
+          </li>
           <li className="group flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2.5 transition-colors duration-150 hover:bg-surface-hover">
             <IntentPrefetchLink
               href={COMPANY_GITHUB_HREF}

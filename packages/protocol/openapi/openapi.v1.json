@@ -1095,6 +1095,26 @@
           "instructions": {
             "type": "string",
             "maxLength": 20000
+          },
+          "repository": {
+            "type": "object",
+            "properties": {
+              "fullName": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+              },
+              "baseBranch": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "fullName",
+              "baseBranch"
+            ],
+            "additionalProperties": false,
+            "description": "The repository and base branch a coding step works in."
           }
         },
         "required": [
@@ -1181,6 +1201,31 @@
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "pairs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1,
@@ -1316,6 +1361,31 @@
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "pairs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1,
@@ -1627,6 +1697,31 @@
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "pairs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1,
@@ -1744,6 +1839,31 @@
                 "additionalProperties": {
                   "type": "object",
                   "properties": {
+                    "pairs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "key": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "key",
+                          "value"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    },
                     "id": {
                       "type": "string",
                       "minLength": 1,
@@ -7288,6 +7408,9 @@
           },
           {
             "$ref": "#/components/schemas/PresentationDeltaEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ReasoningUpdateEvent"
           }
         ]
       },
@@ -8550,6 +8673,99 @@
               "startOffset",
               "endOffset",
               "delta"
+            ],
+            "additionalProperties": false
+          },
+          "presentationCursor": {
+            "type": "string",
+            "pattern": "^p1:[1-9][0-9]*-[0-9]+$/u",
+            "example": "p1:1786449600000-0",
+            "description": "Opaque, best-effort cursor within the transient presentation window."
+          }
+        },
+        "required": [
+          "runId",
+          "attemptNumber",
+          "schemaVersion",
+          "occurredAt",
+          "type",
+          "payload",
+          "presentationCursor"
+        ],
+        "additionalProperties": false
+      },
+      "ReasoningUpdateEvent": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "example": "run_019fed53"
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 0,
+            "exclusiveMinimum": true
+          },
+          "schemaVersion": {
+            "type": "number",
+            "enum": [
+              1
+            ]
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "message.reasoning_updated"
+            ]
+          },
+          "payload": {
+            "type": "object",
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "itemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "parentToolCallId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "example": "run_019fed53"
+              },
+              "position": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 262144
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "streaming",
+                  "done"
+                ]
+              }
+            },
+            "required": [
+              "messageId",
+              "itemId",
+              "position",
+              "text",
+              "state"
             ],
             "additionalProperties": false
           },
@@ -10536,6 +10752,505 @@
         ],
         "additionalProperties": false
       },
+      "CompanySentryPluginEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "configured": {
+                "type": "boolean"
+              },
+              "canManage": {
+                "type": "boolean"
+              },
+              "installUrl": {
+                "type": "string",
+                "nullable": true,
+                "format": "uri"
+              },
+              "connection": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                  "integrationId": {
+                    "type": "string"
+                  },
+                  "workspaceId": {
+                    "type": "string"
+                  },
+                  "installationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "organizationId": {
+                    "type": "string"
+                  },
+                  "organizationSlug": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": "string",
+                    "enum": [
+                      "us",
+                      "eu"
+                    ]
+                  },
+                  "selectedProjectIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "cooldownMinutes": {
+                    "type": "number"
+                  },
+                  "dailyCap": {
+                    "type": "number"
+                  },
+                  "verifiedAt": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time"
+                  },
+                  "lastReceivedAt": {
+                    "type": "string",
+                    "nullable": true,
+                    "format": "date-time"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "capabilityModes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "ask",
+                        "off"
+                      ]
+                    }
+                  },
+                  "toolModes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "ask",
+                        "off"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "integrationId",
+                  "workspaceId",
+                  "installationId",
+                  "organizationId",
+                  "organizationSlug",
+                  "region",
+                  "selectedProjectIds",
+                  "cooldownMinutes",
+                  "dailyCap",
+                  "verifiedAt",
+                  "lastReceivedAt",
+                  "status",
+                  "capabilityModes",
+                  "toolModes"
+                ]
+              },
+              "events": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PluginEventDefinition"
+                }
+              },
+              "usage": {
+                "type": "number"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "ask",
+                        "off"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "mode"
+                  ]
+                }
+              },
+              "outcomes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "receivedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "runStatus": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "runReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "receivedAt",
+                    "status",
+                    "reason",
+                    "runStatus",
+                    "runReason",
+                    "issueId",
+                    "taskId"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "configured",
+              "canManage",
+              "installUrl",
+              "connection",
+              "events",
+              "usage",
+              "tools",
+              "outcomes"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "PluginEventDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "webhook",
+              "poll"
+            ]
+          },
+          "filters": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PluginEventFilterDefinition"
+            },
+            "maxItems": 16
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "delivery",
+          "filters"
+        ],
+        "additionalProperties": false
+      },
+      "PluginEventFilterDefinition": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "required",
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "tag_pairs"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "required",
+              "kind"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "integration_resource"
+                ]
+              },
+              "resourceType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "resourceType",
+              "required"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "choice"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 64
+              },
+              "required": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "kind",
+              "options",
+              "required"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "SentryProjectsEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^\\d+$"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "slug",
+                    "name"
+                  ]
+                }
+              },
+              "nextCursor": {
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "required": [
+              "projects",
+              "nextCursor"
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
+      "SentryFixSetupEnvelope": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "object",
+            "properties": {
+              "repository": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+              },
+              "baseBranch": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "engine": {
+                "type": "string",
+                "enum": [
+                  "codex",
+                  "claude-code"
+                ]
+              }
+            },
+            "required": [
+              "repository",
+              "baseBranch",
+              "engine"
+            ],
+            "additionalProperties": false
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ProtocolMetadata"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ]
+      },
       "CompanyGitHubPluginEnvelope": {
         "type": "object",
         "properties": {
@@ -10640,146 +11355,6 @@
           "linkedAt"
         ],
         "additionalProperties": false
-      },
-      "PluginEventDefinition": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "label": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 120
-          },
-          "description": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 500
-          },
-          "delivery": {
-            "type": "string",
-            "enum": [
-              "webhook",
-              "poll"
-            ]
-          },
-          "filters": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PluginEventFilterDefinition"
-            },
-            "maxItems": 16
-          }
-        },
-        "required": [
-          "id",
-          "label",
-          "description",
-          "delivery",
-          "filters"
-        ],
-        "additionalProperties": false
-      },
-      "PluginEventFilterDefinition": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 120
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "integration_resource"
-                ]
-              },
-              "resourceType": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "required": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "id",
-              "label",
-              "kind",
-              "resourceType",
-              "required"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 120
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "choice"
-                ]
-              },
-              "options": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 64
-                    },
-                    "name": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "name"
-                  ],
-                  "additionalProperties": false
-                },
-                "minItems": 1,
-                "maxItems": 64
-              },
-              "required": {
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "id",
-              "label",
-              "kind",
-              "options",
-              "required"
-            ],
-            "additionalProperties": false
-          }
-        ]
       },
       "CompanyGitHubAvailableInstallationsEnvelope": {
         "type": "object",
@@ -21257,6 +21832,18 @@
           {
             "schema": {
               "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            },
+            "required": false,
+            "name": "includeReasoning",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "pattern": "^v1:[1-9][0-9]*$/u",
               "example": "v1:42",
               "description": "Opaque, versioned event cursor."
@@ -21269,7 +21856,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Typed durable Run Events plus optional transient presentation deltas. Only durable events carry SSE IDs.",
+            "description": "Typed durable Run Events plus optional transient presentation frames: text deltas, and reasoning updates when `includeReasoning=1`. Only durable events carry SSE IDs.",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -23351,6 +23938,386 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SlackBotMutationEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/sentry": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sentry company integration getCompanySentryPlugin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanySentryPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sentry company integration disconnectSentry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanySentryPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/sentry/projects": {
+      "get": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "required": false,
+            "name": "all",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sentry company integration listSentryProjects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentryProjectsEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/sentry/connect": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "installationId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 512
+                  },
+                  "region": {
+                    "type": "string",
+                    "enum": [
+                      "us",
+                      "eu"
+                    ]
+                  }
+                },
+                "required": [
+                  "installationId",
+                  "code",
+                  "region"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sentry company integration connectSentry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanySentryPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/sentry/settings": {
+      "put": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^\\d+$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  },
+                  "cooldownMinutes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10080
+                  },
+                  "dailyCap": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000
+                  },
+                  "capabilityModes": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "string",
+                        "enum": [
+                          "on",
+                          "ask",
+                          "off"
+                        ]
+                      },
+                      "write": {
+                        "type": "string",
+                        "enum": [
+                          "on",
+                          "ask",
+                          "off"
+                        ]
+                      }
+                    }
+                  },
+                  "toolModes": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": [
+                        "on",
+                        "ask",
+                        "off"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "projectIds",
+                  "cooldownMinutes",
+                  "dailyCap"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sentry company integration saveSentrySettings.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanySentryPluginEnvelope"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A structured protocol error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/company-plugins/sentry/validate-fix": {
+      "post": {
+        "tags": [
+          "Integrations"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repository": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                  },
+                  "baseBranch": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "engine": {
+                    "type": "string",
+                    "enum": [
+                      "codex",
+                      "claude-code"
+                    ]
+                  }
+                },
+                "required": [
+                  "repository",
+                  "baseBranch",
+                  "engine"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sentry company integration validateSentryFix.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentryFixSetupEnvelope"
                 }
               }
             }

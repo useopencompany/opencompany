@@ -75,7 +75,7 @@ import {
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
-  PresentationDeltaEventSchema,
+  PresentationEventSchema,
   RunEventSchema,
   V1_BROWSER_REQUEST_HEADERS,
   type V1RouteHandlers,
@@ -122,6 +122,7 @@ import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
+import type { SentryService } from "./sentry";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
@@ -224,6 +225,7 @@ export type CreateApiAppInput = {
   integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
   companyGitHub?: CompanyGitHubService;
+  sentry?: SentryService;
   slackProvisioning?: SlackProvisioningService;
   imessageSettings?: ImessageSettingsService;
   whatsappSettings?: WhatsappSettingsService;
@@ -286,6 +288,10 @@ export function createApiApp(input: CreateApiAppInput) {
   const rateLimiter = input.rateLimiter ?? new InMemoryApiRateLimiter();
   const now = input.now ?? (() => new Date());
   const browserOrigins = [...(input.browserOrigins ?? [])];
+  const sentry = () => {
+    if (!input.sentry) throw new ApiError(503, "unavailable", "Sentry integration is unavailable.");
+    return input.sentry;
+  };
   const companyGitHub = () => {
     if (!input.companyGitHub)
       throw new CoreError("unavailable", "Company plugins are unavailable.");
@@ -1930,6 +1936,7 @@ export function createApiApp(input: CreateApiAppInput) {
       const runId = c.req.valid("param").runId;
       const queryCursor = c.req.valid("query").cursor;
       const queryPresentationCursor = c.req.valid("query").presentationCursor;
+      const includeReasoning = c.req.valid("query").includeReasoning === "1";
       const headerCursor = c.req.valid("header")["last-event-id"];
       if (queryCursor && headerCursor && queryCursor !== headerCursor) {
         throw new ApiError(400, "invalid_request", "Conflicting event cursors were provided.");
@@ -1945,11 +1952,12 @@ export function createApiApp(input: CreateApiAppInput) {
         throw new ApiError(400, "invalid_request", "The event cursor is invalid.");
       }
       const initialRun = await input.chat.getRun(actor, runId);
-      // Only the opencompany engine publishes presentation frames (the runner wires the hot
-      // publisher for that engine alone), and a run's engine never changes. Coding-engine
-      // streams skip the Redis hot path and wake on the durable-event cadence instead of the
-      // presentation cadence.
-      const presentation = initialRun.engine === "opencompany" ? input.presentation : undefined;
+      // The opencompany engine publishes text deltas and reasoning; coding engines publish only
+      // reasoning, since their text already streams as durable content updates. A coding-engine
+      // stream that did not ask for reasoning skips the Redis hot path and wakes on the
+      // durable-event cadence instead of the presentation cadence. A run's engine never changes.
+      const presentation =
+        initialRun.engine === "opencompany" || includeReasoning ? input.presentation : undefined;
       // A cursor may already point at the final durable event. In that case the response body is
       // intentionally empty, so the shared client needs the authenticated status snapshot to
       // distinguish terminal exhaustion from an early network disconnect.
@@ -2009,7 +2017,13 @@ export function createApiApp(input: CreateApiAppInput) {
                   durableWake = true;
                   break;
                 }
-                const dto = PresentationDeltaEventSchema.parse({
+                // Older installed clients reject frame types they do not know, so reasoning goes
+                // only to readers that asked for it. Skipping still advances their cursor.
+                if (entry.frame.type === "message.reasoning_updated" && !includeReasoning) {
+                  presentationStreamId = entry.streamId;
+                  continue;
+                }
+                const dto = PresentationEventSchema.parse({
                   ...entry.frame,
                   presentationCursor: encodePresentationCursor(entry.streamId),
                 });
@@ -2496,6 +2510,29 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.slackBotSettings.disconnect(actor);
       return c.json({ data: { updated: true as const }, meta }, 200);
     },
+    getCompanySentryPlugin: async (c) =>
+      c.json({ data: await sentry().get(actorFrom(c)), meta }, 200),
+    listSentryProjects: async (c) => {
+      const query = c.req.valid("query");
+      return c.json(
+        { data: await sentry().projects(actorFrom(c), query.all === "true", query.cursor), meta },
+        200,
+      );
+    },
+    connectSentry: async (c) =>
+      c.json({ data: await sentry().connect(actorFrom(c), c.req.valid("json")), meta }, 200),
+    saveSentrySettings: async (c) =>
+      c.json({ data: await sentry().settings(actorFrom(c), c.req.valid("json")), meta }, 200),
+    disconnectSentry: async (c) =>
+      c.json({ data: await sentry().disconnect(actorFrom(c)), meta }, 200),
+    validateSentryFix: async (c) =>
+      c.json(
+        {
+          data: await sentry().validateFixSetup(actorFrom(c), c.req.valid("json")),
+          meta,
+        },
+        200,
+      ),
     getCompanyGitHubPlugin: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -3072,6 +3109,13 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
+  if (input.sentry) {
+    const sentry = input.sentry;
+    app.use("/webhooks/sentry", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/sentry", (c) => sentry.webhook(c.req.raw));
+    app.post("/integrations/sentry/alert-action", (c) => sentry.alertAction(c.req.raw));
+    app.get("/integrations/sentry/alert-action/options", (c) => sentry.alertAction(c.req.raw));
+  }
   if (input.githubAppIngress) {
     const ingress = input.githubAppIngress;
     // GitHub caps webhook payloads at 25 MB; issue and pull request bodies are far smaller.

@@ -27,12 +27,13 @@
     "@vercel/blob": "^2.8.0",
     "@workos-inc/node": "^10.13.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "4.13.5",
+    "hono": "4.13.7",
     "jose": "^6.2.11",
     "pg": "^8.23.0",
     "stripe": "22.1.1",
-    "sharp": "0.35.4",
-    "@opencompany/crypto": "workspace:*"
+    "sharp": "0.35.5",
+    "@opencompany/crypto": "workspace:*",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

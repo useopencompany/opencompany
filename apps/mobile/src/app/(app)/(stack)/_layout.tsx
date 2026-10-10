@@ -36,7 +36,7 @@ export default function StackLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="chats/[chatId]" />
         <Stack.Screen
-          name="attachment-sheet"
+          name="model-sheet"
           options={{
             presentation: "formSheet",
             animation: "default",
@@ -44,7 +44,8 @@ export default function StackLayout() {
             gestureEnabled: true,
             sheetGrabberVisible: true,
             contentStyle: { backgroundColor: "transparent" },
-            sheetAllowedDetents: [0.65],
+            sheetAllowedDetents: [0.65, 1],
+            sheetExpandsWhenScrolledToEdge: true,
           }}
         />
         <Stack.Screen
@@ -73,6 +74,33 @@ export default function StackLayout() {
             ],
           }}
         />
+        {["tool-sheet", "reasoning-sheet"].map((name) => (
+          <Stack.Screen
+            key={name}
+            name={name}
+            options={{
+              presentation: "formSheet",
+              animation: "default",
+              title: name === "tool-sheet" ? "Tool call" : "Reasoning",
+              headerShown: true,
+              headerTransparent: true,
+              gestureEnabled: true,
+              sheetGrabberVisible: true,
+              contentStyle: { backgroundColor },
+              sheetAllowedDetents: [0.5, 1],
+              sheetExpandsWhenScrolledToEdge: true,
+              unstable_headerLeftItems: () => [],
+              unstable_headerRightItems: () => [
+                {
+                  type: "button",
+                  label: "Close",
+                  icon: { type: "sfSymbol", name: "xmark" },
+                  onPress: () => router.dismiss(),
+                },
+              ],
+            }}
+          />
+        ))}
         <Stack.Screen
           name="settings-sheet"
           options={{

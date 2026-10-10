@@ -1,5 +1,6 @@
 import { normalizeScheduleDefinition } from "@opencompany/agent/schedule-rules";
 import { SkillMentionError } from "@opencompany/agent/skills";
+import { validateWorkflowStepRepository } from "@opencompany/agent/workflow-step-repository";
 import { refineWorkflowTaskTitle } from "@opencompany/agent/workflow-task-title";
 import {
   prepareWorkflowRunForUser,
@@ -49,6 +50,15 @@ export function createAutomationServices(input: AutomationServicesInput) {
   const runnerToken = input.runnerToken?.trim() || process.env.RUNNER_INTERNAL_TOKEN?.trim();
   const planner: AutomationExecutionPlanner = {
     prepareWorkflow: async ({ actor, workflow, prompt, skillIds }) => {
+      for (const step of workflow.steps) {
+        if (step.repository)
+          await validateWorkflowStepRepository({
+            userWorkosId: actor.userId,
+            engine: step.model,
+            repository: step.repository,
+            activation: true,
+          });
+      }
       const prepared = await prepareWorkflow({
         actor,
         workflow,

@@ -2,19 +2,26 @@ import { type RunEventStreamOptions, streamRunEvents } from "@opencompany/protoc
 import {
   AttachmentUploadEnvelopeSchema,
   CancelRunEnvelopeSchema,
+  ClaudeCodeAuthStatusEnvelopeSchema,
+  CodexAuthStatusEnvelopeSchema,
   ConversationEnvelopeSchema,
   ConversationPageSchema,
   ConversationShareEnvelopeSchema,
   CreateMessageBodySchema,
   CreateMessageEnvelopeSchema,
+  CreateTaskBodySchema,
   CreateTaskCommentBodySchema,
   CreateTaskCommentEnvelopeSchema,
+  CreateTaskEnvelopeSchema,
   type ErrorEnvelope,
   ErrorEnvelopeSchema,
+  type GitHubRepositoryAccessDto,
+  GitHubRepositoryAccessSchema,
   type IdentityDto,
   IdentityEnvelopeSchema,
   type IdentityUserDto,
   type IdentityWorkspaceDto,
+  InvokeWorkflowBodySchema,
   MessagePageSchema,
   MessagePresentationEnvelopeSchema,
   ResolveApprovalBodySchema,
@@ -62,22 +69,27 @@ const parseApiOrigin = (): string => {
 export const API_ORIGIN = parseApiOrigin();
 
 /**
- * Public share pages are served by the web app, which runs beside the API: `api.` becomes `my.`
- * on hosted origins, and the local API on :3001 pairs with the local web app on :3443.
+ * The web app runs beside the API: `api.` becomes `my.` on hosted origins, and the local API on
+ * :3001 pairs with the local web app on :3443.
  */
-const shareOrigin = (apiOrigin: string): string | null => {
+const webOrigin = (apiOrigin: string): string | null => {
   const url = new URL(apiOrigin);
   if (url.hostname === "localhost" && url.port === "3001") return "https://localhost:3443";
   if (url.hostname.startsWith("api.")) return `https://my.${url.hostname.slice("api.".length)}`;
   return null;
 };
 
-const SHARE_ORIGIN = shareOrigin(API_ORIGIN);
+const WEB_ORIGIN = webOrigin(API_ORIGIN);
 
 export const publicShareUrl = (shareId: string): string => {
-  if (!SHARE_ORIGIN) throw new Error("Share links are unavailable for this server.");
-  return new URL(`/share/${encodeURIComponent(shareId)}`, `${SHARE_ORIGIN}/`).toString();
+  if (!WEB_ORIGIN) throw new Error("Share links are unavailable for this server.");
+  return new URL(`/share/${encodeURIComponent(shareId)}`, `${WEB_ORIGIN}/`).toString();
 };
+
+/** Where Codex and Claude Code subscriptions are connected. Null when no web app pairs with the API. */
+export const WEB_INFERENCE_SETTINGS_URL = WEB_ORIGIN
+  ? new URL("/settings/workspace/inference", `${WEB_ORIGIN}/`).toString()
+  : null;
 
 export class ApiRequestError extends Error {
   constructor(
@@ -124,8 +136,52 @@ type UpdateConversationBody = z.input<typeof UpdateConversationBodySchema>;
 type UpdateTaskBody = z.input<typeof UpdateTaskBodySchema>;
 type CreateTaskCommentBody = z.input<typeof CreateTaskCommentBodySchema>;
 type CreateTaskCommentEnvelope = z.output<typeof CreateTaskCommentEnvelopeSchema>;
+type CreateTaskBody = z.input<typeof CreateTaskBodySchema>;
+type CreateTaskEnvelope = z.output<typeof CreateTaskEnvelopeSchema>;
+type InvokeWorkflowBody = z.input<typeof InvokeWorkflowBodySchema>;
+// The composer's mention catalogs read a few fields of large, growing resources. The protocol's
+// strict schemas reject any field this build does not know, and the API ships new ones ahead of the
+// app, so these validate only what the menu uses and let the rest through.
+const PluginCatalogEnvelopeSchema = z.object({
+  data: z.array(
+    z
+      .object({ name: z.string().min(1), status: z.enum(["enabled", "disabled", "archived"]) })
+      .loose(),
+  ),
+});
+const SkillCatalogEnvelopeSchema = z.object({
+  data: z.array(
+    z
+      .object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        scope: z.enum(["personal", "company"]).nullable(),
+      })
+      .loose(),
+  ),
+});
+const WorkflowCatalogPageSchema = z.object({
+  data: z.array(
+    z
+      .object({
+        slug: z.string().min(1),
+        name: z.string().min(1),
+        status: z.string(),
+        steps: z.array(z.object({ instructions: z.string() }).loose()),
+      })
+      .loose(),
+  ),
+  nextCursor: z.string().nullable(),
+});
+export type PluginCatalogItem = z.output<typeof PluginCatalogEnvelopeSchema>["data"][number];
+export type SkillCatalogItem = z.output<typeof SkillCatalogEnvelopeSchema>["data"][number];
+export type WorkflowCatalogItem = z.output<typeof WorkflowCatalogPageSchema>["data"][number];
 type ConversationShareEnvelope = z.output<typeof ConversationShareEnvelopeSchema>;
 type SessionPullRequestList = z.output<typeof SessionPullRequestListSchema>;
+type ClaudeCodeAuthStatusEnvelope = z.output<typeof ClaudeCodeAuthStatusEnvelopeSchema>;
+type CodexAuthStatusEnvelope = z.output<typeof CodexAuthStatusEnvelopeSchema>;
+export type ClaudeCodeAuthStatus = ClaudeCodeAuthStatusEnvelope["data"];
+export type CodexAuthStatus = CodexAuthStatusEnvelope["data"];
 export type ReadModelName = "tasks-v1" | "chat-messages-v2" | "chat-runs-v1";
 type MessagePage = z.output<typeof MessagePageSchema>;
 type AttachmentUploadEnvelope = z.output<typeof AttachmentUploadEnvelopeSchema>;
@@ -167,7 +223,31 @@ export interface AuthenticatedApi {
     body: CreateTaskCommentBody,
     signal?: AbortSignal,
   ) => Promise<CreateTaskCommentEnvelope>;
+  /** Starts an ad-hoc Task. The server answers with the Task and its Conversation. */
+  createTask: (
+    body: CreateTaskBody,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) => Promise<CreateTaskEnvelope>;
+  /** Starts a saved workflow as a Task. `workflowId` is the workflow's slug. */
+  invokeWorkflow: (
+    workflowId: string,
+    body: InvokeWorkflowBody,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ) => Promise<CreateTaskEnvelope>;
+  /** Installed Plugins in the active workspace, archived ones included. */
+  listPlugins: (signal?: AbortSignal) => Promise<PluginCatalogItem[]>;
+  listSkillCatalog: (signal?: AbortSignal) => Promise<SkillCatalogItem[]>;
+  /** Every workflow the actor can see, across all pages. */
+  listWorkflows: (signal?: AbortSignal) => Promise<WorkflowCatalogItem[]>;
+  /** The GitHub App installations and repositories the actor can reach as themselves. */
+  listGitHubRepositories: (signal?: AbortSignal) => Promise<GitHubRepositoryAccessDto>;
   listSessionPullRequests: (signal?: AbortSignal) => Promise<SessionPullRequestList>;
+  /** The acting user's own Claude Code subscription connection. Never includes the token. */
+  getClaudeCodeAuth: (signal?: AbortSignal) => Promise<ClaudeCodeAuthStatus>;
+  /** The acting user's own Codex connection. Never includes credentials. */
+  getCodexAuth: (signal?: AbortSignal) => Promise<CodexAuthStatus>;
   /** Every current row of an authorized read model, as a one-off snapshot rather than a stream. */
   readModelSnapshot: <Schema extends z.ZodType>(
     readModel: ReadModelName,
@@ -478,8 +558,91 @@ export const createAuthenticatedApi = (options: AuthenticatedApiOptions): Authen
         },
         signal,
       ),
+    createTask: async (body, idempotencyKey, signal) =>
+      requestJson(
+        "v1/tasks",
+        CreateTaskEnvelopeSchema,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(CreateTaskBodySchema.parse(body)),
+        },
+        signal,
+      ),
+    invokeWorkflow: async (workflowId, body, idempotencyKey, signal) =>
+      requestJson(
+        `v1/workflows/${encodeURIComponent(workflowId)}/invoke`,
+        CreateTaskEnvelopeSchema,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+          body: JSON.stringify(InvokeWorkflowBodySchema.parse(body)),
+        },
+        signal,
+      ),
+    listPlugins: async (signal) =>
+      (await requestJson("v1/plugins", PluginCatalogEnvelopeSchema, undefined, signal)).data,
+    listSkillCatalog: async (signal) =>
+      (await requestJson("v1/skills/catalog", SkillCatalogEnvelopeSchema, undefined, signal)).data,
+    listWorkflows: async (signal) => {
+      const workflows: WorkflowCatalogItem[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await requestJson(
+          "v1/workflows",
+          WorkflowCatalogPageSchema,
+          undefined,
+          signal,
+          {
+            cursor,
+            limit: 100,
+          },
+        );
+        workflows.push(...page.data);
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      return workflows;
+    },
+    listGitHubRepositories: async (signal) => {
+      // This route lives outside /v1 and redirects a request it cannot identify to the web sign-in
+      // page instead of answering 401. Follow no redirect: an HTML sign-in page is not data. The
+      // session itself is still valid, so this never signs the user out.
+      const response = await request(
+        "integrations/github-user/installations",
+        { redirect: "manual" },
+        signal,
+      );
+      if (response.status === 0 || (response.status >= 300 && response.status < 400))
+        throw new ApiRequestError(
+          "GitHub repositories could not be loaded for this session.",
+          401,
+          "authentication_required",
+          false,
+          undefined,
+          null,
+        );
+      return parseJsonResponse(response, GitHubRepositoryAccessSchema);
+    },
     listSessionPullRequests: async (signal) =>
       requestJson("v1/session-pull-requests", SessionPullRequestListSchema, undefined, signal),
+    getClaudeCodeAuth: async (signal) =>
+      (
+        await requestJson<ClaudeCodeAuthStatusEnvelope>(
+          "v1/engine-auth/claude-code",
+          ClaudeCodeAuthStatusEnvelopeSchema,
+          undefined,
+          signal,
+        )
+      ).data,
+    getCodexAuth: async (signal) =>
+      (
+        await requestJson<CodexAuthStatusEnvelope>(
+          "v1/engine-auth/codex",
+          CodexAuthStatusEnvelopeSchema,
+          undefined,
+          signal,
+        )
+      ).data,
     readModelSnapshot: async (readModel, schema, query, signal) => {
       const rows = new Map<string, Record<string, unknown>>();
       let offset = "-1";
