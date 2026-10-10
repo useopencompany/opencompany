@@ -120,6 +120,8 @@ export type WorkflowStep = {
   runtimeModel?: AgentModelId;
   reasoningEffort?: CloudCodingReasoningEffort;
   instructions: string;
+  // The repository and base branch a coding step works in.
+  repository?: { fullName: string; baseBranch: string };
 };
 export type ChatSessionSkillBundleSourceKind = "standalone" | "plugin";
 export type ExternalArtifactSourceType = "github" | "skills.sh";
@@ -161,6 +163,7 @@ export type ChatModelRoutingErrorCategory =
   | "unknown";
 
 export type IntegrationProvider =
+  | "sentry"
   | "custom_mcp"
   | "gmail"
   | "google_admin"
@@ -201,6 +204,7 @@ export type IntegrationProvider =
 // workspace admin. `github` remains here only for historical rows from the
 // retired workspace-ingestion integration.
 export const WORKSPACE_OWNED_INTEGRATION_PROVIDERS = [
+  "sentry",
   "github",
   "github_app",
   "jamie",
@@ -1173,7 +1177,7 @@ export const integrations = productSchema.table(
     ),
     providerCheck: check(
       "goat_integrations_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp', 'sentry')`,
     ),
     statusCheck: check(
       "goat_integrations_status_check",
@@ -1223,7 +1227,7 @@ export const integrationCredentials = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_credentials_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'slack_bot', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp', 'sentry')`,
     ),
     kindCheck: check(
       "goat_integration_credentials_kind_check",
@@ -1273,7 +1277,7 @@ export const integrationResources = productSchema.table(
     }).onDelete("cascade"),
     providerCheck: check(
       "goat_integration_resources_provider_check",
-      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp')`,
+      sql`${table.provider} IN ('gmail', 'google_admin', 'google_calendar', 'google_drive', 'linear', 'github', 'github_app', 'github_user', 'jamie', 'slack', 'hubspot', 'granola', 'fathom', 'attio', 'betterstack', 'convex', 'render', 'vercel', 'signoz', 'dash0', 'stripe', 'latitude', 'posthog', 'neon', 'notion', 'supabase', 'resend', 'todoist', 'x_account', 'custom_mcp', 'sentry')`,
     ),
     statusCheck: check(
       "goat_integration_resources_status_check",
@@ -6489,3 +6493,104 @@ export const slackAgentProvisioning = productSchema.table("slack_agent_provision
   leaseUntil: timestamp("lease_until", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Sentry installations are exclusive to one workspace. Settings are separate from credentials so
+// changing project access never rewrites encrypted token material.
+export const sentryConnections = productSchema.table(
+  "sentry_connections",
+  {
+    integrationId: text("integration_id")
+      .primaryKey()
+      .references(() => integrations.id, { onDelete: "cascade" }),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .unique()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    installationId: text("installation_id").notNull().unique(),
+    organizationId: text("organization_id").notNull(),
+    organizationSlug: text("organization_slug").notNull(),
+    region: text("region").$type<"us" | "eu">().notNull(),
+    selectedProjectIds: jsonb("selected_project_ids")
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    cooldownMinutes: integer("cooldown_minutes").notNull().default(30),
+    dailyCap: integer("daily_cap").notNull().default(25),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  },
+  (table) => ({
+    regionCheck: check("sentry_connections_region_check", sql`${table.region} IN ('us', 'eu')`),
+    limitsCheck: check(
+      "sentry_connections_limits_check",
+      sql`${table.cooldownMinutes} BETWEEN 0 AND 10080 AND ${table.dailyCap} BETWEEN 0 AND 1000`,
+    ),
+    projectsCheck: check(
+      "sentry_connections_projects_check",
+      sql`jsonb_typeof(${table.selectedProjectIds}) = 'array'`,
+    ),
+  }),
+);
+
+export const sentryWebhookReceipts = productSchema.table(
+  "sentry_webhook_receipts",
+  {
+    id: text("id").primaryKey(),
+    installationId: text("installation_id").notNull(),
+    resource: text("resource").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    status: text("status")
+      .$type<"pending" | "processed" | "ignored" | "failed">()
+      .notNull()
+      .default("pending"),
+    reason: text("reason"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    leaseUntil: timestamp("lease_until", { withTimezone: true }),
+    selectedEventId: text("selected_event_id"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>(),
+  },
+  (table) => ({
+    pendingIdx: index("sentry_webhook_receipts_pending_idx").on(table.status, table.nextAttemptAt),
+    installationIdx: index("sentry_webhook_receipts_installation_idx").on(
+      table.installationId,
+      table.receivedAt,
+    ),
+  }),
+);
+
+export const sentryIssueRuns = productSchema.table(
+  "sentry_issue_runs",
+  {
+    eventRunId: text("event_run_id")
+      .primaryKey()
+      .references(() => workflowEventRuns.id, { onDelete: "cascade" }),
+    receiptId: text("receipt_id")
+      .notNull()
+      .references(() => sentryWebhookReceipts.id),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integrations.id),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflows.id, { onDelete: "cascade" }),
+    issueId: text("issue_id").notNull(),
+    projectId: text("project_id").notNull(),
+    triggerFilters: jsonb("trigger_filters").notNull(),
+    taskId: text("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+  },
+  (table) => ({
+    issueIdx: index("sentry_issue_runs_issue_idx").on(
+      table.workspaceId,
+      table.workflowId,
+      table.issueId,
+      table.startedAt,
+    ),
+  }),
+);

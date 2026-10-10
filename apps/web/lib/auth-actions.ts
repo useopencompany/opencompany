@@ -81,6 +81,7 @@ export async function verifyMagicCode(input: {
   email: string;
   code: string;
   invitationToken?: string;
+  returnPathname?: string;
 }): Promise<AuthActionResult> {
   const email = input.email.trim().toLowerCase();
   const code = input.code.trim();
@@ -99,7 +100,12 @@ export async function verifyMagicCode(input: {
   } catch (error) {
     const selection = organizationSelectionFromError(error);
     if (selection) {
-      await setOrganizationSelection(selection);
+      await setOrganizationSelection({
+        ...selection,
+        ...(input.returnPathname
+          ? { returnPathname: safeReturnPathname(input.returnPathname) }
+          : {}),
+      });
       return redirect("/signin");
     }
     console.error("[opencompany] Failed to verify a magic sign-in code", error);
@@ -107,7 +113,7 @@ export async function verifyMagicCode(input: {
   }
 
   await completeAuthentication(authResponse, getAppUrl());
-  redirect("/");
+  redirect(safeReturnPathname(input.returnPathname));
 }
 
 export async function selectOrganization(input: {

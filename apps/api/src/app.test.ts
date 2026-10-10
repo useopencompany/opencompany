@@ -90,6 +90,53 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("authenticates Sentry setup, validates its typed input, and exposes signed ingress separately", async () => {
+    const get = vi.fn(async () => ({
+      configured: false,
+      canManage: true,
+      installUrl: null,
+      connection: null,
+      events: [],
+      usage: 0,
+      tools: [],
+      outcomes: [],
+    }));
+    const connect = vi.fn();
+    const webhook = vi.fn(async () => new Response(null, { status: 202 }));
+    const sentry = { get, connect, webhook } as unknown as NonNullable<
+      Parameters<typeof createApiApp>[0]["sentry"]
+    >;
+    const app = testApp(fakeRepository(), { sentry });
+    expect((await app.request("/v1/company-plugins/sentry")).status).toBe(200);
+    expect(get).toHaveBeenCalledWith(actor);
+    expect(
+      (
+        await app.request("/v1/company-plugins/sentry/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ installationId: "not-a-uuid", region: "us", code: "grant" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(connect).not.toHaveBeenCalled();
+    const unauthenticated = testApp(fakeRepository(), {
+      sentry,
+      authenticate: async () => {
+        throw new ApiError(401, "unauthenticated", "Sign in first.");
+      },
+    });
+    expect((await unauthenticated.request("/v1/company-plugins/sentry")).status).toBe(401);
+    expect(
+      (
+        await unauthenticated.request("/webhooks/sentry", {
+          method: "POST",
+          body: "signed raw payload",
+        })
+      ).status,
+    ).toBe(202);
+    expect(webhook).toHaveBeenCalledOnce();
+  });
+
   it("serves private Codex usage with a dedicated refresh rate limit", async () => {
     const usage = {
       windows: [

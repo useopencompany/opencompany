@@ -106,6 +106,8 @@ export type PluginEventFilterDefinition = {
 } & (
   | { kind: "integration_resource"; resourceType: string }
   | { kind: "choice"; options: { id: string; name: string }[] }
+  | { kind: "text" }
+  | { kind: "tag_pairs" }
 );
 
 // `webhook` events reach the platform through a signed provider delivery; `poll` events are
@@ -530,7 +532,9 @@ export function parsePluginEvents(
       const validKind =
         candidate.kind === "integration_resource"
           ? Boolean(resourceType && /^[a-z][a-z0-9_]*$/u.test(resourceType))
-          : candidate.kind === "choice" && validOptions;
+          : (candidate.kind === "choice" && validOptions) ||
+            candidate.kind === "text" ||
+            candidate.kind === "tag_pairs";
       if (
         !filterId ||
         !/^[a-z][a-z0-9_]*$/u.test(filterId) ||
@@ -556,7 +560,11 @@ export function parsePluginEvents(
                 name: option.name.trim(),
               })),
             }
-          : { kind: "integration_resource" as const, resourceType: resourceType! }),
+          : candidate.kind === "text"
+            ? { kind: "text" as const }
+            : candidate.kind === "tag_pairs"
+              ? { kind: "tag_pairs" as const }
+              : { kind: "integration_resource" as const, resourceType: resourceType! }),
       });
     }
     if (!valid) continue;

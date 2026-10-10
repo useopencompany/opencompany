@@ -7,6 +7,7 @@ export type WorkflowStep = {
   runtimeModel?: string;
   reasoningEffort?: string;
   instructions: string;
+  repository?: { fullName: string; baseBranch: string };
 };
 
 export type WorkflowTrigger =
@@ -18,7 +19,13 @@ export type WorkflowTrigger =
       integrationId: string;
       filters: Record<
         string,
-        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+        {
+          id: string;
+          name: string;
+          key?: string;
+          metadata?: Record<string, string>;
+          pairs?: { key: string; value: string }[];
+        }
       >;
       prompt: string;
     }

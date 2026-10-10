@@ -173,6 +173,24 @@ describe("WorkflowEditor", () => {
     });
   });
 
+  it("shows a coding step's repository and keeps it when instructions autosave", async () => {
+    const repository = { fullName: "acme/service", baseBranch: "release/stable" };
+    const codingStep = { ...workflow.steps[0]!, model: "codex", repository };
+    render(
+      <WorkflowEditor workflow={{ ...workflow, steps: [codingStep] }} canEdit skillCatalog={[]} />,
+    );
+    expect(screen.getByText("Works in acme/service from release/stable")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Describe what this step should do..."), {
+      target: { value: "Fix the failing check." },
+    });
+    await advanceAutosave();
+
+    expect(workflowActionsMock.update.mock.calls[0]![1].steps).toEqual([
+      expect.objectContaining({ instructions: "Fix the failing check.", repository }),
+    ]);
+  });
+
   it("turns the Slack channel off and customizes the identity it posts under", async () => {
     render(<WorkflowEditor workflow={workflow} canEdit skillCatalog={[]} />);
 

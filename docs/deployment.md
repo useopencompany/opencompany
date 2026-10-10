@@ -307,3 +307,9 @@ Stripe calls `${PRODUCTION_OPENCOMPANY_URL}/api/stripe/webhook`. The web route s
 to the API-owned handler; it does not verify or persist the event. `OPENCOMPANY_STRIPE_WEBHOOK_SECRET`
 lives in Infisical `prod` `/api`. The API owns subscription, credit-ledger, auto-refill, and webhook
 idempotency while preserving the retained billing tables required by current contracts.
+
+Sentry public integration releases require `SENTRY_APP_CLIENT_ID`, `SENTRY_APP_CLIENT_SECRET`,
+and `SENTRY_APP_SLUG` in both Infisical `prod` `/api` and `/runner`. Render declarations and
+preflight cover these values. Provision and verify runtime sync before release. Publication
+requires a separately authorized live verification and Sentry review approval. See
+[Sentry release notes](./sentry-plugin.md).

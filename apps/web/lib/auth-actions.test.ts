@@ -203,6 +203,17 @@ describe("verifyMagicCode", () => {
     expect(redirectMock).toHaveBeenCalledWith("/");
   });
 
+  it("returns to Sentry setup after magic-code authentication", async () => {
+    getWorkOSClientMock.mockReturnValue({
+      userManagement: {
+        authenticateWithMagicAuth: vi.fn(async () => ({ user: { id: "user_123" } })),
+      },
+    } as never);
+    const returnPathname = "/integrations/sentry/setup?installationId=install-1&code=grant-1";
+    await verifyMagicCode({ email: "ada@example.com", code: "123456", returnPathname });
+    expect(redirectMock).toHaveBeenCalledWith(returnPathname);
+  });
+
   it("returns a friendly error without redirecting when the code is invalid", async () => {
     const authenticateWithMagicAuth = vi.fn(async () => {
       throw new Error("code_not_found");

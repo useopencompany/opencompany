@@ -650,73 +650,77 @@ describe("executeActionGateway", () => {
     ).resolves.toEqual({ ok: true, needsApproval: false });
   });
 
-  it("auto-denies ask actions through the headless gateway and records the decision", async () => {
-    const action = createReadAction("gmail.send");
-    action.capability = "write";
-    action.effects = ACTION_EFFECTS_WRITE;
-    action.permissionMode = "ask";
-    const registerApproval = vi.fn(async () => ({
-      actionId: action.id,
-      sourceId: action.provider,
-      capabilityId: action.capability,
-      inputHash: "input_hash",
-      status: "denied" as const,
-    }));
-    const dependencies = {
-      resolveCatalog: vi.fn(async () => ({
-        providers: [
-          {
-            id: "gmail" as const,
-            kind: "integration" as const,
-            label: "Gmail",
-            description: "Email",
-          },
-        ],
-        actions: [action],
-      })),
-      registerApproval,
-    };
-    const principal = { ...context, policy: "headless" as const };
-    const gateway = createActionPrincipalGateway(dependencies);
-    const request = {
-      sessionId: "task_session",
-      turnId: "task_turn",
-      action: action.id,
-      params: { to: "customer@example.com" },
-      invocationId: "task_call",
-    };
+  it.each(["gmail", "sentry"] as const)(
+    "auto-denies %s ask actions through the headless gateway and records the decision",
+    async (provider) => {
+      const action = createReadAction(`${provider}.write`);
+      action.provider = provider;
+      action.capability = "write";
+      action.effects = ACTION_EFFECTS_WRITE;
+      action.permissionMode = "ask";
+      const registerApproval = vi.fn(async () => ({
+        actionId: action.id,
+        sourceId: action.provider,
+        capabilityId: action.capability,
+        inputHash: "input_hash",
+        status: "denied" as const,
+      }));
+      const dependencies = {
+        resolveCatalog: vi.fn(async () => ({
+          providers: [
+            {
+              id: provider,
+              kind: "integration" as const,
+              label: "Gmail",
+              description: "Email",
+            },
+          ],
+          actions: [action],
+        })),
+        registerApproval,
+      };
+      const principal = { ...context, policy: "headless" as const };
+      const gateway = createActionPrincipalGateway(dependencies);
+      const request = {
+        sessionId: "task_session",
+        turnId: "task_turn",
+        action: action.id,
+        params: { to: "customer@example.com" },
+        invocationId: "task_call",
+      };
 
-    await expect(
-      gateway({
-        request: { ...request, operation: "approval" },
-        principal,
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toEqual({ ok: true, needsApproval: false });
-    await expect(
-      gateway({
-        request: { ...request, operation: "execute" },
-        principal,
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ ok: false, error: { code: "not_permitted" } });
-    expect(registerApproval).toHaveBeenCalledWith(
-      expect.objectContaining({
-        run: {
-          sessionId: "task_session",
-          runId: "task_turn",
-          actorId: "user_1",
-          workspaceId: "workspace_1",
-          policy: "headless",
-        },
-        actionId: "gmail.send",
-        sourceId: "gmail",
-        capabilityId: "write",
-        decision: "denied",
-      }),
-    );
-    expect(action.execute).not.toHaveBeenCalled();
-  });
+      await expect(
+        gateway({
+          request: { ...request, operation: "approval" },
+          principal,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({ ok: true, needsApproval: false });
+      await expect(
+        gateway({
+          request: { ...request, operation: "execute" },
+          principal,
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toMatchObject({ ok: false, error: { code: "not_permitted" } });
+      expect(registerApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          run: {
+            sessionId: "task_session",
+            runId: "task_turn",
+            actorId: "user_1",
+            workspaceId: "workspace_1",
+            policy: "headless",
+          },
+          actionId: action.id,
+          sourceId: provider,
+          capabilityId: "write",
+          decision: "denied",
+        }),
+      );
+      expect(action.execute).not.toHaveBeenCalled();
+    },
+  );
 
   it("reuses the canonical executor with host-derived identity", async () => {
     const readAction = createReadAction();

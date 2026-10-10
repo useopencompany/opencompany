@@ -37,7 +37,7 @@
     "@ai-sdk/mcp": "^2.0.44",
     "@ai-sdk/openai": "^4.0.58",
     "@browserbasehq/sdk": "^2.19.1",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",

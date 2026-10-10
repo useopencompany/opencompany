@@ -1,6 +1,7 @@
 import type {
   CompanyGitHubInstallationDto,
   CompanyGitHubPluginDto,
+  CompanySentryPluginDto,
   PluginEventDefinitionDto,
   PluginListItemDto,
 } from "@opencompany/protocol";
@@ -33,6 +34,7 @@ export function workflowEventProviderOptions(input: {
   plugins: readonly PluginListItemDto[];
   personalAccounts: Record<string, IntegrationAccountView[] | undefined>;
   companyGitHub?: CompanyGitHubPluginDto | null;
+  companySentry?: CompanySentryPluginDto | null;
 }): WorkflowEventProviderOption[] {
   const personal = input.plugins.flatMap((plugin: PluginListItemDto) => {
     if (plugin.status !== "enabled") return [];
@@ -65,9 +67,24 @@ export function workflowEventProviderOptions(input: {
       },
     ];
   });
-  return input.companyGitHub
-    ? [...personal, companyGitHubEventProvider(input.companyGitHub)]
-    : personal;
+  return [
+    ...personal,
+    ...(input.companyGitHub ? [companyGitHubEventProvider(input.companyGitHub)] : []),
+    ...(input.companySentry
+      ? [
+          {
+            provider: "sentry",
+            label: "Sentry (company)",
+            accountHref: "/plugins/company/sentry",
+            accountLabel: input.companySentry.canManage
+              ? "Connect Sentry"
+              : "Ask an admin to connect Sentry",
+            accounts: companySentryEventAccounts(input.companySentry),
+            events: input.companySentry.events,
+          },
+        ]
+      : []),
+  ];
 }
 
 // The company GitHub plugin binds to accounts an admin linked for the whole workspace, so there is
@@ -95,4 +112,11 @@ export function companyGitHubEventAccounts(plugin: CompanyGitHubPluginDto | null
 
 export function workflowEventProvidersReady(providers: readonly WorkflowEventProviderOption[]) {
   return providers.some((provider) => provider.accounts.length > 0 && provider.events.length > 0);
+}
+
+export function companySentryEventAccounts(plugin: CompanySentryPluginDto | null | undefined) {
+  const connection = plugin?.connection;
+  return connection?.status === "connected" && connection.verifiedAt
+    ? [{ integrationId: connection.integrationId, label: connection.organizationSlug }]
+    : [];
 }
