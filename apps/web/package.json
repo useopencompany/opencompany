@@ -72,7 +72,7 @@
     "lucide-react": "1.40.0",
     "mcp-handler": "^1.1.0",
     "mdast-util-from-markdown": "^2.0.3",
-    "next": "16.3.6",
+    "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^10.1.0",
