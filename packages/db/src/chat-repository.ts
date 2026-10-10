@@ -249,7 +249,7 @@ export class PostgresChatAttachmentRepository {
       SELECT
         completed.attachment_id AS id, ${input.format} AS format,
         ${input.mediaType} AS "mediaType", ${input.filename} AS filename,
-        ${input.sizeBytes} AS "sizeBytes", completed.expires_at AS "expiresAt",
+        ${input.sizeBytes}::integer AS "sizeBytes", completed.expires_at AS "expiresAt",
         EXISTS (SELECT 1 FROM inserted) AS created
       FROM completed
     `);
