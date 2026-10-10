@@ -10,6 +10,23 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v57.0.0/ before 
 
 We use `@expo/ui` library to access some native SwiftUI components. Use `sosumi` skill to look up actual Apple Developer documentation for SwiftUI, Liquid Glass, etc. and dedicated `swiftui-expert-skill`.
 
+## Task map
+
+Chat paths below are relative to `src/widgets/chat`; sidebar paths are relative to `src/widgets/sidebar`.
+
+| Task | Entry point and dependencies |
+| --- | --- |
+| Composer | Chat `ui/ChatComposer.tsx` → `model/chat-input-controller.tsx`, `model/chat-composer-context.tsx`, `model/composer-selection.ts`, and `model/quick-actions/`. |
+| Sidebar | Sidebar `ui/Sidebar.tsx`, `ui/SidebarConversationRow.tsx`, `model/sidebar-items.ts`; chat `model/conversation-actions.ts` and `model/sidebar-change-guard.ts` coordinate mutations with refresh. |
+| Drafts | Chat `model/use-draft-send.ts` → `model/chat-store.ts` → `model/chat-storage/drafts.ts` and `model/chat-storage/outbox.ts`; `model/quick-actions/composer-segments.ts` serializes tags. |
+| Uploads | Chat `model/use-attachment-sources.ts`, `model/prepare-image-attachment.ts`, and `model/attachment-validation.ts` → `model/chat-storage/files.ts`; `model/process-chat-command.ts` uploads and freezes the send body. |
+| Streaming and server sync | [chat-session.ts](src/widgets/chat/model/chat-session.ts) owns sync, run streams, and outbox processing; chat `model/chat-coordinator.tsx` owns session lifetime, `model/run-projection.ts` and `model/message-presentation.ts` project events for the UI. |
+| Native components | `src/widgets/chat/native`, `src/widgets/sidebar/native`, `src/shared/ui/animated-symbol`; registration in `app.config.ts`. Follow the native modules guidance below. |
+
+The chat UI reads SQLite through `chat-queries.ts` and `chat-store.ts`; `chat-session.ts` syncs it
+with the server. These files live in `src/widgets/chat/model`. Transport and API origin live in
+`src/shared/api/opencompany-api.ts`; auth lives in `src/features/auth/model`.
+
 ## Styling
 
 Styling is done using Uniwind that allows us to use Tailwind class names in React Native. Always use `uniwind` skill when working with styles. The theme is defined in `src/global.css`: supports standard Tailwind V4 class names + a few custom styles based on our design system.
@@ -95,6 +112,10 @@ React Compiler is enabled in the mobile app. Don't use `useMemo`, `useCallback`,
 - No testing is implemented in the mobile app for now. Don't write unit or E2E tests unless explicitly asked to by the user.
 
 ## Device Testing
+
+Before an authorized device check, follow the [active environment reference](../../docs/mobile-development.md#identify-the-active-environment)
+to confirm Metro's checkout and port, reload mode, API target, native build, and current bundle.
+Static verification uses `bun run --cwd apps/mobile typecheck`.
 
 Do not use a simulator or a preview to verify the app unless the user requests that explicitly. Use agent-device only for app/device automation tasks. For a normal app-driving task, start immediately. Do not probe first with `--help`, `--version`, `devices`, `appstate`, `snapshot`, or `screenshot`; open the requested app in the foreground and continue from its initial interactive snapshot. For TV, Fire TV, or Vega OS tasks, read `agent-device help tv`. For exploratory QA, read `agent-device help dogfood`. For logs, network, audio, traces, or runtime failures, read `agent-device help debugging`. For React Native component trees, props/state/hooks, slow renders, or rerenders, read `agent-device help react-devtools`. For React Native JavaScript heap growth, heap snapshots, allocation hotspots, or retained-object leaks, read `agent-device help cdp`. For React Native apps, overlays, Metro/Fast Refresh blockers, and routing to React DevTools or debugging evidence, read `agent-device help react-native`.
 

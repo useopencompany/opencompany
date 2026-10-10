@@ -17,6 +17,7 @@ Start with:
 git status --short --branch
 git diff --name-only origin/main...HEAD
 git diff --name-only
+git diff --cached --name-only
 git ls-files --others --exclude-standard
 ```
 
@@ -28,16 +29,12 @@ Always run the CI-equivalent checks and the schema/migration check. Other checks
 
 ### 1. CI-equivalent checks (always)
 
-Run:
-
-```bash
-bun install --frozen-lockfile
-bun run format:check
-bun run lint
-bun run typecheck
-bun run build
-bun run test
-```
+Run the commands in [CONTRIBUTING.md](../../../CONTRIBUTING.md#local-checks), using
+[verify.yml](../../../.github/workflows/verify.yml) as the CI source of truth. `bun run test`
+uses Node-backed Vitest workers with CI concurrency limits. For fixture failures, consult
+[database test fixtures](../../../docs/database.md#test-fixtures). Mobile has no automated tests;
+follow its nested guidance. A local TruffleHog installation is optional for this audit; require the
+hosted secret scan below.
 
 Verify the secret scan in GitHub Actions for the current branch's PR. Query the commit check runs
 through the REST API so this also works with GitHub App tokens that cannot read every status-rollup
@@ -58,7 +55,12 @@ If any command fails, report the failing command and the relevant error. If Turb
 
 ### 2. Schema ↔ migration (always)
 
-If `packages/db/src/schema.ts` changed in committed or local files:
+Inspect every schema in [database docs](../../../docs/database.md#schema-modules), including
+`product-schema.ts`, `legacy-billing-schema.ts`, `llm-broker-schema.ts`, and retained `schema.ts`.
+Check generation inputs in `packages/db/drizzle.config.ts`. The CI coupling script only compares
+committed revisions, so also inspect staged, unstaged, and untracked changes.
+
+For each physical schema change:
 
 - Verify a new file exists under `drizzle/` (check both `git diff --name-only origin/main...HEAD -- drizzle/` and local/untracked drizzle files).
 - If schema changed without a new migration file: inspect the schema diff. If only file location/import/package wiring changed and table/index/relation definitions are identical, report it as FYI. Otherwise flag it and tell the user to run `bun run db:generate`.
@@ -66,11 +68,17 @@ If `packages/db/src/schema.ts` changed in committed or local files:
 
 ### 3. Env vars ↔ `.env.example`
 
-If any of these grew a new `process.env.X` reference, check `.env.example` lists it (commented out is fine for optional CI vars):
+Inspect new env reads across `apps/api/src`, `apps/runner/src`, `apps/web`, shared packages,
+and `scripts`, including config wrappers and `process.env` bracket/destructuring access.
+Every added variable needs `.env.example` and the relevant entry in
+[env docs](../../../docs/env-vars.md).
 
-- Anything under `apps/web/lib/`, `apps/web/app/`, `apps/web/proxy.ts`, `scripts/`, `packages/db/`.
-
-Use grep for `process\.env\.` in the committed and local diffs to find new references. Flag any new env var missing from `.env.example`.
+Use that doc's ownership table: prod `/api` owns API database/auth/provider ingress values,
+`/runner` owns execution credentials, `/web` owns browser auth and thin relays, and `/release`
+owns release automation. Local setup pulls shared API inputs from dev `/web`; do not infer prod
+ownership from local paths. Check required values in `scripts/release-preflight.mjs` and require
+hosted-service verification before release. Report missing or unverified configuration without
+printing values.
 
 ### 4. Setup/workflow changes ↔ `docs/`
 
@@ -80,9 +88,10 @@ Trigger one or more checks based on what changed:
 |---|---|
 | `scripts/setup.mjs`, `scripts/neon-branch.mjs`, `package.json` scripts section | `docs/getting-started.md` mentions the new/changed flow |
 | `packages/db/**`, `drizzle/**`, schema changes | `docs/database.md` reflects new tables / workflow |
-| `apps/web/lib/auth.ts`, `apps/web/proxy.ts`, `apps/web/app/auth/**`, auth UI components | `docs/auth.md` is accurate |
+| `apps/api/src/auth.ts`, `apps/api/src/browser-origins.ts`, `apps/web/lib/auth.ts`, `apps/web/proxy.ts`, `apps/web/app/auth/**`, auth UI components | `docs/auth.md` is accurate |
 | New top-level package script | `docs/` mentions when to run it |
-| `.env.example` changes | `docs/getting-started.md` or `docs/database.md` / `docs/auth.md` covers the new var |
+| Env reads, `.env.example`, or release preflight changes | `docs/env-vars.md` records ownership and setup/release requirements |
+| Company plugin connection, ingress, trigger, or worker changes | `docs/plugin-events.md` implementation checklist covers the changed path |
 
 For each trigger, open the relevant doc and verify the changed concept is described. If not, flag it with a one-line suggestion of what to add.
 
@@ -92,7 +101,7 @@ Don't be pedantic about wording — only flag genuinely missing or misleading co
 
 If `package.json` changed:
 
-- Verify `bun.lock` was committed too and `package-lock.json` was not reintroduced.
+- If dependency declarations changed, verify `bun.lock` matches them. Script-only edits need no lockfile diff. Ensure `package-lock.json` was not reintroduced.
 - If a new runtime dep was added, briefly note what for in the PR summary suggestion.
 If the lockfile changes locally, run `bun install --frozen-lockfile` to verify it is consistent.
 
@@ -110,8 +119,8 @@ Produce a punch list, grouped as:
 
 End with a one-line verdict: `Ready to merge` or `Address blockers first`. If local checks pass but CI secret scanning remains unverified, use `Awaiting CI secret scan`. If changes still need publishing, use `Ready for commit/push, then CI verification`.
 
-## Don't
+## Audit boundaries
 
 - Don't run `git push`, `gh pr merge`, or any other action that ships code. This skill is read-only audit + suggest.
-- Don't rewrite docs unless the user explicitly says "fix the docs too". Surface gaps; let the human decide.
+- Report documentation gaps; edit only when the user has requested fixes.
 - Don't run the dev server or migrations against `main`'s Neon branch. The current branch's Neon DB is fine for lint/typecheck.

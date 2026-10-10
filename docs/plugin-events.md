@@ -97,6 +97,31 @@ whose step reviews the pull request and comments the findings. The clone needs a
 account; the run also needs the activating member's own **GitHub as you** connection, because a
 company plugin delivers events but supplies no tools. Both gaps are named on the template card.
 
+## Company-plugin implementation checklist
+
+Use this when adding or changing a workspace-owned plugin. [ADR 0018](adr/0018-company-plugins.md)
+owns the company/personal distinction. GitHub is the current implementation to trace; a company
+connection supplies events, while actions still use the run owner's personal tool connections.
+Paths below are repository-relative. Follow the rows that apply and account for each before review.
+
+| Task | Files and completion criterion |
+| --- | --- |
+| Declare provider and events | `packages/core/src/company-plugins.ts`: register the trigger provider, integration provider, event IDs, and filters. Keep trigger names such as `github-app` distinct from connection names such as `github_app`. Export new declarations through `packages/core/src/index.ts`. |
+| Persist workspace connections | `packages/db/src/company-github.ts` is the repository example; `packages/db/src/product-schema.ts` owns provider checks. Add a reviewed `drizzle/` migration for physical changes. Connections must remain scoped to the workspace through connect, disconnect, and provider removal. |
+| Authenticate and authorize | `apps/api/src/auth.ts` resolves Actors. `apps/api/src/company-github.ts` enforces admin management and rechecks provider account access server-side. `validateCompanyGitHubTriggerAccess` rechecks the trigger author's repository access. Cover another workspace, non-admin management, and revoked access. |
+| Expose typed commands | `packages/protocol/src/schemas.ts`, `packages/protocol/src/routes.ts`, and `packages/protocol/src/client.ts` own DTOs, route declarations/registration, and client typing. Include provider variants in trigger/resource schemas. Regenerate the OpenAPI artifact with the protocol package scripts. |
+| Wire the API at runtime | `apps/api/src/app.ts` binds handlers and rate limits; `apps/api/src/server.ts` constructs repositories, connection services, and ingress. A route declaration alone does not wire the service. |
+| Receive provider events | `packages/agent/src/integrations/github-app-events.ts` verifies signatures and normalizes bounded, untrusted context; `apps/api/src/github-app-ingress.ts` handles durable writes. `apps/web/app/api/webhooks/github/route.ts` is the thin relay example. Cover invalid signatures, duplicates, bot loops, uninstall/disconnect, and retryable persistence errors. |
+| Resolve accounts and filters | `packages/agent/src/integration-resource-options.ts` loads authorized provider resources; `apps/web/lib/integration-resource-actions.ts` calls the API; `apps/web/lib/workflow-event-filters.ts` maps editor filter loaders. Return only resources the author can use. |
+| Validate and route triggers | `apps/api/src/automations.ts` composes activation checks; `packages/db/src/workflow-event-subscriptions.ts` validates connected workspace accounts and declared filters; `packages/db/src/workflow-event-routes.ts` matches routes and enqueues idempotent event runs. Test activation cutoffs and workspace isolation. |
+| Recheck queued work | `apps/runner/src/workflow-event-worker.ts` revalidates membership, workflow status, current connection, and unchanged trigger before task creation. Company declarations feed `companyPluginEventKeys`; test revocation after enqueue in `apps/runner/src/workflow-event-worker.integration.test.ts`. |
+| Add settings and trigger UI | `apps/web/app/(app)/plugins/page.tsx`, `apps/web/app/(app)/plugins/company/github/page.tsx`, `apps/web/components/CompanyPluginSettings.tsx`, and `apps/web/lib/company-plugin-actions.ts` own company discovery/connection UI. `apps/web/lib/workflow-event-triggers.ts`, `apps/web/components/WorkflowEditor.tsx`, and `apps/web/components/CompanyAgentEditor.tsx` expose event choices. Cover disconnected and non-admin states. |
+| Add a packaged workflow, when needed | `apps/web/lib/workflow-templates.ts` and `apps/web/components/WorkflowTemplatesButton.tsx` bind account/filter choices into a draft. Declare both the company event connection and required personal tool plugins so missing setup is visible before cloning. |
+| Configure and verify | `.env.example`, [env ownership](env-vars.md), and `scripts/release-preflight.mjs` own deployment inputs. API ingress secrets belong to prod `/api`; add runner secrets only if the runner consumes them. Run the relevant provider/API/DB/worker suites, then the [CI checks](../CONTRIBUTING.md#local-checks). UI changes need real-product evidence. |
+
+For SQL fixture failures, use the [fixture owner map](database.md#test-fixtures); these suites have
+explicit migration lists or minimal DDL that must grow with the queries they exercise.
+
 ## Contract and ownership
 
 Reviewed plugin packages declare `so.opencompany.events`. Each event has an ID, label, description,
