@@ -89,3 +89,7 @@ listener forwards a signed event through `/api/stripe/webhook` to the API-owned 
 
 For mobile development or an authorized device check, use the
 [mobile environment reference](mobile-development.md#identify-the-active-environment).
+
+For local Sentry development, configure the three `SENTRY_APP_*` values in the development
+environment and follow [Sentry setup](./sentry-plugin.md). Focused tests mock HTTP and use PGlite;
+they need no live Sentry account. Use a branch-isolated database for product verification.

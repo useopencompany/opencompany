@@ -122,6 +122,7 @@ import type { ProjectService } from "./projects";
 import { type ApiRateLimiter, InMemoryApiRateLimiter } from "./rate-limit";
 import type { RepoConfigService } from "./repo-configs";
 import { PollingRunEventNotifier, type RunEventNotifier } from "./run-event-notifier";
+import type { SentryService } from "./sentry";
 import type { SlackBotIngressService } from "./slack-bot-ingress";
 import type { SlackBotSettingsService } from "./slack-bot-settings";
 import type { SlackIngressService } from "./slack-ingress";
@@ -224,6 +225,7 @@ export type CreateApiAppInput = {
   integrationResourceOptions: Pick<IntegrationResourceOptionsService, "listOptions">;
   slackBotSettings: SlackBotSettingsService;
   companyGitHub?: CompanyGitHubService;
+  sentry?: SentryService;
   slackProvisioning?: SlackProvisioningService;
   imessageSettings?: ImessageSettingsService;
   whatsappSettings?: WhatsappSettingsService;
@@ -286,6 +288,10 @@ export function createApiApp(input: CreateApiAppInput) {
   const rateLimiter = input.rateLimiter ?? new InMemoryApiRateLimiter();
   const now = input.now ?? (() => new Date());
   const browserOrigins = [...(input.browserOrigins ?? [])];
+  const sentry = () => {
+    if (!input.sentry) throw new ApiError(503, "unavailable", "Sentry integration is unavailable.");
+    return input.sentry;
+  };
   const companyGitHub = () => {
     if (!input.companyGitHub)
       throw new CoreError("unavailable", "Company plugins are unavailable.");
@@ -2504,6 +2510,29 @@ export function createApiApp(input: CreateApiAppInput) {
       await input.slackBotSettings.disconnect(actor);
       return c.json({ data: { updated: true as const }, meta }, 200);
     },
+    getCompanySentryPlugin: async (c) =>
+      c.json({ data: await sentry().get(actorFrom(c)), meta }, 200),
+    listSentryProjects: async (c) => {
+      const query = c.req.valid("query");
+      return c.json(
+        { data: await sentry().projects(actorFrom(c), query.all === "true", query.cursor), meta },
+        200,
+      );
+    },
+    connectSentry: async (c) =>
+      c.json({ data: await sentry().connect(actorFrom(c), c.req.valid("json")), meta }, 200),
+    saveSentrySettings: async (c) =>
+      c.json({ data: await sentry().settings(actorFrom(c), c.req.valid("json")), meta }, 200),
+    disconnectSentry: async (c) =>
+      c.json({ data: await sentry().disconnect(actorFrom(c)), meta }, 200),
+    validateSentryFix: async (c) =>
+      c.json(
+        {
+          data: await sentry().validateFixSetup(actorFrom(c), c.req.valid("json")),
+          meta,
+        },
+        200,
+      ),
     getCompanyGitHubPlugin: async (c) => {
       const actor = actorFrom(c);
       await enforceRateLimit(rateLimiter, actor, "read", 300);
@@ -3080,6 +3109,13 @@ export function createApiApp(input: CreateApiAppInput) {
     });
     return c.json({ data: output, meta }, 200);
   });
+  if (input.sentry) {
+    const sentry = input.sentry;
+    app.use("/webhooks/sentry", ingressBodyLimit(1024 * 1024));
+    app.post("/webhooks/sentry", (c) => sentry.webhook(c.req.raw));
+    app.post("/integrations/sentry/alert-action", (c) => sentry.alertAction(c.req.raw));
+    app.get("/integrations/sentry/alert-action/options", (c) => sentry.alertAction(c.req.raw));
+  }
   if (input.githubAppIngress) {
     const ingress = input.githubAppIngress;
     // GitHub caps webhook payloads at 25 MB; issue and pull request bodies are far smaller.

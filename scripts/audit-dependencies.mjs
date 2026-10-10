@@ -9,6 +9,16 @@ import { spawnSync } from "node:child_process";
 // itself an error, so a fixed dependency cannot leave a silent hole behind.
 const acceptedAdvisories = [
   {
+    ghsa: "GHSA-hp3w-g68c-fv3c",
+    package: "sprintf-js",
+    // No patched release exists; 1.1.3 is still the latest. Reached through
+    // gray-matter > js-yaml > argparse in marketing builds and roarr > global-agent
+    // in Electron packaging. The RangeError requires an attacker-controlled format
+    // string; these callers use fixed error and log formats. Remove this exception
+    // when a compatible patched release exists, and re-review any new runtime use.
+    expiresOn: "2026-10-31",
+  },
+  {
     ghsa: "GHSA-vfj7-8cjw-p6xm",
     package: "braces",
     // No patched release exists; 3.0.3 is still the latest. micromatch brings it into

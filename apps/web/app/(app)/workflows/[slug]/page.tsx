@@ -11,6 +11,7 @@ import {
 import { canManageWorkflowScope } from "@/lib/headless-automation-types";
 import { listHeadlessPlugins, listHeadlessSkillCatalog } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getCompanySentryPluginAction } from "@/lib/sentry-actions";
 import { getSlackBotWorkspaceSettingsAction } from "@/lib/slack-bot-actions";
 import { workflowEventProviderOptions } from "@/lib/workflow-event-triggers";
 import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
@@ -31,6 +32,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     members,
     slackBotSettings,
     companyGitHub,
+    companySentry,
     workflows,
   ] = await Promise.all([
     getHeadlessWorkflow(slug),
@@ -41,6 +43,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     listWorkspaceMembersAction(),
     getSlackBotWorkspaceSettingsAction(),
     getCompanyGitHubPluginForTriggersAction(),
+    getCompanySentryPluginAction(),
     listHeadlessWorkflows(),
   ]);
 
@@ -70,6 +73,7 @@ export default async function WorkflowEditorPage({ params }: WorkflowEditorPageP
     plugins,
     personalAccounts,
     companyGitHub,
+    companySentry,
   });
   const owner =
     members.find(

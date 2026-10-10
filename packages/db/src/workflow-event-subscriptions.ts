@@ -78,6 +78,17 @@ async function validateCompanyPluginEventSubscription(
     `),
   );
   if (!row) return "Event triggers need an account your workspace admin connected.";
+  if (input.trigger.provider === "sentry") {
+    const [access] = rowsFromExecute<{ id: string }>(
+      await execute(sql`
+      SELECT integration_id AS id FROM goat.sentry_connections
+      WHERE integration_id = ${input.trigger.integrationId}
+        AND selected_project_ids ? ${input.trigger.filters.project?.id ?? ""}
+        AND verified_at IS NOT NULL
+    `),
+    );
+    if (!access) return "Choose a Sentry project your workspace admin selected.";
+  }
   const declaration = companyPluginEvent(input.trigger.provider, input.trigger.event);
   if (!declaration) return "This event is not available for this plugin.";
   return workflowEventFilterValidationError(declaration, input.trigger.filters);
@@ -85,7 +96,7 @@ async function validateCompanyPluginEventSubscription(
 
 export function workflowEventFilterValidationError(
   declaration: PluginEventDefinition,
-  filters: Record<string, { id: string }>,
+  filters: Record<string, { id: string; pairs?: { key: string; value: string }[] }>,
 ): string | null {
   const declaredFilters = new Map(declaration.filters.map((filter) => [filter.id, filter]));
   if (Object.keys(filters).some((id) => !declaredFilters.has(id))) {
@@ -96,6 +107,25 @@ export function workflowEventFilterValidationError(
   }
   for (const filter of declaration.filters) {
     const selected = filters[filter.id];
+    if (selected?.pairs && filter.kind !== "tag_pairs") return "Tag pairs require a tag filter.";
+    if (selected && filter.kind === "tag_pairs") {
+      const pairs = selected.pairs;
+      if (
+        !pairs?.length ||
+        pairs.length > 16 ||
+        pairs.some(
+          (pair) =>
+            typeof pair.key !== "string" ||
+            !pair.key.trim() ||
+            pair.key.length > 64 ||
+            typeof pair.value !== "string" ||
+            !pair.value.trim() ||
+            pair.value.length > 256,
+        ) ||
+        new Set(pairs.map((pair) => pair.key)).size !== pairs.length
+      )
+        return "Choose unique, non-empty exact tag pairs.";
+    }
     if (
       selected &&
       filter.kind === "choice" &&

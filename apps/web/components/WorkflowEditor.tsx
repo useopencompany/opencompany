@@ -83,6 +83,7 @@ import {
   DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
   DEFAULT_WORKFLOW_SCHEDULE_TIMEZONE,
 } from "@/lib/workflow-schedule-defaults";
+import { ExactTagConditions } from "./SentryConditions";
 
 const AUTOSAVE_DELAY_MS = 1200;
 // Stable identity so the autosave effect is not re-run — and its error banner cleared — on every
@@ -101,7 +102,13 @@ export type WorkflowTriggerDraft =
       integrationId: string;
       filters: Record<
         string,
-        { id: string; name: string; key?: string; metadata?: Record<string, string> }
+        {
+          id: string;
+          name: string;
+          key?: string;
+          metadata?: Record<string, string>;
+          pairs?: { key: string; value: string }[];
+        }
       >;
       prompt: string;
     }
@@ -1167,6 +1174,36 @@ function EventFilterPicker({
           ? [selected]
           : [];
 
+  if (filter.kind === "tag_pairs" || filter.kind === "text") {
+    const update = (value: typeof selected) =>
+      onChange({
+        ...trigger,
+        filters: value
+          ? { ...trigger.filters, [filter.id]: value }
+          : Object.fromEntries(Object.entries(trigger.filters).filter(([id]) => id !== filter.id)),
+      });
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <span className="text-xs text-ink-subtle">{filter.label}</span>
+        {filter.kind === "tag_pairs" ? (
+          <ExactTagConditions value={selected} disabled={!canEdit} onChange={update} />
+        ) : (
+          <Input
+            aria-label={filter.label}
+            disabled={!canEdit}
+            maxLength={256}
+            value={selected?.id ?? ""}
+            placeholder="Any environment"
+            onChange={(event) =>
+              update(
+                event.target.value ? { id: event.target.value, name: event.target.value } : null,
+              )
+            }
+          />
+        )}
+      </div>
+    );
+  }
   return (
     <label className="flex min-w-0 flex-col gap-1.5">
       <span className="text-[12px] font-medium text-ink-subtle">{filter.label}</span>
@@ -1532,6 +1569,11 @@ export function StepCard({
           ) : null}
         </div>
       </div>
+      {step.repository ? (
+        <p className="text-[12px] text-ink-subtle">
+          Works in {step.repository.fullName} from {step.repository.baseBranch}
+        </p>
+      ) : null}
       <section className="rounded-xl border border-border bg-surface px-3.5 py-3">
         {canEdit ? (
           <MarkdownEditor
@@ -1990,7 +2032,16 @@ function workflowStepWithPatch(step: WorkflowStep, patch: WorkflowStepPatch): Wo
     instructions: next.instructions,
     ...(next.runtimeModel ? { runtimeModel: next.runtimeModel } : {}),
     ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
+    // Only a coding runtime can work in a repository, so switching away drops the target.
+    ...(next.repository && workflowStepUsesCodingRuntime(next.model)
+      ? { repository: next.repository }
+      : {}),
   };
+}
+
+function workflowStepUsesCodingRuntime(model: string) {
+  const option = WORKFLOW_MODEL_OPTIONS.find((candidate) => candidate.token === model);
+  return Boolean(option && isWorkflowCloudRuntime(option.engine));
 }
 
 function serializeWorkflowDraft(draft: WorkflowDraft) {
