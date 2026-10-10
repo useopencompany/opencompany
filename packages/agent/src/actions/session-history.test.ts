@@ -51,13 +51,21 @@ describe("past session history", () => {
     expect(next.nextCursor).toBeNull();
     expect(next.sessions[0]?.archived).toBe(true);
   });
-  it("matches activity in the requested interval with inclusive start and exclusive end", async () => {
-    await db.exec(`UPDATE goat.chat_messages SET created_at='2026-08-01' WHERE session_id='past';
-      INSERT INTO goat.chat_messages (id,session_id,content,created_at) VALUES ('start','past','found','2026-09-01'),('end','archived','excluded','2026-09-08');`);
-    const result = await store.find(actor, { ...range, query: "found" });
-    expect(result.sessions.map((s) => s.sessionId)).toEqual(["past"]);
-    expect((await store.find(actor, { ...range, query: "excluded" })).sessions).toEqual([]);
-  });
+  it.each(["UTC", "Pacific/Honolulu", "Europe/Berlin"])(
+    "matches inclusive start and exclusive end in database timezone %s",
+    async (timezone) => {
+      await db.query("SELECT set_config('TimeZone', $1, false)", [timezone]);
+      try {
+        await db.exec(`UPDATE goat.chat_messages SET created_at='2026-08-01T00:00:00Z' WHERE session_id='past';
+          INSERT INTO goat.chat_messages (id,session_id,content,created_at) VALUES ('start','past','found','2026-09-01T00:00:00Z'),('end','archived','excluded','2026-09-08T00:00:00Z');`);
+        const result = await store.find(actor, { ...range, query: "found" });
+        expect(result.sessions.map((s) => s.sessionId)).toEqual(["past"]);
+        expect((await store.find(actor, { ...range, query: "excluded" })).sessions).toEqual([]);
+      } finally {
+        await db.exec("SET TIME ZONE 'UTC'");
+      }
+    },
+  );
   it("searches literal case-insensitive phrases, not wildcard patterns or hidden payloads", async () => {
     await db.query("UPDATE goat.chat_messages SET content=$1 WHERE session_id='past'", [
       "100%_done\\skill",

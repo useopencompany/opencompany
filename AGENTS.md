@@ -17,6 +17,7 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 - Runtime: Node `>=20.20.0`
 - Stack: Turborepo, Bun, Next.js App Router, Drizzle, Neon Postgres, WorkOS AuthKit, Vercel AI Gateway, GitHub App integration.
 - Product app: `apps/web`
+- Public API: `apps/api`
 - Shared runner service: `apps/runner`
 - Database package: `packages/db`
 
@@ -28,25 +29,24 @@ Use judgment. The goal is not to follow rules mechanically; the goal is to ship 
 - Lint: `bun run lint`
 - Typecheck: `bun run typecheck`
 - Build: `bun run build`
-- Unit tests: `bun run test`
+- Unit tests: `bun run test`, with Node-backed Vitest workers and CI concurrency limits
 - UI behavior: run `bun run dev:web` and verify the real route in a browser
 - Secret scan when available: `bun run secrets:check`
 - Use Turborebo filtering syntax to run commands against specific apps/packages: `bun run dev --filter @opencompany/web`
+
+For the full CI-equivalent commands and focused test runs, see [local checks](CONTRIBUTING.md#local-checks).
 
 The user usually keeps a dev server running. Do not start another one unless asked or unless you have confirmed it is needed.
 
 ## opencompany product surface
 
-- Start in `apps/web` for product and API work.
-- `web` is the Next.js client and composition root. "opencompany runner" means the retained
-  opencompany-domain execution paths inside `apps/runner`. Look first at the task and chat
-  modules, `/internal/goat/*` routes, and the `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` gate. There is no
-  separate runner package.
+- Web UI: `apps/web/app`, `apps/web/components`, and `apps/web/lib`. Browser auth stays in `apps/web/lib/auth.ts` and `apps/web/proxy.ts`.
+- Public API: `apps/api/src/app.ts` registers handlers, `server.ts` wires services, and `auth.ts` resolves Actors. Workflow commands live in `automations.ts` and `workflow-commands.ts` in that directory.
+- Contracts: `packages/protocol/src/routes.ts` and `schemas.ts`. Business rules: `packages/core/src`. Durable execution: `apps/runner/src`; shared agent behavior: `packages/agent/src`.
 - Follow shared code into `packages/db/src/*`, `packages/wiki`, and
   `packages/telemetry` as needed. Preserve the isolated legacy-billing and LLM-broker
   compatibility schemas unless a task explicitly retires those contracts.
-- Use `docs/system-map.md` for the current app/runner flow and `bun run dev:web` for the
-  local product stack.
+- Read the [system map](docs/system-map.md) for cross-app flows and ownership. Mobile tasks start in [apps/mobile/AGENTS.md](apps/mobile/AGENTS.md).
 
 ## Engineering Judgment
 
@@ -70,10 +70,10 @@ The user usually keeps a dev server running. Do not start another one unless ask
 
 ## Data And Env Changes
 
-- Any change to `packages/db/src/schema.ts` needs a Drizzle migration.
+- Physical changes to `packages/db/src/*schema.ts` need a Drizzle migration. See [database docs](docs/database.md#schema-modules) for the schema modules and generation inputs.
 - Migration or data-destructive work gets extra scrutiny. Explain rollback implications before running one-way operations.
 - New env vars require `.env.example` and the relevant docs update.
-- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the web app uses `prod` + `/web`, the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
+- Production env vars must be added to the runtime-specific Infisical path and verified in the hosted service before release: the public API uses `prod` + `/api`, the web app uses `prod` + `/web`, the runner uses `prod` + `/runner`, and release automation uses `prod` + `/release`. Add required variables to the matching release preflight so a missing sync fails the release instead of silently disabling behavior.
 - Local setup should use branch-isolated Neon DBs through `bun run setup`. Avoid shared database mode unless explicitly needed.
 - Do not run production migrations or production-affecting scripts unless the user explicitly asks.
 
@@ -88,6 +88,8 @@ Use the repo’s existing tooling. Do not introduce a new test runner or fixture
   for every UI or UX change, captured from the real product and showing the relevant states.
   Store new PR screenshots and recordings in `docs/pr-assets/<change-name>/`.
 - Refactors with intended no behavior change: run the existing relevant checks. Add a small characterization test if the touched behavior has no useful coverage.
+
+For PGlite schema or timezone failures, check the [fixture owners](docs/database.md#test-fixtures).
 
 If something cannot be verified because of missing env, unavailable services, or absent fixtures, say exactly what blocked verification.
 
@@ -112,6 +114,7 @@ Useful docs:
 - `docs/database.md` - Neon, Drizzle, and migrations
 - `docs/deployment.md` - release flow
 - `docs/env-vars.md` - environment variables
+- Company plugin changes: [implementation checklist](docs/plugin-events.md#company-plugin-implementation-checklist)
 
 ## Communication
 
@@ -119,6 +122,7 @@ Useful docs:
 - Flag uncertainty and unverified work.
 - Surface tradeoffs when there are multiple reasonable approaches.
 - Keep final summaries short and specific: changed files, verification, and remaining risk.
+- PR titles: prefer concise, human-readable descriptions of the change over conventional-commit prefixes. See [PR naming](CONTRIBUTING.md#pr-naming).
 
 ## When In Doubt
 
