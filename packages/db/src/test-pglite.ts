@@ -11,17 +11,23 @@ import { PGlite, type PGliteInterfaceExtensions, type PGliteOptions } from "@ele
  * included. Across the repo's PGlite suites that is ~40s of test time.
  *
  * The cache is keyed by PGlite version because a data directory is only loadable by the build
- * that produced it. Callers that already hold a data directory pass it to `PGlite.create`
- * directly — restoring one skips initdb for the same reason.
+ * that produced it. Callers with a schema snapshot can supply their own data directory.
  */
-export function createTestPGlite<O extends Omit<PGliteOptions, "loadDataDir">>(
+export async function createTestPGlite<O extends PGliteOptions>(
   options?: O,
 ): Promise<PGlite & PGliteInterfaceExtensions<O["extensions"]>> {
   // Spreading a generic loses the link back to `O`, so restate it for the extension typing.
   type WithDataDir = O & { loadDataDir: Blob };
-  return bareDataDir().then((loadDataDir) =>
-    PGlite.create<WithDataDir>({ ...options, loadDataDir } as WithDataDir),
-  );
+  const loadDataDir = options?.loadDataDir ?? (await bareDataDir());
+  const database = await PGlite.create<WithDataDir>({ ...options, loadDataDir } as WithDataDir);
+  try {
+    // Restored clusters retain their timezone even when the worker starts with TZ=UTC.
+    await database.exec("SET TIME ZONE 'UTC'");
+    return database;
+  } catch (error) {
+    await database.close();
+    throw error;
+  }
 }
 
 let cached: Promise<Blob> | undefined;

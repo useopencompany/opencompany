@@ -22,6 +22,14 @@ requirement applies equally to maintainer-authored and external pull requests.
 Store new PR screenshots and recordings in `docs/pr-assets/<change-name>/`. Keep existing assets at
 their current paths to preserve PR links.
 
+## PR naming
+
+Prefer concise, human-readable titles that specify what changes. Describe the result for the
+reader rather than using conventional-commit prefixes or scopes.
+
+For example, use `Improve composer stability and performance in the mobile app` instead of
+`feat(mobile): refactor composer`.
+
 ## Commit Identity and Email Privacy
 
 Git records the author and committer email address in every commit. That metadata is visible when a
@@ -77,7 +85,7 @@ repository-level controls and the visibility-change procedure are documented in
 [CI security](./docs/ci-security.md); those settings are part of the contribution boundary and must
 not be relaxed to make a pull request pass.
 
-## Local Checks
+## Local checks
 
 Use Bun `1.4.2` and Node `20.20.0` or newer. Install exactly the committed dependency graph:
 
@@ -85,18 +93,18 @@ Use Bun `1.4.2` and Node `20.20.0` or newer. Install exactly the committed depen
 bun install --frozen-lockfile
 ```
 
-Run the CI-equivalent gates before opening a pull request:
+Run the local equivalents of [.github/workflows/verify.yml](.github/workflows/verify.yml) before
+opening a pull request. These check all packages; CI may restrict Turbo to affected packages:
 
 ```bash
+node --check scripts/setup.mjs
 node scripts/check-schema-migration.mjs
 bun run db:migrations:check
 bun run format:check
 bun run boundary:check
-bun --bun turbo run lint
-bun run typecheck
+bun --bun turbo run lint typecheck --concurrency=2
 bun --filter @opencompany/protocol openapi:check
-bun run build
-bun run build:docs
+bun --bun turbo run build --concurrency=2
 bun run test
 node --test scripts/lib/*.test.mjs
 bun run secrets:check
@@ -107,8 +115,22 @@ TruffleHog must be installed for the local secret scan. The pull request gate sc
 commit range without repository credentials and reviews new high- or critical-severity dependency
 vulnerabilities. The full dependency audit also checks existing runtime, build, and release
 dependencies and fails on any advisory. `boundary:check` enforces the permanent application and
-naming boundaries. For focused development, use Turborepo filters such as
-`bun run test --filter @opencompany/web`, but run the full gate before review.
+naming boundaries.
+
+`bun run test` expands to `bun turbo run test --concurrency=2 -- --maxWorkers=2`, matching CI.
+Keep Vitest on Node: forcing `bun --bun` makes PGlite WASM intermittently trap in fork workers.
+For one package, use `bun turbo run test --concurrency=2 --filter=@opencompany/db -- --maxWorkers=2`.
+For one file, use `bun run --cwd packages/agent test src/actions/session-history.test.ts --maxWorkers=2`.
+Turbo filters go before `--`; Vitest options and file filters go after it. Root `bun run test`
+already contains that separator, so use the explicit Turbo command for package filters.
+
+Database failures: read [fixture ownership and timezone handling](docs/database.md#test-fixtures)
+before editing migrations or deleting caches. Mobile has no automated tests; follow
+[its guidance](apps/mobile/AGENTS.md) for verification.
+
+The schema coupling script compares committed base/head revisions. Review staged, unstaged, and
+untracked schema changes separately. CI also checks the built runner image and exact PR secret scan;
+local commands do not certify those hosted checks.
 
 ## Schema and Environment Changes
 
