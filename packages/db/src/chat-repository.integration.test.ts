@@ -392,7 +392,7 @@ describe("Postgres Chat repositories", () => {
     expect(legacyAttachmentSurvivedMigration).toBe(true);
   });
 
-  it("scopes attachment upload keys to actor and workspace and completes atomically", async () => {
+  it("scopes attachment upload keys and preserves numeric sizes across completion paths", async () => {
     await database.exec(`
       INSERT INTO goat.workspace_members (id, workspace_id, user_workos_id, role)
       VALUES ('member_4', 'workspace_2', 'user_1', 'admin')
@@ -424,17 +424,55 @@ describe("Postgres Chat repositories", () => {
     expect(first?.commandId).toBe("attachment_command_1");
     expect(otherWorkspace?.commandId).toBe("attachment_command_2");
 
+    const completion = {
+      commandId: "attachment_command_1",
+      format: "text" as const,
+      mediaType: "text/plain",
+      filename: "notes.txt",
+      sizeBytes: 5,
+      blobUrl: "https://blob.invalid/keyed-1",
+      extractedText: "notes",
+    };
+    const completedAttachment = {
+      id: "attachment_keyed_1",
+      format: "text",
+      mediaType: "text/plain",
+      filename: "notes.txt",
+      sizeBytes: 5,
+      expiresAt,
+    };
+    await expect(uploads.complete(completion)).resolves.toEqual({
+      ...completedAttachment,
+      created: true,
+    });
+    await expect(uploads.complete(completion)).resolves.toEqual({
+      ...completedAttachment,
+      created: false,
+    });
+    await expect(uploads.findCompleted("attachment_command_1")).resolves.toEqual(
+      completedAttachment,
+    );
     await expect(
-      uploads.complete({
-        commandId: "attachment_command_1",
+      uploads.create({
+        actor: actor(),
+        id: "attachment_unkeyed_1",
         format: "text",
         mediaType: "text/plain",
-        filename: "notes.txt",
-        sizeBytes: 5,
-        blobUrl: "https://blob.invalid/keyed-1",
-        extractedText: "notes",
+        filename: "unkeyed.txt",
+        sizeBytes: 7,
+        blobPathname: "goat-chat-v1/user_1/attachment_unkeyed_1/content",
+        blobUrl: "https://blob.invalid/unkeyed-1",
+        extractedText: "unkeyed",
+        expiresAt,
       }),
-    ).resolves.toMatchObject({ id: "attachment_keyed_1", created: true });
+    ).resolves.toEqual({
+      id: "attachment_unkeyed_1",
+      format: "text",
+      mediaType: "text/plain",
+      filename: "unkeyed.txt",
+      sizeBytes: 7,
+      expiresAt,
+    });
     expect(
       (
         await database.query<{ completed_at: Date; upload_count: number }>(`
