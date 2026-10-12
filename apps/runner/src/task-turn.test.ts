@@ -9,6 +9,7 @@ import { TaskTurnTerminalError } from "./codex-chat-errors";
 import {
   buildTaskCloserPrompt,
   buildTaskFailureCompletion,
+  buildTaskStepLimitCompletion,
   buildTaskTerminalProjection,
   buildTaskTurnCompletion,
   loadRecentTaskCommentThread,
@@ -316,6 +317,45 @@ describe("session-backed task turns", () => {
       engine: "codex",
       prompt: expect.stringContaining("Step 2/2 — Implement"),
     });
+  });
+
+  it("continues a task whose model loop stopped on tool calls at its step limit", () => {
+    const taskContext = context(workflowSpec());
+    const completion = buildTaskStepLimitCompletion({
+      context: taskContext,
+      result: "I have inspected the relevant wiki pages.",
+      parentSettings: {},
+    });
+
+    expect(completion).toMatchObject({
+      disposition: null,
+      reportedOutcome: null,
+      outcomeComment: null,
+      nextTurn: {
+        engine: taskContext.harnessSpec.engine,
+        prompt: expect.stringContaining("Finish the original task"),
+        userMessageContent: "Continuing automatically after reaching the per-run step limit.",
+        settings: { taskStepLimitContinuations: 1 },
+      },
+    });
+    expect(completion.harnessSpec.workflow?.completedStepCount).toBe(0);
+  });
+
+  it("reports needs attention after repeated model-step-limit continuations", () => {
+    const taskContext = context(workflowSpec());
+    const completion = buildTaskStepLimitCompletion({
+      context: taskContext,
+      result: "The requested wiki write is still incomplete.",
+      parentSettings: { taskStepLimitContinuations: 3 },
+    });
+
+    expect(completion).toMatchObject({
+      disposition: "needs_attention",
+      reportedOutcome: "needs_attention",
+      outcomeComment: expect.stringContaining("repeatedly reached its model-step limit"),
+      nextTurn: null,
+    });
+    expect(completion.harnessSpec.workflow?.completedStepCount).toBe(0);
   });
 
   it("queues a scheduled task check-in instead of finalizing the task", async () => {

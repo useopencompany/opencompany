@@ -57,6 +57,11 @@ const CODING_ERROR_MAX_LENGTH = 2_000;
 const EXECUTION_TURN_LIMIT_ERROR = /reached maximum number of turns \(\d+\)/i;
 const EXECUTION_TURN_LIMIT_RETRY_COMMENT =
   "Continuing from saved work after this run reached its execution limit.";
+const TASK_STEP_LIMIT_MAX_CONTINUATIONS = 3;
+const TASK_STEP_LIMIT_CONTINUATION_PROMPT =
+  "The previous background-task run reached its model-step limit while work remained. Continue from the existing transcript and tool results without repeating completed reads or actions. Finish the original task, including every requested write or other side effect, then provide the final result.";
+const TASK_STEP_LIMIT_EXHAUSTED_COMMENT =
+  "The task repeatedly reached its model-step limit before the requested work was complete.";
 const logger = createLogger({ service: "opencompany-runner", runtime: "task-turn" });
 
 export type TaskTurnContext = {
@@ -570,6 +575,39 @@ export function buildTaskTurnCompletion(input: {
     reportedOutcome,
     outcomeComment,
     nextTurn,
+  };
+}
+
+export function buildTaskStepLimitCompletion(input: {
+  context: TaskTurnContext;
+  result: string;
+  parentSettings: CodexChatTurnSettings;
+}): TaskTurnCompletion {
+  const continuationCount = Math.max(
+    0,
+    Math.floor(input.parentSettings.taskStepLimitContinuations ?? 0),
+  );
+  const exhausted = continuationCount >= TASK_STEP_LIMIT_MAX_CONTINUATIONS;
+  return {
+    taskId: input.context.task.id,
+    taskDisplayId: input.context.task.displayId,
+    taskName: input.context.task.name,
+    harnessSpec: input.context.harnessSpec,
+    result: input.result.trim(),
+    disposition: exhausted ? "needs_attention" : null,
+    reportedOutcome: exhausted ? "needs_attention" : null,
+    outcomeComment: exhausted ? TASK_STEP_LIMIT_EXHAUSTED_COMMENT : null,
+    nextTurn: exhausted
+      ? null
+      : createNextTaskTurn({
+          harnessSpec: input.context.harnessSpec,
+          prompt: TASK_STEP_LIMIT_CONTINUATION_PROMPT,
+          userMessageContent: "Continuing automatically after reaching the per-run step limit.",
+          settings: {
+            ...taskTurnSettingsForHarness(input.context.harnessSpec),
+            taskStepLimitContinuations: continuationCount + 1,
+          },
+        }),
   };
 }
 
