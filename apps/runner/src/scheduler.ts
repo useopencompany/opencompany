@@ -4,7 +4,12 @@ import {
   type CaptureProductTaskSpawnedInput,
   captureProductTaskSpawned,
 } from "@opencompany/analytics/product/server";
-import { type Actor, TASK_WRITE_PERMISSION, TaskApplicationService } from "@opencompany/core";
+import {
+  type Actor,
+  TASK_GOAL_MAX_LENGTH,
+  TASK_WRITE_PERMISSION,
+  TaskApplicationService,
+} from "@opencompany/core";
 import { newResourceId } from "@opencompany/core/resource-ids";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { PostgresTaskRepository } from "@opencompany/db/task-repository";
@@ -334,7 +339,13 @@ function scheduledWorkflowTaskPrompt(
 ) {
   const runContext = workflow.prompt?.trim() ?? "";
   if (runContext && runContext !== DEFAULT_WORKFLOW_SCHEDULE_PROMPT) return runContext;
-  return workflow.firstStepInstructions?.trim() || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
+  const firstStepInstructions = workflow.firstStepInstructions?.trim() ?? "";
+  // The harness already carries the complete step instructions. Keep the Task goal generic when
+  // those instructions exceed its lower limit so one valid Workflow cannot stall the whole sweep.
+  if (firstStepInstructions.length > TASK_GOAL_MAX_LENGTH) {
+    return DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
+  }
+  return firstStepInstructions || DEFAULT_WORKFLOW_SCHEDULE_PROMPT;
 }
 
 function rowsFromExecute<T>(result: unknown): T[] {
