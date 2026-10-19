@@ -19,13 +19,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@base-ui/react": "^1.5.0",
-    "@central-icons-react/round-outlined-radius-2-stroke-2": "1.1.318",
+    "@base-ui/react": "^1.9.0",
+    "@central-icons-react/round-outlined-radius-2-stroke-2": "1.2.15",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "sonner": "^2.0.8",
-    "tailwind-merge": "^3.6.0"
+    "tailwind-merge": "^3.7.0"
   },
   "peerDependencies": {
     "react": "^19.0.0",
@@ -34,11 +34,11 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^25.9.1",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.3.4",
-    "postcss": "8.5.28",
+    "eslint-config-next": "16.4.2",
+    "postcss": "8.5.30",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3"
   }
