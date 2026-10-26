@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@opencompany/protocol": "workspace:*",
-    "redis": "^6.2.1"
+    "redis": "^6.3.0"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
