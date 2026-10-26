@@ -80,15 +80,15 @@
     "bench": "bun --env-file=.env.local packages/agent/evals/index.ts"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
+    "@neondatabase/serverless": "^1.2.0",
     "@opencompany/db": "workspace:*",
     "@opencompany/wiki": "workspace:*",
     "@workos-inc/node": "^10.13.0",
     "dotenv": "^17.4.2",
-    "drizzle-orm": "^0.45.2",
-    "eslint-config-next": "16.2.10",
-    "next": "16.3.8",
-    "pg": "^8.23.0",
+    "drizzle-orm": "^0.45.4",
+    "eslint-config-next": "16.4.2",
+    "next": "16.4.2",
+    "pg": "^8.23.1",
     "vercel": "^59.11.2"
   },
   "overrides": {
@@ -177,16 +177,16 @@
     "electron"
   ],
   "devDependencies": {
-    "@biomejs/biome": "2.5.12",
+    "@biomejs/biome": "2.6.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
-    "@testing-library/user-event": "^14.6.7",
-    "@vitejs/plugin-react": "^6.1.1",
-    "drizzle-kit": "^0.31.10",
+    "@testing-library/user-event": "^14.6.8",
+    "@vitejs/plugin-react": "^6.1.2",
+    "drizzle-kit": "^0.31.11",
     "jsdom": "^29.1.1",
     "neonctl": "^3.6.0",
-    "postcss": "8.5.28",
-    "turbo": "^2.10.12",
+    "postcss": "8.5.31",
+    "turbo": "^2.11.10",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },
