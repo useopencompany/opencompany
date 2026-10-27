@@ -46,7 +46,7 @@
     "@opencompany/telemetry": "workspace:*",
     "@opencompany/ui": "workspace:*",
     "@opencompany/wiki": "workspace:*",
-    "@sentry/nextjs": "10.73.0",
+    "@sentry/nextjs": "10.75.2",
     "@tanstack/electric-db-collection": "0.4.7",
     "@tanstack/react-db": "0.3.7",
     "@tiptap/core": "3.31.2",
