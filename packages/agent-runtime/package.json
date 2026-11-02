@@ -30,8 +30,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "cron-parser": "^5.10.0",
-    "yaml": "^2.9.0"
+    "cron-parser": "^5.10.2",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
