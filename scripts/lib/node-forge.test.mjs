@@ -46,14 +46,14 @@ function signDigestInfo(includeNull, includeGarbage) {
   );
 }
 
-test("patched node-forge rejects extra nested DigestAlgorithm elements", () => {
+test("node-forge rejects extra nested DigestAlgorithm elements", () => {
   assert.throws(
     () => verifier.verify(digest, signDigestInfo(true, true)),
     /does not contain a valid RSASSA-PKCS1-v1_5 DigestInfo/,
   );
 });
 
-test("patched node-forge accepts valid SHA-256 signatures with optional NULL", () => {
+test("node-forge accepts valid SHA-256 signatures with optional NULL", () => {
   assert.equal(verifier.verify(digest, signDigestInfo(true, false)), true);
   assert.equal(verifier.verify(digest, signDigestInfo(false, false)), true);
 });

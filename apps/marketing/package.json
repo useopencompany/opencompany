@@ -16,9 +16,10 @@
   "dependencies": {
     "@opencompany/analytics": "workspace:*",
     "@opencompany/ui": "workspace:*",
+    "geist": "1.9.2",
     "github-slugger": "^2.0.0",
     "gray-matter": "^4.0.3",
-    "next": "16.3.8",
+    "next": "16.4.5",
     "next-mdx-remote": "^6.0.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -31,10 +32,10 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.7",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.2.6",
+    "eslint-config-next": "16.4.5",
     "postcss": "8.5.28",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
