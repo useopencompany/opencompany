@@ -5,7 +5,8 @@ secrets, paste them into logs, or copy production values into tracked files.
 
 ## Local development
 
-Authenticate the Infisical CLI, then run `bun run setup`. The setup script pulls `dev` `/web` and
+Authenticate the Infisical CLI against opencompany's self-hosted instance with
+`infisical login --domain https://infisical.opencompany.cloud`, then run `bun run setup`. The setup script pulls `dev` `/web` and
 `/runner`, writes only gitignored local env files, generates branch-local values, and creates a
 branch-isolated Neon database. `bun run env:pull` refreshes shared values without replacing the
 branch database. `bun run setup -- --check` reports missing requirements without writing.
@@ -46,9 +47,9 @@ Edit secrets in the runtime's Infisical path and verify the integration sync on 
 - Runner: `prod` `/runner` → Render runner.
 - Release automation: `prod` `/release` → GitHub Actions through `infisical run`.
 - Mobile build automation: `prod` `/mobile` → GitHub Actions through the Infisical secrets action
-  and OIDC.
+  and the universal-auth machine identity.
 - Desktop release automation: `prod` `/desktop` → GitHub Actions through the Infisical secrets
-  action and OIDC.
+  action and the universal-auth machine identity.
 
 After changing a required value, run the release preflight and deploy the affected runtime. A value
 existing in Infisical is not sufficient evidence until the destination reports it and the runtime

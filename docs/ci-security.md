@@ -60,7 +60,7 @@ publishes that release only when the operator asks it to.
 
 `.github/workflows/release-production.yml` is a separate trusted path. It only accepts `push` to
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
-deployment/OIDC permission to the production release job.
+deployment permission and production secrets to the production release job.
 
 ## Review and production policy
 
@@ -91,7 +91,7 @@ contribution terms and the explicit decision not to require DCO sign-off.
 The production environment has no redundant manual reviewer. It accepts deployments only from
 `main`, and administrators cannot bypass that branch policy. Production remains automatic after a
 permitted merge because the release workflow independently verifies the selected `main` commit
-before the privileged deployment job receives OIDC or environment secrets.
+before the privileged deployment job receives environment secrets.
 
 ## Repository settings contract
 

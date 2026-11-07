@@ -116,25 +116,30 @@ test("production credentials are scoped to the release job", async () => {
   const beforeRelease = workflow.slice(0, releaseStart);
   const release = workflow.slice(releaseStart);
 
-  assert.doesNotMatch(beforeRelease, /id-token: write/u);
   assert.doesNotMatch(beforeRelease, /environment: production/u);
+  assert.doesNotMatch(beforeRelease, /secrets\.INFISICAL_/u);
   assert.match(release, /environment: production/u);
-  assert.match(release, /id-token: write/u);
+  assert.doesNotMatch(workflow, /id-token: write/u);
   assert.match(release, /deployments: write/u);
 });
 
-test("pins production secret access to the audited Infisical identity", async () => {
+test("pins production secret access to the self-hosted Infisical project", async () => {
   const workflow = await readFile(workflowUrl, "utf8");
 
-  assert.match(workflow, /INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"/u);
+  assert.match(workflow, /INFISICAL_DOMAIN: "https:\/\/infisical\.opencompany\.cloud"/u);
+  assert.match(workflow, /INFISICAL_PROJECT_SLUG: "opencompany-xqub"/u);
+  assert.equal(workflow.match(/method: universal/gu)?.length, 6);
   assert.equal(
-    workflow.match(/identity-id: \$\{\{ env\.INFISICAL_MACHINE_IDENTITY_ID \}\}/gu)?.length,
+    workflow.match(/client-id: \$\{\{ secrets\.INFISICAL_MACHINE_IDENTITY_CLIENT_ID \}\}/gu)
+      ?.length,
     6,
   );
-  assert.doesNotMatch(
-    workflow,
-    /vars\.INFISICAL_MACHINE_IDENTITY_ID|secrets\.INFISICAL_MACHINE_IDENTITY_ID/u,
+  assert.equal(
+    workflow.match(/client-secret: \$\{\{ secrets\.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET \}\}/gu)
+      ?.length,
+    6,
   );
+  assert.doesNotMatch(workflow, /method: oidc|identity-id:|vars\.INFISICAL_/u);
 });
 
 test("retries bounded Infisical secret fetches before changing production", async () => {
