@@ -22,14 +22,13 @@ jobs:
     environment: production
     permissions:
       contents: write
-      id-token: write
     env:
       CI: true
       DO_NOT_TRACK: "1"
       GH_TOKEN: ${{ github.token }}
-      INFISICAL_MACHINE_IDENTITY_ID: "251c74b2-32d5-490a-abfa-12d83f59ed7b"
-      INFISICAL_ENV_SLUG: ${{ vars.INFISICAL_ENV_SLUG || secrets.INFISICAL_ENV_SLUG || 'prod' }}
-      INFISICAL_DOMAIN: ${{ vars.INFISICAL_DOMAIN || secrets.INFISICAL_DOMAIN || 'https://eu.infisical.com' }}
+      INFISICAL_DOMAIN: "https://infisical.opencompany.cloud"
+      INFISICAL_PROJECT_SLUG: "opencompany-xqub"
+      INFISICAL_ENV_SLUG: "prod"
     steps:
       - name: Require desktop releases to run from main
         if: ${{ github.ref != 'refs/heads/main' }}
@@ -72,9 +71,10 @@ jobs:
       - name: Fetch desktop signing secrets from Infisical
         uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
         with:
-          method: oidc
-          identity-id: ${{ env.INFISICAL_MACHINE_IDENTITY_ID }}
-          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG || secrets.INFISICAL_PROJECT_SLUG }}
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
           env-slug: ${{ env.INFISICAL_ENV_SLUG }}
           domain: ${{ env.INFISICAL_DOMAIN }}
           secret-path: /desktop
