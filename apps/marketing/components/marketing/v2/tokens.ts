@@ -1,13 +1,14 @@
-import { DM_Mono } from "next/font/google";
+import localFont from "next/font/local";
 
 /**
  * Micro-label face for this landing variant. The reference design pairs a
  * single grotesque for everything readable with a mono used only for
  * 10px uppercase labels, so the mono never carries body copy.
  */
-export const microMono = DM_Mono({
-  subsets: ["latin"],
-  weight: ["500"],
+// Self-hosted (latin subset, OFL) so builds never fetch from Google Fonts.
+export const microMono = localFont({
+  src: "../../../app/fonts/DMMono-Medium.woff2",
+  weight: "500",
   display: "swap",
 });
 
