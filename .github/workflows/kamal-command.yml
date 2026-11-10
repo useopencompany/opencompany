@@ -16,6 +16,10 @@ on:
         type: string
         default: kamal app details
         required: true
+      setup_docker_cache:
+        description: Set up the Docker builder, for commands that build an image (kamal build push).
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -134,6 +138,11 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$VM_SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+
+      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+        if: ${{ inputs.setup_docker_cache }}
+        with:
+          cache-key: opencompany/${{ inputs.app }}-image
 
       # Through an environment variable, so the input is never spliced into the script.
       - name: Run the command

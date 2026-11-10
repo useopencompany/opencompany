@@ -122,9 +122,7 @@ credentials. Dispatch it from the Actions tab on `main`:
 
 - `app`, `api` or `runner`, the directory the command runs in.
 - `command`, starting with `kamal`. The default is `kamal app details`.
-
-Builds through this workflow, such as `kamal build push`, use the runner's plain Docker builder with
-no layer cache, so they take a few minutes longer than a release build.
+- `setup_docker_cache`, for commands that build an image such as `kamal build push`.
 
 The workflow runs in the `production` environment and has its own concurrency group. Kamal's lock
 on the server stops two deploys from overlapping. A cancelled run releases that lock.
@@ -221,7 +219,8 @@ None of this affects users.
    `91.99.204.222`.
 3. Dispatch Renew Runner Certificate with `staging`, then without it. Check the stored certificate's
    SANs with `openssl x509 -noout -ext subjectAltName`.
-4. Kamal Command, `app: api`: `kamal build push`, then `kamal setup --skip-push`. This installs kamal-proxy and boots Electric on the new stream and the API.
+4. Kamal Command, `app: api`: `kamal build push` with `setup_docker_cache`, then
+   `kamal setup --skip-push`. This installs kamal-proxy and boots Electric on the new stream and the API.
 5. Wait for Electric's `/v1/health` to report `active` and for the `opencompany_hetzner_v1` slot to
    be active with bounded lag. Warm every named read model through `api-next`.
 6. On `https://api-next.opencompany.chat`, check:
@@ -230,7 +229,8 @@ None of this affects users.
    - a live chat SSE stream that lasts more than 2 minutes
    - Electric live updates
    - an attachment upload
-7. Kamal Command, `app: runner`: `kamal build push`, so the runner image is ready. Do not boot it. The runner is not staged, because two runners would both claim jobs.
+7. Kamal Command, `app: runner`: `kamal build push` with `setup_docker_cache`, so the runner
+   image is ready. Do not boot it. The runner is not staged, because two runners would both claim jobs.
 
 Merge nothing to `main` from the start of the cutover until the release-workflow PR lands.
 
