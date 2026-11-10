@@ -113,6 +113,7 @@ Useful docs:
 - `docs/getting-started.md` - local setup
 - `docs/database.md` - Neon, Drizzle, and migrations
 - `docs/deployment.md` - release flow
+- `docs/hosting.md` - Hetzner server, Kamal and the Render cutover
 - `docs/env-vars.md` - environment variables
 - Company plugin changes: [implementation checklist](docs/plugin-events.md#company-plugin-implementation-checklist)
 

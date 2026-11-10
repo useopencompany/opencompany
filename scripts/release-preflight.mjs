@@ -5,6 +5,7 @@
 
 import "./load-env.mjs";
 import { inspectLegacySkillCutover } from "./lib/legacy-skill-cutover.mjs";
+import { inspectCertificate, PREFLIGHT_MIN_DAYS } from "./lib/runner-cert.mjs";
 
 const groups = {
   web: {
@@ -247,6 +248,9 @@ const groups = {
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
       "RUNNER_SANDBOX_NAMESPACE",
+      // Browser- and sandbox-reachable origin. Render also supplies RENDER_EXTERNAL_URL, but the
+      // Kamal deploy has no such fallback, so production sets it explicitly.
+      "RUNNER_PUBLIC_URL",
       // One built template per user-selectable sandbox size. A missing alias would
       // silently fall back to E2B's stock template, so a workspace would get — and
       // be billed for — a machine other than the one it picked.
@@ -264,9 +268,12 @@ const groups = {
       },
     ],
     optional: [
+      // kamal-proxy's certificate for the runner hosts (.github/workflows/renew-runner-cert.yml).
+      // Checked below whenever set; required once the release deploys the runner with Kamal.
+      "RUNNER_TLS_CERTIFICATE_PEM",
+      "RUNNER_TLS_PRIVATE_KEY_PEM",
       "EXA_API_KEY",
       "APIFY_API_TOKEN",
-      "RUNNER_PUBLIC_URL",
       "RUNNER_DATABASE_URL",
       "RUNNER_DB_POOL_MAX",
       "RUNNER_WORKER_CONCURRENCY",
@@ -331,6 +338,11 @@ const groups = {
       "PRODUCTION_OPENCOMPANY_URL",
       "PRODUCTION_API_URL",
       "RUNNER_PUBLIC_URL",
+      // Kamal reaches the Hetzner server over SSH with this key, trusting only these host keys.
+      "VM_SSH_PRIVATE_KEY",
+      "VM_SSH_KNOWN_HOSTS",
+      // The runner certificate's DNS challenge writes TXT records through Vercel DNS.
+      "VERCEL_DNS_API_TOKEN",
     ],
     optional: [],
   },
@@ -470,6 +482,22 @@ if (selected.includes("runner")) {
   if (process.env.RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED?.trim().toLowerCase() !== "true") {
     failed = true;
     console.log("\nRUNNER_OPENCOMPANY_TASK_WORKER_ENABLED must be true in the production runner.");
+  }
+
+  const certificatePem = process.env.RUNNER_TLS_CERTIFICATE_PEM;
+  const privateKeyPem = process.env.RUNNER_TLS_PRIVATE_KEY_PEM;
+  if (!isUnset(certificatePem) || !isUnset(privateKeyPem)) {
+    const certificate = inspectCertificate({ certificatePem, privateKeyPem });
+    const problems = [...certificate.problems];
+    if (certificate.daysLeft > 0 && certificate.daysLeft <= PREFLIGHT_MIN_DAYS) {
+      problems.push(`it expires in ${Math.floor(certificate.daysLeft)} days`);
+    }
+    if (problems.length > 0) {
+      failed = true;
+      console.log(
+        `\nRUNNER_TLS_CERTIFICATE_PEM and RUNNER_TLS_PRIVATE_KEY_PEM are unusable: ${problems.join("; ")}. Run the Renew Runner Certificate workflow.`,
+      );
+    }
   }
 }
 

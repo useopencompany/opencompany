@@ -14,6 +14,8 @@ import {
 
 const originalEnv = { ...process.env };
 const serverReleaseEnvKeys = [
+  "KAMAL_VERSION",
+  "KAMAL_CONTAINER_NAME",
   "VERCEL_GIT_COMMIT_SHA",
   "RENDER_GIT_COMMIT",
   "RELEASE_SHA",
@@ -118,6 +120,21 @@ describe("createLogger", () => {
       render_service_id: "srv_123",
       render_instance_id: "inst_123",
       session_id: "ses_123",
+    });
+  });
+
+  it("reports the Kamal release and container on server logs", () => {
+    process.env.KAMAL_VERSION = "kamal-sha";
+    process.env.KAMAL_CONTAINER_NAME = "opencompany-runner-web-kamal-sha";
+    process.env.RENDER_GIT_COMMIT = "render-sha";
+    const logger = createLogger({ service: "opencompany-test", runtime: "server" });
+
+    logger.info("Hello from Kamal");
+
+    const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
+    expect(record).toMatchObject({
+      release: "kamal-sha",
+      instance_id: "opencompany-runner-web-kamal-sha",
     });
   });
 

@@ -7,6 +7,7 @@ import { findLastSuccessfulSurfaceSha } from "./lib/release-deployments.mjs";
 import {
   databaseChanged,
   finalizeReleasePlan,
+  forcedManualSurfaces,
   planReleaseSurfaces,
   RELEASE_STATE_SURFACES,
   RELEASE_SURFACES,
@@ -29,8 +30,17 @@ async function main() {
     (surface) =>
       (surface === "api" && !options.deployApi) || (surface === "runner" && !options.deployRunner),
   );
-  // A full release needs no ranges, except to prove that a skipped Render surface is unchanged.
-  const rangedSurfaces = options.deployAll ? skippedSurfaces : RELEASE_STATE_SURFACES;
+  const forcedSurfaces = forcedManualSurfaces(options);
+  // A full release needs ranges only for surfaces it does not force, and to prove that a skipped
+  // API or runner is unchanged.
+  const rangedSurfaces = options.deployAll
+    ? [
+        ...new Set([
+          ...skippedSurfaces,
+          ...RELEASE_SURFACES.filter((surface) => !forcedSurfaces.includes(surface)),
+        ]),
+      ]
+    : RELEASE_STATE_SURFACES;
   const baseBySurface = Object.fromEntries(RELEASE_STATE_SURFACES.map((surface) => [surface, ""]));
   if (rangedSurfaces.length > 0) {
     const repository = requiredEnv("GITHUB_REPOSITORY");
@@ -56,7 +66,7 @@ async function main() {
   const requestedSurfaces = {};
   for (const surface of RELEASE_SURFACES) {
     requestedSurfaces[surface] =
-      options.deployAll ||
+      forcedSurfaces.includes(surface) ||
       rangeSelectsSurface(surface, baseBySurface[surface], headSha, rangeCache);
   }
   const staleSurfaces = skippedChangedSurfaces({
@@ -162,9 +172,10 @@ function readChangedFiles(baseSha, headSha) {
 }
 
 function parseArgs(args) {
-  const parsed = { deployAll: false, deployApi: true, deployRunner: true };
+  const parsed = { deployAll: false, changedSitesOnly: false, deployApi: true, deployRunner: true };
   for (const arg of args) {
     if (arg === "--all") parsed.deployAll = true;
+    else if (arg === "--changed-sites-only") parsed.changedSitesOnly = true;
     else if (arg === "--skip-api") parsed.deployApi = false;
     else if (arg === "--skip-runner") parsed.deployRunner = false;
     else throw new Error(`Unknown argument: ${arg}`);

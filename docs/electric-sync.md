@@ -33,6 +33,14 @@ Render Blueprint pins the Electric image by digest, attaches a 20 GB persistent 
 the same `ELECTRIC_SECRET`, `ELECTRIC_AUTH_MODE=self-hosted`, and
 `BUN_CONFIG_MAX_HTTP_REQUESTS=4096` for the Bun read-model proxy.
 
+The Hetzner move adds a second production Electric: a Kamal accessory of the API,
+`opencompany-api-electric`, on the private `kamal` Docker network with the same image digest, the
+named volume `opencompany-electric-data` at `/var/electric`, and its own `opencompany_hetzner_v1`
+stream. It reads `/electric`'s `DATABASE_URL` and shares `ELECTRIC_SECRET` with the API. The Kamal
+API reaches it through `ELECTRIC_URL=http://opencompany-api-electric:3000` in
+`apps/api/config/deploy.yml`, while `/api` keeps the Render URL for the Render API. Both run until
+the Render services are deleted; [hosting](hosting.md#electric) covers restarts and rebuilds.
+
 The disk state and Postgres replication resources are one consistency unit. Do not change
 `ELECTRIC_STORAGE_DIR`, `ELECTRIC_REPLICATION_STREAM_ID`, or `DATABASE_URL`, clear the disk, or drop
 the corresponding publication/slot independently. A deliberate rebuild must start with a fresh

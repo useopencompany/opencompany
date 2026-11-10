@@ -1,3 +1,4 @@
+import { deployedRelease } from "@opencompany/observability/release";
 import { OTLPMetricExporter } from "@opentelemetry/exporter-metrics-otlp-http";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
@@ -32,10 +33,11 @@ export function registerNodeObservability(input: { serviceName?: string } = {}) 
     exportIntervalMillis: OTEL_METRIC_EXPORT_INTERVAL_MS,
   });
 
+  const release = deployedRelease();
   sdk = new NodeSDK({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: input.serviceName ?? OBSERVABILITY_SERVICE_NAME,
-      ...(readRelease() ? { [ATTR_SERVICE_VERSION]: readRelease() } : {}),
+      ...(release ? { [ATTR_SERVICE_VERSION]: release } : {}),
     }),
     traceExporter,
     metricReader,
@@ -76,13 +78,4 @@ function metricsEndpoint(endpoint: string) {
   return endpoint.replace(/\/+$/, "").endsWith("/v1/metrics")
     ? endpoint.replace(/\/+$/, "")
     : `${endpoint.replace(/\/+$/, "")}/v1/metrics`;
-}
-
-function readRelease() {
-  return (
-    process.env.VERCEL_GIT_COMMIT_SHA ??
-    process.env.RENDER_GIT_COMMIT ??
-    process.env.OBSERVABILITY_RELEASE ??
-    undefined
-  );
 }

@@ -78,5 +78,6 @@ notice policy, and contribution terms are documented in [OPEN_SOURCE.md](./OPEN_
 - [Database and migrations](./docs/database.md)
 - [Runner](./docs/runner.md)
 - [Deployment](./docs/deployment.md)
+- [Hosting](./docs/hosting.md)
 - [Environment variables](./docs/env-vars.md)
 - [Secret management](./docs/secret-management.md)

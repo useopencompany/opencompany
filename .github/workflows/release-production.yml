@@ -13,6 +13,10 @@ on:
         description: Deploy the Render runner (required when it changed since its last release)
         type: boolean
         default: true
+      redeploy_sites:
+        description: Redeploy web, marketing and docs even when unchanged since their last release
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -103,12 +107,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           DEPLOY_API_INPUT: ${{ inputs.deploy_api }}
           DEPLOY_RUNNER_INPUT: ${{ inputs.deploy_runner }}
+          REDEPLOY_SITES_INPUT: ${{ inputs.redeploy_sites }}
         run: |
           args=()
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             args+=(--all)
             if [[ "$DEPLOY_API_INPUT" != "true" ]]; then args+=(--skip-api); fi
             if [[ "$DEPLOY_RUNNER_INPUT" != "true" ]]; then args+=(--skip-runner); fi
+            if [[ "$REDEPLOY_SITES_INPUT" != "true" ]]; then args+=(--changed-sites-only); fi
           fi
           node scripts/release-plan.mjs "${args[@]}"
 

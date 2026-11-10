@@ -62,7 +62,12 @@ import {
   type WorkflowApplicationService,
   type WorkflowMemory,
 } from "@opencompany/core";
-import { captureException, createLogger, type LogFields } from "@opencompany/observability";
+import {
+  captureException,
+  createLogger,
+  deployedRelease,
+  type LogFields,
+} from "@opencompany/observability";
 import type { SessionPullRequestDto } from "@opencompany/protocol";
 import {
   createOpenApiDocument,
@@ -2951,11 +2956,7 @@ export function createApiApp(input: CreateApiAppInput) {
       capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
       environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
       protocolVersion: PROTOCOL_VERSION,
-      release:
-        process.env.RENDER_GIT_COMMIT ??
-        process.env.OBSERVABILITY_RELEASE ??
-        process.env.GITHUB_SHA ??
-        null,
+      release: deployedRelease() ?? null,
       renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
     }),
   );
