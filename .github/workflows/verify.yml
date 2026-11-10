@@ -112,18 +112,14 @@ jobs:
           fi
           echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
-      - name: Setup Ruby for Kamal
-        if: ${{ steps.kamal.outputs.changed == 'true' }}
-        uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
-        with:
-          ruby-version: "3.4"
-
-      # `kamal config` parses config/deploy.yml and .kamal/secrets the way a deploy does. The empty
+      # `kamal config` parses config/deploy.yml and .kamal/secrets the way a deploy does, on the
+      # image's Ruby because the repository's action allowlist has no Ruby setup action. The empty
       # environment proves neither depends on a value only production holds.
       - name: Check Kamal configs
         if: ${{ steps.kamal.outputs.changed == 'true' }}
         run: |
-          gem install kamal -v 2.12.0 --no-document
+          gem install --user-install kamal -v 2.12.0 --no-document
+          PATH="$(ruby -e 'print File.join(Gem.user_dir, "bin")'):$PATH"
           for app in api runner; do
             (cd "apps/$app" && env -i PATH="$PATH" HOME="$HOME" kamal config > /dev/null)
           done

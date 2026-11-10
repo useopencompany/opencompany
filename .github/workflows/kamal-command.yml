@@ -16,10 +16,6 @@ on:
         type: string
         default: kamal app details
         required: true
-      setup_docker_cache:
-        description: Set up the Docker builder, for commands that build an image (kamal build push).
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -117,27 +113,27 @@ jobs:
             exit 1
           fi
 
-      - uses: ruby/setup-ruby@b3aaceaef7e0ee231b499e7b5f49c03fc1d32199 # v1.338.0
-        with:
-          ruby-version: "3.4"
-
+      # The repository allows only a short list of actions, so Kamal runs on the image's own Ruby
+      # and the key goes into a plain ssh-agent.
       - name: Install Kamal
-        run: gem install kamal -v 2.12.0 --no-document
+        run: |
+          gem install --user-install kamal -v 2.12.0 --no-document
+          ruby -e 'puts File.join(Gem.user_dir, "bin")' >> "$GITHUB_PATH"
 
-      - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        with:
-          ssh-private-key: ${{ env.VM_SSH_PRIVATE_KEY }}
+      - name: Load the deploy key into ssh-agent
+        run: |
+          eval "$(ssh-agent -s)" > /dev/null
+          ssh-add - <<< "$VM_SSH_PRIVATE_KEY"
+          {
+            echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+            echo "SSH_AGENT_PID=$SSH_AGENT_PID"
+          } >> "$GITHUB_ENV"
 
       # The server's host keys from Infisical, so SSH never trusts a key on first use.
       - name: Trust the server's host keys
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$VM_SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
-
-      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
-        if: ${{ inputs.setup_docker_cache }}
-        with:
-          cache-key: opencompany/${{ inputs.app }}-image
 
       # Through an environment variable, so the input is never spliced into the script.
       - name: Run the command
@@ -156,3 +152,7 @@ jobs:
         if: ${{ cancelled() }}
         working-directory: apps/${{ inputs.app }}
         run: kamal lock release
+
+      - name: Stop ssh-agent
+        if: ${{ always() && env.SSH_AGENT_PID != '' }}
+        run: ssh-agent -k > /dev/null
