@@ -1,0 +1,167 @@
+name: Kamal Command
+
+# Runs one Kamal command against production from apps/<app>, with the credentials a release uses:
+# for example `kamal app logs -n 200`, `kamal app details` or `kamal rollback <sha>`.
+# docs/hosting.md lists common commands.
+on:
+  workflow_dispatch:
+    inputs:
+      app:
+        description: The app whose Kamal config to use.
+        type: choice
+        options: [api, runner]
+        required: true
+      command:
+        description: The Kamal command to run.
+        type: string
+        default: kamal app details
+        required: true
+      setup_docker_cache:
+        description: Set up the Docker builder, for commands that build an image (kamal build push).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Its own group: sharing the release's would let a queued command drop a waiting release. Kamal's
+# lock on the server already stops a deploying command from running during a release.
+concurrency:
+  group: kamal-command
+  cancel-in-progress: false
+
+jobs:
+  kamal:
+    name: Kamal on ${{ inputs.app }}
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    env:
+      KAMAL_REGISTRY_USERNAME: ${{ github.actor }}
+      KAMAL_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+      INFISICAL_DOMAIN: "https://infisical.opencompany.cloud"
+      INFISICAL_PROJECT_SLUG: "opencompany-xqub"
+      INFISICAL_ENV_SLUG: "prod"
+    steps:
+      - name: Require main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::Kamal commands must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # SSH key, known hosts and anything else the deploy itself needs.
+      - name: Fetch release secrets from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /release
+
+      # The Electric accessory runs in the API's Kamal config. `/electric` names its database URL
+      # DATABASE_URL, so it is exported as ELECTRIC_DATABASE_URL before `/api` loads.
+      - name: Fetch Electric secrets from Infisical
+        if: ${{ inputs.app == 'api' }}
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /electric
+
+      - name: Rename Electric secrets
+        if: ${{ inputs.app == 'api' }}
+        run: |
+          {
+            echo "ELECTRIC_DATABASE_URL=$DATABASE_URL"
+            echo "ELECTRIC_ACCESSORY_SECRET=$ELECTRIC_SECRET"
+            echo "DATABASE_URL="
+          } >> "$GITHUB_ENV"
+
+      # Loaded last, so the app's folder wins a key `/release` also holds.
+      - name: Fetch ${{ inputs.app }} secrets from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /${{ inputs.app }}
+
+      # The API and the accessory both read ELECTRIC_SECRET from the job, which now holds `/api`'s
+      # value. A different `/electric` value means the folders drifted.
+      - name: Require one Electric secret
+        if: ${{ inputs.app == 'api' }}
+        run: |
+          if [[ -z "$ELECTRIC_DATABASE_URL" || -z "$ELECTRIC_SECRET" ]]; then
+            echo "::error::Infisical /electric DATABASE_URL and /api ELECTRIC_SECRET must be set."
+            exit 1
+          fi
+          if [[ "$ELECTRIC_SECRET" != "$ELECTRIC_ACCESSORY_SECRET" ]]; then
+            echo "::error::ELECTRIC_SECRET differs between Infisical /api and /electric."
+            exit 1
+          fi
+
+      # The repository allows only a short list of actions, so Kamal runs on the image's own Ruby
+      # and the key goes into a plain ssh-agent.
+      - name: Install Kamal
+        run: |
+          gem install --user-install kamal -v 2.12.0 --no-document
+          ruby -e 'puts File.join(Gem.user_dir, "bin")' >> "$GITHUB_PATH"
+
+      - name: Load the deploy key into ssh-agent
+        run: |
+          eval "$(ssh-agent -s)" > /dev/null
+          ssh-add - <<< "$VM_SSH_PRIVATE_KEY"
+          {
+            echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+            echo "SSH_AGENT_PID=$SSH_AGENT_PID"
+          } >> "$GITHUB_ENV"
+
+      # The server's host keys from Infisical, so SSH never trusts a key on first use.
+      - name: Trust the server's host keys
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VM_SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+
+      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+        if: ${{ inputs.setup_docker_cache }}
+        with:
+          cache-key: opencompany/${{ inputs.app }}-image
+
+      # Through an environment variable, so the input is never spliced into the script.
+      - name: Run the command
+        working-directory: apps/${{ inputs.app }}
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: |
+          if [[ ! "$COMMAND" =~ ^kamal[[:space:]] ]]; then
+            echo "::error::The command must start with kamal."
+            exit 1
+          fi
+          bash -c "$COMMAND"
+
+      # A cancelled deploy leaves Kamal's lock on the server, which would block the next one.
+      - name: Release the deploy lock
+        if: ${{ cancelled() }}
+        working-directory: apps/${{ inputs.app }}
+        run: kamal lock release
+
+      - name: Stop ssh-agent
+        if: ${{ always() && env.SSH_AGENT_PID != '' }}
+        run: ssh-agent -k > /dev/null

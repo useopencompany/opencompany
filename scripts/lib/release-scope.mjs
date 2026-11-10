@@ -12,7 +12,7 @@ const PACKAGE_SURFACES = new Map([
 ]);
 
 const ALL_SURFACES = RELEASE_SURFACES;
-const VERCEL_SURFACES = ["web", "marketing", "docs"];
+export const VERCEL_SURFACES = ["web", "marketing", "docs"];
 
 const FORCE_RULES = [
   { files: [".github/workflows/release-production.yml"], surfaces: ALL_SURFACES },
@@ -111,6 +111,16 @@ export function skippedChangedSurfaces({ changedSurfaces, deployApi = true, depl
     ...(!deployApi && changedSurfaces.api ? ["api"] : []),
     ...(!deployRunner && changedSurfaces.runner ? ["runner"] : []),
   ];
+}
+
+// A manual release deploys every surface, except that `changedSitesOnly` leaves the Vercel sites
+// to their changes since their last successful release, like a push does. The runner certificate
+// workflow uses it to redeploy the runner without rebuilding unchanged sites.
+export function forcedManualSurfaces({ deployAll = false, changedSitesOnly = false } = {}) {
+  if (!deployAll) return [];
+  return changedSitesOnly
+    ? RELEASE_SURFACES.filter((surface) => !VERCEL_SURFACES.includes(surface))
+    : RELEASE_SURFACES;
 }
 
 export function databaseChanged({ affectedPackages = [], changedFiles = [] } = {}) {

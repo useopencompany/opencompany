@@ -1,0 +1,155 @@
+name: Renew Runner Certificate
+
+# kamal-proxy serves one certificate for runner.opencompany.chat, work.opencompany.space and
+# *.work.opencompany.space. Let's Encrypt's HTTP challenge cannot issue the wildcard, so this
+# workflow issues it with a DNS challenge against Vercel DNS and stores it in Infisical `/runner`.
+# kamal-proxy reads it on the next runner deploy. docs/hosting.md#runner-certificate has the details.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      staging:
+        description: Issue from Let's Encrypt staging and print it, without storing it
+        type: boolean
+        default: false
+      force_renewal:
+        description: Renew even when the stored certificate has more than 30 days left
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renew-runner-cert
+  cancel-in-progress: false
+
+jobs:
+  renew:
+    name: Renew the runner certificate
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    environment: production
+    permissions:
+      contents: read
+      # Dispatches a runner release when the served certificate is about to expire.
+      actions: write
+    env:
+      INFISICAL_DOMAIN: "https://infisical.opencompany.cloud"
+      INFISICAL_PROJECT_SLUG: "opencompany-xqub"
+      INFISICAL_ENV_SLUG: "prod"
+      LEGO_VERSION: "4.35.2"
+      LEGO_SHA256: "ee5be4bf457de8e3efa86a51651c75c87f0ee0e4e9f3ae14f6034d68365770f3"
+      STAGING: ${{ inputs.staging == true }}
+    steps:
+      - name: Require main
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: |
+          echo "::error::The certificate workflow must run from main. Current ref: $GITHUB_REF"
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+
+      # VERCEL_DNS_API_TOKEN and VERCEL_ORG_ID for the DNS challenge.
+      - name: Fetch release secrets from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /release
+
+      # The stored RUNNER_TLS_CERTIFICATE_PEM and RUNNER_TLS_PRIVATE_KEY_PEM.
+      - name: Fetch runner secrets from Infisical
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /runner
+
+      - name: Decide whether to renew
+        id: plan
+        env:
+          FORCE_RENEWAL: ${{ inputs.force_renewal == true || inputs.staging == true }}
+        run: node scripts/runner-cert.mjs plan
+
+      - name: Install lego
+        if: ${{ steps.plan.outputs.renew == 'true' }}
+        run: |
+          archive="lego_v${LEGO_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/go-acme/lego/releases/download/v${LEGO_VERSION}/$archive"
+          echo "$LEGO_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" lego
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+          echo "LEGO_PATH=$RUNNER_TEMP/lego" >> "$GITHUB_ENV"
+
+      # lego names the files after the first domain. The .crt holds the full chain.
+      - name: Issue the certificate
+        if: ${{ steps.plan.outputs.renew == 'true' }}
+        env:
+          VERCEL_API_TOKEN: ${{ env.VERCEL_DNS_API_TOKEN }}
+          VERCEL_TEAM_ID: ${{ env.VERCEL_ORG_ID }}
+        run: |
+          if [[ -z "$VERCEL_API_TOKEN" ]]; then
+            echo "::error::Infisical /release must hold VERCEL_DNS_API_TOKEN."
+            exit 1
+          fi
+          server=https://acme-v02.api.letsencrypt.org/directory
+          if [[ "$STAGING" == "true" ]]; then server=https://acme-staging-v02.api.letsencrypt.org/directory; fi
+          lego --accept-tos --path "$LEGO_PATH" --server "$server" \
+            --dns vercel --dns.resolvers 1.1.1.1:53 \
+            --domains runner.opencompany.chat \
+            --domains work.opencompany.space \
+            --domains '*.work.opencompany.space' \
+            run
+
+      - name: Store the certificate in Infisical
+        if: ${{ steps.plan.outputs.renew == 'true' }}
+        env:
+          INFISICAL_MACHINE_IDENTITY_CLIENT_ID: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+        run: |
+          args=(store
+            --certificate "$LEGO_PATH/certificates/runner.opencompany.chat.crt"
+            --key "$LEGO_PATH/certificates/runner.opencompany.chat.key")
+          if [[ "$STAGING" == "true" ]]; then args+=(--dry-run); fi
+          node scripts/runner-cert.mjs "${args[@]}"
+
+      # kamal-proxy keeps the certificate it loaded at the last runner deploy. Once that one has 10
+      # days or less and Infisical holds a newer one, a runner-only release loads the new one.
+      - name: Check the served certificate
+        id: served
+        if: ${{ inputs.staging != true }}
+        env:
+          RENEWED: ${{ steps.plan.outputs.renew }}
+        run: |
+          args=(check-served)
+          if [[ "$RENEWED" == "true" ]]; then
+            args+=(--certificate "$LEGO_PATH/certificates/runner.opencompany.chat.crt")
+          fi
+          node scripts/runner-cert.mjs "${args[@]}"
+
+      - name: Release the runner
+        if: ${{ steps.served.outputs.action == 'redeploy' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run release-production.yml --ref main \
+            -f deploy_api=false -f deploy_runner=true -f redeploy_sites=false
+          echo "::notice::Dispatched a runner release to load the renewed certificate."

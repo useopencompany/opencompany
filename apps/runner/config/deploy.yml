@@ -1,0 +1,159 @@
+# The release workflow deploys this from apps/runner with `kamal deploy`. docs/hosting.md covers
+# the server, the manual commands, the TLS certificate and the Render cutover.
+service: opencompany-runner
+image: useopencompany/opencompany-runner
+
+servers:
+  web:
+    hosts:
+      - 91.99.204.222
+    options:
+      # For a `docker stop` without -t, such as a daemon restart.
+      stop-timeout: 300
+
+proxy:
+  # The runner serves browsers, sandboxes and signed workspace previews, so it sits behind
+  # kamal-proxy like the API. Let's Encrypt's HTTP challenge cannot issue the wildcard, so
+  # .github/workflows/renew-runner-cert.yml issues one certificate for all three hosts with a DNS
+  # challenge and stores it in Infisical `/runner`. kamal-proxy reads it on each deploy.
+  ssl:
+    certificate_pem: RUNNER_TLS_CERTIFICATE_PEM
+    private_key_pem: RUNNER_TLS_PRIVATE_KEY_PEM
+  hosts:
+    - runner.opencompany.chat
+    - work.opencompany.space
+    - "*.work.opencompany.space"
+  app_port: 3040
+  healthcheck:
+    path: /healthz
+    interval: 3
+    timeout: 5
+  # Dictation and chat streams hold a request open; see apps/api/config/deploy.yml.
+  response_timeout: 0
+  buffering:
+    responses: false
+
+# kamal-proxy stops routing to the old runner after 30 seconds of in-flight requests. Then
+# `docker stop -t 300`: the runner stops claiming and drains its jobs within the 300 seconds
+# Render allowed too (apps/runner/src/index.ts).
+drain_timeout: 30
+stop_timeout: 300
+# Boot and the first /healthz answer must finish within this.
+deploy_timeout: 120
+retain_containers: 3
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  context: ../..
+  # Relative to this directory: Kamal passes it to `docker buildx build --file` from here.
+  dockerfile: ../../Dockerfile.runner
+  # The selected buildx builder: Blacksmith's cached builder in CI.
+  driver: docker
+
+logging:
+  options:
+    max-size: 50m
+
+# scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets, the runner group
+# in scripts/release-preflight.mjs and the runner keys in render.yaml.
+env:
+  clear:
+    NODE_ENV: production
+    PORT: "3040"
+  secret:
+    - DATABASE_URL
+    - RUNNER_DATABASE_URL
+    - RUNNER_WORKER_CONCURRENCY
+    - RUNNER_DB_POOL_MAX
+    - RUNNER_JOB_LEASE_TTL_MS
+    - RUNNER_INTERNAL_TOKEN
+    - OPENCOMPANY_API_ORIGIN
+    - API_INTERNAL_TOKEN
+    - RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED
+    - RUNNER_SANDBOX_NAMESPACE
+    - NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
+    - NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
+    - NEXT_PUBLIC_POSTHOG_TOKEN
+    - NEXT_PUBLIC_POSTHOG_HOST
+    - OPENCOMPANY_NEXT_PUBLIC_APP_URL
+    - RUNNER_STREAM_TOKEN_SECRET
+    - INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
+    - RUNNER_ALLOWED_ORIGINS
+    - RUNNER_PREVIEW_BASE_DOMAIN
+    - RUNNER_PREVIEW_PROTOCOL
+    - E2B_API_KEY
+    - OPENCOMPANY_BROWSER_PROFILES_ENABLED
+    - OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH
+    - BROWSERBASE_API_KEY
+    - BROWSERBASE_PROJECT_ID
+    - VERCEL_AI_GATEWAY_API_KEY
+    - OPENCOMPANY_OBSERVABILITY_ENABLED
+    - OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT
+    - OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
+    - OPENAI_CODEX_API_KEY
+    - BLOB_READ_WRITE_TOKEN
+    - REDIS_URL
+    - EXA_API_KEY
+    - KAPSO_API_KEY
+    - KAPSO_PHONE_NUMBER_ID
+    - WHATSAPP_LINE_HANDLE
+    - MESSAGES_API_KEY
+    - MESSAGES_LINE_HANDLE
+    - APIFY_API_TOKEN
+    - MONID_API_KEY
+    - GITHUB_USER_APP_CLIENT_ID
+    - GITHUB_USER_APP_CLIENT_SECRET
+    - SENTRY_APP_CLIENT_ID
+    - SENTRY_APP_CLIENT_SECRET
+    - SENTRY_APP_SLUG
+    - GOOGLE_OAUTH_CLIENT_ID
+    - GOOGLE_OAUTH_CLIENT_SECRET
+    - OPENCOMPANY_X_CLIENT_ID
+    - OPENCOMPANY_X_CLIENT_SECRET
+    - OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
+    - OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET
+    - RUNNER_OPENCOMPANY_BROWSER_ENABLED
+    - OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL
+    - OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD
+    - OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE
+    - RUNNER_CODEX_MODEL
+    - RUNNER_CODEX_TIMEOUT_MS
+    - RUNNER_CODEX_API_KEY_FALLBACK_ENABLED
+    - RUNNER_OPENCOMPANY_CODEX_CHAT_IDLE_TIMEOUT_MS
+    - RUNNER_OPENCOMPANY_CODEX_CHAT_LEASE_TTL_MS
+    - OPENAI_API_KEY
+    - OPENCOMPANY_DICTATION_REALTIME_MODEL
+    - OPENCOMPANY_DICTATION_FINAL_MODEL
+    - OPENCOMPANY_CHAT_ACTIONS_KILL_SWITCH
+    - OPENCOMPANY_CHAT_SANDBOX_IMAGE
+    - OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH
+    - OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS
+    - OPENCOMPANY_REVOLUT_BUSINESS_WORKSPACE_ID
+    - OPENCOMPANY_REVOLUT_BUSINESS_API_TOKEN
+    - OPENCOMPANY_REVOLUT_BUSINESS_ACCOUNT_LABEL
+    - OPENCOMPANY_REVOLUT_BUSINESS_API_BASE_URL
+    - RUNNER_INSTANCE_ID
+    - BETTER_STACK_ERRORS_DSN
+    - OBSERVABILITY_ENABLED
+    - OBSERVABILITY_ENV
+    - OBSERVABILITY_RELEASE
+    - OBSERVABILITY_LOG_LEVEL
+    - OBSERVABILITY_TIMING
+    - BRAINTRUST_ENABLED
+    - BRAINTRUST_API_KEY
+    - BRAINTRUST_PROJECT_ID
+    - BRAINTRUST_PROJECT_NAME
+    - LATITUDE_API_KEY
+    - LATITUDE_PROJECT_SLUG
+    - LATITUDE_SERVICE_NAME
+    - LATITUDE_TELEMETRY_DISABLED
+    - RUNNER_PUBLIC_URL
+ssh:
+  user: main

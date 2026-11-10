@@ -350,8 +350,8 @@ describe("canonical Hono API", () => {
   });
 
   it("reports the deployed API release for expected-SHA health gates", async () => {
-    const previousRelease = process.env.RENDER_GIT_COMMIT;
-    process.env.RENDER_GIT_COMMIT = "api-release-sha";
+    vi.stubEnv("KAMAL_VERSION", "kamal-release-sha");
+    vi.stubEnv("RENDER_GIT_COMMIT", "render-release-sha");
     try {
       const response = await testApp(fakeRepository()).request("/healthz");
 
@@ -361,15 +361,11 @@ describe("canonical Hono API", () => {
         service: "opencompany-api",
         capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
         protocolVersion: PROTOCOL_VERSION,
-        release: "api-release-sha",
-        renderGitCommit: "api-release-sha",
+        release: "kamal-release-sha",
+        renderGitCommit: "render-release-sha",
       });
     } finally {
-      if (previousRelease === undefined) {
-        delete process.env.RENDER_GIT_COMMIT;
-      } else {
-        process.env.RENDER_GIT_COMMIT = previousRelease;
-      }
+      vi.unstubAllEnvs();
     }
   });
 

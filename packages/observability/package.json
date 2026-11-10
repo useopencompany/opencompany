@@ -12,6 +12,10 @@
       "types": "./src/braintrust.ts",
       "default": "./src/braintrust.ts"
     },
+    "./release": {
+      "types": "./src/release.ts",
+      "default": "./src/release.ts"
+    },
     "./sentry-bun": {
       "types": "./src/sentry-bun.ts",
       "default": "./src/sentry-bun.ts"

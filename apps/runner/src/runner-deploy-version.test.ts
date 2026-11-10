@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { recoveryReasonForDeployVersions, runnerDeployVersion } from "./runner-deploy-version";
 
 describe("runnerDeployVersion", () => {
-  it("prefers the Render commit and has a stable local fallback", () => {
+  it("prefers the platform commit and has a stable local fallback", () => {
+    expect(
+      runnerDeployVersion({
+        KAMAL_VERSION: "kamal_1",
+        RENDER_GIT_COMMIT: "commit_1",
+      } as NodeJS.ProcessEnv),
+    ).toBe("kamal_1");
     expect(
       runnerDeployVersion({
         RENDER_GIT_COMMIT: "commit_1",

@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/bun";
 import {
   createLogger,
+  deployedRelease,
   errorToLogFields,
   isObservabilityEnabled,
   type LogFields,
@@ -41,11 +42,7 @@ export function installBunExceptionReporter(input: BunExceptionReporterInput): b
     dsn,
     environment:
       input.environment ?? process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
-    release:
-      input.release ??
-      process.env.OBSERVABILITY_RELEASE ??
-      process.env.RENDER_GIT_COMMIT ??
-      process.env.VERCEL_GIT_COMMIT_SHA,
+    release: input.release ?? deployedRelease(),
     serverName: input.serviceName,
     initialScope: { tags: { service: input.serviceName } },
     sendDefaultPii: false,

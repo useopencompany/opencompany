@@ -1,5 +1,5 @@
 import { INFISICAL_US_HOST, isInfisicalHost } from "@opencompany/db/infisical-auth";
-import { createLogger } from "@opencompany/observability";
+import { createLogger, deployedRelease } from "@opencompany/observability";
 import Fastify from "fastify";
 import { registerAcpToolsMcpRoute } from "./acp-tools-mcp";
 import { alwaysAllowAction } from "./action-permissions";
@@ -70,11 +70,7 @@ export function createServer(
       personalPluginsAuthorization: "v1",
     },
     environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
-    release:
-      process.env.RENDER_GIT_COMMIT ??
-      process.env.VERCEL_GIT_COMMIT_SHA ??
-      process.env.OBSERVABILITY_RELEASE ??
-      null,
+    release: deployedRelease() ?? null,
     renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
   }));
 

@@ -151,6 +151,8 @@
     "VERCEL_ENV",
     "VERCEL_GIT_COMMIT_SHA",
     "RENDER_GIT_COMMIT",
+    "KAMAL_VERSION",
+    "KAMAL_CONTAINER_NAME",
     "REDIS_URL"
   ],
   "tasks": {

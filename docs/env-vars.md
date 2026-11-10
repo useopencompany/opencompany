@@ -17,7 +17,7 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `prod` `/web` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
 | `prod` `/api` | Render product API | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
 | `prod` `/electric` | Render Electric sync service | direct production database URL, service auth, persistent storage path, and replication-stream identity |
-| `prod` `/runner` | Render runner | production worker and broker configuration |
+| `prod` `/runner` | Render runner, then Kamal | production worker and broker configuration, and kamal-proxy's runner TLS certificate |
 | `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials, Sentry artifact upload credential, and public mobile configuration |
 | `prod` `/desktop` | GitHub Actions | macOS Developer ID certificate and App Store Connect notarization key |
 | `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
@@ -65,10 +65,22 @@ contracts include:
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
   enabled task-worker gate, the stable `RUNNER_SANDBOX_NAMESPACE` that scopes managed E2B cleanup,
   E2B, Blob (including Plugin data archives), model providers,
-  GitHub/Google/X integration credentials, opencompany PostHog, and Redis values; capability
-  controls and provider-specific tuning remain optional.
+  GitHub/Google/X integration credentials, opencompany PostHog, Redis values, and
+  `RUNNER_PUBLIC_URL`; capability controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel/Render credentials and project/service IDs (including
-  `DOCS_VERCEL_PROJECT_ID`), and opencompany/API/runner URLs.
+  `DOCS_VERCEL_PROJECT_ID`), opencompany/API/runner URLs, the Hetzner server's SSH key and known
+  hosts (`VM_SSH_PRIVATE_KEY`, `VM_SSH_KNOWN_HOSTS`), and `VERCEL_DNS_API_TOKEN` for the runner
+  certificate's DNS challenge.
+
+`RUNNER_PUBLIC_URL` is the runner origin that browsers and sandboxes reach. It is required in prod
+`/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. The runner still
+falls back to Render's `RENDER_EXTERNAL_URL` while Render hosts it; the Kamal deploy has no such
+fallback. `RUNNER_TLS_CERTIFICATE_PEM` and `RUNNER_TLS_PRIVATE_KEY_PEM` in `/runner` are written by
+`.github/workflows/renew-runner-cert.yml` and read only by kamal-proxy, never the container. See
+[hosting](./hosting.md#runner-certificate).
+
+Kamal sets `KAMAL_VERSION` (the deployed commit SHA) and `KAMAL_CONTAINER_NAME` in each container.
+The services report them as their release and log `instance_id`; never set them by hand.
 
 Browser clients call the non-secret `NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN` directly for commands and
 authorized read models. Server Components use the server-only `OPENCOMPANY_API_ORIGIN`. Configure both

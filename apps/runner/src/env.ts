@@ -24,8 +24,8 @@ export type RunnerEnv = {
   openaiApiKey?: string | undefined;
   dictationRealtimeModel?: string | undefined;
   dictationFinalModel?: string | undefined;
-  // Browser/sandbox-reachable runner origin. Render supplies RENDER_EXTERNAL_URL in hosted
-  // services; RUNNER_PUBLIC_URL is the explicit local and non-Render override.
+  // Browser/sandbox-reachable runner origin. Production sets RUNNER_PUBLIC_URL; the
+  // RENDER_EXTERNAL_URL fallback covers the Render service until it is deleted.
   runnerPublicUrl?: string | undefined;
   // Wildcard preview hostname routed to this runner, for example preview.opencompany.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
