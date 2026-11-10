@@ -82,9 +82,11 @@ async function checkServed() {
   const stored = inspectCertificate({ certificatePem: storedPem, privateKeyPem: "" });
   const host = RUNNER_TLS_HOSTS[0];
   const served = await servedCertificate(host);
-  const action = servedCertificateAction({ served, storedFingerprint: stored.fingerprint });
+  const action = servedCertificateAction({ served, stored });
 
-  if (served) {
+  if (served?.expired) {
+    console.log(`${host} serves an expired certificate.`);
+  } else if (served) {
     console.log(
       `${host} serves ${served.fingerprint} for ${served.hosts.join(", ")}, expiring ${served.notAfter} (${Math.floor(served.daysLeft)} days).`,
     );
@@ -97,7 +99,7 @@ async function checkServed() {
     console.log("The served certificate is about to expire and Infisical holds a newer one.");
   } else if (action === "renewal-failed") {
     throw new Error(
-      `${host} serves a certificate that expires in ${Math.floor(served.daysLeft)} days, and Infisical holds no newer one. Renew it with force_renewal.`,
+      `${host} serves a certificate that ${served.expired ? "has expired" : `expires in ${Math.floor(served.daysLeft)} days`}, and Infisical holds no newer one. Renew it with force_renewal.`,
     );
   }
   writeOutput("action", action);
@@ -105,7 +107,7 @@ async function checkServed() {
 
 function servedCertificate(host) {
   return new Promise((resolve, reject) => {
-    const socket = connect({ host, port: 443, servername: host, rejectUnauthorized: false });
+    const socket = connect({ host, port: 443, servername: host });
     socket.setTimeout(15_000, () => socket.destroy(new Error(`${host}:443 timed out.`)));
     socket.once("secureConnect", () => {
       const certificate = socket.getPeerCertificate();
@@ -120,6 +122,7 @@ function servedCertificate(host) {
     });
     socket.once("error", (error) => {
       if (error.code === "ENOTFOUND") resolve(null);
+      else if (error.code === "CERT_HAS_EXPIRED") resolve({ expired: true });
       else reject(new Error(`Could not read the certificate ${host} serves: ${error.message}`));
     });
   });

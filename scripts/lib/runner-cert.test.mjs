@@ -99,22 +99,39 @@ test("forces a runner release only when kamal-proxy serves an expiring, replaced
     fingerprint,
     hosts,
   });
-  assert.equal(servedCertificateAction({ served: null, storedFingerprint: "A" }), "not-served");
+  const stored = (fingerprint, daysLeft = 89) => ({ fingerprint, daysLeft });
+  assert.equal(servedCertificateAction({ served: null, stored: stored("A") }), "not-served");
   // Vercel's wildcard answers for runner.opencompany.chat until the cutover.
   assert.equal(
     servedCertificateAction({
       served: served(5, "V", ["*.opencompany.chat", "opencompany.chat"]),
-      storedFingerprint: "A",
+      stored: stored("A"),
     }),
     "not-served",
   );
-  assert.equal(servedCertificateAction({ served: served(40, "A"), storedFingerprint: "B" }), "ok");
+  assert.equal(servedCertificateAction({ served: served(40, "A"), stored: stored("B") }), "ok");
   assert.equal(
-    servedCertificateAction({ served: served(9, "A"), storedFingerprint: "B" }),
+    servedCertificateAction({ served: served(9, "A"), stored: stored("B") }),
     "redeploy",
   );
   assert.equal(
-    servedCertificateAction({ served: served(9, "A"), storedFingerprint: "A" }),
+    servedCertificateAction({ served: served(9, "A"), stored: stored("A", 9) }),
+    "renewal-failed",
+  );
+});
+
+test("an expired served certificate redeploys only when Infisical holds a current one", () => {
+  const expired = { expired: true };
+  assert.equal(
+    servedCertificateAction({ served: expired, stored: { fingerprint: "B", daysLeft: 89 } }),
+    "redeploy",
+  );
+  assert.equal(
+    servedCertificateAction({ served: expired, stored: { fingerprint: "A", daysLeft: -1 } }),
+    "renewal-failed",
+  );
+  assert.equal(
+    servedCertificateAction({ served: expired, stored: { problems: ["x"] } }),
     "renewal-failed",
   );
 });

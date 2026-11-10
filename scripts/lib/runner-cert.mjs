@@ -67,13 +67,17 @@ export function renewalReason({ certificatePem, privateKeyPem, now = new Date(),
 // kamal-proxy loads the certificate only when the runner deploys. A renewal therefore reaches
 // clients with the next runner release, and this decides when the workflow must force one. Until
 // the cutover another server answers for the hostname (Vercel's *.opencompany.chat wildcard), so
-// only a certificate covering every runner host counts as kamal-proxy's.
-export function servedCertificateAction({ served, storedFingerprint }) {
+// only a certificate covering every runner host counts as kamal-proxy's. The probe validates the
+// chain, so an expired certificate arrives as `{ expired: true }` with nothing else to compare.
+export function servedCertificateAction({ served, stored }) {
+  if (served?.expired) {
+    return stored.daysLeft > REDEPLOY_WITHIN_DAYS ? "redeploy" : "renewal-failed";
+  }
   if (!served || RUNNER_TLS_HOSTS.some((host) => !served.hosts.includes(host))) {
     return "not-served";
   }
   if (served.daysLeft > REDEPLOY_WITHIN_DAYS) return "ok";
-  return served.fingerprint === storedFingerprint ? "renewal-failed" : "redeploy";
+  return served.fingerprint === stored.fingerprint ? "renewal-failed" : "redeploy";
 }
 
 function subjectAltNames(certificate) {
