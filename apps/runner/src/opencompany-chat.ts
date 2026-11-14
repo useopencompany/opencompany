@@ -114,6 +114,7 @@ import {
 } from "./opencompany-subagent";
 import { rowsFromExecute } from "./sql-exec";
 import {
+  buildTaskStepLimitCompletion,
   buildTaskTerminalProjection,
   buildTaskTurnCompletion,
   closeTaskTurn,
@@ -491,6 +492,21 @@ export async function runProductChatTurn(input: {
     }
     projection = withCompletedResponseFallback(projection);
     const taskResult = projectionText(projection);
+    // This loop has no tool-call stop condition besides its step budget. A terminal tool-calls
+    // reason therefore means the last tool ran, but the model never got another step to finish.
+    if (input.taskContext && projection.finishReason === "tool-calls") {
+      await abortWatcher.checkNow();
+      await abortWatcher.stop();
+      await projector.completed(
+        projection,
+        buildTaskStepLimitCompletion({
+          context: input.taskContext,
+          result: taskResult,
+          parentSettings: turn.settings,
+        }),
+      );
+      return "settled";
+    }
     const taskOutcome = input.taskContext
       ? await closeTaskTurn({
           context: input.taskContext,
