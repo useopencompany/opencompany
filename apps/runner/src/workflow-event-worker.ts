@@ -10,6 +10,7 @@ import { captureException, createLogger } from "@opencompany/observability";
 import { inArray, type SQL, sql } from "drizzle-orm";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
+import { sentryWorkflowEventAdapter } from "./sentry-workflow-events";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "workflow-events" });
@@ -17,12 +18,13 @@ const WORKFLOW_EVENT_POLL_INTERVAL_MS = 1_000;
 const WORKFLOW_EVENT_MAX_ATTEMPTS = 8;
 const WORKFLOW_EVENT_MAX_RETRY_DELAY_MS = 15 * 60_000;
 
-type WorkflowEventTransaction = {
+export type WorkflowEventTransaction = {
   execute(query: SQL): Promise<unknown>;
 };
 
-type PendingWorkflowEvent = {
+export type PendingWorkflowEvent = {
   id: string;
+  provider: string;
   workspaceId: string;
   userWorkosId: string;
   workflowId: string;
@@ -36,6 +38,32 @@ type PendingWorkflowEvent = {
   harnessSpec: HarnessSpec;
   attemptCount: number;
   eligible: boolean;
+};
+
+// Provider-specific steps of Task creation, all inside the claiming transaction. Providers without
+// an adapter create their Task from the enqueued goal as is.
+export type WorkflowEventProviderAdapter = {
+  // A reason to suppress the delivery, or null when it may start a Task. Runs for every claimed
+  // delivery, so the provider can also name why a generically ineligible one was dropped.
+  admit(
+    tx: WorkflowEventTransaction,
+    event: PendingWorkflowEvent,
+    now: Date,
+  ): Promise<string | null>;
+  suppressed(event: PendingWorkflowEvent, reason: string): void;
+  // The Task goal. It must stay within the Task goal limit.
+  goal(tx: WorkflowEventTransaction, event: PendingWorkflowEvent): Promise<string>;
+  // Records the started Task and returns work to run after the transaction commits.
+  started(
+    tx: WorkflowEventTransaction,
+    event: PendingWorkflowEvent,
+    taskId: string,
+    now: Date,
+  ): Promise<() => void>;
+};
+
+const PROVIDER_ADAPTERS: Partial<Record<string, WorkflowEventProviderAdapter>> = {
+  sentry: sentryWorkflowEventAdapter,
 };
 
 type WorkflowEventDependencies = {
@@ -52,11 +80,13 @@ export async function createNextWorkflowEventTask(
   dependencies: WorkflowEventDependencies = {},
 ) {
   const db = dependencies.db ?? getDb();
-  return db.transaction(async (tx) => {
+  let afterCommit: (() => void) | undefined;
+  const result = await db.transaction(async (tx) => {
     const event = rowsFromExecute<PendingWorkflowEvent>(
       await tx.execute(sql`
         SELECT
           event.id,
+          event.provider,
           event.workspace_id AS "workspaceId",
           event.user_workos_id AS "userWorkosId",
           event.workflow_id AS "workflowId",
@@ -143,15 +173,20 @@ export async function createNextWorkflowEventTask(
     )[0];
     if (!event) return { status: "none" as const };
 
-    if (!event.eligible) {
+    const adapter = PROVIDER_ADAPTERS[event.provider];
+    const providerReason = adapter ? await adapter.admit(tx, event, now) : null;
+    if (!event.eligible || providerReason) {
+      const reason = providerReason ?? (adapter ? "workflow or membership revoked" : null);
+      if (adapter && reason) adapter.suppressed(event, reason);
       await tx.execute(sql`
         UPDATE goat.workflow_event_runs
-        SET status = 'ignored', updated_at = ${now}
+        SET status = 'ignored', last_error = ${reason}, updated_at = ${now}
         WHERE id = ${event.id}
       `);
       return { status: "ignored" as const, eventId: event.id };
     }
 
+    if (adapter) event.goal = await adapter.goal(tx, event);
     let created: { taskId: string };
     await tx.execute(sql`SAVEPOINT workflow_event_task`);
     try {
@@ -186,6 +221,7 @@ export async function createNextWorkflowEventTask(
       return { status: failed ? ("failed" as const) : ("retry" as const), eventId: event.id };
     }
 
+    if (adapter) afterCommit = await adapter.started(tx, event, created.taskId, now);
     await tx.execute(sql`
       UPDATE goat.workflow_event_runs
       SET
@@ -198,6 +234,8 @@ export async function createNextWorkflowEventTask(
     `);
     return { status: "created" as const, eventId: event.id, taskId: created.taskId };
   });
+  afterCommit?.();
+  return result;
 }
 
 // A company plugin event stays eligible while the workspace connection its trigger names is still

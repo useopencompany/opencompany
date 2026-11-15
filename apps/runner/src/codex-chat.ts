@@ -19,6 +19,7 @@ import {
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
 import {
   loadChatSessionPluginRuntime,
@@ -121,6 +122,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
   managedSandboxMetadata,
@@ -165,6 +167,7 @@ export async function runCodexChatTurn(input: {
   env: RunnerEnv;
   taskContext?: TaskTurnContext | undefined;
   canonicalAttemptId?: string;
+  presentationPublisher?: ChatPresentationPublisher;
   recovery?: { reason: "lease_reclaimed" | "cross_deploy" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -542,6 +545,14 @@ export async function runCodexChatTurn(input: {
       // Resumes the parts already persisted for this message (normally empty; non-empty only if a
       // previous write landed before a transient failure of the same turn).
       initialParts,
+      ...(input.presentationPublisher
+        ? {
+            presentation: {
+              publisher: input.presentationPublisher,
+              attemptNumber: turn.attempts,
+            },
+          }
+        : {}),
       normalizeEvent: acpNormalizer.normalize,
     });
     projector = turnProjector;
@@ -1085,6 +1096,16 @@ export async function runCodexChatTurn(input: {
       // A transient setup failure (e.g. the fence) preserves the durable turn: the worker defers
       // and retries from scratch instead of projecting a failed assistant message.
       throw effectiveError;
+    } else if (
+      !engineStarted &&
+      executionStage === "ensure_codex_acp" &&
+      isRetryablePackageInstallError(effectiveError)
+    ) {
+      throw new CodexChatRetryableInfrastructureError(
+        "Codex could not download its managed runtime.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
       // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
       // and reboots or replaces it. Failing the turn here instead would strand the session on the

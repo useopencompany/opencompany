@@ -38,6 +38,8 @@ export type RunEventStreamOptions = {
   runId: string;
   cursor?: string;
   presentationCursor?: string;
+  /** Asks for `message.reasoning_updated` frames. Readers that cannot parse them leave it off. */
+  includeReasoning?: boolean;
   signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
   isRetryableError?: (error: unknown) => boolean;
@@ -72,6 +74,7 @@ export async function* streamRunEvents(
     );
     if (cursor) url.searchParams.set("cursor", cursor);
     if (presentationCursor) url.searchParams.set("presentationCursor", presentationCursor);
+    if (options.includeReasoning) url.searchParams.set("includeReasoning", "1");
     let response: Response;
     try {
       response = await fetchImpl(url, {
@@ -128,7 +131,10 @@ export async function* streamRunEvents(
         if (event.runId !== options.runId) {
           throw new Error("The Run event stream returned an event for another Run.");
         }
-        if (event.type === "message.presentation_delta") {
+        if (
+          event.type === "message.presentation_delta" ||
+          event.type === "message.reasoning_updated"
+        ) {
           presentationCursor = event.presentationCursor;
           receivedEvent = true;
           reconnectAttempts = 0;

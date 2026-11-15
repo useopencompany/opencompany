@@ -190,6 +190,36 @@ describe("compileWorkflowHarnessSpec", () => {
     });
   });
 
+  it("names a step's typed repository in its prompt, whatever its instructions say", () => {
+    const spec = compileWorkflowHarnessSpec({
+      workflow: {
+        id: "fix",
+        name: "Fix",
+        description: "",
+        steps: [
+          {
+            id: "step-1",
+            title: "Fix",
+            model: "codex",
+            instructions: "Use repository acme/other.",
+            repository: { fullName: "acme/service", baseBranch: "release/stable" },
+          },
+        ],
+      },
+      workspaceId: "ws_1",
+      skills: [],
+      tools: [],
+      description: "Fix the issue.",
+    });
+
+    expect(spec.systemPrompt).toContain(
+      "Use repository acme/service and base branch release/stable. These are explicit values",
+    );
+    expect(spec.systemPrompt.indexOf("acme/service")).toBeLessThan(
+      spec.systemPrompt.indexOf("<workflow_step_instructions>"),
+    );
+  });
+
   it("uses the first step instructions when a scheduled run has no additional context", () => {
     const spec = compileWorkflowHarnessSpec({
       workflow: {

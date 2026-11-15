@@ -12,6 +12,7 @@ import {
   listPostHogEventDefinitionsAction,
   type PostHogEventDefinitionListResult,
 } from "@/lib/integrations/posthog-events-actions";
+import { listSentryProjectsAction } from "./sentry-actions";
 
 // An `integration_resource` filter offers the resources of one connected account. Plugins declare
 // which resource type a filter picks from; resolving that type to real options is platform code,
@@ -35,6 +36,27 @@ type WorkflowEventFilterLoader = (input: {
 const LINEAR_LEGACY_TRIAGE_EVENT = "issue_enters_triage";
 
 const WORKFLOW_EVENT_FILTER_LOADERS: Record<string, WorkflowEventFilterLoader> = {
+  "sentry:project": async () => {
+    try {
+      const options: WorkflowEventFilterOption[] = [];
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const result = await listSentryProjectsAction(false, cursor);
+        options.push(...result.projects.map((project) => ({ id: project.id, name: project.name })));
+        cursor = result.nextCursor ?? undefined;
+        if (cursor && seen.has(cursor))
+          throw new Error("Sentry project pagination did not advance.");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
+      return { ok: true, options };
+    } catch (error) {
+      return {
+        ok: false,
+        error: error instanceof Error ? error.message : "Could not load Sentry projects.",
+      };
+    }
+  },
   "linear:team": async ({ integrationId, event }) => {
     // The retired triage trigger stored the team's triage state alongside it, so teams without
     // Triage enabled cannot serve it.

@@ -21,6 +21,12 @@ import {
 import type { CloudCodingReasoningEffort } from "@opencompany/agent-runtime/types";
 import { captureProductEvent } from "@opencompany/analytics/product/client";
 import type { ChatEngine } from "@opencompany/core";
+import {
+  AD_HOC_TASK_ID,
+  AD_HOC_TASK_TOKEN,
+  descriptionFromAdHocTaskPrompt,
+  hasAdHocTaskToken,
+} from "@opencompany/core/ad-hoc-task";
 import type { EngineRuntimeStatus, InvokeWorkflowBody, MessageEngine } from "@opencompany/protocol";
 import {
   Command,
@@ -127,12 +133,6 @@ import { useConversationTabTitle } from "@/components/useConversationTabTitle";
 import { useHeadlessChatTranscript } from "@/components/useHeadlessChatTranscript";
 import { useHydrated } from "@/components/useHydrated";
 import { WorkflowComposerControls } from "@/components/WorkflowComposerControls";
-import {
-  AD_HOC_TASK_ID,
-  AD_HOC_TASK_TOKEN,
-  descriptionFromAdHocTaskPrompt,
-  hasAdHocTaskToken,
-} from "@/lib/ad-hoc-task";
 import { CHAT_ATTACHMENT_ACCEPT } from "@/lib/chat-attachment-formats";
 import { AUTO_MODEL_ATTACHMENT_CAPABILITIES, AUTO_MODEL_SELECTION } from "@/lib/chat-auto-model";
 import {

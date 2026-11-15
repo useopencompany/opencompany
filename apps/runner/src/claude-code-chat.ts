@@ -22,6 +22,7 @@ import {
   shellQuote,
   supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import {
   loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth,
@@ -135,6 +136,7 @@ import {
   armSandboxIdleTimeout,
   createOrConnectSandbox,
   isRetryableCommandStreamError,
+  isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
   managedSandboxMetadata,
@@ -309,6 +311,7 @@ export async function runClaudeCodeChatTurn(input: {
   env: RunnerEnv;
   taskContext?: TaskTurnContext | undefined;
   canonicalAttemptId?: string;
+  presentationPublisher?: ChatPresentationPublisher;
   recovery?: { reason: "lease_reclaimed" | "cross_deploy" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -494,6 +497,14 @@ export async function runClaudeCodeChatTurn(input: {
     target: projectorTarget,
     redact: (value) => redact(value),
     initialParts,
+    ...(input.presentationPublisher
+      ? {
+          presentation: {
+            publisher: input.presentationPublisher,
+            attemptNumber: turn.attempts,
+          },
+        }
+      : {}),
     normalizeEvent: acpNormalizer.normalize,
     onNormalizedEvent: async (event) => {
       const request = extractAcpScheduleWakeup(event);
@@ -1249,6 +1260,16 @@ export async function runClaudeCodeChatTurn(input: {
       throw effectiveError;
     } else if (effectiveError instanceof CodexChatRetryableInfrastructureError) {
       throw effectiveError;
+    } else if (
+      !engineStarted &&
+      executionStage === "ensure_claude_acp" &&
+      isRetryablePackageInstallError(effectiveError)
+    ) {
+      throw new CodexChatRetryableInfrastructureError(
+        "Claude Code could not download its managed runtime.",
+        effectiveError,
+        failureDiagnostic(executionStage, effectiveError, redact),
+      );
     } else if (!engineStarted && isUnresponsiveGuestError(effectiveError)) {
       // The retry reacquires the sandbox through `createOrConnectSandbox`, which probes the guest
       // and reboots or replaces it. Failing the turn here instead would strand the session on the

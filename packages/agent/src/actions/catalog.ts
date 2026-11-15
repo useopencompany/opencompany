@@ -1,5 +1,7 @@
+import { createLogger } from "@opencompany/observability";
 import { resolvePluginGatewayRegistrations } from "../plugin-gateway";
 import { type RemoteMcpGatewayRegistration, resolveRemoteMcpActions } from "./remote-mcp";
+import { resolveSentryActions } from "./sentry";
 import { resolveSessionHistoryActions } from "./session-history";
 import type {
   ActionProviderCatalog,
@@ -64,6 +66,17 @@ export async function resolveActionCatalog(
       resolveRemoteMcpActions(input, registration).catch(() => null),
     ),
   );
+  const sentry = await resolveSentryActions(input).catch((error) => {
+    createLogger({ service: "opencompany-agent", runtime: "sentry" }).warn(
+      "Sentry catalog unavailable",
+      {
+        event: "opencompany.sentry_catalog_failed",
+        error_message: error instanceof Error ? error.message : String(error),
+      },
+    );
+    return null;
+  });
+  if (sentry) resolved.push(sentry);
   const providers = resolved.filter(
     (entry): entry is ActionProviderCatalog => entry !== null && entry.actions.length > 0,
   );
@@ -124,6 +137,18 @@ export async function resolveActionCatalog(
           description,
         }),
       ),
+      ...(sentry && sentry.actions.length === 0
+        ? [
+            {
+              id: sentry.id,
+              kind: "integration" as const,
+              label: sentry.label,
+              description:
+                "Sentry is disconnected, setup is incomplete, or all shared tools are disabled.",
+              unavailable: true,
+            },
+          ]
+        : []),
       ...unavailableConnections.filter(
         (source): source is ActionSourceDescriptor => source !== null,
       ),

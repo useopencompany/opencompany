@@ -19,6 +19,7 @@ import {
   extractWorkflowMentionIds,
   extractWorkflowSkillMentionRefs,
 } from "./workflow-skill-mentions";
+import { workflowStepRepositoryInstructions } from "./workflow-step-repository";
 import {
   resolveWorkflowMention,
   WorkflowMentionError,
@@ -111,6 +112,7 @@ export function compileWorkflowHarnessSpec(input: {
         ? [`Workflow description: ${input.workflow.description}`]
         : []),
       "Run this step in the background using the task request plus explicit handoff artifacts from prior steps. The user cannot respond during the run; if these step instructions require a plan, question, decision, or approval before continuing, end with that request so the task can pause for review.",
+      ...(step.repository ? [workflowStepRepositoryInstructions(step.repository)] : []),
       "",
       "<workflow_step_instructions>",
       step.instructions,

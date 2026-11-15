@@ -1,4 +1,7 @@
-import { OFFICIAL_PLUGIN_SOURCES } from "@opencompany/agent-runtime/official-plugin-catalog";
+import {
+  OFFICIAL_PLUGIN_LABELS,
+  OFFICIAL_PLUGIN_SOURCES,
+} from "@opencompany/agent-runtime/official-plugin-catalog";
 
 export type OfficialMcpPluginName =
   | "attio"
@@ -134,7 +137,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   attio: {
     name: "attio",
     kind: "mcp",
-    label: "Attio",
+    label: OFFICIAL_PLUGIN_LABELS["attio"],
     description: "Inspect CRM structure, query workspace data, and make approved changes.",
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["attio"],
@@ -145,7 +148,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   betterstack: {
     name: "betterstack",
     kind: "mcp",
-    label: "Better Stack",
+    label: OFFICIAL_PLUGIN_LABELS["betterstack"],
     description:
       "Investigate observability data and manage monitoring, incidents, dashboards, and team access.",
     category: "engineering",
@@ -157,7 +160,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   fathom: {
     name: "fathom",
     kind: "mcp",
-    label: "Fathom",
+    label: OFFICIAL_PLUGIN_LABELS["fathom"],
     description: "Search meetings and read summaries, transcripts, and action items with approval.",
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["fathom"],
@@ -168,7 +171,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   github: {
     name: "github",
     kind: "mcp",
-    label: "GitHub as you",
+    label: OFFICIAL_PLUGIN_LABELS["github"],
     description: "Work with repositories, issues, pull requests, and Actions as yourself.",
     category: "engineering",
     featured: true,
@@ -181,7 +184,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   gmail: {
     name: "gmail",
     kind: "mcp",
-    label: "Gmail",
+    label: OFFICIAL_PLUGIN_LABELS["gmail"],
     description:
       "Search and read Gmail, download attachments, create drafts, send email, and organize messages with approval.",
     category: "communication",
@@ -194,7 +197,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   granola: {
     name: "granola",
     kind: "mcp",
-    label: "Granola",
+    label: OFFICIAL_PLUGIN_LABELS["granola"],
     description: "Search and read meeting notes, summaries, folders, and transcripts.",
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["granola"],
@@ -209,7 +212,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   "google-admin": {
     name: "google-admin",
     kind: "mcp",
-    label: "Google Admin",
+    label: OFFICIAL_PLUGIN_LABELS["google-admin"],
     description: "Create Workspace user accounts, set up groups, and add group members.",
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["google-admin"],
@@ -221,7 +224,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   "google-calendar": {
     name: "google-calendar",
     kind: "mcp",
-    label: "Google Calendar",
+    label: OFFICIAL_PLUGIN_LABELS["google-calendar"],
     description: "List calendars, read your schedule, and create calendar events.",
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["google-calendar"],
@@ -232,7 +235,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   "google-drive": {
     name: "google-drive",
     kind: "mcp",
-    label: "Google Drive",
+    label: OFFICIAL_PLUGIN_LABELS["google-drive"],
     description:
       "Browse, read, create, copy, and edit files through opencompany's Google Drive MCP.",
     category: "productivity",
@@ -245,7 +248,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   hubspot: {
     name: "hubspot",
     kind: "mcp",
-    label: "HubSpot",
+    label: OFFICIAL_PLUGIN_LABELS["hubspot"],
     description: "Inspect CRM structure, query customer data, and make approved changes.",
     category: "business",
     source: OFFICIAL_PLUGIN_SOURCES["hubspot"],
@@ -256,7 +259,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   infisical: {
     name: "infisical",
     kind: "mcp",
-    label: "Infisical",
+    label: OFFICIAL_PLUGIN_LABELS["infisical"],
     description:
       "Search current Infisical documentation and safely use workspace secrets in coding sandboxes.",
     category: "engineering",
@@ -269,7 +272,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   jamie: {
     name: "jamie",
     kind: "mcp",
-    label: "Jamie",
+    label: OFFICIAL_PLUGIN_LABELS["jamie"],
     description:
       "Search meeting notes and transcripts, review action items, and organize meetings with approval.",
     category: "productivity",
@@ -285,7 +288,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   latitude: {
     name: "latitude",
     kind: "mcp",
-    label: "Latitude",
+    label: OFFICIAL_PLUGIN_LABELS["latitude"],
     description:
       "Inspect agent observability data and manage Latitude workspace resources with approval.",
     category: "engineering",
@@ -297,7 +300,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   linear: {
     name: "linear",
     kind: "mcp",
-    label: "Linear",
+    label: OFFICIAL_PLUGIN_LABELS["linear"],
     description: "Work with Linear issues, projects, comments, and team workflows.",
     category: "productivity",
     featured: true,
@@ -311,7 +314,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   neon: {
     name: "neon",
     kind: "mcp",
-    label: "Neon",
+    label: OFFICIAL_PLUGIN_LABELS["neon"],
     description:
       "Inspect Neon projects and database structure, and run permission-gated read-only SQL.",
     category: "engineering",
@@ -323,7 +326,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   notion: {
     name: "notion",
     kind: "mcp",
-    label: "Notion",
+    label: OFFICIAL_PLUGIN_LABELS["notion"],
     description:
       "Search workspace knowledge, work with Custom Agents, and make approved content changes.",
     category: "productivity",
@@ -336,7 +339,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   todoist: {
     name: "todoist",
     kind: "mcp",
-    label: "Todoist",
+    label: OFFICIAL_PLUGIN_LABELS["todoist"],
     description: "Read tasks, projects, and comments, and make approved changes to your Todoist.",
     category: "productivity",
     source: OFFICIAL_PLUGIN_SOURCES["todoist"],
@@ -348,7 +351,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   supabase: {
     name: "supabase",
     kind: "mcp",
-    label: "Supabase",
+    label: OFFICIAL_PLUGIN_LABELS["supabase"],
     description:
       "Inspect projects, query databases, and manage migrations and Edge Functions with permission controls.",
     category: "engineering",
@@ -361,7 +364,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   resend: {
     name: "resend",
     kind: "mcp",
-    label: "Resend",
+    label: OFFICIAL_PLUGIN_LABELS["resend"],
     description:
       "Send emails, read inbound messages, and manage contacts and broadcasts with permission controls.",
     category: "communication",
@@ -374,7 +377,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   posthog: {
     name: "posthog",
     kind: "mcp",
-    label: "PostHog",
+    label: OFFICIAL_PLUGIN_LABELS["posthog"],
     description:
       "Explore dashboards, insights, schemas, and product analytics, with permission-gated insight creation.",
     category: "business",
@@ -388,7 +391,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   convex: {
     name: "convex",
     kind: "mcp",
-    label: "Convex",
+    label: OFFICIAL_PLUGIN_LABELS["convex"],
     category: "engineering",
     description:
       "Inspect deployments, query data, and run Convex functions with permission controls.",
@@ -405,7 +408,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   render: {
     name: "render",
     kind: "mcp",
-    label: "Render",
+    label: OFFICIAL_PLUGIN_LABELS["render"],
     description:
       "Inspect Render infrastructure, troubleshoot services, and deploy permission-gated applications and datastores.",
     category: "engineering",
@@ -417,7 +420,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   vercel: {
     name: "vercel",
     kind: "mcp",
-    label: "Vercel",
+    label: OFFICIAL_PLUGIN_LABELS["vercel"],
     description:
       "Inspect Vercel projects and deployments, investigate operational data, and perform permission-gated deployment and account actions.",
     category: "engineering",
@@ -431,7 +434,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   dash0: {
     name: "dash0",
     kind: "mcp",
-    label: "Dash0",
+    label: OFFICIAL_PLUGIN_LABELS["dash0"],
     description: "Investigate telemetry and Agent0 findings in your Dash0 organization.",
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES.dash0,
@@ -443,7 +446,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   signoz: {
     name: "signoz",
     kind: "mcp",
-    label: "SigNoz",
+    label: OFFICIAL_PLUGIN_LABELS["signoz"],
     description: "Investigate logs, metrics, traces, alerts, and dashboards in SigNoz US Cloud.",
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES["signoz"],
@@ -454,7 +457,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   slack: {
     name: "slack",
     kind: "mcp",
-    label: "Slack",
+    label: OFFICIAL_PLUGIN_LABELS["slack"],
     description: "Search Slack and, with approval, read private content or make changes.",
     category: "communication",
     featured: true,
@@ -466,7 +469,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   stripe: {
     name: "stripe",
     kind: "mcp",
-    label: "Stripe",
+    label: OFFICIAL_PLUGIN_LABELS["stripe"],
     description:
       "Learn about Stripe, inspect account and financial data, and manage Stripe resources with approval.",
     category: "business",
@@ -478,7 +481,7 @@ export const OFFICIAL_MCP_PLUGIN_METADATA = {
   x: {
     name: "x",
     kind: "mcp",
-    label: "X",
+    label: OFFICIAL_PLUGIN_LABELS["x"],
     description: "Research public conversations and manage your X account with approval.",
     category: "communication",
     source: OFFICIAL_PLUGIN_SOURCES["x"],
@@ -494,7 +497,7 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
   doppler: {
     name: "doppler",
     kind: "skills",
-    label: "Doppler",
+    label: OFFICIAL_PLUGIN_LABELS["doppler"],
     description: "Run your existing development scripts with Doppler in your coding sandbox.",
     category: "engineering",
     source: OFFICIAL_PLUGIN_SOURCES.doppler,
@@ -503,7 +506,7 @@ export const OFFICIAL_SKILL_PLUGIN_METADATA = {
   "yc-advise": {
     name: "yc-advise",
     kind: "skills",
-    label: "YC Advise",
+    label: OFFICIAL_PLUGIN_LABELS["yc-advise"],
     description:
       "Independent YC-style startup advice and structured founder office hours, based on public principles and not affiliated with Y Combinator.",
     category: "business",
@@ -515,7 +518,7 @@ export const OFFICIAL_MANAGED_PLUGIN_METADATA = {
   "lead-research": {
     name: "lead-research",
     kind: "managed",
-    label: "Lead research",
+    label: OFFICIAL_PLUGIN_LABELS["lead-research"],
     description:
       "Find companies and people that match your ICP, and get the work emails needed to reach them.",
     category: "business",

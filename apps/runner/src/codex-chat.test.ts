@@ -82,6 +82,7 @@ const sandboxMocks = vi.hoisted(() => ({
   armSandboxActiveTimeoutById: vi.fn(),
   armSandboxIdleTimeout: vi.fn(),
   createOrConnectSandbox: vi.fn(),
+  isRetryablePackageInstallError: vi.fn(),
   isUnresponsiveGuestError: vi.fn(),
   isRetryableCommandStreamError: vi.fn(),
   isRetryableSandboxAcquisitionError: vi.fn(),
@@ -222,6 +223,7 @@ vi.mock("./sandbox", () => ({
   armSandboxActiveTimeoutById: sandboxMocks.armSandboxActiveTimeoutById,
   armSandboxIdleTimeout: sandboxMocks.armSandboxIdleTimeout,
   createOrConnectSandbox: sandboxMocks.createOrConnectSandbox,
+  isRetryablePackageInstallError: sandboxMocks.isRetryablePackageInstallError,
   isUnresponsiveGuestError: sandboxMocks.isUnresponsiveGuestError,
   isRetryableCommandStreamError: sandboxMocks.isRetryableCommandStreamError,
   isRetryableSandboxAcquisitionError: sandboxMocks.isRetryableSandboxAcquisitionError,
@@ -682,6 +684,7 @@ describe("runCodexChatTurn over ACP", () => {
     sandboxMocks.armSandboxActiveTimeoutById.mockResolvedValue(true);
     sandboxMocks.armSandboxIdleTimeout.mockResolvedValue(true);
     sandboxMocks.createOrConnectSandbox.mockResolvedValue(fakeSandbox("sbx_existing"));
+    sandboxMocks.isRetryablePackageInstallError.mockReturnValue(false);
     sandboxMocks.isUnresponsiveGuestError.mockReturnValue(false);
     sandboxMocks.isRetryableCommandStreamError.mockReturnValue(false);
     sandboxMocks.isRetryableSandboxAcquisitionError.mockReturnValue(false);
@@ -996,6 +999,31 @@ describe("runCodexChatTurn over ACP", () => {
       cause: timeout,
       diagnosticMessage: "[ensure_codex_acp] TimeoutError: The operation timed out.",
     });
+  });
+
+  it("retries a transient Codex runtime download failure", async () => {
+    const installError = new Error("exit status 1");
+    installError.name = "CommandExitError";
+    cliMocks.ensureCodexAcpAdapterInstalled.mockRejectedValueOnce(installError);
+    sandboxMocks.isRetryablePackageInstallError.mockReturnValue(true);
+
+    await expect(
+      runCodexChatTurn({
+        turn: codexTurn(),
+        session: codexSession(),
+        canonicalAttemptId: "attempt_1",
+        env: env(),
+      }),
+    ).rejects.toMatchObject({
+      name: CodexChatRetryableInfrastructureError.name,
+      cause: installError,
+      message: "Codex could not download its managed runtime.",
+      diagnosticMessage: "[ensure_codex_acp] CommandExitError: exit status 1",
+    });
+
+    for (const result of eventMocks.createExternalEngineProjector.mock.results) {
+      expect(result.value.fail).not.toHaveBeenCalled();
+    }
   });
 
   it("keeps a command timeout terminal once the engine is driving the turn", async () => {

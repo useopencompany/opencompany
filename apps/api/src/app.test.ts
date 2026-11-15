@@ -43,6 +43,7 @@ import {
 } from "@opencompany/core";
 import { setExceptionReporter } from "@opencompany/observability";
 import {
+  AttachmentUploadEnvelopeSchema,
   PROTOCOL_UPDATE_REQUIRED_MESSAGE,
   PROTOCOL_VERSION,
   PROTOCOL_VERSION_HEADER,
@@ -90,6 +91,53 @@ function messageHeaders(idempotencyKey: string) {
 }
 
 describe("canonical Hono API", () => {
+  it("authenticates Sentry setup, validates its typed input, and exposes signed ingress separately", async () => {
+    const get = vi.fn(async () => ({
+      configured: false,
+      canManage: true,
+      installUrl: null,
+      connection: null,
+      events: [],
+      usage: 0,
+      tools: [],
+      outcomes: [],
+    }));
+    const connect = vi.fn();
+    const webhook = vi.fn(async () => new Response(null, { status: 202 }));
+    const sentry = { get, connect, webhook } as unknown as NonNullable<
+      Parameters<typeof createApiApp>[0]["sentry"]
+    >;
+    const app = testApp(fakeRepository(), { sentry });
+    expect((await app.request("/v1/company-plugins/sentry")).status).toBe(200);
+    expect(get).toHaveBeenCalledWith(actor);
+    expect(
+      (
+        await app.request("/v1/company-plugins/sentry/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ installationId: "not-a-uuid", region: "us", code: "grant" }),
+        })
+      ).status,
+    ).toBe(400);
+    expect(connect).not.toHaveBeenCalled();
+    const unauthenticated = testApp(fakeRepository(), {
+      sentry,
+      authenticate: async () => {
+        throw new ApiError(401, "unauthenticated", "Sign in first.");
+      },
+    });
+    expect((await unauthenticated.request("/v1/company-plugins/sentry")).status).toBe(401);
+    expect(
+      (
+        await unauthenticated.request("/webhooks/sentry", {
+          method: "POST",
+          body: "signed raw payload",
+        })
+      ).status,
+    ).toBe(202);
+    expect(webhook).toHaveBeenCalledOnce();
+  });
+
   it("serves private Codex usage with a dedicated refresh rate limit", async () => {
     const usage = {
       windows: [
@@ -2714,13 +2762,14 @@ describe("canonical Hono API", () => {
     const response = await app.request("/v1/attachments", { method: "POST", body: form });
     expect(response.status).toBe(201);
     expect(uploaded).toHaveLength(1);
-    const json = await response.json();
+    const json = AttachmentUploadEnvelopeSchema.parse(await response.json());
     expect(json).toMatchObject({
       data: {
         attachment: {
           id: "attachment_1",
           filename: "brief.pdf",
           kind: "document",
+          sizeBytes: 3,
         },
         replayed: false,
       },
@@ -2751,7 +2800,10 @@ describe("canonical Hono API", () => {
     expect(upload).toHaveBeenCalledWith(
       expect.objectContaining({ idempotencyKey: "web-chat-attachment:pending-1" }),
     );
-    await expect(response.json()).resolves.toMatchObject({ data: { replayed: true } });
+    const json = AttachmentUploadEnvelopeSchema.parse(await response.json());
+    expect(json).toMatchObject({
+      data: { attachment: { sizeBytes: 4 }, replayed: true },
+    });
 
     const invalidForm = new FormData();
     invalidForm.set("file", new File(["text"], "brief.txt", { type: "text/plain" }));

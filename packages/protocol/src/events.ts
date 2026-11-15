@@ -138,18 +138,67 @@ export const PresentationDeltaFrameSchema = z
   })
   .strict();
 
+export const REASONING_UPDATE_MAX_TEXT_LENGTH = 262_144;
+
+/**
+ * The current text of one reasoning block. Each frame carries the whole block rather than a delta,
+ * so a reader can drop a stale or replayed frame by comparing it with what it already holds.
+ * Reasoning never enters the durable event log; the persisted presentation stays canonical.
+ */
+export const ReasoningUpdateFrameSchema = z
+  .object({
+    runId: ResourceIdSchema,
+    attemptNumber: z.number().int().positive(),
+    schemaVersion: z.literal(EVENT_SCHEMA_VERSION),
+    occurredAt: TimestampSchema,
+    type: z.literal("message.reasoning_updated"),
+    payload: z
+      .object({
+        messageId: ResourceIdSchema,
+        itemId: z.string().min(1).max(200),
+        // Set when the block belongs to a subagent's nested trace.
+        parentToolCallId: ResourceIdSchema.optional(),
+        // The block's index among its siblings in the persisted presentation parts.
+        position: z.number().int().min(0),
+        text: z.string().max(REASONING_UPDATE_MAX_TEXT_LENGTH),
+        state: z.enum(["streaming", "done"]),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const PresentationDeltaEventSchema = PresentationDeltaFrameSchema.extend({
   presentationCursor: PresentationCursorSchema,
 })
   .strict()
   .openapi("PresentationDeltaEvent");
 
+export const ReasoningUpdateEventSchema = ReasoningUpdateFrameSchema.extend({
+  presentationCursor: PresentationCursorSchema,
+})
+  .strict()
+  .openapi("ReasoningUpdateEvent");
+
+export const PresentationFrameSchema = z.union([
+  PresentationDeltaFrameSchema,
+  ReasoningUpdateFrameSchema,
+]);
+
+export const PresentationEventSchema = z.union([
+  PresentationDeltaEventSchema,
+  ReasoningUpdateEventSchema,
+]);
+
 export const RunStreamEventSchema = z
-  .union([z.lazy(() => RunEventSchema), PresentationDeltaEventSchema])
+  .union([z.lazy(() => RunEventSchema), PresentationDeltaEventSchema, ReasoningUpdateEventSchema])
   .openapi("RunStreamEvent");
 
 export type PresentationDeltaFrameDto = z.infer<typeof PresentationDeltaFrameSchema>;
 export type PresentationDeltaEventDto = z.infer<typeof PresentationDeltaEventSchema>;
+export type ReasoningUpdateFrameDto = z.infer<typeof ReasoningUpdateFrameSchema>;
+export type ReasoningUpdateEventDto = z.infer<typeof ReasoningUpdateEventSchema>;
+export type PresentationFrameDto = z.infer<typeof PresentationFrameSchema>;
+export type PresentationEventDto = z.infer<typeof PresentationEventSchema>;
 export type RunStreamEventDto = z.infer<typeof RunStreamEventSchema>;
 
 export function encodeEventCursor(sequence: number | bigint): string {
@@ -193,6 +242,10 @@ export function parseRunEvent(value: unknown): RunEventDto {
 
 export function parsePresentationDeltaFrame(value: unknown): PresentationDeltaFrameDto {
   return PresentationDeltaFrameSchema.parse(value);
+}
+
+export function parsePresentationFrame(value: unknown): PresentationFrameDto {
+  return PresentationFrameSchema.parse(value);
 }
 
 export function parseRunStreamEvent(value: unknown): RunStreamEventDto {

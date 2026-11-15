@@ -46,7 +46,7 @@ export default async function proxy(request: NextRequest) {
   return rememberOnboardingVersion(
     request,
     handleAuthkitHeaders(request, headers, {
-      redirect: new URL("/signin", request.url).toString(),
+      redirect: signInRedirectUrl(request.url).toString(),
     }),
   );
 }
@@ -62,4 +62,13 @@ export function isUnauthenticatedPath(pathname: string) {
     UNAUTHENTICATED_PATHS.has(pathname) ||
     UNAUTHENTICATED_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
+}
+
+export function signInRedirectUrl(requestUrl: string) {
+  const current = new URL(requestUrl);
+  const signIn = new URL("/signin", current);
+  if (current.pathname === "/integrations/sentry/setup") {
+    signIn.searchParams.set("returnPathname", `${current.pathname}${current.search}`);
+  }
+  return signIn;
 }

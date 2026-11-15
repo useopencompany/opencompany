@@ -9,7 +9,8 @@
 
 - Bun `1.4.2`
 - Node `20.20.0` or newer
-- Infisical CLI authenticated to this project
+- Infisical CLI authenticated to this project with
+  `infisical login --domain https://infisical.opencompany.cloud`
 - Neon CLI access to the development project
 - Docker or OrbStack for local Electric
 - Stripe CLI for local billing webhooks
@@ -86,3 +87,10 @@ user when needed. See [Environment variables](./env-vars.md) for the variable co
 For changes touching the runner, create the relevant task or cloud coding turn and verify its
 durable status in the UI. For billing work, run `bun run setup:stripe` and confirm the local Stripe
 listener forwards a signed event through `/api/stripe/webhook` to the API-owned handler.
+
+For mobile development or an authorized device check, use the
+[mobile environment reference](mobile-development.md#identify-the-active-environment).
+
+For local Sentry development, configure the three `SENTRY_APP_*` values in the development
+environment and follow [Sentry setup](./sentry-plugin.md). Focused tests mock HTTP and use PGlite;
+they need no live Sentry account. Use a branch-isolated database for product verification.

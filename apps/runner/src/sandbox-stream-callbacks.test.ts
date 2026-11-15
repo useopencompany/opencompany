@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { guardCommandStreamCallbacks, isRetryableCommandStreamError } from "./sandbox";
+import {
+  guardCommandStreamCallbacks,
+  isRetryableCommandStreamError,
+  isRetryablePackageInstallError,
+} from "./sandbox";
 
 describe("guardCommandStreamCallbacks", () => {
   it("serializes callback invocations before exposing a captured failure", async () => {
@@ -62,5 +66,31 @@ describe("isRetryableCommandStreamError", () => {
     }),
   ])("keeps unrelated failures terminal", (error) => {
     expect(isRetryableCommandStreamError(error)).toBe(false);
+  });
+});
+
+describe("isRetryablePackageInstallError", () => {
+  it("recognizes the npm registry reset that failed TASK-2433", () => {
+    const error = Object.assign(new Error("exit status 1"), {
+      name: "CommandExitError",
+      result: {
+        exitCode: 1,
+        stdout: "",
+        stderr: "npm error code ECONNRESET\nnpm error network aborted",
+      },
+    });
+
+    expect(isRetryablePackageInstallError(error)).toBe(true);
+  });
+
+  it.each([
+    Object.assign(new Error("exit status 1"), {
+      name: "CommandExitError",
+      result: { exitCode: 1, stdout: "", stderr: "npm error code E404" },
+    }),
+    Object.assign(new Error("exit status 1"), { name: "CommandExitError" }),
+    new Error("npm error code ECONNRESET"),
+  ])("keeps package and unrelated failures terminal", (error) => {
+    expect(isRetryablePackageInstallError(error)).toBe(false);
   });
 });

@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./test-sentry-schema": {
+      "types": "./src/test-sentry-schema.ts",
+      "default": "./src/test-sentry-schema.ts"
+    },
+    "./sentry": {
+      "types": "./src/sentry.ts",
+      "default": "./src/sentry.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
@@ -260,6 +268,6 @@
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

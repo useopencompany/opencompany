@@ -21,6 +21,10 @@ import {
   captureProductLlmUsageRecorded,
   type ProductLlmUsageAnalyticsStage,
 } from "@opencompany/analytics/product/server";
+import {
+  type ChatPresentationPublisher,
+  REASONING_UPDATE_MAX_TEXT_LENGTH,
+} from "@opencompany/chat-presentation";
 import type { RunEventDraft, RunExecutionRepository } from "@opencompany/core";
 import { PostgresRunExecutionRepository } from "@opencompany/db/chat-repository";
 import { normalizePostgresText, stringifyPostgresJson } from "@opencompany/db/postgres-json";
@@ -98,6 +102,9 @@ export function createExternalEngineProjector(input: {
   execution?: RunExecutionRepository;
   now?: () => number;
   assistantWriteDebounceMs?: number;
+  // Streams finished reasoning blocks to live readers. Text needs no hot path here: it already
+  // streams as durable content updates.
+  presentation?: { publisher: ChatPresentationPublisher; attemptNumber: number };
 }) {
   const { target, redact } = input;
   const execution =
@@ -114,8 +121,10 @@ export function createExternalEngineProjector(input: {
   let lastDurableWriteAt = now() - assistantWriteDebounceMs;
   const toolEventStates = new Map<string, "started" | "completed" | "failed">();
   const publishedArtifactIds = new Set<string>();
-  // Events are appended before the assistant checkpoint is saved. Rehydrate their state
-  // from that checkpoint so a replacement attempt only emits subsequent transitions.
+  // The assistant checkpoint is saved before its events are appended. Rehydrate their state from
+  // that checkpoint so a replacement attempt only emits subsequent transitions. An attempt that
+  // dies between the two writes loses at most one transition, and readers refresh the canonical
+  // presentation when the Run settles.
   semanticEventsFromCodexParts(parts, toolEventStates, publishedArtifactIds, redact);
   const outputAccumulator = createCodexCommandOutputAccumulator();
   // Every coding engine, chat and Task alike, streams its turn through this projector, so linking
@@ -149,8 +158,8 @@ export function createExternalEngineProjector(input: {
     }
   };
 
-  const appendProjectionEvents = async (content: string) => {
-    if (!target.canonicalAttemptId) return;
+  const projectionEvents = (content: string): RunEventDraft[] => {
+    if (!target.canonicalAttemptId) return [];
     const events: RunEventDraft[] = [];
     if (content !== lastProjectedContent) {
       events.push({
@@ -163,7 +172,11 @@ export function createExternalEngineProjector(input: {
     events.push(
       ...semanticEventsFromCodexParts(parts, toolEventStates, publishedArtifactIds, redact),
     );
-    if (events.length === 0) return;
+    return events;
+  };
+
+  const appendProjectionEvents = async (events: RunEventDraft[]) => {
+    if (!target.canonicalAttemptId || events.length === 0) return;
     const inserted = await execution.appendEvents({
       worker: { workerId: target.leaseOwner },
       runId: target.turnId,
@@ -227,12 +240,44 @@ export function createExternalEngineProjector(input: {
     options: AssistantWriteOptions & { force?: boolean } = {},
   ) => {
     const content = computeContent();
-    await appendProjectionEvents(content);
+    const events = projectionEvents(content);
     const nowMs = now();
-    if (!options.force && nowMs - lastDurableWriteAt < assistantWriteDebounceMs) return content;
-    lastDurableWriteAt = nowMs;
-    await persistAssistantMessage(content, options);
+    // Tool and artifact events make readers fetch the presentation, so the row they fetch must
+    // already hold the transition. Only content snapshots may run ahead of the durable write.
+    const signalsRefresh = events.some((event) => event.type !== "message.content_updated");
+    if (options.force || signalsRefresh || nowMs - lastDurableWriteAt >= assistantWriteDebounceMs) {
+      lastDurableWriteAt = nowMs;
+      await persistAssistantMessage(content, options);
+    }
+    await appendProjectionEvents(events);
     return content;
+  };
+
+  const presentReasoning = (event: HarnessNormalizedEvent) => {
+    const presentation = input.presentation;
+    if (!presentation) return;
+    const parentToolCallId = readString(event.payload.parentToolCallId);
+    const siblings = parentToolCallId ? subagentChildren(parts, parentToolCallId) : parts;
+    const position = siblings ? siblings.length - 1 : -1;
+    const block = siblings?.[position];
+    if (block?.type !== "reasoning" || !block.itemId) return;
+    const text = redact(block.text);
+    if (text.length > REASONING_UPDATE_MAX_TEXT_LENGTH) return;
+    presentation.publisher.publish({
+      runId: target.turnId,
+      attemptNumber: presentation.attemptNumber,
+      schemaVersion: 1,
+      occurredAt: new Date(now()).toISOString(),
+      type: "message.reasoning_updated",
+      payload: {
+        messageId: target.assistantMessageId,
+        itemId: block.itemId,
+        ...(parentToolCallId ? { parentToolCallId } : {}),
+        position,
+        text,
+        state: "done",
+      },
+    });
   };
 
   const insertEventRow = async (event: HarnessNormalizedEvent) => {
@@ -368,6 +413,7 @@ export function createExternalEngineProjector(input: {
     if (!projection.changed) return "none";
     parts = projection.parts;
     if (projection.error) turnError = projection.error;
+    if (event.type === "reasoning.completed") presentReasoning(event);
     return STREAMED_PROJECTION_EVENT_TYPES.has(event.type) ? "streamed" : "boundary";
   };
 
@@ -1277,4 +1323,21 @@ function redactJson(value: unknown, redact: (value: string) => string): unknown 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function subagentChildren(
+  parts: readonly CodexUiMessagePart[],
+  toolCallId: string,
+): readonly CodexUiMessagePart[] | null {
+  for (const part of parts) {
+    if (!("children" in part)) continue;
+    if (part.toolCallId === toolCallId) return part.children;
+    const nested = subagentChildren(part.children, toolCallId);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
 }

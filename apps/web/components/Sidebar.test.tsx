@@ -1095,7 +1095,7 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("sidebar-chat-working")).not.toBeInTheDocument();
   });
 
-  it("archives a settled task from its row and offers no archive on a running one", async () => {
+  it("archives a settled task from its row, opens new chat, and offers no archive on a running one", async () => {
     const user = userEvent.setup();
     pathnameMock.value = "/tasks/T-2";
     sidebarTasksMock.value = [
@@ -1128,7 +1128,7 @@ describe("Sidebar", () => {
     // when the write and its projection land.
     expect(screen.queryByRole("link", { name: /Settled task/ })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Running task/ })).toBeInTheDocument();
-    expect(routerMock.push).toHaveBeenCalledWith("/tasks");
+    expect(routerMock.push).toHaveBeenCalledWith("/");
   });
 
   it("keeps the Tasks nav row current on the board itself", () => {

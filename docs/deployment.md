@@ -66,7 +66,11 @@ old instance during that window. A failed or partial backend release leaves the 
 and the database surface unfinished so the next release retries it.
 
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
-deployment, and health checks. Do not bypass preflight or branch protection.
+deployment, and health checks. Do not bypass preflight or branch protection. The API and runner
+toggles can leave a Render surface on its current deployment only when nothing since that surface's
+last successful SHA changes it; planning fails otherwise. A skipped surface keeps running older
+shared packages than the rest of the release, which breaks contracts such as stored credential
+shapes between the API and the runner.
 
 ## Configuration ownership
 
@@ -81,6 +85,12 @@ deployment, and health checks. Do not bypass preflight or branch protection.
 - Desktop: Infisical `prod` `/desktop`, loaded by GitHub Actions to sign and notarize the macOS app.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
+
+Production, desktop, and mobile release workflows read these paths from the self-hosted Infisical
+at `https://infisical.opencompany.cloud`, project `opencompany-xqub`. The domain, project slug, and
+`prod` env slug are pinned in each workflow. They authenticate with a universal-auth machine
+identity whose credentials are the GitHub `production` environment secrets
+`INFISICAL_MACHINE_IDENTITY_CLIENT_ID` and `INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET`.
 
 Run `bun run infisical:release:preflight` to validate the release group. The hosted workflow also
 checks Vercel project metadata and required host values that cannot be verified through a normal
@@ -120,9 +130,10 @@ project:
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
 - `SENTRY_AUTH_TOKEN`, used only by the native Sentry artifact upload hooks
 
-The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
-shared with the release workflow. The existing OIDC machine identity must have read access to
-`/mobile`. GitHub does not need copies of the build values.
+The workflow authenticates to Infisical with the universal-auth machine identity whose credentials
+are the GitHub `production` environment secrets `INFISICAL_MACHINE_IDENTITY_CLIENT_ID` and
+`INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET`, shared with the release workflows. That identity must
+have read access to `/mobile`. GitHub does not need copies of the build values.
 
 The Infisical action exports every value into the GitHub job environment. `EXPO_TOKEN` and the App
 Store Connect values configure the local EAS CLI invocation. EAS does not copy the caller's complete
@@ -171,7 +182,7 @@ Draft releases are invisible to installed apps. Do not mark any other release in
 Latest. The release process and update behavior are described in
 [the desktop README](../apps/desktop/README.md#releases).
 
-The job reads these values from Infisical `prod` `/desktop`. The existing OIDC machine identity
+The job reads these values from Infisical `prod` `/desktop`. The universal-auth machine identity
 needs read access to that path:
 
 - `MACOS_CERTIFICATE_P12_BASE64`, a base64-encoded `.p12` export of the Developer ID Application
@@ -303,3 +314,9 @@ Stripe calls `${PRODUCTION_OPENCOMPANY_URL}/api/stripe/webhook`. The web route s
 to the API-owned handler; it does not verify or persist the event. `OPENCOMPANY_STRIPE_WEBHOOK_SECRET`
 lives in Infisical `prod` `/api`. The API owns subscription, credit-ledger, auto-refill, and webhook
 idempotency while preserving the retained billing tables required by current contracts.
+
+Sentry public integration releases require `SENTRY_APP_CLIENT_ID`, `SENTRY_APP_CLIENT_SECRET`,
+and `SENTRY_APP_SLUG` in both Infisical `prod` `/api` and `/runner`. Render declarations and
+preflight cover these values. Provision and verify runtime sync before release. Publication
+requires a separately authorized live verification and Sentry review approval. See
+[Sentry release notes](./sentry-plugin.md).

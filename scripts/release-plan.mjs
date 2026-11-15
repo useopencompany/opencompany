@@ -10,6 +10,7 @@ import {
   planReleaseSurfaces,
   RELEASE_STATE_SURFACES,
   RELEASE_SURFACES,
+  skippedChangedSurfaces,
 } from "./lib/release-scope.mjs";
 
 await main().catch((error) => {
@@ -24,12 +25,18 @@ async function main() {
     throw new Error("RELEASE_SHA must identify a checked-out full Git commit SHA.");
   }
 
+  const skippedSurfaces = RELEASE_SURFACES.filter(
+    (surface) =>
+      (surface === "api" && !options.deployApi) || (surface === "runner" && !options.deployRunner),
+  );
+  // A full release needs no ranges, except to prove that a skipped Render surface is unchanged.
+  const rangedSurfaces = options.deployAll ? skippedSurfaces : RELEASE_STATE_SURFACES;
   const baseBySurface = Object.fromEntries(RELEASE_STATE_SURFACES.map((surface) => [surface, ""]));
-  if (!options.deployAll) {
+  if (rangedSurfaces.length > 0) {
     const repository = requiredEnv("GITHUB_REPOSITORY");
     const token = requiredEnv("GITHUB_TOKEN");
     await Promise.all(
-      RELEASE_STATE_SURFACES.map(async (surface) => {
+      rangedSurfaces.map(async (surface) => {
         try {
           baseBySurface[surface] = await findLastSuccessfulSurfaceSha({
             repository,
@@ -52,6 +59,29 @@ async function main() {
       options.deployAll ||
       rangeSelectsSurface(surface, baseBySurface[surface], headSha, rangeCache);
   }
+  const staleSurfaces = skippedChangedSurfaces({
+    changedSurfaces: Object.fromEntries(
+      skippedSurfaces.map((surface) => [
+        surface,
+        rangeSelectsSurface(surface, baseBySurface[surface], headSha, rangeCache),
+      ]),
+    ),
+    deployApi: options.deployApi,
+    deployRunner: options.deployRunner,
+  });
+  if (staleSurfaces.length > 0) {
+    throw new Error(
+      staleSurfaces
+        .map(
+          (surface) =>
+            `Cannot skip the ${surface}: ${describeBase(baseBySurface[surface])}..${headSha.slice(0, 7)} changes it.`,
+        )
+        .concat(
+          "A skipped surface keeps running older shared packages than the surfaces being released. Deploy it in this release, or release a commit that leaves it unchanged.",
+        )
+        .join(" "),
+    );
+  }
   const databaseHasChanges =
     options.deployAll || rangeSelectsDatabase(baseBySurface.database, headSha, rangeCache);
   const plan = finalizeReleasePlan({
@@ -73,6 +103,10 @@ async function main() {
     writeOutput(`${surface}_base`, base);
   }
   writeOutput("any", String(selected.length > 0));
+}
+
+function describeBase(baseSha) {
+  return isFullSha(baseSha) ? baseSha.slice(0, 7) : "an unresolved last successful deployment";
 }
 
 function rangeSelectsSurface(surface, baseSha, headSha, rangeCache) {

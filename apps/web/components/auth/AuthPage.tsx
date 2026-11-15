@@ -2,10 +2,19 @@ import { redirect } from "next/navigation";
 import { AuthCard } from "@/components/auth/AuthCard";
 import { Mark } from "@/components/Mark";
 import { currentIdentity } from "@/lib/auth";
-import { readLastAuthMethod, readOrganizationOptions } from "@/lib/auth-methods";
+import {
+  readLastAuthMethod,
+  readOrganizationOptions,
+  safeReturnPathname,
+} from "@/lib/auth-methods";
 import { isDesktopRequest } from "@/lib/desktop";
 
-type AuthPageSearchParams = Promise<{ invitation_token?: string; email?: string; error?: string }>;
+type AuthPageSearchParams = Promise<{
+  invitation_token?: string;
+  email?: string;
+  error?: string;
+  returnPathname?: string;
+}>;
 
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_state: "That sign-in link expired. Try continuing with Google again.",
@@ -20,11 +29,12 @@ export async function AuthPage({
   mode: "sign-in" | "sign-up";
   searchParams: AuthPageSearchParams;
 }) {
+  const params = await searchParams;
+  const returnPathname = safeReturnPathname(params.returnPathname);
   const identity = await currentIdentity({ optional: true });
-  if (identity) redirect(identity.workspaces.length > 0 ? "/" : "/onboarding");
+  if (identity) redirect(identity.workspaces.length > 0 ? returnPathname : "/onboarding");
 
-  const [params, lastUsedMethod, organizationOptions, desktop] = await Promise.all([
-    searchParams,
+  const [lastUsedMethod, organizationOptions, desktop] = await Promise.all([
     readLastAuthMethod(),
     readOrganizationOptions(),
     isDesktopRequest(),
@@ -56,6 +66,7 @@ export async function AuthPage({
         <AuthCard
           mode={mode}
           desktop={desktop}
+          returnPathname={returnPathname}
           lastUsedMethod={lastUsedMethod}
           organizationOptions={organizationOptions}
           initialError={params.error ? (OAUTH_ERROR_MESSAGES[params.error] ?? null) : null}

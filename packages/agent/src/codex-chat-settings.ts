@@ -1,11 +1,12 @@
-import { isCodexReasoningEffort } from "@opencompany/agent-runtime";
+import { CODEX_DEFAULT_REASONING_EFFORT, isCodexReasoningEffort } from "@opencompany/agent-runtime";
 import type {
   CloudCodingReasoningEffort,
   CodexReasoningEffort,
 } from "@opencompany/agent-runtime/types";
 import type { CodexChatTurnSettings } from "@opencompany/db/product-schema";
 
-export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort = "xhigh";
+export const DEFAULT_CODEX_CHAT_REASONING_EFFORT: CodexReasoningEffort =
+  CODEX_DEFAULT_REASONING_EFFORT;
 export const DEFAULT_CODEX_PLAN_MODE_REASONING_EFFORT: CodexReasoningEffort = "high";
 export const CODEX_GOAL_OBJECTIVE_MAX_LENGTH = 4_000;
 export const CODEX_GOAL_TOKEN_BUDGET_MAX = 2_000_000;

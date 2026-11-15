@@ -1,6 +1,6 @@
-import type { RunStreamEventDto } from "@opencompany/protocol/events";
+import type { ReasoningUpdateEventDto, RunStreamEventDto } from "@opencompany/protocol/events";
 import type { AttachmentDto } from "@opencompany/protocol/schemas";
-import type { ChatPart } from "./chat";
+import type { ChatPart, ReasoningPart, ToolPart } from "./chat";
 import type { RunCheckpoint } from "./chat-store";
 
 const replacePart = <T extends ChatPart>(
@@ -11,6 +11,142 @@ const replacePart = <T extends ChatPart>(
   const index = parts.findIndex(matches);
   if (index < 0) return [...parts, next];
   return parts.map((part, partIndex) => (partIndex === index ? next : part));
+};
+
+/** Applies `update` to the tool with this call id, wherever it sits in the trace. */
+const updateTool = (
+  parts: ChatPart[],
+  toolCallId: string,
+  update: (tool: ToolPart) => ToolPart,
+): { parts: ChatPart[]; found: boolean } => {
+  let found = false;
+  const next = parts.map((part) => {
+    if (found || part.type !== "tool") return part;
+    if (part.toolCallId === toolCallId) {
+      found = true;
+      return update(part);
+    }
+    if (!part.children) return part;
+    const nested = updateTool(part.children, toolCallId, update);
+    if (!nested.found) return part;
+    found = true;
+    return { ...part, children: nested.parts };
+  });
+  return { parts: found ? next : parts, found };
+};
+
+const findTool = (parts: readonly ChatPart[], toolCallId: string): ToolPart | undefined => {
+  for (const part of parts) {
+    if (part.type !== "tool") continue;
+    if (part.toolCallId === toolCallId) return part;
+    const nested = part.children ? findTool(part.children, toolCallId) : undefined;
+    if (nested) return nested;
+  }
+  return undefined;
+};
+
+const insertAtPosition = (siblings: ChatPart[], part: ChatPart, position: number): ChatPart[] => {
+  // Parts from the canonical presentation know where they were; anything after `position`
+  // happened later, so the new part goes in front of it. Live-only parts are newest.
+  const before = siblings.findIndex(
+    (sibling) =>
+      "sourceIndex" in sibling &&
+      sibling.sourceIndex !== undefined &&
+      sibling.sourceIndex >= position,
+  );
+  if (before < 0) return [...siblings, part];
+  return [...siblings.slice(0, before), part, ...siblings.slice(before)];
+};
+
+/**
+ * Whether `incoming` holds newer reasoning than `existing`. Each frame carries the whole block,
+ * so a replayed or reordered frame shows up as text that is not longer than what is already here.
+ */
+const supersedes = (existing: ReasoningPart, incoming: ReasoningPart): boolean => {
+  if (existing.attempt !== undefined && incoming.attempt !== undefined) {
+    if (incoming.attempt < existing.attempt) return false;
+    if (incoming.attempt > existing.attempt) return true;
+  }
+  if (incoming.text.length !== existing.text.length)
+    return incoming.text.length > existing.text.length;
+  return existing.streaming && !incoming.streaming;
+};
+
+export interface ReasoningUpdate {
+  parentToolCallId?: string;
+  position: number;
+  part: ReasoningPart;
+}
+
+/** Merges one reasoning snapshot into its block, or places a new block among its siblings. */
+export const upsertReasoning = (parts: ChatPart[], update: ReasoningUpdate): ChatPart[] => {
+  const upsert = (siblings: ChatPart[], idPrefix: string): ChatPart[] => {
+    const part = { ...update.part, id: `${idPrefix}reasoning:${update.part.itemId}` };
+    const index = siblings.findIndex(
+      (sibling) => sibling.type === "reasoning" && sibling.itemId === part.itemId,
+    );
+    if (index < 0)
+      return insertAtPosition(siblings, { ...part, sourceIndex: update.position }, update.position);
+    const existing = siblings[index] as ReasoningPart;
+    if (!supersedes(existing, part)) return siblings;
+    return siblings.map((sibling, siblingIndex) =>
+      siblingIndex === index
+        ? { ...existing, ...part, sourceIndex: existing.sourceIndex }
+        : sibling,
+    );
+  };
+  if (!update.parentToolCallId) return upsert(parts, "");
+  // A subagent's block waits for its parent tool; the canonical refresh delivers it otherwise.
+  return updateTool(parts, update.parentToolCallId, (tool) => ({
+    ...tool,
+    children: upsert(tool.children ?? [], `${tool.id}/`),
+  })).parts;
+};
+
+const reasoningUpdateFrom = (event: ReasoningUpdateEventDto): ReasoningUpdate => ({
+  ...(event.payload.parentToolCallId ? { parentToolCallId: event.payload.parentToolCallId } : {}),
+  position: event.payload.position,
+  part: {
+    id: `reasoning:${event.payload.itemId}`,
+    type: "reasoning",
+    itemId: event.payload.itemId,
+    text: event.payload.text,
+    streaming: event.payload.state === "streaming",
+    attempt: event.attemptNumber,
+  },
+});
+
+const liveReasoning = (parts: readonly ChatPart[], parentToolCallId?: string): ReasoningUpdate[] =>
+  parts.flatMap((part, index): ReasoningUpdate[] => {
+    if (part.type === "reasoning")
+      return [
+        {
+          ...(parentToolCallId ? { parentToolCallId } : {}),
+          position: part.sourceIndex ?? index,
+          part,
+        },
+      ];
+    if (part.type === "tool" && part.children) return liveReasoning(part.children, part.toolCallId);
+    return [];
+  });
+
+/**
+ * Lays live reasoning over a canonical presentation. The canonical parts can predate frames this
+ * device already applied, so a block keeps whichever text is newer, and a block still streaming
+ * that the checkpoint has not saved yet stays in place.
+ */
+export const preserveLiveReasoning = (
+  canonical: ChatPart[],
+  live: readonly ChatPart[],
+): ChatPart[] => {
+  const saved = new Set(liveReasoning(canonical).map((update) => update.part.itemId));
+  return liveReasoning(live)
+    .filter(
+      (update) =>
+        update.part.attempt !== undefined &&
+        (saved.has(update.part.itemId) || update.part.streaming),
+    )
+    .reduce(upsertReasoning, canonical);
 };
 
 const appendText = (parts: ChatPart[], delta: string, startOffset: number): ChatPart[] => {
@@ -40,6 +176,12 @@ export const projectRunEvent = (
   checkpoint: RunCheckpoint,
   event: RunStreamEventDto,
 ): RunCheckpoint => {
+  if (event.type === "message.reasoning_updated") {
+    const base = { ...checkpoint, presentationCursor: event.presentationCursor };
+    if (event.payload.messageId !== checkpoint.assistantMessageId) return base;
+    return { ...base, parts: upsertReasoning(checkpoint.parts, reasoningUpdateFrom(event)) };
+  }
+
   if (event.type === "message.presentation_delta") {
     if (
       event.payload.messageId !== checkpoint.assistantMessageId ||
@@ -94,62 +236,78 @@ export const projectRunEvent = (
         parts: reconcileTextContent(checkpoint.parts, event.payload.content),
       };
     }
-    case "tool.started":
-      return {
-        ...base,
-        parts: replacePart(
-          checkpoint.parts,
-          (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
-          {
-            id: `tool:${event.payload.toolCallId}`,
-            type: "tool",
-            toolCallId: event.payload.toolCallId,
-            name: event.payload.name,
-            ...(event.payload.label ? { label: event.payload.label } : {}),
-            ...(event.payload.detail ? { detail: event.payload.detail } : {}),
-            status: "running",
-          },
-        ),
-      };
+    case "tool.started": {
+      const { toolCallId, parentToolCallId } = event.payload;
+      // A started event repeats after a reconnect; it must not wipe what a refresh already knows.
+      const existing = findTool(checkpoint.parts, toolCallId);
+      if (existing) return base;
+      const started = (idPrefix: string): ToolPart => ({
+        id: `${idPrefix}tool:${toolCallId}`,
+        type: "tool",
+        toolCallId,
+        name: event.payload.name,
+        ...(event.payload.label ? { label: event.payload.label } : {}),
+        ...(event.payload.detail ? { detail: event.payload.detail } : {}),
+        status: "running",
+      });
+      if (parentToolCallId) {
+        const nested = updateTool(checkpoint.parts, parentToolCallId, (parent) => ({
+          ...parent,
+          children: [...(parent.children ?? []), started(`${parent.id}/`)],
+        }));
+        if (nested.found) return { ...base, parts: nested.parts };
+      }
+      return { ...base, parts: [...checkpoint.parts, started("")] };
+    }
     case "tool.completed": {
-      const existing = checkpoint.parts.find(
-        (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
-      );
-      return {
-        ...base,
-        parts: replacePart(
-          checkpoint.parts,
-          (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
-          {
-            id: `tool:${event.payload.toolCallId}`,
-            type: "tool",
-            toolCallId: event.payload.toolCallId,
-            name: existing?.type === "tool" ? existing.name : "Tool",
-            status: "completed",
-            ...(event.payload.summary ? { summary: event.payload.summary } : {}),
-          },
-        ),
-      };
+      const { toolCallId, summary } = event.payload;
+      const updated = updateTool(checkpoint.parts, toolCallId, (tool) => ({
+        ...tool,
+        status: "completed",
+        state: "output-available",
+        ...(summary ? { summary } : {}),
+      }));
+      return updated.found
+        ? { ...base, parts: updated.parts }
+        : {
+            ...base,
+            parts: [
+              ...checkpoint.parts,
+              {
+                id: `tool:${toolCallId}`,
+                type: "tool",
+                toolCallId,
+                name: "tool",
+                status: "completed",
+                ...(summary ? { summary } : {}),
+              },
+            ],
+          };
     }
     case "tool.failed": {
-      const existing = checkpoint.parts.find(
-        (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
-      );
-      return {
-        ...base,
-        parts: replacePart(
-          checkpoint.parts,
-          (part) => part.type === "tool" && part.toolCallId === event.payload.toolCallId,
-          {
-            id: `tool:${event.payload.toolCallId}`,
-            type: "tool",
-            toolCallId: event.payload.toolCallId,
-            name: existing?.type === "tool" ? existing.name : "Tool",
-            status: "failed",
-            error: event.payload.message,
-          },
-        ),
-      };
+      const { toolCallId, message } = event.payload;
+      const updated = updateTool(checkpoint.parts, toolCallId, (tool) => ({
+        ...tool,
+        status: "failed",
+        state: "output-error",
+        error: message,
+      }));
+      return updated.found
+        ? { ...base, parts: updated.parts }
+        : {
+            ...base,
+            parts: [
+              ...checkpoint.parts,
+              {
+                id: `tool:${toolCallId}`,
+                type: "tool",
+                toolCallId,
+                name: "tool",
+                status: "failed",
+                error: message,
+              },
+            ],
+          };
     }
     case "approval.requested":
       return {

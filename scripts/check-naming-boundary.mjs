@@ -192,6 +192,9 @@ const baseEnvKeys = envKeys(
 // `.env.example` still matches origin/main modulo the rename map; genuinely new
 // variables are declared here so the check accepts them.
 const addedEnvKeys = [
+  "SENTRY_APP_CLIENT_ID",
+  "SENTRY_APP_CLIENT_SECRET",
+  "SENTRY_APP_SLUG",
   "APP_VARIANT",
   "API_INTERNAL_TOKEN",
   "GITHUB_USER_APP_WEBHOOK_SECRET",

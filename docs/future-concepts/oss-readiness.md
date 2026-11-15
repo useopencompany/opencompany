@@ -65,7 +65,9 @@ the launch or accepting an external pull request.
   verified `main` automatically, accepts no other branch, and disallows administrator bypass. See
   [CI security](../ci-security.md).
 - **Hosted fork controls (owner-confirmed 2026-09-07):** Infisical's OIDC boundary and Vercel Fork
-  Protection are configured and working. This records the release owner's confirmation without
+  Protection are configured and working. Since 2026-11-07, release workflows authenticate to the
+  self-hosted Infisical with universal-auth credentials stored as GitHub `production` environment
+  secrets, which GitHub does not pass to fork pull requests. This records the release owner's confirmation without
   storing hosted configuration or credential values in the repository.
 - **History and contributor privacy (resolved 2026-09-07):** the final scan covered every live
   branch and pull-request head intended to remain reachable: 4,935 unique commits across eight

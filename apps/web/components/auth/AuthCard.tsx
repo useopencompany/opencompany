@@ -27,6 +27,7 @@ type AuthCardProps = {
   desktop?: boolean;
   invitationToken?: string;
   prefillEmail?: string;
+  returnPathname?: string;
   lastUsedMethod: AuthMethod | null;
   organizationOptions?: OrganizationOption[] | null;
   initialError?: string | null;
@@ -139,6 +140,7 @@ export function AuthCard({
   desktop = false,
   invitationToken,
   prefillEmail,
+  returnPathname = "/",
   lastUsedMethod,
   organizationOptions,
   initialError,
@@ -234,6 +236,7 @@ export function AuthCard({
       const result = await verifyMagicCode({
         email,
         code,
+        returnPathname,
         ...(invitationToken ? { invitationToken } : {}),
       });
       // On success verifyMagicCode redirects server-side; only failure returns here.
@@ -255,6 +258,7 @@ export function AuthCard({
           />
         ) : (
           <form action={startGoogleAuth}>
+            <input type="hidden" name="returnPathname" value={returnPathname} />
             {invitationToken ? (
               <input type="hidden" name="invitationToken" value={invitationToken} />
             ) : null}
@@ -338,7 +342,11 @@ export function AuthCard({
             Already have an account?{" "}
             <a
               className="font-medium text-violet-600 underline-offset-2 transition-colors hover:underline dark:text-violet-400"
-              href="/signin"
+              href={
+                returnPathname === "/"
+                  ? "/signin"
+                  : `/signin?${new URLSearchParams({ returnPathname })}`
+              }
             >
               Sign in
             </a>
@@ -348,7 +356,11 @@ export function AuthCard({
             New here?{" "}
             <a
               className="font-medium text-violet-600 underline-offset-2 transition-colors hover:underline dark:text-violet-400"
-              href="/signup"
+              href={
+                returnPathname === "/"
+                  ? "/signup"
+                  : `/signup?${new URLSearchParams({ returnPathname })}`
+              }
             >
               Create an account
             </a>

@@ -3,6 +3,7 @@ import type { JSONSchema7 } from "ai";
 import type { CapabilityId } from "./capabilities";
 
 export type ActionProviderId =
+  | "sentry"
   | "custom_mcp"
   | "slack"
   | "gmail"
