@@ -24,11 +24,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
 
+<!-- Hold #2049 with #2013 until production GitHub webhook setup and a live event-triggered run are confirmed. -->
+
+- start from the pull request review workflow template. choose a connected company github account and repository, then review the draft before activating it. the reviewer also needs their own github connection (#2049) — @louis.
+
+<!-- Hold #2070 until Sentry publication approval and production installation are confirmed. -->
+
+- connect sentry under company plugins to investigate new issues, propose fixes, or prepare a daily review. choose which projects the assistant can access (#2070) — @MonsterDeveloper.
+
+<!-- Hold the newer iOS entries until distribution is confirmed. The 2026-10-04 build succeeded at #2068, but a build alone does not confirm availability to users. -->
+
+- choose codex or claude code from the iphone app's model picker to start a coding chat. choose its model and reasoning effort, and attach photos from the camera, photos, or files (#2064) — @MonsterDeveloper.
+- type @ for plugins and repositories, / for skills, or # to start a task or workflow from the iphone composer. task replies support @ mentions (#2066) — @MonsterDeveloper.
+- pin chats, reply to running tasks, and see unread activity and pull request status in the iphone sidebar. create or revoke a read-only sharing link from a chat's menu (#2050) — @MonsterDeveloper.
+
+### Changed
+- follow the assistant's work on iphone with expandable reasoning and tool activity. tap a tool to inspect or copy its input and result; completed activity folds away so the reply stays easy to read (#2068) — @MonsterDeveloper.
+
 ### Fixed
-- opening a recent chat from Home no longer sends you straight back to a new chat when a prefetched server read briefly misses it (#2054) — @louis.
-- starting a new chat no longer throws you back to home while the first reply is on its way, and the chat stays in the sidebar after a reload. the address bar only switches to the chat once the server has it (#2040) — @louis.
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+
+- writing and sending messages on iphone feels steadier, with smoother keyboard movement and scrolling (#2038) — @MonsterDeveloper.
+- preview chats from the iphone sidebar without a crash, including chats you have not opened on that device (#2051) — @MonsterDeveloper.
+- signing out on iphone now finishes when you return from the browser (#2045) — @MonsterDeveloper.
+
+## [1.36.0] - 2026-11-15
+
+### Added
+- let one workflow hand work to another. type @ in a step's instructions and choose the workflow it should start. follow the new task and its pull request status from a card in the original task (#2056) — @louis.
+
+### Changed
+- select an already-open chat from the sidebar and start typing right away. the composer in that pane now gets focus automatically (#2048) — @louis.
+- slimmer scrollbars leave more room for your sidebar and chat (#2044) — @MonsterDeveloper.
+
+### Fixed
+- connect your github account without needing permission to manage your organization's app installation. repository access still follows the permissions your organization grants (#2057) — @louis.
+- mention a skill in a task reply and the assistant can use it. skill mentions also keep their highlighting after you send a message (#2046, #2053) — @louis.
+- starting or reopening a chat no longer sends you back to home during a brief loading delay. new chats also stay in the sidebar after a reload (#2040, #2054) — @louis.
+- archiving the task you are viewing now opens a new chat instead of leaving you on the archived task (#2062) — @louis.
+- coding chats retry temporary sandbox maintenance and download failures during startup, so a brief interruption is less likely to stop your work (#2041, #2060) — @louis.
+
+### Security
+- updated app dependencies to address known security vulnerabilities (#2072, #2092) — @MonsterDeveloper.
 
 ## [1.35.1] - 2026-09-25
 
