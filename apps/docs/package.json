@@ -15,10 +15,10 @@
   },
   "dependencies": {
     "@opencompany/protocol": "workspace:*",
-    "fumadocs-core": "16.15.4",
+    "fumadocs-core": "16.17.10",
     "fumadocs-mdx": "^15.4.0",
-    "fumadocs-openapi": "^11.3.5",
-    "fumadocs-ui": "16.15.4",
+    "fumadocs-openapi": "^12.5.8",
+    "fumadocs-ui": "16.17.10",
     "json-schema-typed": "^8.0.2",
     "next": "16.4.5",
     "react": "19.2.8",
