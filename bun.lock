@@ -619,6 +619,7 @@
   },
   "trustedDependencies": [
     "electron",
+    "react-native-enriched-markdown",
   ],
   "overrides": {
     "@arizeai/openinference-instrumentation-langchain": "4.0.23",
