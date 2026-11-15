@@ -60,7 +60,7 @@ publishes that release only when the operator asks it to.
 
 `.github/workflows/release-production.yml` is a separate trusted path. It only accepts `push` to
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
-deployment/OIDC permission to the production release job.
+deployment permission and production secrets to the production release job.
 
 ## Review and production policy
 
@@ -91,7 +91,7 @@ contribution terms and the explicit decision not to require DCO sign-off.
 The production environment has no redundant manual reviewer. It accepts deployments only from
 `main`, and administrators cannot bypass that branch policy. Production remains automatic after a
 permitted merge because the release workflow independently verifies the selected `main` commit
-before the privileged deployment job receives OIDC or environment secrets.
+before the privileged deployment job receives environment secrets.
 
 ## Repository settings contract
 
@@ -157,18 +157,16 @@ dependency cannot leave a silent hole behind. Prefer an override or an upstream 
 exception only when no released version is both patched and compatible, and record why in the
 script rather than in a commit message.
 
-Two tooling advisories currently have no patched release. `braces@3.0.3` is reached through
-micromatch in Metro and fast-glob tooling; GHSA-vfj7-8cjw-p6xm requires a deeply nested brace pattern.
-`http-cache-semantics@4.2.0` is reached through Electron's artifact downloader; GHSA-ch52-4w7c-c8xp
-affects shared HTTP caches. Their named exceptions expire on 2026-10-31. Replace them with compatible
-patched releases when available, and re-review before accepting untrusted glob patterns or adding
-another HTTP-cache consumer.
+Three advisories outside decode-uri-component have no patched release on the version line we
+depend on. `deepmerge@4.3.1` (GHSA-gcqx-w48m-w2h4) is reached only through `@expo/config`, which
+merges repository-owned config. The zod 3.x copies (GHSA-mrhx-c7xc-m3w5) come from `@expo/cli` and
+the Vercel CLI builders, which validate repository config rather than request data. Our own
+packages use zod 4.6.7. Both exceptions expire on 2027-02-28. Re-review them before either tool
+processes untrusted input.
 
-`node-forge@1.4.0` has no released fix for GHSA-86w9-cpqp-85rv. The Bun patch in
-`patches/node-forge@1.4.0.patch` applies the nested DigestAlgorithm element-count check from
-[upstream PR 1152](https://github.com/digitalbazaar/forge/pull/1152). The Policy job tests malformed
-and valid signatures through `scripts/lib/node-forge.test.mjs`. Its advisory exception expires on
-2026-10-31. Remove both the patch and exception when a fixed version is available.
+`node-forge` is overridden to 1.4.3, which includes the nested DigestAlgorithm element-count fix
+for GHSA-86w9-cpqp-85rv. The Policy job keeps `scripts/lib/node-forge.test.mjs` as a regression
+test for malformed and valid signatures.
 
 Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
 These overrides update vulnerable transitive copies while preserving compatible major versions for

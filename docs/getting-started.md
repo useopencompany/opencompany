@@ -9,7 +9,8 @@
 
 - Bun `1.4.2`
 - Node `20.20.0` or newer
-- Infisical CLI authenticated to this project
+- Infisical CLI authenticated to this project with
+  `infisical login --domain https://infisical.opencompany.cloud`
 - Neon CLI access to the development project
 - Docker or OrbStack for local Electric
 - Stripe CLI for local billing webhooks

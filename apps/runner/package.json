@@ -13,7 +13,7 @@
   "dependencies": {
     "@fastify/rate-limit": "11.2.0",
     "@fumari/image-size": "0.1.0",
-    "@modelcontextprotocol/sdk": "1.31.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@opencompany/agent-runtime": "workspace:*",
     "@opencompany/analytics": "workspace:*",
     "@opencompany/billing": "workspace:*",
@@ -30,10 +30,10 @@
     "ai": "^7.0.106",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
-    "e2b": "^2.51.0",
-    "fastify": "^5.12.5",
+    "e2b": "^2.63.0",
+    "fastify": "^5.12.8",
     "ws": "^8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
@@ -41,6 +41,6 @@
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.13",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

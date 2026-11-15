@@ -86,6 +86,12 @@ shapes between the API and the runner.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
   production URLs, and the migration database URL.
 
+Production, desktop, and mobile release workflows read these paths from the self-hosted Infisical
+at `https://infisical.opencompany.cloud`, project `opencompany-xqub`. The domain, project slug, and
+`prod` env slug are pinned in each workflow. They authenticate with a universal-auth machine
+identity whose credentials are the GitHub `production` environment secrets
+`INFISICAL_MACHINE_IDENTITY_CLIENT_ID` and `INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET`.
+
 Run `bun run infisical:release:preflight` to validate the release group. The hosted workflow also
 checks Vercel project metadata and required host values that cannot be verified through a normal
 environment pull. It creates `.vercel/project.json` from release credentials at runtime; the
@@ -124,9 +130,10 @@ project:
 - `EXPO_PUBLIC_WORKOS_CLIENT_ID`
 - `SENTRY_AUTH_TOKEN`, used only by the native Sentry artifact upload hooks
 
-The workflow uses the GitHub `production` environment variable `INFISICAL_PROJECT_SLUG`, which is
-shared with the release workflow. The existing OIDC machine identity must have read access to
-`/mobile`. GitHub does not need copies of the build values.
+The workflow authenticates to Infisical with the universal-auth machine identity whose credentials
+are the GitHub `production` environment secrets `INFISICAL_MACHINE_IDENTITY_CLIENT_ID` and
+`INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET`, shared with the release workflows. That identity must
+have read access to `/mobile`. GitHub does not need copies of the build values.
 
 The Infisical action exports every value into the GitHub job environment. `EXPO_TOKEN` and the App
 Store Connect values configure the local EAS CLI invocation. EAS does not copy the caller's complete
@@ -175,7 +182,7 @@ Draft releases are invisible to installed apps. Do not mark any other release in
 Latest. The release process and update behavior are described in
 [the desktop README](../apps/desktop/README.md#releases).
 
-The job reads these values from Infisical `prod` `/desktop`. The existing OIDC machine identity
+The job reads these values from Infisical `prod` `/desktop`. The universal-auth machine identity
 needs read access to that path:
 
 - `MACOS_CERTIFICATE_P12_BASE64`, a base64-encoded `.p12` export of the Developer ID Application
