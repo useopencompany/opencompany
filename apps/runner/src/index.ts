@@ -38,14 +38,15 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "index",
 });
-// Render sends SIGTERM on deploy and SIGKILLs after `maxShutdownDelaySeconds` (300s,
-// render.yaml). Workers stop claiming immediately, then active runner jobs and durable opencompany Codex
-// turns get most of that window to finish in place. The remaining minute covers interruption or
-// handoff, stream/telemetry flushes, and closing the DB pool before Render's hard kill.
-const RENDER_SHUTDOWN_DRAIN_MS = 230_000;
-const RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
-const RENDER_SHUTDOWN_DB_CLOSE_MS = 10_000;
-const RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS = 10_000;
+// The host sends SIGTERM on deploy and SIGKILLs 300 seconds later: Render's
+// `maxShutdownDelaySeconds` (render.yaml) and Kamal's `stop_timeout` (apps/runner/config/deploy.yml)
+// are both 300. Workers stop claiming immediately, then active runner jobs and durable opencompany
+// Codex turns get most of that window to finish in place. The remaining minute covers interruption
+// or handoff, stream/telemetry flushes, and closing the DB pool before the hard kill.
+const SHUTDOWN_DRAIN_MS = 230_000;
+const SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
+const SHUTDOWN_DB_CLOSE_MS = 10_000;
+const SHUTDOWN_TELEMETRY_FLUSH_MS = 10_000;
 
 installBunExceptionReporter({
   serviceName: "opencompany-runner-goat",
@@ -199,8 +200,8 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
   try {
     const drain = await drainRunnerTasks({
       tasks,
-      drainMs: RENDER_SHUTDOWN_DRAIN_MS,
-      postAbortWaitMs: RENDER_SHUTDOWN_POST_DRAIN_WAIT_MS,
+      drainMs: SHUTDOWN_DRAIN_MS,
+      postAbortWaitMs: SHUTDOWN_POST_DRAIN_WAIT_MS,
       onDeadline: ({ activeAtStart, interruptedAtDeadline }) => {
         logger.warn("Runner shutdown drain deadline exceeded; handing off active work", {
           event: "opencompany.runner_shutdown_drain_deadline_exceeded",
@@ -222,10 +223,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
       });
     }
 
-    const dbClosed = await settlesWithin(
-      Promise.allSettled([closeDb()]),
-      RENDER_SHUTDOWN_DB_CLOSE_MS,
-    );
+    const dbClosed = await settlesWithin(Promise.allSettled([closeDb()]), SHUTDOWN_DB_CLOSE_MS);
     if (!dbClosed) {
       logger.error("Runner DB close exceeded its shutdown budget", {
         event: "opencompany.runner_shutdown_db_close_timeout",
@@ -243,7 +241,7 @@ async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
         flushLatitude(),
         shutdownNodeObservability(),
       ]),
-      RENDER_SHUTDOWN_TELEMETRY_FLUSH_MS,
+      SHUTDOWN_TELEMETRY_FLUSH_MS,
     );
   } catch (error) {
     reportProcessError("opencompany.runner_shutdown_failed", error);

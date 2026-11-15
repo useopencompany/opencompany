@@ -1,0 +1,195 @@
+# The release workflow deploys this from apps/api with `kamal deploy`. Never run `kamal setup` once
+# the server is up: it reboots the Electric accessory. docs/hosting.md covers the server, the
+# manual commands and the Render cutover.
+service: opencompany-api
+image: useopencompany/opencompany-api
+
+servers:
+  web:
+    hosts:
+      - 91.99.204.222
+    options:
+      # For a `docker stop` without -t, such as a daemon restart.
+      stop-timeout: 60
+
+proxy:
+  ssl: true
+  # kamal-proxy issues one Let's Encrypt certificate per host on its first request.
+  # api-next is the pre-cutover test hostname; PR 3 of the Hetzner move removes it.
+  hosts:
+    - api.opencompany.chat
+    - api-next.opencompany.chat
+  app_port: 3001
+  healthcheck:
+    path: /healthz
+    interval: 3
+    timeout: 5
+  # Chat streams over SSE and Electric live shapes hold a request open for minutes. 0 turns off
+  # kamal-proxy's response-header timeout; Bun and the clients still bound each request.
+  response_timeout: 0
+  # Stream each chunk to the client as the API writes it.
+  buffering:
+    responses: false
+
+# kamal-proxy waits this long for in-flight requests before Kamal stops the old container. Render
+# allowed the API 60 seconds as well.
+drain_timeout: 60
+# Then `docker stop -t 60`, for work the API finishes after a response.
+stop_timeout: 60
+retain_containers: 3
+
+registry:
+  server: ghcr.io
+  username:
+    - KAMAL_REGISTRY_USERNAME
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: amd64
+  context: ../..
+  # Relative to this directory: Kamal passes it to `docker buildx build --file` from here.
+  dockerfile: ../../Dockerfile.api
+  # The selected buildx builder: Blacksmith's cached builder in CI.
+  driver: docker
+
+logging:
+  options:
+    max-size: 50m
+
+# scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets, the api group
+# in scripts/release-preflight.mjs and the API keys in render.yaml.
+env:
+  clear:
+    NODE_ENV: production
+    PORT: "3001"
+    # The Electric accessory below, on Kamal's private Docker network. It lives here rather than
+    # in Infisical `/api` because that folder also syncs to the Render API, which keeps its own
+    # Electric until the cutover.
+    ELECTRIC_URL: http://opencompany-api-electric:3000
+  secret:
+    - API_DATABASE_URL
+    - API_DB_POOL_MAX
+    - API_BROWSER_ORIGINS
+    - OPENCOMPANY_API_ORIGIN
+    - WORKOS_CLIENT_ID
+    - WORKOS_MOBILE_CLIENT_ID
+    - WORKOS_API_KEY
+    - WORKOS_COOKIE_PASSWORD
+    - WORKOS_COOKIE_NAME
+    - WORKOS_COOKIE_DOMAIN
+    - OPENCOMPANY_AUTHKIT_DOMAIN
+    - OPENCOMPANY_API_OAUTH_AUDIENCE
+    - OPENCOMPANY_DEFAULT_CHAT_MODEL
+    - INTEGRATION_CREDENTIAL_ENCRYPTION_KEY
+    - VERCEL_AI_GATEWAY_API_KEY
+    - OPENCOMPANY_NEXT_PUBLIC_APP_URL
+    - OPENCOMPANY_STRIPE_API_KEY
+    - OPENCOMPANY_STRIPE_WEBHOOK_SECRET
+    - OPENCOMPANY_STRIPE_CHECKOUT_ENABLED
+    - CRON_SECRET
+    - MONID_API_KEY
+    - GITHUB_USER_APP_SLUG
+    - GITHUB_USER_APP_CLIENT_ID
+    - GITHUB_USER_APP_CLIENT_SECRET
+    - SENTRY_APP_CLIENT_ID
+    - SENTRY_APP_CLIENT_SECRET
+    - SENTRY_APP_SLUG
+    - GITHUB_USER_APP_STATE_SECRET
+    - GOOGLE_OAUTH_CLIENT_ID
+    - GOOGLE_OAUTH_CLIENT_SECRET
+    - GOOGLE_INTEGRATION_STATE_SECRET
+    - OPENCOMPANY_SLACK_CLIENT_ID
+    - OPENCOMPANY_SLACK_CLIENT_SECRET
+    - OPENCOMPANY_SLACK_STATE_SECRET
+    - OPENCOMPANY_LINEAR_CLIENT_ID
+    - OPENCOMPANY_LINEAR_CLIENT_SECRET
+    - OPENCOMPANY_LINEAR_WEBHOOK_SECRET
+    - OPENCOMPANY_LINEAR_STATE_SECRET
+    - OPENCOMPANY_HUBSPOT_MCP_CLIENT_ID
+    - OPENCOMPANY_HUBSPOT_MCP_CLIENT_SECRET
+    - MCP_OAUTH_STATE_SECRET
+    - OPENCOMPANY_X_CLIENT_ID
+    - OPENCOMPANY_X_CLIENT_SECRET
+    - OPENCOMPANY_X_STATE_SECRET
+    - OPENCOMPANY_SLACK_BOT_CLIENT_ID
+    - OPENCOMPANY_SLACK_BOT_CLIENT_SECRET
+    - OPENCOMPANY_SLACK_BOT_SIGNING_SECRET
+    - OPENCOMPANY_SLACK_BOT_STATE_SECRET
+    - KAPSO_API_KEY
+    - KAPSO_PHONE_NUMBER_ID
+    - WHATSAPP_LINE_HANDLE
+    - MESSAGES_API_KEY
+    - KAPSO_WEBHOOK_SECRET
+    - MESSAGES_WEBHOOK_SECRET
+    - MESSAGES_LINE_HANDLE
+    - LINEAR_API_KEY
+    - OPENCOMPANY_FEEDBACK_LINEAR_TEAM_ID
+    - OPENCOMPANY_FEEDBACK_LINEAR_LABELS
+    - OPENCOMPANY_FEEDBACK_LINEAR_PROJECT_ID
+    - NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN
+    - NEXT_PUBLIC_OPENCOMPANY_POSTHOG_HOST
+    - RUNNER_PUBLIC_URL
+    - RUNNER_INTERNAL_URL
+    - RUNNER_INTERNAL_TOKEN
+    - API_INTERNAL_TOKEN
+    - OPENCOMPANY_BROWSER_PROFILES_ENABLED
+    - OPENCOMPANY_BROWSER_PROFILES_KILL_SWITCH
+    - BROWSERBASE_API_KEY
+    - BROWSERBASE_PROJECT_ID
+    - APIFY_API_TOKEN
+    - RUNNER_OPENCOMPANY_BROWSER_ENABLED
+    - OPENCOMPANY_MANAGED_CAPABILITIES_KILL_SWITCH
+    - OPENCOMPANY_DISABLED_MANAGED_CAPABILITY_ACTIONS
+    - BLOB_READ_WRITE_TOKEN
+    - ELECTRIC_AUTH_MODE
+    - ELECTRIC_SOURCE_ID
+    - ELECTRIC_SOURCE_SECRET
+    - ELECTRIC_SECRET
+    - ELECTRIC_TOKEN
+    - BUN_CONFIG_MAX_HTTP_REQUESTS
+    - REDIS_URL
+    - OPENCOMPANY_OBSERVABILITY_ENABLED
+    - OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT
+    - OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS
+    - BETTER_STACK_ERRORS_DSN
+    - OBSERVABILITY_ENABLED
+    - OBSERVABILITY_ENV
+    - OBSERVABILITY_RELEASE
+    - OBSERVABILITY_LOG_LEVEL
+    - OBSERVABILITY_TIMING
+    - NEXT_PUBLIC_POSTHOG_TOKEN
+    - NEXT_PUBLIC_POSTHOG_HOST
+    - LATITUDE_API_KEY
+    - LATITUDE_PROJECT_SLUG
+    - LATITUDE_SERVICE_NAME
+    - LATITUDE_TELEMETRY_DISABLED
+
+accessories:
+  # The durable browser read layer behind the API's read-model proxy. Its volume and replication
+  # stream form one stateful unit: docs/electric-sync.md covers a rebuild. `kamal deploy` leaves a
+  # running accessory alone; `kamal accessory reboot electric` restarts it.
+  electric:
+    host: 91.99.204.222
+    # The same digest as render.yaml, so both stacks run the same Electric build.
+    image: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
+    # No published port: only the API reaches it, as opencompany-api-electric on the kamal network.
+    volumes:
+      - opencompany-electric-data:/var/electric
+    env:
+      clear:
+        ELECTRIC_STORAGE_DIR: /var/electric
+        # Its own publication and replication slot, so it warms beside the Render Electric
+        # (opencompany_render_v1) without contending for either.
+        ELECTRIC_REPLICATION_STREAM_ID: opencompany_hetzner_v1
+      secret:
+        # Infisical `/electric` holds DATABASE_URL. The deploy job exports it as
+        # ELECTRIC_DATABASE_URL, because a plain DATABASE_URL would mean something else in a job
+        # that also loads `/api` and `/release`.
+        - DATABASE_URL:ELECTRIC_DATABASE_URL
+        - ELECTRIC_SECRET
+    options:
+      stop-timeout: 60
+
+ssh:
+  user: main

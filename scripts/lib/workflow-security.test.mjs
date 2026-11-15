@@ -7,6 +7,8 @@ const pullRequestWorkflowUrl = new URL("ci.yml", workflowDirectory);
 const verifyWorkflowUrl = new URL("verify.yml", workflowDirectory);
 const releaseWorkflowUrl = new URL("release-production.yml", workflowDirectory);
 const desktopReleaseWorkflowUrl = new URL("release-desktop.yml", workflowDirectory);
+const kamalCommandWorkflowUrl = new URL("kamal-command.yml", workflowDirectory);
+const runnerCertificateWorkflowUrl = new URL("renew-runner-cert.yml", workflowDirectory);
 
 test("every third-party workflow action is pinned to a full commit SHA", async () => {
   const workflowFiles = (await readdir(workflowDirectory)).filter((name) => name.endsWith(".yml"));
@@ -150,6 +152,24 @@ test("production verifies main before entering the privileged release job", asyn
   assert.doesNotMatch(workflow, /pull_request_target:/u);
   assert.doesNotMatch(workflow, /pull_request:/u);
   assert.doesNotMatch(workflow, /workflow_run:/u);
+});
+
+test("production Kamal command input never executes through a shell", async () => {
+  const workflow = await readFile(kamalCommandWorkflowUrl, "utf8");
+
+  assert.match(workflow, /Shellwords\.split\(ENV\.fetch\("COMMAND"\)\)/u);
+  assert.match(workflow, /args\.first == "kamal"/u);
+  assert.match(workflow, /exec\(\*args\)/u);
+  assert.doesNotMatch(workflow, /bash -c/u);
+});
+
+test("runner certificate issuance keeps the lego binary separate from its data directory", async () => {
+  const workflow = await readFile(runnerCertificateWorkflowUrl, "utf8");
+
+  assert.match(workflow, /LEGO_BIN=\$RUNNER_TEMP\/lego/u);
+  assert.match(workflow, /LEGO_DATA_PATH=\$RUNNER_TEMP\/lego-data/u);
+  assert.match(workflow, /"\$LEGO_BIN" --accept-tos --path "\$LEGO_DATA_PATH"/u);
+  assert.doesNotMatch(workflow, /--path "\$LEGO_BIN"/u);
 });
 
 test("desktop releases are manual, main-only, and verified before publishing", async () => {
