@@ -48,7 +48,20 @@ export function installBunExceptionReporter(input: BunExceptionReporterInput): b
       process.env.VERCEL_GIT_COMMIT_SHA,
     serverName: input.serviceName,
     initialScope: { tags: { service: input.serviceName } },
-    sendDefaultPii: false,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+        response: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+      },
+      httpBodies: [],
+      urlQueryParams: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    },
     tracesSampleRate: 0,
     beforeSend(event, hint) {
       return sanitizeErrorEvent(event, hint.originalException);

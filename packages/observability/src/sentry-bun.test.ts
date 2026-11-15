@@ -81,7 +81,20 @@ describe("installBunExceptionReporter", () => {
         release: "release-1",
         serverName: "opencompany-api",
         initialScope: { tags: { service: "opencompany-api" } },
-        sendDefaultPii: false,
+        dataCollection: {
+          userInfo: false,
+          cookies: false,
+          httpHeaders: {
+            request: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+            response: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+          },
+          httpBodies: [],
+          urlQueryParams: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+          genAI: { inputs: false, outputs: false },
+          databaseQueryData: false,
+          queues: false,
+          graphQL: { document: false, variables: false },
+        },
         tracesSampleRate: 0,
       }),
     );
