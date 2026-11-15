@@ -1,17 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createContext, use, useState } from "react";
-import anthropicDark from "@/assets/images/model-anthropic-dark.png";
-import anthropicLight from "@/assets/images/model-anthropic-light.png";
-import deepseekDark from "@/assets/images/model-deepseek-dark.png";
-import deepseekLight from "@/assets/images/model-deepseek-light.png";
-import moonshotDark from "@/assets/images/model-moonshot-dark.png";
-import moonshotLight from "@/assets/images/model-moonshot-light.png";
-import openaiDark from "@/assets/images/model-openai-dark.png";
-import openaiLight from "@/assets/images/model-openai-light.png";
-import qwenDark from "@/assets/images/model-qwen-dark.png";
-import qwenLight from "@/assets/images/model-qwen-light.png";
-import zaiDark from "@/assets/images/model-zai-dark.png";
-import zaiLight from "@/assets/images/model-zai-light.png";
+import { createContext, use, useEffect, useRef, useState } from "react";
+import { until } from "until-async";
+import { useAuth } from "@/features/auth";
 import { throwIfAborted } from "@/shared/lib/abort";
 import { analytics } from "@/shared/lib/analytics";
 import { queryClient } from "@/shared/lib/query-client";
@@ -19,65 +9,27 @@ import { useToast } from "@/shared/ui/toast";
 import { chatQueryKeys, useChatCoordinator } from "./chat-coordinator";
 import {
   getStoredDraft,
+  listStoredConversations,
   NEW_CHAT_ID,
   persistDraftAttachment,
   removeStoredAttachment,
+  type StoredConversation,
   type StoredDraft,
   saveStoredDraft,
 } from "./chat-store";
-
-export const CHAT_MODELS = [
-  {
-    id: "anthropic/claude-sonnet-5",
-    label: "Claude Sonnet 5",
-    provider: "Anthropic",
-    logo: { light: anthropicLight, dark: anthropicDark },
-  },
-  {
-    id: "anthropic/claude-opus-4.8",
-    label: "Claude Opus 4.8",
-    provider: "Anthropic",
-    logo: { light: anthropicLight, dark: anthropicDark },
-  },
-  {
-    id: "openai/gpt-5.5",
-    label: "GPT 5.5",
-    provider: "OpenAI",
-    logo: { light: openaiLight, dark: openaiDark },
-  },
-  {
-    id: "alibaba/qwen3.8-max",
-    label: "Qwen 3.8 Max",
-    provider: "Alibaba",
-    logo: { light: qwenLight, dark: qwenDark },
-  },
-  {
-    id: "deepseek/deepseek-v4-pro",
-    label: "DeepSeek V4 Pro",
-    provider: "DeepSeek",
-    logo: { light: deepseekLight, dark: deepseekDark },
-  },
-  {
-    id: "moonshotai/kimi-k3",
-    label: "Kimi K3",
-    provider: "Moonshot",
-    logo: { light: moonshotLight, dark: moonshotDark },
-  },
-  {
-    id: "moonshotai/kimi-k2.6",
-    label: "Kimi K2.6",
-    provider: "Moonshot",
-    logo: { light: moonshotLight, dark: moonshotDark },
-  },
-  {
-    id: "zai/glm-5.2",
-    label: "GLM 5.2",
-    provider: "zai",
-    logo: { light: zaiLight, dark: zaiDark },
-  },
-] as const;
-
-export type ChatModelId = (typeof CHAT_MODELS)[number]["id"];
+import {
+  AUTO_MODEL_ID,
+  type ComposerSelection,
+  defaultComposerSelection,
+  resolveComposerSelection,
+  selectedModelId,
+} from "./composer-selection";
+import {
+  type ComposerMention,
+  type ComposerSegment,
+  parseDraftSegments,
+  serializeSegments,
+} from "./quick-actions/composer-segments";
 
 export interface ComposerAttachment {
   id: string;
@@ -90,55 +42,99 @@ export interface ComposerAttachment {
   height?: number;
 }
 
-// Input acknowledgements live only in the cache, never in the persisted draft.
-interface ComposerDraft extends StoredDraft {
-  nativeEventCount?: number;
+/** What the conversation allows the composer to change. */
+export interface ComposerLocks {
+  /** The server accepted this conversation, so its engine and model are fixed. */
+  engineAndModel: boolean;
+  /** A Task reply keeps the Task's engine, model, and settings; nothing is selectable. */
+  isTask: boolean;
+}
+
+interface PendingAttachment {
+  conversationId: string;
+  attachment: ComposerAttachment;
+  /** Saved to the draft. It leaves this list once the draft query shows the stored copy. */
+  saved: boolean;
+  /** Removed by the user while it was still saving. Its stored copy is deleted once saved. */
+  removed: boolean;
 }
 
 interface ChatComposerContextValue {
   conversationId: string;
+  /** The draft as it will be sent, with tags serialized into text. */
   value: string;
-  nativeEventCount: number;
+  /** The skills, workflow, and Task the draft's tags carry. */
+  mentions: ComposerMention[];
+  /** The draft as composer content, with its tags restored. For hydrating the input. */
+  segments: ComposerSegment[];
+  /** The draft's attachments, followed by any still being prepared and saved. */
   attachments: ComposerAttachment[];
-  selectedModelId: ChatModelId;
+  /** Some attachments are still saving, so the draft cannot send yet. */
+  hasPendingAttachments: boolean;
+  /** The selection the composer shows and sends, with conversation locks applied. */
+  selection: ComposerSelection;
+  locks: ComposerLocks;
+  autoModelEnabled: boolean;
   isReady: boolean;
   activateConversation: (conversationId: string) => void;
   addAttachments: (attachments: ComposerAttachment[]) => Promise<void>;
+  /**
+   * Shows attachments in the composer at once while `save` prepares and stores them. When `save`
+   * reports failure they leave the composer again.
+   */
+  showWhileSaving: <T extends { status: string }>(
+    attachments: ComposerAttachment[],
+    save: () => Promise<T>,
+  ) => Promise<T>;
   removeAttachment: (id: string) => Promise<void>;
-  selectModel: (id: ChatModelId) => void;
-  setValue: (value: string, nativeEventCount: number) => void;
+  updateSelection: (update: (current: ComposerSelection) => ComposerSelection) => void;
+  setContent: (segments: ComposerSegment[]) => void;
 }
 
 const ChatComposerContext = createContext<ChatComposerContextValue | null>(null);
 
+const conversationSource = (conversation: StoredConversation | undefined) =>
+  conversation
+    ? {
+        engine: conversation.engine,
+        model: conversation.model,
+        composerSettings: conversation.composerSettings,
+        locked: !conversation.provisional,
+      }
+    : null;
+
 export function ChatComposerProvider({ children }: { children: React.ReactNode }) {
   const { partition } = useChatCoordinator();
+  const { profile } = useAuth();
   const { showErrorToast } = useToast();
   const [conversationId, setConversationId] = useState(NEW_CHAT_ID);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const autoModelEnabled = profile?.autoModelRoutingEnabled === true;
   const queryKey = partition
     ? chatQueryKeys.draft(partition, conversationId)
     : ["chat", "draft", "signed-out"];
   const draftQuery = useQuery({
     queryKey,
-    queryFn: async ({ signal }): Promise<ComposerDraft> => {
+    queryFn: async ({ signal }): Promise<StoredDraft> => {
       const draft = await getStoredDraft(partition!, conversationId);
       throwIfAborted(signal);
-      return {
-        ...draft,
-        nativeEventCount: queryClient.getQueryData<ComposerDraft>(queryKey)?.nativeEventCount ?? 0,
-      };
+      return draft;
     },
     enabled: Boolean(partition),
     staleTime: Infinity,
   });
+  const conversationQuery = useQuery({
+    queryKey: partition
+      ? chatQueryKeys.conversations(partition)
+      : ["chat", "conversations", "signed-out"],
+    queryFn: () => listStoredConversations(partition!),
+    enabled: Boolean(partition) && conversationId !== NEW_CHAT_ID,
+    select: (items) => items.find((item) => item.id === conversationId),
+  });
+  const conversation = conversationId === NEW_CHAT_ID ? undefined : conversationQuery.data;
   const saveDraftMutation = useMutation({
     mutationFn: (input: { partition: NonNullable<typeof partition>; draft: StoredDraft }) =>
-      saveStoredDraft(
-        input.partition,
-        input.draft.conversationId,
-        input.draft.text,
-        input.draft.modelId,
-      ),
+      saveStoredDraft(input.partition, input.draft.conversationId, input.draft),
     onError: (error, input) => {
       if (!input.partition.signal?.aborted)
         showErrorToast(
@@ -148,26 +144,29 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
         );
     },
   });
-  const emptyDraft: ComposerDraft = {
+  const emptyDraft: StoredDraft = {
     conversationId,
     text: "",
-    modelId: "moonshotai/kimi-k3",
+    mentions: [],
+    selection: null,
     attachments: [],
   };
   const draft = draftQuery.data ?? emptyDraft;
-  const editDraft = (
-    changes: Partial<Pick<ComposerDraft, "text" | "modelId" | "nativeEventCount">>,
-  ) => {
+  const resolveSelection = (stored: ComposerSelection | null) => {
+    const resolved = resolveComposerSelection(stored, conversationSource(conversation));
+    // Auto follows the account entitlement. Losing it falls back to the Chat default rather than
+    // sending a model the server would refuse.
+    return resolved.chatModelId === AUTO_MODEL_ID && !autoModelEnabled
+      ? { ...resolved, chatModelId: defaultComposerSelection().chatModelId }
+      : resolved;
+  };
+  const selection = resolveSelection(draft.selection);
+  const editDraft = (changes: Partial<Pick<StoredDraft, "text" | "mentions" | "selection">>) => {
     if (!partition) return;
     // Cancel a stale disk read before publishing an edit. The query cache is the live draft;
     // SQLite owns persistence, and successful writes never hydrate older text over newer edits.
     void queryClient.cancelQueries({ queryKey, exact: true });
-    const current = queryClient.getQueryData<ComposerDraft>(queryKey) ?? emptyDraft;
-    if (
-      changes.nativeEventCount !== undefined &&
-      changes.nativeEventCount < (current.nativeEventCount ?? 0)
-    )
-      return;
+    const current = queryClient.getQueryData<StoredDraft>(queryKey) ?? emptyDraft;
     const next = { ...current, ...changes };
     queryClient.setQueryData(queryKey, next);
     saveDraftMutation.mutate({ partition, draft: next });
@@ -182,8 +181,90 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
     }
     await queryClient.invalidateQueries({ queryKey, exact: true });
   };
+  // Attachments the user removed while they were still saving. Their stored copies are deleted as
+  // soon as the save lands.
+  const removedWhileSavingRef = useRef(new Set<string>());
+  const removedIds = new Set(
+    pendingAttachments.filter((pending) => pending.removed).map((pending) => pending.attachment.id),
+  );
+  const storedAttachments = draft.attachments.filter(
+    (attachment) => !removedIds.has(attachment.id),
+  );
+  const storedIds = new Set(draft.attachments.map((attachment) => attachment.id));
+  const pendingHere = pendingAttachments.filter(
+    (pending) =>
+      pending.conversationId === conversationId &&
+      !pending.removed &&
+      !storedIds.has(pending.attachment.id),
+  );
+  // A saved attachment stays pending until the draft query renders its stored copy, so its
+  // preview never drops out for a frame between the two.
+  useEffect(() => {
+    const isShownFromDraft = (pending: PendingAttachment) =>
+      pending.saved && !pending.removed && storedIds.has(pending.attachment.id);
+    if (pendingAttachments.some(isShownFromDraft))
+      setPendingAttachments((current) => current.filter((pending) => !isShownFromDraft(pending)));
+  }, [pendingAttachments, draft.attachments]);
+  const dropPending = (ids: Set<string>) => {
+    for (const id of ids) removedWhileSavingRef.current.delete(id);
+    setPendingAttachments((current) =>
+      current.filter((pending) => !ids.has(pending.attachment.id)),
+    );
+  };
+  const showWhileSaving = async <T extends { status: string }>(
+    attachments: ComposerAttachment[],
+    save: () => Promise<T>,
+  ): Promise<T> => {
+    const ids = new Set(attachments.map((attachment) => attachment.id));
+    setPendingAttachments((current) => [
+      ...current,
+      ...attachments.map((attachment) => ({
+        conversationId,
+        attachment,
+        saved: false,
+        removed: false,
+      })),
+    ]);
+    const result = await save();
+    if (result.status !== "added" || !partition) {
+      dropPending(ids);
+      return result;
+    }
+    const removed = new Set([...ids].filter((id) => removedWhileSavingRef.current.has(id)));
+    setPendingAttachments((current) =>
+      current.map((pending) =>
+        ids.has(pending.attachment.id) && !removed.has(pending.attachment.id)
+          ? { ...pending, saved: true }
+          : pending,
+      ),
+    );
+    if (removed.size > 0) {
+      const [removeError] = await until(async () => {
+        for (const id of removed) await removeStoredAttachment(partition, id);
+        await queryClient.invalidateQueries({ queryKey, exact: true });
+      });
+      if (removeError)
+        showErrorToast(
+          "A removed attachment could not be deleted.",
+          removeError,
+          "chat.attachment.remove",
+        );
+      dropPending(removed);
+    }
+    return result;
+  };
   const removeAttachment = async (id: string): Promise<void> => {
     if (!partition) return;
+    if (pendingHere.some((pending) => pending.attachment.id === id)) {
+      removedWhileSavingRef.current.add(id);
+      setPendingAttachments((current) =>
+        current.map((pending) =>
+          pending.attachment.id === id ? { ...pending, removed: true } : pending,
+        ),
+      );
+      analytics.capture("attachment_removed");
+      return;
+    }
     await removeStoredAttachment(partition, id);
     analytics.capture("attachment_removed");
     await queryClient.invalidateQueries({ queryKey, exact: true });
@@ -193,18 +274,35 @@ export function ChatComposerProvider({ children }: { children: React.ReactNode }
       value={{
         conversationId,
         value: draft.text,
-        nativeEventCount: draft.nativeEventCount ?? 0,
-        attachments: draft.attachments,
-        selectedModelId: draft.modelId,
+        mentions: draft.mentions,
+        segments: parseDraftSegments(draft.text, draft.mentions),
+        attachments: [...storedAttachments, ...pendingHere.map((pending) => pending.attachment)],
+        hasPendingAttachments: pendingHere.some((pending) => !pending.saved),
+        selection,
+        locks: {
+          engineAndModel: Boolean(conversation && !conversation.provisional),
+          isTask: conversation?.kind === "task",
+        },
+        autoModelEnabled,
         isReady: !partition || draftQuery.isFetched,
         activateConversation: setConversationId,
         addAttachments,
+        showWhileSaving,
         removeAttachment,
-        selectModel: (modelId) => {
-          editDraft({ modelId });
-          analytics.capture("chat_model_selected", { model_id: modelId });
+        updateSelection: (update) => {
+          // Build on the latest cached draft, not this render's copy, so edits made within one
+          // frame, such as quick toggles, all land.
+          const latest = queryClient.getQueryData<StoredDraft>(queryKey);
+          const current = latest ? resolveSelection(latest.selection) : selection;
+          const next = update(current);
+          editDraft({ selection: next });
+          if (next.engine !== current.engine || selectedModelId(next) !== selectedModelId(current))
+            analytics.capture("chat_model_selected", {
+              engine: next.engine,
+              model_id: selectedModelId(next),
+            });
         },
-        setValue: (text, nativeEventCount) => editDraft({ text, nativeEventCount }),
+        setContent: (segments) => editDraft(serializeSegments(segments)),
       }}
     >
       {children}

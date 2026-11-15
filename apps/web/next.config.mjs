@@ -20,6 +20,9 @@ const headlessApi = headlessApiRouting();
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  ...(process.env.NODE_ENV === "development" && process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL
+    ? { allowedDevOrigins: [new URL(process.env.OPENCOMPANY_NEXT_PUBLIC_APP_URL).hostname] }
+    : {}),
   ...(deploymentId ? { deploymentId } : {}),
   env: {
     NEXT_PUBLIC_OBSERVABILITY_RELEASE: release,

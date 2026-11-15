@@ -22,6 +22,7 @@ import {
   shellQuote,
   supportsCompactActionDiscovery,
 } from "@opencompany/agent-runtime";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import {
   loadClaudeCodeCredential,
   markClaudeCodeCredentialNeedsReauth,
@@ -310,6 +311,7 @@ export async function runClaudeCodeChatTurn(input: {
   env: RunnerEnv;
   taskContext?: TaskTurnContext | undefined;
   canonicalAttemptId?: string;
+  presentationPublisher?: ChatPresentationPublisher;
   recovery?: { reason: "lease_reclaimed" | "cross_deploy" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -495,6 +497,14 @@ export async function runClaudeCodeChatTurn(input: {
     target: projectorTarget,
     redact: (value) => redact(value),
     initialParts,
+    ...(input.presentationPublisher
+      ? {
+          presentation: {
+            publisher: input.presentationPublisher,
+            attemptNumber: turn.attempts,
+          },
+        }
+      : {}),
     normalizeEvent: acpNormalizer.normalize,
     onNormalizedEvent: async (event) => {
       const request = extractAcpScheduleWakeup(event);

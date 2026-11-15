@@ -61,3 +61,38 @@ export const OFFICIAL_PLUGIN_SOURCES = {
   doppler:
     "https://github.com/useopencompany/plugins/tree/891c084c347ff69288635b651e545c9bfd47b212/doppler",
 } as const;
+
+// Display names shared by the web plugin pages and the mobile composer's mention menu.
+export const OFFICIAL_PLUGIN_LABELS = {
+  attio: "Attio",
+  betterstack: "Better Stack",
+  fathom: "Fathom",
+  github: "GitHub as you",
+  gmail: "Gmail",
+  granola: "Granola",
+  "google-admin": "Google Admin",
+  "google-calendar": "Google Calendar",
+  "google-drive": "Google Drive",
+  hubspot: "HubSpot",
+  infisical: "Infisical",
+  jamie: "Jamie",
+  latitude: "Latitude",
+  linear: "Linear",
+  neon: "Neon",
+  notion: "Notion",
+  todoist: "Todoist",
+  supabase: "Supabase",
+  resend: "Resend",
+  posthog: "PostHog",
+  convex: "Convex",
+  render: "Render",
+  vercel: "Vercel",
+  dash0: "Dash0",
+  signoz: "SigNoz",
+  slack: "Slack",
+  stripe: "Stripe",
+  x: "X",
+  doppler: "Doppler",
+  "yc-advise": "YC Advise",
+  "lead-research": "Lead research",
+} as const satisfies Record<keyof typeof OFFICIAL_PLUGIN_SOURCES, string>;

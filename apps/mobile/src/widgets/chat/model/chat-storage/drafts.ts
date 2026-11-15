@@ -1,6 +1,8 @@
 import { File } from "expo-file-system";
 import { until } from "until-async";
-import type { ChatModelId, ComposerAttachment } from "../chat-composer-context";
+import type { ComposerAttachment } from "../chat-composer-context";
+import { type ComposerSelection, parseStoredSelection } from "../composer-selection";
+import { type ComposerMention, parseStoredMentions } from "../quick-actions/composer-segments";
 import { getChatDatabase, values, waitForChatWrites, withChatTransaction } from "./database";
 import { attachmentDirectory, deleteFiles } from "./files";
 import type { AttachmentRow, ChatPartition, DraftRow, StoredDraft } from "./types";
@@ -23,7 +25,7 @@ export const getStoredDraft = async (
   await waitForChatWrites();
   const database = await getChatDatabase();
   const row = await database.getFirstAsync<DraftRow>(
-    `SELECT conversation_id, text, model_id FROM drafts
+    `SELECT conversation_id, text, model_id, selection_json, mentions_json FROM drafts
       WHERE user_id = ? AND workspace_id = ? AND conversation_id = ?`,
     ...values(partition),
     conversationId,
@@ -40,7 +42,8 @@ export const getStoredDraft = async (
   return {
     conversationId,
     text: row?.text ?? "",
-    modelId: row?.model_id ?? "moonshotai/kimi-k3",
+    mentions: parseStoredMentions(row?.mentions_json ?? null),
+    selection: row ? parseStoredSelection(row.selection_json, row.model_id) : null,
     attachments: attachments.map(attachmentFromRow),
   };
 };
@@ -48,19 +51,30 @@ export const getStoredDraft = async (
 export const saveStoredDraft = async (
   partition: ChatPartition,
   conversationId: string,
-  text: string,
-  modelId: ChatModelId,
+  {
+    text,
+    mentions,
+    selection,
+  }: { text: string; mentions: ComposerMention[]; selection: ComposerSelection | null },
 ): Promise<void> => {
   return withChatTransaction(partition, async (database) => {
+    // model_id predates engines and stays NOT NULL. It mirrors the Chat model, or stays empty
+    // while the draft has no selection of its own.
     await database.runAsync(
-      `INSERT INTO drafts (user_id, workspace_id, conversation_id, text, model_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO drafts (
+         user_id, workspace_id, conversation_id, text, model_id, selection_json, mentions_json,
+         updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (user_id, workspace_id, conversation_id) DO UPDATE SET
-       text = excluded.text, model_id = excluded.model_id, updated_at = excluded.updated_at`,
+       text = excluded.text, model_id = excluded.model_id,
+       selection_json = excluded.selection_json, mentions_json = excluded.mentions_json,
+       updated_at = excluded.updated_at`,
       ...values(partition),
       conversationId,
       text,
-      modelId,
+      selection?.chatModelId ?? "",
+      selection ? JSON.stringify(selection) : null,
+      mentions.length > 0 ? JSON.stringify(mentions) : null,
       Date.now(),
     );
   });
@@ -69,9 +83,10 @@ export const saveStoredDraft = async (
 export const persistDraftAttachment = async (
   partition: ChatPartition,
   conversationId: string,
-  input: Omit<ComposerAttachment, "id" | "uri"> & { sourceUri: string },
+  input: Omit<ComposerAttachment, "uri"> & { sourceUri: string },
 ): Promise<ComposerAttachment> => {
-  const id = globalThis.crypto.randomUUID();
+  // The draft keeps the attachment's id, so its pending preview turns into the stored copy in place.
+  const { id } = input;
   const directory = attachmentDirectory();
   directory.create({ idempotent: true, intermediates: true });
   const candidateExtension = input.name.includes(".")

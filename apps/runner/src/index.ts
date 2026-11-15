@@ -29,6 +29,7 @@ import { drainRunnerTasks, type RunnerDrainTask, settlesWithin } from "./runner-
 import { startSandboxBillingWorker } from "./sandbox-billing-worker";
 import { startSandboxReconciler } from "./sandbox-reconciler";
 import { startTaskScheduleWorker } from "./scheduler";
+import { startSentryReceiptWorker } from "./sentry-event-worker";
 import { createServer } from "./server";
 import { startStuckWorkMonitor } from "./stuck-work-monitor";
 import { startWorkflowEventWorker } from "./workflow-event-worker";
@@ -124,6 +125,9 @@ const workflowEventWorker = codexChatWorker
       },
     })
   : null;
+const sentryReceiptWorker = workflowEventWorker
+  ? startSentryReceiptWorker({ onRouted: () => workflowEventWorker.notify() })
+  : null;
 const slackChannelWorker = codexChatWorker
   ? startSlackChannelWorker(() => codexChatWorker.notify())
   : null;
@@ -158,6 +162,7 @@ await server.listen({ host: "0.0.0.0", port: env.port });
 async function shutdownRunner(signal: "SIGINT" | "SIGTERM") {
   const tasks = [
     runnerDrainTask("task_schedule", taskScheduleWorker),
+    runnerDrainTask("sentry_receipt", sentryReceiptWorker),
     runnerDrainTask("workflow_event", workflowEventWorker),
     codexChatWorker
       ? {

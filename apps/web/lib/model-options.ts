@@ -7,14 +7,12 @@ import {
   getAgentModelDefinition,
   isClaudeCodeModelId,
   isCodexModelId,
+  normalizeChatCatalogModelId,
   OPENCOMPANY_CHAT_DEFAULT_MODEL_ID,
   OPENCOMPANY_CHAT_MODEL_IDS,
-  resolveAvailableAgentModelId,
 } from "@opencompany/agent-runtime";
 import type { AgentModelId } from "@opencompany/agent-runtime/types";
 import type { ChatEngine } from "@opencompany/core";
-
-const MODEL_ID_SET = new Set<string>(OPENCOMPANY_CHAT_MODEL_IDS);
 
 export const MODELS = OPENCOMPANY_CHAT_MODEL_IDS.map(requireAgentModelDefinition);
 
@@ -27,11 +25,7 @@ export type ModelOption = (typeof MODELS)[number];
 export const DEFAULT_MODEL = OPENCOMPANY_CHAT_DEFAULT_MODEL_ID;
 
 export function normalizeModel(value: unknown): AgentModelId {
-  if (typeof value === "string") {
-    const availableModel = resolveAvailableAgentModelId(value as AgentModelId);
-    if (MODEL_ID_SET.has(availableModel)) return availableModel;
-  }
-  return DEFAULT_MODEL;
+  return normalizeChatCatalogModelId(value);
 }
 
 export function normalizeConversationModel(

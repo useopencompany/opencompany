@@ -27,6 +27,20 @@ export const CAPABILITY_MODES: readonly CapabilityMode[] = ["on", "ask", "off"];
 export const PROVIDER_CAPABILITIES: Partial<
   Record<ActionProviderId, readonly ProviderCapability[]>
 > = {
+  sentry: [
+    {
+      id: "read",
+      label: "Investigate Sentry",
+      description: "Read selected projects, issues, releases, logs and traces.",
+      defaultMode: "on",
+    },
+    {
+      id: "write",
+      label: "Update Sentry issues",
+      description: "Assign, resolve or permanently archive issues.",
+      defaultMode: "ask",
+    },
+  ],
   gmail: [
     {
       id: "read",

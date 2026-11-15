@@ -10,9 +10,13 @@ workflow.
 - `packages/db/src/legacy-billing-schema.ts` — retained public-schema billing compatibility tables.
 - `packages/db/src/llm-broker-schema.ts` — retained public-schema broker token/request tables.
 
-`client.ts`, `pool.ts`, and `drizzle.config.ts` compose exactly those modules. Feature-specific
-query helpers live in `packages/db/src/*`; consumers should import the narrow package export
-instead of the entire schema where practical.
+`packages/db/src/client.ts` and `pool.ts` compose these three runtime modules.
+`packages/db/drizzle.config.ts` currently generates from `src/schema.ts`, the retained legacy
+schema, and `src/product-schema.ts`. Check that config before generating SQL; runtime imports and
+generation inputs are different. `scripts/check-schema-migration.mjs` guards all four schema files.
+Physical changes need a migration; TypeScript-only edits do not.
+
+Feature query helpers live in `packages/db/src/*`; import their narrow package exports where practical.
 
 ## Local branches
 
@@ -91,3 +95,30 @@ Production `apps/web` code does not import the database or Drizzle. API and runn
 own repository wiring; shared packages own the mapping. The 35 sessionless pre-cutover Tasks remain
 readable only through the bounded actor-scoped compatibility resources governed by ADR 0002. Their
 physical history must not be deleted without the separate retention, usage, and data-rollback gate.
+
+## Test fixtures
+
+Use the Node-backed [CI test commands](../CONTRIBUTING.md#local-checks). PGlite fixtures do not
+materialize the current Drizzle schema automatically. Find the failing suite's schema owner first:
+
+| Owner | Schema assembly |
+| --- | --- |
+| `packages/db/src/test-pglite.ts` | Restores a bare cluster cached by PGlite version under `node_modules/.cache/pglite`, or a supplied snapshot. Creates no product tables. Resets each connection to UTC. |
+| `packages/db/src/test-schema-snapshot.ts` | Runs the caller's builder once, dumps its schema/data, and returns a fresh independent UTC connection per restore. The caller still owns DDL and migration selection. |
+| `packages/db/src/chat-repository.integration.test.ts` | Local `BASE_SCHEMA`, legacy seed rows, then its explicit ordered `migrationPaths`. Owns chat/sidebar repository coverage. |
+| `packages/db/src/task-repository.integration.test.ts` | `TASK_TEST_BASE_SCHEMA` from `test-task-schema.ts`, then its own `migrationPaths`. `apps/runner/src/slack-channel-worker.integration.test.ts` also consumes that base. |
+| `packages/db/src/workflow-repository.integration.test.ts` | Local `BASE_SCHEMA`, seed rows, then its own `migrationPaths`. |
+| `apps/api/src/auth.integration.test.ts`, `bots.integration.test.ts` | Suite-local SQL passed to `snapshotPGliteSchema`; no automatic migration replay. |
+| `apps/runner/src/workflow-event-worker.integration.test.ts` | Suite-local SQL with its own PGlite instance. |
+| `packages/agent/src/actions/session-history.test.ts` | Minimal SQL tables over `createTestPGlite`; explicit UTC timestamp fixtures. |
+
+When a query starts reading a new column, update the relevant suite's migration list or minimal DDL.
+A missing column can mean an incomplete fixture even when the branch database is fully migrated.
+For example, sidebar queries depend on the sidebar-state, runtime-summary, project, and awaiting-input
+migrations selected in the chat repository suite. Apply prerequisite migrations in order; do not
+add fake production migrations to repair test setup.
+
+A restored data directory retains PostgreSQL's timezone, so `TZ=UTC` alone cannot normalize it.
+Both shared restore helpers explicitly set the connection timezone to UTC. Use offset-bearing
+literals such as `2026-09-01T00:00:00Z` for absolute fixture times. A test of timezone behavior can
+set its own connection timezone and must restore it before reusing that connection.

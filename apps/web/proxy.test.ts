@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localHttpsRedirectUrl } from "@/lib/local-https-redirect";
-import { isUnauthenticatedPath } from "./proxy";
+import { isUnauthenticatedPath, signInRedirectUrl } from "./proxy";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -119,3 +119,18 @@ function request(url: string, headers: Record<string, string>) {
     nextUrl: new URL(url),
   } as Parameters<typeof localHttpsRedirectUrl>[0];
 }
+
+describe("Sentry installation sign-in", () => {
+  it("preserves the one-time installation parameters through sign-in", () => {
+    const redirect = signInRedirectUrl(
+      "https://opencompany.example/integrations/sentry/setup?installationId=install-1&code=grant-1",
+    );
+    expect(redirect.pathname).toBe("/signin");
+    expect(redirect.searchParams.get("returnPathname")).toBe(
+      "/integrations/sentry/setup?installationId=install-1&code=grant-1",
+    );
+  });
+  it("leaves other document redirects unchanged", () => {
+    expect(signInRedirectUrl("https://opencompany.example/tasks").search).toBe("");
+  });
+});

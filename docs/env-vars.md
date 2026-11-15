@@ -233,3 +233,8 @@ override a developer's generated values and remains gitignored.
 Update the runtime reader, `.env.example`, setup/export code, Turbo env configuration, hosted
 Infisical path, host sync, and release preflight together. Remove a variable only after `rg` proves
 there is no runtime, script, workflow, or operational-doc consumer.
+
+The Sentry company public integration requires `SENTRY_APP_CLIENT_ID`, `SENTRY_APP_CLIENT_SECRET`,
+and `SENTRY_APP_SLUG` in Infisical `prod` `/api` and `/runner`. Use matching values; the web
+app only relays ingress and calls the authenticated API. Both runtime release preflights require
+them. See [Sentry setup and operations](./sentry-plugin.md).

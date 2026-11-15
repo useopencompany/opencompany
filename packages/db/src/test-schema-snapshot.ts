@@ -1,4 +1,4 @@
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { createTestPGlite } from "./test-pglite";
 
 /**
@@ -19,7 +19,7 @@ export async function snapshotPGliteSchema(
     // These snapshots live in memory for the duration of one test file, so compressing them would
     // trade the restore time this helper exists to save for memory nobody is short of.
     const snapshot = await builder.dumpDataDir("none");
-    return () => PGlite.create({ loadDataDir: snapshot });
+    return () => createTestPGlite({ loadDataDir: snapshot });
   } finally {
     await builder.close();
   }

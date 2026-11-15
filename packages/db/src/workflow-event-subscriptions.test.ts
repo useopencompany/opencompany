@@ -1,6 +1,9 @@
 import type { Actor, WorkflowEventTrigger } from "@opencompany/core";
 import { describe, expect, it, vi } from "vitest";
-import { validateWorkflowEventSubscription } from "./workflow-event-subscriptions";
+import {
+  validateWorkflowEventSubscription,
+  workflowEventFilterValidationError,
+} from "./workflow-event-subscriptions";
 
 const actor: Actor = {
   userId: "user_1",
@@ -187,4 +190,47 @@ it("rejects unsupported choice values even for an enabled plugin event", async (
       trigger: { ...trigger, filters: { status: { id: "triage", name: "Triage" } } },
     }),
   ).resolves.toBeNull();
+});
+
+it("enforces selected Sentry project access when saving a trigger", async () => {
+  const sentryTrigger = {
+    ...trigger,
+    provider: "sentry",
+    event: "issue.created",
+    filters: { project: { id: "1", name: "Web" } },
+  };
+  const execute = vi
+    .fn()
+    .mockResolvedValueOnce({ rows: [{ id: "sentry_1" }] })
+    .mockResolvedValueOnce({ rows: [] });
+  await expect(
+    validateWorkflowEventSubscription(execute, { actor, trigger: sentryTrigger }),
+  ).resolves.toContain("admin selected");
+});
+it("validates tag pairs without changing existing resource and choice contracts", () => {
+  const tags = {
+    ...declaration,
+    filters: [{ id: "tags", label: "Tags", required: false, kind: "tag_pairs" as const }],
+  };
+  expect(
+    workflowEventFilterValidationError(tags as never, {
+      tags: { id: "exact", pairs: [{ key: "tenant", value: "acme" }] },
+    }),
+  ).toBeNull();
+  expect(
+    workflowEventFilterValidationError(tags as never, {
+      tags: {
+        id: "exact",
+        pairs: [
+          { key: "tenant", value: "a" },
+          { key: "tenant", value: "b" },
+        ],
+      },
+    }),
+  ).toContain("unique");
+  expect(
+    workflowEventFilterValidationError(declaration as never, {
+      team: { id: "team", pairs: [{ key: "a", value: "b" }] },
+    }),
+  ).toContain("Tag pairs require");
 });

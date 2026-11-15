@@ -60,7 +60,7 @@ publishes that release only when the operator asks it to.
 
 `.github/workflows/release-production.yml` is a separate trusted path. It only accepts `push` to
 `main` or `workflow_dispatch`, verifies the selected commit before the privileged job, and scopes
-deployment/OIDC permission to the production release job.
+deployment permission and production secrets to the production release job.
 
 ## Review and production policy
 
@@ -91,7 +91,7 @@ contribution terms and the explicit decision not to require DCO sign-off.
 The production environment has no redundant manual reviewer. It accepts deployments only from
 `main`, and administrators cannot bypass that branch policy. Production remains automatic after a
 permitted merge because the release workflow independently verifies the selected `main` commit
-before the privileged deployment job receives OIDC or environment secrets.
+before the privileged deployment job receives environment secrets.
 
 ## Repository settings contract
 
@@ -156,6 +156,17 @@ fails the audit, and so does an exception whose advisory has stopped being repor
 dependency cannot leave a silent hole behind. Prefer an override or an upstream upgrade. Add an
 exception only when no released version is both patched and compatible, and record why in the
 script rather than in a commit message.
+
+Three advisories outside decode-uri-component have no patched release on the version line we
+depend on. `deepmerge@4.3.1` (GHSA-gcqx-w48m-w2h4) is reached only through `@expo/config`, which
+merges repository-owned config. The zod 3.x copies (GHSA-mrhx-c7xc-m3w5) come from `@expo/cli` and
+the Vercel CLI builders, which validate repository config rather than request data. Our own
+packages use zod 4.6.7. Both exceptions expire on 2027-02-28. Re-review them before either tool
+processes untrusted input.
+
+`node-forge` is overridden to 1.4.3, which includes the nested DigestAlgorithm element-count fix
+for GHSA-86w9-cpqp-85rv. The Policy job keeps `scripts/lib/node-forge.test.mjs` as a regression
+test for malformed and valid signatures.
 
 Bun 1.4.2 is required for the version-scoped overrides in `package.json` and lockfile version 3.
 These overrides update vulnerable transitive copies while preserving compatible major versions for

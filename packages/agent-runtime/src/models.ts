@@ -81,6 +81,18 @@ export function isAgentModelSelectable(modelId: string): boolean {
   return !HIDDEN_MODEL_PICKER_ID_SET.has(modelId);
 }
 
+const OPENCOMPANY_CHAT_MODEL_ID_SET = new Set<string>(OPENCOMPANY_CHAT_MODEL_IDS);
+
+// Resolves a stored or requested Chat model to one the Chat catalog offers, falling back to the
+// Chat default for unknown ids and applying rollout-gated replacements first.
+export function normalizeChatCatalogModelId(value: unknown): AgentModelId {
+  if (typeof value === "string") {
+    const availableModel = resolveAvailableAgentModelId(value as AgentModelId);
+    if (OPENCOMPANY_CHAT_MODEL_ID_SET.has(availableModel)) return availableModel;
+  }
+  return OPENCOMPANY_CHAT_DEFAULT_MODEL_ID;
+}
+
 export const CODEX_DEFAULT_MODEL_ID: AgentModelId = "openai/gpt-6-astra";
 export const CODEX_AGENT_MODEL_IDS = [
   "openai/gpt-6-astra",
@@ -117,6 +129,9 @@ export const CLAUDE_CODE_REASONING_EFFORTS = [
   ...CODEX_REASONING_EFFORTS,
   "ultracode",
 ] as const satisfies readonly ClaudeCodeReasoningEffort[];
+// The level a new chat with each coding agent opens on until the user picks another.
+export const CODEX_DEFAULT_REASONING_EFFORT = "xhigh" satisfies CodexReasoningEffort;
+export const CLAUDE_CODE_DEFAULT_REASONING_EFFORT = "high" satisfies ClaudeCodeReasoningEffort;
 
 const CODEX_MODEL_ID_SET = new Set<string>(CODEX_AGENT_MODEL_IDS);
 const CODEX_RUNTIME_MODEL_ID_SET = new Set<string>([

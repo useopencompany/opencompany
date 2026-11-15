@@ -179,7 +179,7 @@ export interface TaskRepository {
   }): Promise<UpdateTaskResult | null>;
 }
 
-const MAX_GOAL_LENGTH = 10_000;
+export const TASK_GOAL_MAX_LENGTH = 10_000;
 const MAX_COMMENT_LENGTH = 10_000;
 const MAX_NAME_LENGTH = 160;
 const MAX_IDEMPOTENCY_KEY_LENGTH = 200;
@@ -262,10 +262,10 @@ export class TaskApplicationService {
     }
     const goal = input.goal.trim();
     if (!goal) throw new CoreError("invalid_argument", "A Task goal is required.");
-    if (goal.length > MAX_GOAL_LENGTH) {
+    if (goal.length > TASK_GOAL_MAX_LENGTH) {
       throw new CoreError(
         "invalid_argument",
-        `A Task goal cannot exceed ${MAX_GOAL_LENGTH} characters.`,
+        `A Task goal cannot exceed ${TASK_GOAL_MAX_LENGTH} characters.`,
       );
     }
     if (!CHAT_ENGINES.includes(input.engine)) {

@@ -162,3 +162,28 @@ ALTER TABLE conversations ADD COLUMN task_display_id TEXT;
 ALTER TABLE conversations ADD COLUMN task_status TEXT;
 PRAGMA user_version = 4;
 `;
+
+// Engine selection for drafts and the server's last composer settings for conversations. Both
+// start NULL: an older draft keeps its Chat model through drafts.model_id, and an older
+// conversation hydrates its settings on the next snapshot.
+export const COMPOSER_SELECTION_SCHEMA = `
+ALTER TABLE drafts ADD COLUMN selection_json TEXT;
+ALTER TABLE conversations ADD COLUMN composer_settings_json TEXT;
+PRAGMA user_version = 5;
+`;
+
+// Mentions the composer's tags carry beyond their text: skills, workflows, and the ad-hoc Task.
+// NULL for drafts written before tags existed, which hold plain text only.
+export const DRAFT_MENTIONS_SCHEMA = `
+ALTER TABLE drafts ADD COLUMN mentions_json TEXT;
+PRAGMA user_version = 6;
+`;
+
+// Cached presentations predate reasoning, nested traces, and complete tool payloads. Dropping
+// their ETags makes the next online load fetch each one in full. Revisions stay, so a transcript
+// sync cannot replace the cached parts with plain text before that fetch lands, and messages,
+// drafts, and the outbox are untouched.
+export const PRESENTATION_DETAIL_SCHEMA = `
+UPDATE messages SET presentation_etag = NULL;
+PRAGMA user_version = 7;
+`;

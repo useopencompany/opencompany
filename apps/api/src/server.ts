@@ -87,6 +87,7 @@ import { createProjectService } from "./projects";
 import { createRepoConfigService } from "./repo-configs";
 import { PostgresRunEventNotifier } from "./run-event-notifier";
 import { createRunnerClient } from "./runner-client";
+import { createSentryService } from "./sentry";
 import { closeHttpServer, createDrainAwareFetch } from "./server-lifecycle";
 import { resolveApiPort } from "./server-port";
 import { listSessionPullRequestStatuses } from "./session-pull-requests";
@@ -258,6 +259,7 @@ const app = createApiApp({
   slackProvisioning: createSlackProvisioningService({ db: database.db }),
   slackBotSettings: createSlackBotSettingsService({ db: database.db }),
   companyGitHub: createCompanyGitHubService({ db: database.db }),
+  sentry: createSentryService(database.db),
   companyAgentSlack: createCompanyAgentSlackService({
     db: database.db,
     agents: automations.agents,

@@ -25,6 +25,34 @@ const acceptedAdvisories = [
     // Lifts when expo-router depends on query-string >= 9, which requires decode-uri-component 0.5.0.
     expiresOn: "2026-12-31",
   },
+  {
+    ghsa: "GHSA-qr28-fpjm-wq7f",
+    package: "decode-uri-component",
+    // Same expo-router@57 > query-string@7 path and ESM-only constraint as GHSA-vcc3-ghjq-m6fr
+    // above: 0.5.1 is the first fixed release and query-string@7 cannot `require()` it. The
+    // quadratic decode only stalls the mobile client parsing its own deep link. Lifts with the
+    // exception above.
+    expiresOn: "2026-12-31",
+  },
+  {
+    ghsa: "GHSA-gcqx-w48m-w2h4",
+    package: "deepmerge",
+    // No patched release exists; 4.3.1 is still the latest. Reached only through
+    // @expo/config, which merges repository-owned Expo config at build time. Prototype
+    // poisoning needs attacker-controlled input to mergeObject(), and no runtime code path
+    // deep-merges user data with it. Remove when deepmerge publishes a fix or Expo drops it.
+    expiresOn: "2027-02-28",
+  },
+  {
+    ghsa: "GHSA-mrhx-c7xc-m3w5",
+    package: "zod",
+    // Fixed only in zod 4.6.6. Our own packages use 4.6.7 and the exact 4.1.11 pin from the
+    // Vercel CLI is overridden. The remaining 3.x copies have no patched release: @expo/cli
+    // (^3.25.76) and the Vercel CLI builders (@vercel/backends 3.22.4). Both are local or CI
+    // build tooling that validate repository config, not request data. Remove when those
+    // tools move to zod >= 4.6.6.
+    expiresOn: "2027-02-28",
+  },
 ];
 
 const audit = spawnSync("bun", ["audit", "--json"], { encoding: "utf8" });

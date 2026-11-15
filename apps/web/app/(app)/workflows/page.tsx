@@ -4,6 +4,7 @@ import { getCompanyGitHubPluginAction } from "@/lib/company-plugin-actions";
 import { listHeadlessWorkflows } from "@/lib/headless-automation-server";
 import { listHeadlessPlugins } from "@/lib/headless-knowledge-server";
 import { getPersonalAccounts } from "@/lib/integrations/personal-accounts";
+import { getCompanySentryPluginAction } from "@/lib/sentry-actions";
 import { WORKFLOW_TEMPLATES, workflowTemplateMissingPlugins } from "@/lib/workflow-templates";
 import { listWorkspaceMembersAction, type WorkspaceMemberView } from "@/lib/workspace-actions";
 
@@ -27,6 +28,7 @@ export default async function WorkflowsPage() {
       listHeadlessPlugins(),
       getPersonalAccounts(),
       getCompanyGitHubPluginAction(),
+      getCompanySentryPluginAction(),
     ]).catch((error: unknown) => {
       console.error(
         "[opencompany] Failed to load plugin setup state for workflow templates",
@@ -55,6 +57,7 @@ export default async function WorkflowsPage() {
             plugins: templateSetup[0],
             personalAccounts: templateSetup[1],
             companyGitHub: templateSetup[2],
+            companySentry: templateSetup[3],
           }),
         ]),
       )
@@ -67,6 +70,7 @@ export default async function WorkflowsPage() {
       ownerNames={ownerNames}
       templateMissingPlugins={templateMissingPlugins}
       companyGitHub={templateSetup?.[2] ?? null}
+      companySentry={templateSetup?.[3] ?? null}
     />
   );
 }

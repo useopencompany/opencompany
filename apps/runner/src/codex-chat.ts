@@ -19,6 +19,7 @@ import {
   shellQuote,
 } from "@opencompany/agent-runtime";
 import type { CodexReasoningEffort } from "@opencompany/agent-runtime/types";
+import type { ChatPresentationPublisher } from "@opencompany/chat-presentation";
 import { getWorkflowHarnessPluginSkillBundleIds } from "@opencompany/db/harness";
 import {
   loadChatSessionPluginRuntime,
@@ -166,6 +167,7 @@ export async function runCodexChatTurn(input: {
   env: RunnerEnv;
   taskContext?: TaskTurnContext | undefined;
   canonicalAttemptId?: string;
+  presentationPublisher?: ChatPresentationPublisher;
   recovery?: { reason: "lease_reclaimed" | "cross_deploy" };
   shouldAbort?: () => Error | null;
 }): Promise<"settled" | "handed_off"> {
@@ -543,6 +545,14 @@ export async function runCodexChatTurn(input: {
       // Resumes the parts already persisted for this message (normally empty; non-empty only if a
       // previous write landed before a transient failure of the same turn).
       initialParts,
+      ...(input.presentationPublisher
+        ? {
+            presentation: {
+              publisher: input.presentationPublisher,
+              attemptNumber: turn.attempts,
+            },
+          }
+        : {}),
       normalizeEvent: acpNormalizer.normalize,
     });
     projector = turnProjector;

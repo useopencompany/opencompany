@@ -176,3 +176,51 @@ describe("alwaysAllowAction", () => {
     expect(applyIntegrationCapabilityMode).not.toHaveBeenCalled();
   });
 });
+
+it.each(["member", "admin"] as const)(
+  "only admins can persist a shared Sentry tool permission, actor %s",
+  async (role) => {
+    vi.clearAllMocks();
+    vi.mocked(getWorkspaceRole).mockResolvedValue(role);
+    const action = {
+      id: "sentry.resolve_issue",
+      provider: "sentry" as const,
+      capability: "write" as const,
+      permissionMode: "ask" as const,
+      permission: {
+        provider: "sentry" as const,
+        capabilityId: "write" as const,
+        label: "Resolve",
+        integrationIds: ["sentry_connection"],
+        toolId: "resolve_issue",
+      },
+      description: "Resolve",
+      effects: {
+        mutatesExternalSystem: true,
+        metered: false,
+        idempotent: false,
+        destructive: false,
+        uncertainAfterDispatch: true,
+      },
+      params: {},
+      execute: vi.fn(),
+    };
+    vi.mocked(resolveActionCatalog).mockResolvedValue({ providers: [], actions: [action] });
+    const operation = alwaysAllowAction({
+      userWorkosId: "user_1",
+      workspaceId: "workspace_1",
+      actionId: action.id,
+    });
+    if (role === "member") {
+      await expect(operation).rejects.toThrow("Only workspace admins");
+      expect(applyIntegrationToolMode).not.toHaveBeenCalled();
+    } else {
+      await expect(operation).resolves.toEqual({ changed: true });
+      expect(applyIntegrationToolMode).toHaveBeenCalledWith({
+        integrationIds: ["sentry_connection"],
+        toolId: "resolve_issue",
+        mode: "on",
+      });
+    }
+  },
+);

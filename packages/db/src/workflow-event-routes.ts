@@ -6,7 +6,11 @@
 // redeliveries, and a context block describing what happened.
 
 import { randomUUID } from "node:crypto";
-import { companyPluginEvent, type PluginEventDefinition } from "@opencompany/core";
+import {
+  companyPluginEvent,
+  type PluginEventDefinition,
+  TASK_GOAL_MAX_LENGTH,
+} from "@opencompany/core";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "./client";
 import {
@@ -44,14 +48,17 @@ export type WorkflowEventTriggerRoute = {
   harnessSpec: HarnessSpec;
   provider: string;
   event: string;
-  filters: Record<string, { id: string }>;
+  filters: Record<string, { id: string; pairs?: { key: string; value: string }[] }>;
   activatedAt?: Date;
   legacyTriageStateId?: string;
 };
 
-// Budget for one enqueued goal: the authored prompt plus the provider's context block.
-const WORKFLOW_EVENT_GOAL_MAX_LENGTH = 10_000;
+// Budget for one enqueued goal: the authored prompt plus the provider's context block. The goal
+// becomes the Task goal unchanged, so it can never exceed what Task creation accepts.
+export const WORKFLOW_EVENT_GOAL_MAX_LENGTH = TASK_GOAL_MAX_LENGTH;
 const WORKFLOW_EVENT_PROMPT_MAX_LENGTH = 8_000;
+// The prompt is cut first, so the context block always keeps at least this much room.
+const WORKFLOW_EVENT_CONTEXT_MIN_LENGTH = 2_000;
 
 export async function listWorkflowEventTriggerRoutes(
   input: {
@@ -287,13 +294,15 @@ export async function listCompanyWorkflowEventTriggerRoutes(
 
 // Every route that matched the delivery gets one durable run. The unique
 // (workflow, provider, delivery) index makes redeliveries — a webhook retry or a poller re-seeing
-// the same resource — no-ops, so callers can enqueue optimistically.
+// the same resource — no-ops, so callers can enqueue optimistically. A provider that adds more
+// context when the Task starts passes a smaller `goalMaxLength` to keep room for it.
 export async function enqueueWorkflowEventRuns(
   input: {
     routes: readonly WorkflowEventTriggerRoute[];
     deliveryId: string;
     eventAt: Date;
     context: WorkflowEventContext;
+    goalMaxLength?: number;
   },
   db: DbLike = getDb(),
 ): Promise<number> {
@@ -315,7 +324,7 @@ export async function enqueueWorkflowEventRuns(
         provider: route.provider,
         eventType: route.event,
         deliveryId: input.deliveryId,
-        goal: workflowEventGoal(route.prompt, input.context),
+        goal: workflowEventGoal(route.prompt, input.context, input.goalMaxLength),
         harnessSpec: route.harnessSpec,
         eventAt: input.eventAt,
       })),
@@ -367,14 +376,23 @@ export function workflowEventFiltersMatch(
 // Composes the enqueued goal: the authored prompt, then the provider context wrapped in a tag so
 // the agent can tell instructions from external content. Long context is truncated, never the
 // closing tag, and a closing tag smuggled into the content itself is neutralized.
-export function workflowEventGoal(prompt: string, context: WorkflowEventContext) {
+export function workflowEventGoal(
+  prompt: string,
+  context: WorkflowEventContext,
+  maxLength = WORKFLOW_EVENT_GOAL_MAX_LENGTH,
+) {
   const closing = `</${context.tag}>`;
   const suffix = `\n${closing}`;
   const body = context.lines
     .flatMap((line) => (line === null ? [] : [line.replaceAll(closing, `<\\/${context.tag}>`)]))
     .join("\n");
-  const promptPart = prompt.trim().slice(0, WORKFLOW_EVENT_PROMPT_MAX_LENGTH);
-  const contextBudget = WORKFLOW_EVENT_GOAL_MAX_LENGTH - promptPart.length - suffix.length - 2;
+  const promptPart = prompt
+    .trim()
+    .slice(
+      0,
+      Math.min(WORKFLOW_EVENT_PROMPT_MAX_LENGTH, maxLength - WORKFLOW_EVENT_CONTEXT_MIN_LENGTH),
+    );
+  const contextBudget = maxLength - promptPart.length - suffix.length - 2;
   return `${promptPart}\n\n${`<${context.tag}>\n${body}`.slice(0, contextBudget)}${suffix}`;
 }
 
@@ -391,7 +409,20 @@ export function parseWorkflowEventConfig(value: unknown) {
     const filters = Object.fromEntries(
       Object.entries(filtersRecord).flatMap(([id, filter]) => {
         const filterId = asNonEmptyString(asRecord(filter)?.id);
-        return filterId ? [[id, { id: filterId }]] : [];
+        return filterId
+          ? [
+              [
+                id,
+                {
+                  ...(provider === "sentry" ? asRecord(filter) : {}),
+                  id: filterId,
+                  ...(Array.isArray(asRecord(filter)?.pairs)
+                    ? { pairs: asRecord(filter)!.pairs as { key: string; value: string }[] }
+                    : {}),
+                },
+              ],
+            ]
+          : [];
       }),
     );
     if (Object.keys(filters).length !== Object.keys(filtersRecord).length) return null;

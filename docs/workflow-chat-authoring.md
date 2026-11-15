@@ -59,3 +59,9 @@ chat-page screenshots. Full-route browser verification was blocked by existing N
 bundling errors involving OpenTelemetry's `stream` dependency and the agent-runtime barrel's
 `node:crypto` import. Component integration tests cover the chat renderer. CI remains required
 before merge.
+
+Sentry company workflows use the admin-selected projects. Each event trigger requires one
+project. Creation and regression accept priority, environment, and exact tag pairs. Creation
+checks the first occurrence, so an issue created in staging cannot later qualify as a new
+production issue. Templates create drafts. Fix templates save their coding engine on the step and
+the repository and base branch as typed step data, which each run's prompt names explicitly. See [Sentry workflows](./sentry-plugin.md).
