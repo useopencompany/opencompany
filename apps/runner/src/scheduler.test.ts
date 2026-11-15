@@ -1,3 +1,5 @@
+import { DEFAULT_WORKFLOW_SCHEDULE_PROMPT } from "@opencompany/agent/workflow-schedule-defaults";
+import { TASK_GOAL_MAX_LENGTH } from "@opencompany/core";
 import type { HarnessSpec } from "@opencompany/db/product-schema";
 import { createTestPGlite } from "@opencompany/db/test-pglite";
 import type { SQL } from "drizzle-orm";
@@ -294,6 +296,67 @@ describe("sweepDueTaskSchedules", () => {
     expect(sqlTextFromExecuteCall(execute, 1)).toContain("trigger_id");
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("workflow_id");
+    expect(sqlTextFromExecuteCall(execute, 4)).toContain("UPDATE goat.workflow_schedule_runs");
+  });
+
+  it("uses a bounded Task goal for oversized workflow instructions", async () => {
+    const oversizedInstructions = "x".repeat(TASK_GOAL_MAX_LENGTH + 1);
+    const workflowHarnessSpec: HarnessSpec = {
+      ...harnessSpec,
+      systemPrompt: oversizedInstructions,
+      initialUserMessage: oversizedInstructions,
+      workflow: {
+        id: "weekly-update",
+        workspaceId: "workspace_1",
+        skillIds: [],
+        skillBundleIds: [],
+        pluginIds: [],
+        steps: [],
+        currentStepIndex: 0,
+        completedStepCount: 0,
+      },
+    };
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "workflow_oversized",
+          triggerId: "trigger_weekday",
+          workspaceId: "workspace_1",
+          slug: "weekly-update",
+          kind: "workflow",
+          userWorkosId: "user_1",
+          name: "Weekly update",
+          cron: "0 9 * * *",
+          timezone: "UTC",
+          prompt: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+          firstStepInstructions: oversizedInstructions,
+          scheduleHarnessSpec: workflowHarnessSpec,
+          nextRunAt: new Date("2026-06-01T09:00:00.000Z"),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: "workflow_schedule_run_oversized" }])
+      .mockResolvedValueOnce([{ authorized: true, featureEnabled: true, commandId: null }])
+      .mockImplementationOnce((query) => {
+        const compiled = new PgDialect().sqlToQuery(query);
+        expect(compiled.params).toContain(DEFAULT_WORKFLOW_SCHEDULE_PROMPT);
+        expect(compiled.params).not.toContain(oversizedInstructions);
+        return canonicalTaskCreateRow(query, {
+          name: "Weekly update",
+          goal: DEFAULT_WORKFLOW_SCHEDULE_PROMPT,
+          model: workflowHarnessSpec.model,
+          workflowId: "weekly-update",
+          scheduledFor: new Date("2026-06-03T09:00:00.000Z"),
+        });
+      })
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
+
+    await expect(
+      sweepDueTaskSchedules({ now: new Date("2026-06-03T12:00:00.000Z") }),
+    ).resolves.toEqual({ checked: 1, created: 1 });
+
     expect(sqlTextFromExecuteCall(execute, 4)).toContain("UPDATE goat.workflow_schedule_runs");
   });
 });
