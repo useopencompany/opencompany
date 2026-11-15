@@ -11,7 +11,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { listPackage } from "@electron/asar";
-import plist from "plist";
+import { parse as parsePlist } from "plist";
 import YAML from "yaml";
 
 const desktopDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,7 +40,7 @@ const EXPECTED_ASAR_ENTRIES = new Set([
 
 function verifyApp(appPath) {
   const label = path.relative(releaseDir, appPath);
-  const info = plist.parse(readFileSync(path.join(appPath, "Contents/Info.plist"), "utf8"));
+  const info = parsePlist(readFileSync(path.join(appPath, "Contents/Info.plist"), "utf8"));
   check(
     info.CFBundleIdentifier === builderConfig.appId,
     `${label}: bundle id ${info.CFBundleIdentifier}`,
