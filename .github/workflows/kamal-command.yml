@@ -144,17 +144,18 @@ jobs:
         with:
           cache-key: opencompany/${{ inputs.app }}-image
 
-      # Through an environment variable, so the input is never spliced into the script.
+      # Parse shell-style quoting for convenience, but execute the resulting argv directly. The
+      # workflow has production secrets, so metacharacters in the input must never reach a shell.
       - name: Run the command
         working-directory: apps/${{ inputs.app }}
         env:
           COMMAND: ${{ inputs.command }}
         run: |
-          if [[ ! "$COMMAND" =~ ^kamal[[:space:]] ]]; then
-            echo "::error::The command must start with kamal."
-            exit 1
-          fi
-          bash -c "$COMMAND"
+          ruby -rshellwords -e '
+            args = Shellwords.split(ENV.fetch("COMMAND"))
+            abort("The command must start with kamal.") unless args.first == "kamal"
+            exec(*args)
+          '
 
       # A cancelled deploy leaves Kamal's lock on the server, which would block the next one.
       - name: Release the deploy lock

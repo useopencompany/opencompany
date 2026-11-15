@@ -96,7 +96,8 @@ jobs:
           echo "$LEGO_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" lego
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-          echo "LEGO_PATH=$RUNNER_TEMP/lego" >> "$GITHUB_ENV"
+          echo "LEGO_BIN=$RUNNER_TEMP/lego" >> "$GITHUB_ENV"
+          echo "LEGO_DATA_PATH=$RUNNER_TEMP/lego-data" >> "$GITHUB_ENV"
 
       # lego names the files after the first domain. The .crt holds the full chain.
       - name: Issue the certificate
@@ -111,7 +112,7 @@ jobs:
           fi
           server=https://acme-v02.api.letsencrypt.org/directory
           if [[ "$STAGING" == "true" ]]; then server=https://acme-staging-v02.api.letsencrypt.org/directory; fi
-          lego --accept-tos --path "$LEGO_PATH" --server "$server" \
+          "$LEGO_BIN" --accept-tos --path "$LEGO_DATA_PATH" --server "$server" \
             --dns vercel --dns.resolvers 1.1.1.1:53 \
             --domains runner.opencompany.chat \
             --domains work.opencompany.space \
@@ -125,8 +126,8 @@ jobs:
           INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
         run: |
           args=(store
-            --certificate "$LEGO_PATH/certificates/runner.opencompany.chat.crt"
-            --key "$LEGO_PATH/certificates/runner.opencompany.chat.key")
+            --certificate "$LEGO_DATA_PATH/certificates/runner.opencompany.chat.crt"
+            --key "$LEGO_DATA_PATH/certificates/runner.opencompany.chat.key")
           if [[ "$STAGING" == "true" ]]; then args+=(--dry-run); fi
           node scripts/runner-cert.mjs "${args[@]}"
 
@@ -140,7 +141,7 @@ jobs:
         run: |
           args=(check-served)
           if [[ "$RENEWED" == "true" ]]; then
-            args+=(--certificate "$LEGO_PATH/certificates/runner.opencompany.chat.crt")
+            args+=(--certificate "$LEGO_DATA_PATH/certificates/runner.opencompany.chat.crt")
           fi
           node scripts/runner-cert.mjs "${args[@]}"
 
