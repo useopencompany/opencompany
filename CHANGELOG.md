@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - preview chats from the iphone sidebar without a crash, including chats you have not opened on that device (#2051) — @MonsterDeveloper.
 - signing out on iphone now finishes when you return from the browser (#2045) — @MonsterDeveloper.
 
-## [1.36.0] - 2026-11-15
+## [1.36.0] - 2026-11-16
 
 ### Added
 - let one workflow hand work to another. type @ in a step's instructions and choose the workflow it should start. follow the new task and its pull request status from a card in the original task (#2056) — @louis.
@@ -63,6 +63,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - mention a skill in a task reply and the assistant can use it. skill mentions also keep their highlighting after you send a message (#2046, #2053) — @louis.
 - starting or reopening a chat no longer sends you back to home during a brief loading delay. new chats also stay in the sidebar after a reload (#2040, #2054) — @louis.
 - archiving the task you are viewing now opens a new chat instead of leaving you on the archived task (#2062) — @louis.
+- scheduled workflows with long first-step instructions no longer prevent later schedules from running (#2079) — @louis.
+- durable tasks continue working when the model reaches its step limit instead of being marked complete too early (#2059) — @louis.
 - coding chats retry temporary sandbox maintenance and download failures during startup, so a brief interruption is less likely to stop your work (#2041, #2060) — @louis.
 
 ### Security
