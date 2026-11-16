@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  certificateRenewalDecision,
   inspectCertificate,
   parseSubjectAltNames,
   RUNNER_TLS_HOSTS,
@@ -90,6 +91,30 @@ test("renews a month ahead, on request, or when the stored pair is unusable", ()
   assert.equal(
     renewalReason({ certificatePem: current.certificatePem, privateKeyPem: other.privateKeyPem }),
     "the private key does not match the certificate",
+  );
+});
+
+test("keeps scheduled renewal idle until the Render runner certificate is bootstrapped", () => {
+  assert.deepEqual(
+    certificateRenewalDecision({
+      eventName: "schedule",
+      runnerPublicUrl: "https://opencompany-runner-frankfurt.onrender.com",
+    }),
+    { renew: false, status: "bootstrap-pending", reason: null },
+  );
+  assert.equal(
+    certificateRenewalDecision({
+      eventName: "workflow_dispatch",
+      runnerPublicUrl: "https://opencompany-runner-frankfurt.onrender.com",
+    }).status,
+    "renew",
+  );
+  assert.equal(
+    certificateRenewalDecision({
+      eventName: "schedule",
+      runnerPublicUrl: "https://runner.opencompany.chat",
+    }).status,
+    "renew",
   );
 });
 

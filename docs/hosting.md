@@ -173,6 +173,10 @@ Let's Encrypt's HTTP challenge cannot issue `*.work.opencompany.space`, so the r
 certificate for all three hosts, issued with a DNS-01 challenge.
 `.github/workflows/renew-runner-cert.yml` runs every Monday and on dispatch:
 
+Before the first bundled certificate is stored, scheduled runs stay idle while
+`RUNNER_PUBLIC_URL` still points at Render. Bootstrap the certificate with the staging dispatch in
+the runbook below; after that, the schedule renews it normally.
+
 1. It reads the certificate from Infisical `/runner`. With 30 days or less left, or when the stored
    pair is invalid, it issues a new one with lego and the Vercel DNS provider. `VERCEL_DNS_API_TOKEN`
    and `VERCEL_ORG_ID` from `/release` create the TXT records. Both `opencompany.chat` and
@@ -217,19 +221,24 @@ None of this affects users.
 2. Lower the TTL to 60 seconds on `api.opencompany.chat`, `work.opencompany.space` and
    `*.work.opencompany.space`. Add an A record for `api-next.opencompany.chat` pointing at
    `91.99.204.222`.
-3. Dispatch Renew Runner Certificate with `staging`, then without it. Check the stored certificate's
+3. Remove the `_acme-challenge.work.opencompany.space` CNAME that points at
+   `opencompany-runner-frankfurt.verify.renderdns.com`. lego follows challenge CNAMEs by default,
+   so leaving Render's verification record in place makes the Vercel provider try to update
+   `renderdns.com`. Render cannot renew its certificate after this change, so make it only when the
+   cutover is committed and the current certificate covers the window.
+4. Dispatch Renew Runner Certificate with `staging`, then without it. Check the stored certificate's
    SANs with `openssl x509 -noout -ext subjectAltName`.
-4. Kamal Command, `app: api`: `kamal build push` with `setup_docker_cache`, then
+5. Kamal Command, `app: api`: `kamal build push` with `setup_docker_cache`, then
    `kamal setup --skip-push`. This installs kamal-proxy and boots Electric on the new stream and the API.
-5. Wait for Electric's `/v1/health` to report `active` and for the `opencompany_hetzner_v1` slot to
+6. Wait for Electric's `/v1/health` to report `active` and for the `opencompany_hetzner_v1` slot to
    be active with bounded lag. Warm every named read model through `api-next`.
-6. On `https://api-next.opencompany.chat`, check:
+7. On `https://api-next.opencompany.chat`, check:
    - `/healthz` reports the staged SHA
    - an authenticated `/v1` call
    - a live chat SSE stream that lasts more than 2 minutes
    - Electric live updates
    - an attachment upload
-7. Kamal Command, `app: runner`: `kamal build push` with `setup_docker_cache`, so the runner
+8. Kamal Command, `app: runner`: `kamal build push` with `setup_docker_cache`, so the runner
    image is ready. Do not boot it. The runner is not staged, because two runners would both claim jobs.
 
 Merge nothing to `main` from the start of the cutover until the release-workflow PR lands.
