@@ -12,23 +12,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
-<!-- Hold #1978 here until a distributed iOS build containing it is confirmed. -->
+<!-- Hold all iOS entries here until a distributed build containing them is confirmed. -->
 
 - copy or share an assistant's reply from the iphone app. attach heic photos from photos or files; the app converts them to jpeg before uploading (#1978) — @louis.
+- pin chats, share a read-only link, and follow task progress from the iphone sidebar. open a task to reply while it works, and see its pull request status in the sidebar (#2050) — @MonsterDeveloper.
+- choose codex or claude code from the iphone model picker, with model and reasoning settings for each. take a photo from the composer or attach one from photos or files (#2064) — @MonsterDeveloper.
+- type @ for plugins and repositories, / for skills, or # for tasks and workflows in the iphone composer. your draft keeps its mentions when you reopen the app (#2066) — @MonsterDeveloper.
+- follow reasoning and tool activity in iphone chats. tap an activity to read its details or copy its input and result; finished activity collapses into a summary you can expand (#2068) — @MonsterDeveloper.
 
-<!-- Hold #2013 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
+<!-- Hold #2013 and #2049 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
 
 - start a workflow or company agent when someone opens a github issue or pull request. an admin connects github under plugins → company, then the trigger's owner selects a repository they can access. events from bots are skipped (#2013) — @louis.
+- set up automatic pull request reviews from the workflow templates. choose a github account and repository, then activate the draft when ready. an admin must connect company github first; your personal github connection reads the changes and posts the review (#2049) — @louis.
+
+<!-- Hold #2070 here until Sentry publication approval, production installation, and the remaining live release checks are confirmed. See docs/sentry-plugin.md. -->
+
+- connect sentry under plugins → company to investigate issues, propose fixes, or run a daily review through workflow templates. an admin chooses which projects the workspace can access (#2070) — @MonsterDeveloper.
 
 <!-- Hold #2021 here until a signed macOS release and a real update between published versions are confirmed. Desktop releases are manual (#2028). -->
 
 - the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
 
 ### Fixed
-- opening a recent chat from Home no longer sends you straight back to a new chat when a prefetched server read briefly misses it (#2054) — @louis.
-- starting a new chat no longer throws you back to home while the first reply is on its way, and the chat stays in the sidebar after a reload. the address bar only switches to the chat once the server has it (#2040) — @louis.
+<!-- Covered by the iOS distribution hold above. -->
+
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+- typing and sending messages on iphone is steadier, with smoother keyboard movement and more reliable reply actions (#2038) — @MonsterDeveloper.
+- previewing a chat in the iphone sidebar no longer crashes the app, and previews load replies even for chats you have not opened on that device (#2051) — @MonsterDeveloper.
+- signing out on iphone now finishes when you return from the browser (#2045) — @MonsterDeveloper.
+
+## [1.36.0] - 2026-11-16
+
+### Added
+- let one workflow hand work to another. type @ in a step's instructions to choose the workflows it may start, then describe when to use them. follow each new task and its pull request from a card in the original run (#2056) — @louis.
+
+### Changed
+- the sidebar and chat now use slimmer scrollbars that follow your system's appearance (#2044) — @MonsterDeveloper.
+
+### Fixed
+- new and recent chats stay open while their first messages load, instead of sending you back to home. new chats also stay in the sidebar after a reload (#2040, #2054) — @louis.
+- opening a chat while signed out now takes you to sign in before loading the conversation (#2042) — @louis.
+- selecting an open chat from the sidebar focuses its composer, so you can start typing in the right pane immediately (#2048) — @louis.
+- mention a skill in a task reply and the task can use it when it continues. skill mentions also keep their highlights in sent chat messages (#2046, #2053) — @louis.
+- archiving the task you are viewing now opens a new chat instead of leaving you on the archived task (#2062) — @louis.
+- connect github as yourself without needing to manage your organization's app installation. coding sessions can use that connection too (#2057, #2058) — @louis.
+- coding sessions retry temporary downloads that fail while starting codex or claude code, so a brief connection problem is less likely to stop your work (#2060) — @louis.
+- background tasks continue automatically when they reach a limit on how many steps they can take in one run. if repeated continuations still cannot finish, the task asks for attention instead of marking unfinished work complete (#2059) — @louis.
+- a workflow with long instructions no longer prevents other scheduled workflows from starting (#2079) — @louis.
+
+### Security
+- updated dependencies to address known security vulnerabilities (#2072, #2092) — @MonsterDeveloper.
 
 ## [1.35.1] - 2026-09-25
 
