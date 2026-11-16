@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/bun";
 import {
   createLogger,
+  deployedRelease,
   errorToLogFields,
   isObservabilityEnabled,
   type LogFields,
@@ -41,14 +42,23 @@ export function installBunExceptionReporter(input: BunExceptionReporterInput): b
     dsn,
     environment:
       input.environment ?? process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
-    release:
-      input.release ??
-      process.env.OBSERVABILITY_RELEASE ??
-      process.env.RENDER_GIT_COMMIT ??
-      process.env.VERCEL_GIT_COMMIT_SHA,
+    release: input.release ?? deployedRelease(),
     serverName: input.serviceName,
     initialScope: { tags: { service: input.serviceName } },
-    sendDefaultPii: false,
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: {
+        request: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+        response: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+      },
+      httpBodies: [],
+      urlQueryParams: { deny: ["forwarded", "-ip", "remote-", "via", "-user"] },
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+    },
     tracesSampleRate: 0,
     beforeSend(event, hint) {
       return sanitizeErrorEvent(event, hint.originalException);

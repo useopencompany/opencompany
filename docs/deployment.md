@@ -18,6 +18,10 @@ verifies every value and requires a distinct project ID for each surface before 
 deployments are disabled for all three projects; verified production releases are owned by CI. The
 API and runner are separate Render services.
 
+The API, runner and Electric are moving to a Hetzner server deployed with Kamal. The Kamal configs,
+the server, the runner certificate and the cutover runbook are in [hosting](hosting.md). Until that
+cutover, releases deploy to Render as described here.
+
 ## Release flow
 
 Merges to `main` trigger the credential-free reusable verification suite before production planning
@@ -68,7 +72,9 @@ and the database surface unfinished so the next release retries it.
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection. The API and runner
 toggles can leave a Render surface on its current deployment only when nothing since that surface's
-last successful SHA changes it; planning fails otherwise. A skipped surface keeps running older
+last successful SHA changes it; planning fails otherwise. Turning off `redeploy_sites` deploys web,
+marketing and docs only when they changed since their last successful release, as a push does. The
+runner certificate workflow dispatches that way to release only the runner. A skipped surface keeps running older
 shared packages than the rest of the release, which breaks contracts such as stored credential
 shapes between the API and the runner.
 
@@ -80,11 +86,13 @@ shapes between the API and the runner.
 - API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
 - Electric: Infisical `prod` `/electric`, copied to the `opencompany-electric` Render service;
   `render.yaml` owns the image, disk, region, and non-secret configuration.
-- Runner: Infisical `prod` `/runner`, synced to the runner Render service.
+- Runner: Infisical `prod` `/runner`, synced to the runner Render service. It also holds the
+  runner's TLS certificate for kamal-proxy.
 - Mobile: Infisical `prod` `/mobile`, loaded by GitHub Actions for EAS builds.
 - Desktop: Infisical `prod` `/desktop`, loaded by GitHub Actions to sign and notarize the macOS app.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
-  production URLs, and the migration database URL.
+  production URLs, the migration database URL, the Hetzner server's SSH key and known hosts, and
+  the Vercel DNS token for the runner certificate.
 
 Production, desktop, and mobile release workflows read these paths from the self-hosted Infisical
 at `https://infisical.opencompany.cloud`, project `opencompany-xqub`. The domain, project slug, and

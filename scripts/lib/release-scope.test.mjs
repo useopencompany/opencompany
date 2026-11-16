@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   databaseChanged,
   finalizeReleasePlan,
+  forcedManualSurfaces,
   planReleaseSurfaces,
   skippedChangedSurfaces,
 } from "./release-scope.mjs";
@@ -162,6 +163,21 @@ test("manual surface exclusions do not re-enable API or runner", () => {
     }),
     { database: true, web: true, marketing: true, docs: true, api: false, runner: false },
   );
+});
+
+test("a manual release can leave unchanged sites to their ranges", () => {
+  assert.deepEqual(forcedManualSurfaces({ deployAll: true }), [
+    "web",
+    "marketing",
+    "docs",
+    "api",
+    "runner",
+  ]);
+  assert.deepEqual(forcedManualSurfaces({ deployAll: true, changedSitesOnly: true }), [
+    "api",
+    "runner",
+  ]);
+  assert.deepEqual(forcedManualSurfaces({ changedSitesOnly: true }), []);
 });
 
 test("a manual release cannot skip a Render surface its range changes", () => {
