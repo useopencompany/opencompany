@@ -118,6 +118,18 @@ describe("installBunExceptionReporter", () => {
     );
   });
 
+  it("falls back from a blank environment override", () => {
+    process.env.BETTER_STACK_ERRORS_DSN = "https://key@errors.example/1";
+    process.env.OBSERVABILITY_ENV = "";
+    process.env.NODE_ENV = "production";
+
+    installBunExceptionReporter({ serviceName: "opencompany-runner", environment: "  " });
+
+    expect(sentry.init).toHaveBeenCalledWith(
+      expect.objectContaining({ environment: "production" }),
+    );
+  });
+
   it("sanitizes database exceptions before Sentry transports the event", () => {
     process.env.BETTER_STACK_ERRORS_DSN = "https://key@errors.example/1";
     installBunExceptionReporter({ serviceName: "opencompany-api" });

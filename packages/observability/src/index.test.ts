@@ -5,6 +5,7 @@ import {
   endTimingTrace,
   errorToLogFields,
   flushObservability,
+  resolveObservabilityEnvironment,
   sanitizeLogFields,
   setExceptionReporter,
   setObservabilityContext,
@@ -90,6 +91,18 @@ describe("createLogger", () => {
       release: "client-sha",
       runtime: "browser",
     });
+  });
+
+  it("falls back from a blank observability environment", () => {
+    process.env.OBSERVABILITY_ENV = "  ";
+    process.env.NODE_ENV = "production";
+
+    expect(resolveObservabilityEnvironment()).toBe("production");
+
+    const logger = createLogger({ service: "opencompany-test", runtime: "server" });
+    logger.info("Hello from production");
+    const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
+    expect(record.environment).toBe("production");
   });
 
   it("prefers platform release metadata over explicit server release overrides", () => {

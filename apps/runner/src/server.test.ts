@@ -69,9 +69,22 @@ afterEach(async () => {
   await Promise.all(servers.map((server) => server.close()));
   servers.length = 0;
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("runner server CORS", () => {
+  it("reports the production environment when the observability override is blank", async () => {
+    vi.stubEnv("OBSERVABILITY_ENV", "");
+    vi.stubEnv("NODE_ENV", "production");
+    const server = createServer(env);
+    servers.push(server);
+
+    const response = await server.inject({ method: "GET", url: "/healthz" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ environment: "production" });
+  });
+
   it("allows configured origins", async () => {
     const server = createServer(env);
     servers.push(server);
