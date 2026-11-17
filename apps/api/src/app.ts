@@ -67,6 +67,7 @@ import {
   createLogger,
   deployedRelease,
   type LogFields,
+  resolveObservabilityEnvironment,
 } from "@opencompany/observability";
 import type { SessionPullRequestDto } from "@opencompany/protocol";
 import {
@@ -2954,7 +2955,7 @@ export function createApiApp(input: CreateApiAppInput) {
       ok: true,
       service: "opencompany-api",
       capabilities: { personalSkillsAuthorization: "v1", personalPluginsAuthorization: "v1" },
-      environment: process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+      environment: resolveObservabilityEnvironment(),
       protocolVersion: PROTOCOL_VERSION,
       release: deployedRelease() ?? null,
       renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,

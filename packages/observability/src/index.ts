@@ -247,7 +247,7 @@ function emitLog(
     level,
     message,
     "service.name": input.service,
-    environment: getEnvironment(),
+    environment: resolveObservabilityEnvironment(),
     release: getRelease(),
     ...(input.runtime ? { runtime: input.runtime } : {}),
   };
@@ -291,11 +291,27 @@ function getLogLevel(): LogLevelSetting {
   return "info";
 }
 
-function getEnvironment() {
+export function resolveObservabilityEnvironment(override?: string) {
+  const explicit = nonEmpty(override);
+  if (explicit) return explicit;
+
   if (isBrowser()) {
-    return getEnv("NEXT_PUBLIC_OBSERVABILITY_ENV") ?? getEnv("NODE_ENV") ?? "development";
+    return (
+      nonEmpty(getEnv("NEXT_PUBLIC_OBSERVABILITY_ENV")) ??
+      nonEmpty(getEnv("NODE_ENV")) ??
+      "development"
+    );
   }
-  return getEnv("OBSERVABILITY_ENV") ?? getEnv("VERCEL_ENV") ?? getEnv("NODE_ENV") ?? "development";
+  return (
+    nonEmpty(getEnv("OBSERVABILITY_ENV")) ??
+    nonEmpty(getEnv("VERCEL_ENV")) ??
+    nonEmpty(getEnv("NODE_ENV")) ??
+    "development"
+  );
+}
+
+function nonEmpty(value: string | undefined) {
+  return value?.trim() || undefined;
 }
 
 function getRelease() {

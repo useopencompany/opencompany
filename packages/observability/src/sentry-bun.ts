@@ -5,6 +5,7 @@ import {
   errorToLogFields,
   isObservabilityEnabled,
   type LogFields,
+  resolveObservabilityEnvironment,
   setExceptionReporter,
 } from ".";
 
@@ -40,8 +41,7 @@ export function installBunExceptionReporter(input: BunExceptionReporterInput): b
 
   Sentry.init({
     dsn,
-    environment:
-      input.environment ?? process.env.OBSERVABILITY_ENV ?? process.env.NODE_ENV ?? "development",
+    environment: resolveObservabilityEnvironment(input.environment),
     release: input.release ?? deployedRelease(),
     serverName: input.serviceName,
     initialScope: { tags: { service: input.serviceName } },
