@@ -182,8 +182,14 @@
     "zod@4.1.11": "4.6.7"
   },
   "trustedDependencies": [
-    "electron"
+    "electron",
+    "react-native-enriched-markdown"
   ],
+  "enriched-markdown": {
+    "enableCodeHighlight": true,
+    "enableMath": true,
+    "enableVideo": false
+  },
   "devDependencies": {
     "@biomejs/biome": "2.5.12",
     "@testing-library/jest-dom": "^7.0.1",

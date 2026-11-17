@@ -1,3 +1,7 @@
+import { deployedRelease } from "./release";
+
+export { deployedRelease } from "./release";
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 type LogLevelSetting = LogLevel | "off";
@@ -258,6 +262,8 @@ function getServerRuntimeContext(): LogFields {
     render_git_commit: getEnv("RENDER_GIT_COMMIT"),
     render_service_id: getEnv("RENDER_SERVICE_ID"),
     render_instance_id: getEnv("RENDER_INSTANCE_ID"),
+    // Kamal names each container `<service>-<role>-<version>`, so it tells deploys apart.
+    instance_id: getEnv("KAMAL_CONTAINER_NAME"),
   });
 }
 
@@ -296,14 +302,7 @@ function getRelease() {
   if (isBrowser()) {
     return getEnv("NEXT_PUBLIC_OBSERVABILITY_RELEASE") ?? "local";
   }
-  return (
-    getEnv("VERCEL_GIT_COMMIT_SHA") ??
-    getEnv("RENDER_GIT_COMMIT") ??
-    getEnv("RELEASE_SHA") ??
-    getEnv("GITHUB_SHA") ??
-    getEnv("OBSERVABILITY_RELEASE") ??
-    "local"
-  );
+  return deployedRelease() ?? "local";
 }
 
 function getEnv(name: string) {
