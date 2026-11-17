@@ -10,6 +10,7 @@ import {
   Bot,
   Check,
   ChevronsUpDown,
+  FolderOutput,
   Inbox,
   ListTodo,
   Loader2,
@@ -563,6 +564,7 @@ function SidebarWorkList() {
     const href = chatHref(chat.id);
     const pinned = isPinned(chat);
     const optimistic = optimisticChatIds.has(chat.id);
+    const projectId = projects.membership.get(chat.id);
     const prefetchChat = () => {
       void preloadHeadlessChatMessages(chat.id).catch((error: unknown) => {
         console.warn("Could not preload a sidebar chat transcript.", {
@@ -588,6 +590,7 @@ function SidebarWorkList() {
         dragProps={optimistic ? {} : chatRowDragProps(chat.id)}
         onPrefetch={prefetchChat}
         onRequestComposerFocus={() => requestChatComposerFocus(chat.id)}
+        onMoveToRecents={projectId ? () => projects.unfile(projectId, chat.id) : null}
         onTogglePin={() => togglePin(chat.id, chat.title, pinned)}
         onArchive={() => archiveChat(chat.id, chat.title, href)}
       />
@@ -597,6 +600,7 @@ function SidebarWorkList() {
   const renderRow = (item: SidebarWorkItem) => {
     if (item.kind === "chat") return renderChatRow(item.chat);
     const href = taskHref(item.task.displayId);
+    const projectId = projects.membership.get(item.task.conversationId);
     return (
       <SidebarTaskRow
         key={item.task.id}
@@ -606,6 +610,9 @@ function SidebarWorkList() {
         pullRequest={pullRequests.get(item.task.conversationId) ?? null}
         active={isTaskRouteActive(pathname, href)}
         dragProps={taskRowDragProps(item.task.conversationId)}
+        onMoveToRecents={
+          projectId ? () => projects.unfile(projectId, item.task.conversationId) : null
+        }
         onArchive={() => archiveTask(item.task, href)}
       />
     );
@@ -739,6 +746,7 @@ function SidebarChatRow({
   dragProps,
   onPrefetch,
   onRequestComposerFocus,
+  onMoveToRecents,
   onTogglePin,
   onArchive,
 }: {
@@ -763,6 +771,7 @@ function SidebarChatRow({
   dragProps: SidebarRowDragProps;
   onPrefetch: () => void;
   onRequestComposerFocus: () => void;
+  onMoveToRecents: (() => Promise<boolean>) | null;
   onTogglePin: () => void;
   onArchive: () => void;
 }) {
@@ -881,23 +890,27 @@ function SidebarChatRow({
               </PopoverContent>
             </Popover>
           ) : null}
-          <button
-            type="button"
-            title={pinned ? "Unpin chat" : "Pin chat"}
-            aria-label={pinned ? `Unpin ${chat.title}` : `Pin ${chat.title}`}
-            aria-pressed={pinned}
-            disabled={pinning}
-            onClick={onTogglePin}
-            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
-              pinned || pinning
-                ? "opacity-100"
-                : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-            }`}
-          >
-            {/* The row has already moved to its new section, so the icon shows the state the user
-                asked for rather than a spinner over the one they just left. */}
-            <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
-          </button>
+          {onMoveToRecents ? (
+            <MoveToRecentsButton label={chat.title} onMove={onMoveToRecents} />
+          ) : (
+            <button
+              type="button"
+              title={pinned ? "Unpin chat" : "Pin chat"}
+              aria-label={pinned ? `Unpin ${chat.title}` : `Pin ${chat.title}`}
+              aria-pressed={pinned}
+              disabled={pinning}
+              onClick={onTogglePin}
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-not-allowed ${
+                pinned || pinning
+                  ? "opacity-100"
+                  : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+              }`}
+            >
+              {/* The row has already moved to its new section, so the icon shows the state the user
+                  asked for rather than a spinner over the one they just left. */}
+              <Pin size={11.5} strokeWidth={1.8} fill={pinned ? "currentColor" : "none"} />
+            </button>
+          )}
           <button
             type="button"
             title="Archive chat"
@@ -1018,6 +1031,7 @@ function SidebarTaskRow({
   active,
   pullRequest,
   dragProps,
+  onMoveToRecents,
   onArchive,
 }: {
   task: SidebarTaskView;
@@ -1028,6 +1042,7 @@ function SidebarTaskRow({
   pullRequest: SessionPullRequest | null;
   // Keyed by the conversation behind the Task, the same key a Project stores for a chat.
   dragProps: SidebarRowDragProps;
+  onMoveToRecents: (() => Promise<boolean>) | null;
   onArchive: () => void;
 }) {
   const archivable = isSettledTaskStatus(task.status);
@@ -1065,11 +1080,16 @@ function SidebarTaskRow({
           <span className="truncate text-[11px] leading-none text-ink-faint">{task.displayId}</span>
         </span>
       </Link>
-      {/* Stand-in for the chat row's pin control, so the archive icon lands in the same column on
-          every row the reader hovers down the list. A Task row is two lines tall, so both this
-          slot and the archive beside it are pulled up against the title: centred across both lines
-          they would sit at a different height from the row's own text and read as misaligned. */}
-      <span aria-hidden="true" className="h-6 w-6 shrink-0" />
+      {/* Tasks do not pin. In a Project, that column instead moves the Task back to Recents;
+          otherwise a spacer keeps the archive icon aligned with chat rows. A Task row is two lines
+          tall, so both actions sit against the title instead of centring across both lines. */}
+      {onMoveToRecents ? (
+        <span className="mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
+          <MoveToRecentsButton label={task.name} onMove={onMoveToRecents} />
+        </span>
+      ) : (
+        <span aria-hidden="true" className="h-6 w-6 shrink-0" />
+      )}
       <span className="mr-1 mt-[1.5px] flex h-6 w-6 shrink-0 items-center justify-center self-start">
         {archivable ? (
           <button
@@ -1084,6 +1104,39 @@ function SidebarTaskRow({
         ) : null}
       </span>
     </div>
+  );
+}
+
+function MoveToRecentsButton({ label, onMove }: { label: string; onMove: () => Promise<boolean> }) {
+  const [moving, setMoving] = useState(false);
+
+  const move = async () => {
+    if (moving) return;
+    setMoving(true);
+    try {
+      await onMove();
+    } finally {
+      setMoving(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title="Move to Recents"
+      aria-label={`Move ${label} to Recents`}
+      disabled={moving}
+      onClick={() => void move()}
+      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-ink/50 transition-opacity duration-150 hover:bg-surface-active hover:text-ink focus:opacity-100 focus:outline-none focus-visible:ring-1 focus-visible:ring-ink/20 disabled:cursor-wait ${
+        moving ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+      }`}
+    >
+      {moving ? (
+        <Loader2 size={12} strokeWidth={1.8} className="animate-spin" />
+      ) : (
+        <FolderOutput size={12.5} strokeWidth={1.75} />
+      )}
+    </button>
   );
 }
 
