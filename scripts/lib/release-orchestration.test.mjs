@@ -2,27 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  backendSurfaceResults,
   deploymentFinalState,
-  renderSurfaceConfig,
-  renderSurfaceResults,
   unsuccessfulSelectedSurfaces,
   webDependenciesPassed,
 } from "./release-orchestration.mjs";
 
-test("defines the production shutdown contract for each Render surface", () => {
-  assert.deepEqual(renderSurfaceConfig("api"), {
-    serviceIdEnv: "RENDER_API_SERVICE_ID",
-    maxShutdownDelaySeconds: 60,
-  });
-  assert.deepEqual(renderSurfaceConfig("runner"), {
-    serviceIdEnv: "RENDER_SERVICE_ID",
-    maxShutdownDelaySeconds: 300,
-  });
-  assert.throws(() => renderSurfaceConfig("unknown"), /Unknown Render surface/u);
-});
-
 test("preserves API success when the runner fails", () => {
-  const results = renderSurfaceResults(["api", "runner"], {
+  const results = backendSurfaceResults(["api", "runner"], {
     api: { status: "fulfilled" },
     runner: { status: "rejected" },
   });

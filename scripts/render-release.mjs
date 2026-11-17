@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// Called by: .github/workflows/release-production.yml and root `bun run release:render`.
+// Called by: root `bun run release:render`, by hand only. Releases deploy with Kamal
+// (scripts/release-kamal-services.mjs); this stays for the Render services until they are deleted.
 // Purpose: triggers and waits for a Render service deploy for the release commit.
 
 import { appendFileSync } from "node:fs";
 
 import {
-  assertRenderServiceShutdownDelay,
   deployCommitMatches,
   isFailedDeployStatus,
   selectNewDeployForRelease,
@@ -47,13 +47,6 @@ async function main() {
   if (args.mode === "wait") {
     await waitForDeploy(args.deployId, releaseSha);
     return;
-  }
-
-  if (args.expectedShutdownDelaySeconds !== undefined) {
-    assertRenderServiceShutdownDelay(
-      await renderRequest(`/services/${serviceId}`),
-      args.expectedShutdownDelaySeconds,
-    );
   }
 
   await cancelStaleInFlightDeploys();
@@ -222,43 +215,26 @@ async function renderRequest(path, init = {}, options = {}) {
 }
 
 function parseArgs(argv) {
-  let expectedShutdownDelaySeconds;
-  const positional = [];
-  for (const arg of argv) {
-    if (arg.startsWith("--expected-shutdown-delay=")) {
-      if (expectedShutdownDelaySeconds !== undefined) {
-        usage("--expected-shutdown-delay may only be provided once.");
-      }
-      const value = Number(arg.slice("--expected-shutdown-delay=".length));
-      if (!Number.isInteger(value) || value <= 0) {
-        usage("--expected-shutdown-delay must be a positive integer.");
-      }
-      expectedShutdownDelaySeconds = value;
-      continue;
-    }
-    positional.push(arg);
-  }
+  if (argv.length === 0) return { mode: "deploy" };
 
-  if (positional.length === 0) return { mode: "deploy", expectedShutdownDelaySeconds };
-
-  const [command, deployId, ...rest] = positional;
+  const [command, deployId, ...rest] = argv;
   if (rest.length > 0) {
     usage(`Unexpected argument: ${rest[0]}`);
   }
 
   if (command === "--trigger-only") {
     if (deployId) usage("--trigger-only does not accept a deploy ID.");
-    return { mode: "trigger-only", expectedShutdownDelaySeconds };
+    return { mode: "trigger-only" };
   }
 
   if (command === "--wait") {
     if (!deployId) usage("--wait requires a deploy ID.");
-    return { mode: "wait", deployId, expectedShutdownDelaySeconds };
+    return { mode: "wait", deployId };
   }
 
   if (command === "--cancel") {
     if (!deployId) usage("--cancel requires a deploy ID.");
-    return { mode: "cancel", deployId, expectedShutdownDelaySeconds };
+    return { mode: "cancel", deployId };
   }
 
   usage(`Unknown argument: ${command}`);
@@ -267,7 +243,7 @@ function parseArgs(argv) {
 function usage(message) {
   console.error(message);
   console.error(
-    "Usage: render-release.mjs [--trigger-only | --wait <deploy_id> | --cancel <deploy_id>] [--expected-shutdown-delay=<seconds>]",
+    "Usage: render-release.mjs [--trigger-only | --wait <deploy_id> | --cancel <deploy_id>]",
   );
   process.exit(1);
 }

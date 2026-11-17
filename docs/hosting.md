@@ -1,9 +1,9 @@
 # Hosting
 
-The product API, the runner and Electric are moving from Render to one Hetzner server, deployed
-with [Kamal](https://kamal-deploy.org) 2.12.0. Web, marketing and docs stay on Vercel, the database
-on Neon and secrets in Infisical. Until the cutover below is done, releases still deploy the API and
-runner to Render, and [deployment](deployment.md) describes that flow.
+The product API, the runner and Electric run on one Hetzner server, deployed with
+[Kamal](https://kamal-deploy.org) 2.12.0. Web, marketing and docs stay on Vercel, the database on
+Neon and secrets in Infisical. The suspended Render services stay as a way back until the cleanup PR
+at the end of [moving off Render](#moving-off-render).
 
 ```
 kamal-proxy :80/:443
@@ -90,7 +90,8 @@ stops claiming work and drains for up to 230 seconds, then hands off what is lef
 `config/deploy.yml` lists the container's keys under `env.secret`. `.kamal/secrets` maps each one
 to the job variable of the same name and holds no values. An unset variable ships as an empty
 string. The Kamal command workflow loads Infisical `prod` `/release`, then the app's folder, which
-wins any key both hold.
+wins any key both hold. A release gives each `kamal deploy` only its app's folder; see
+[releases](#releases).
 
 Three keys differ from Render:
 
@@ -114,6 +115,30 @@ Kamal sets `KAMAL_VERSION` and `KAMAL_CONTAINER_NAME` in every container. Deploy
 SHA as the version, so `/healthz` reports it as `release` and the release smoke can match it. Logs
 carry `KAMAL_CONTAINER_NAME` as `instance_id`. `deployedRelease()` in
 `packages/observability/src/release.ts` is the one place that picks the release.
+
+## Releases
+
+`.github/workflows/release-production.yml` deploys the API and runner whenever the release plan
+selects them:
+
+1. The `build-images` job runs `kamal build push` from `apps/api` and `apps/runner` with
+   `VERSION` set to the release SHA, on Blacksmith's cached Docker builder. It pushes to GHCR with
+   the job's `GITHUB_TOKEN`. The release job does not start if a build fails, so a broken image
+   never follows a migration.
+2. Before migrations, the release job exports `/api` and `/runner` to separate files with the
+   Infisical action's file export, installs Kamal, and loads the deploy key into
+   ssh-agent. The job env cannot feed Kamal: `/api` and `/runner` share key names there, and
+   `DATABASE_URL` holds the migration URL.
+3. After migrations, `scripts/release-kamal-services.mjs` runs
+   `kamal deploy --skip-push --version <sha>` for both apps in parallel. Each process gets its own
+   folder's values plus `PATH`, `HOME`, the ssh-agent socket and the GHCR login, nothing else.
+   `/electric` stays out, because a deploy never boots the accessory. Each app's release smoke then
+   requires `/healthz` to report the SHA.
+4. A cancelled release runs `kamal lock release` for the apps it selected. Removing a lock nobody
+   holds is a no-op.
+
+A release never runs `kamal setup`, so Electric keeps running. The runner deploy takes longest: the
+old container gets up to 300 seconds to drain after the new one passes its health check.
 
 ## Running a Kamal command
 
@@ -194,9 +219,8 @@ certificate.
 `kamal proxy reboot` also reloads the certificate, but it drops every app on the server for a few
 seconds. Prefer a runner release.
 
-The release preflight refuses a stored certificate that is invalid, misses a host, does not match
-its key or has 7 days or less left. Until the release deploys with Kamal, it only checks the
-certificate when one is stored.
+The release preflight refuses a runner release without a certificate, or with one that is invalid,
+misses a host, does not match its key or has 7 days or less left.
 
 ## Moving off Render
 
@@ -294,6 +318,8 @@ Until the cleanup PR:
 3. Point DNS back at the Render CNAMEs.
 4. Kamal Command, `app: runner`: `kamal app stop`.
 5. Dispatch a web-only release.
+6. Once the release-workflow PR has merged, revert it before anything else merges to `main`.
+   Otherwise the next push deploys the API and runner to Hetzner again.
 
 The Render API still reads from the Render Electric, which never changed.
 

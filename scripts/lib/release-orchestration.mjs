@@ -1,21 +1,4 @@
-const RENDER_SURFACE_CONFIG = {
-  api: {
-    serviceIdEnv: "RENDER_API_SERVICE_ID",
-    maxShutdownDelaySeconds: 60,
-  },
-  runner: {
-    serviceIdEnv: "RENDER_SERVICE_ID",
-    maxShutdownDelaySeconds: 300,
-  },
-};
-
-export function renderSurfaceConfig(surface) {
-  const config = RENDER_SURFACE_CONFIG[surface];
-  if (!config) throw new Error(`Unknown Render surface: ${surface}`);
-  return config;
-}
-
-export function renderSurfaceResults(selectedSurfaces, settledBySurface) {
+export function backendSurfaceResults(selectedSurfaces, settledBySurface) {
   return Object.fromEntries(
     ["api", "runner"].map((surface) => {
       if (!selectedSurfaces.includes(surface)) return [surface, "skipped"];
@@ -24,10 +7,10 @@ export function renderSurfaceResults(selectedSurfaces, settledBySurface) {
   );
 }
 
-export function webDependenciesPassed(plan, renderResults) {
+export function webDependenciesPassed(plan, backendResults) {
   return (
-    (!plan.api || renderResults.api === "success") &&
-    (!plan.runner || renderResults.runner === "success")
+    (!plan.api || backendResults.api === "success") &&
+    (!plan.runner || backendResults.runner === "success")
   );
 }
 

@@ -6,10 +6,10 @@ connected integrations, Wiki knowledge, and cloud coding sessions.
 ## Stack
 
 The monorepo uses Bun and Turborepo. `web` is the Next.js App Router presentation client deployed
-on Vercel, `api` is the Hono product API deployed on Render, and `runner` is the Fastify durable
-execution service deployed on Render. Data lives in branch-isolated Neon Postgres and is accessed
-through Drizzle by the API and runner. WorkOS provides authentication, Electric provides authorized
-live read models, and Vercel AI Gateway fronts model providers.
+on Vercel, `api` is the Hono product API, and `runner` is the Fastify durable execution service.
+Both run on a Hetzner server deployed with Kamal. Data lives in branch-isolated Neon Postgres and is
+accessed through Drizzle by the API and runner. WorkOS provides authentication, Electric provides
+authorized live read models, and Vercel AI Gateway fronts model providers.
 
 ## Maintainer quick start
 

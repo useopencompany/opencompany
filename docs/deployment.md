@@ -1,26 +1,23 @@
 # Deployment
 
 Production releases are defined by `.github/workflows/release-production.yml` and target five
-application surfaces. A sixth stateful infrastructure service, Electric, is managed by the Render
-Blueprint but is not redeployed for every application release:
+application surfaces. A sixth stateful infrastructure service, Electric, is a Kamal accessory of the
+API that application releases leave running:
 
-| Surface     | Host   | Responsibility                                                                                                       |
-| ----------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| Web         | Vercel | product presentation, WorkOS browser shell, health/static delivery, and narrow public URL or cron relays             |
-| Product API | Render | authenticated `/v1` resources, provider ingress, OpenAPI, SSE, attachment commands, and authorized read models       |
-| Runner      | Render | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
-| Marketing   | Vercel | public marketing site                                                                                                |
-| Docs        | Vercel | public product and API documentation                                                                                 |
-| Electric    | Render | private Postgres shape sync for the API-owned authorized read-model proxy                                            |
+| Surface     | Host    | Responsibility                                                                                                       |
+| ----------- | ------- | -------------------------------------------------------------------------------------------------------------------- |
+| Web         | Vercel  | product presentation, WorkOS browser shell, health/static delivery, and narrow public URL or cron relays             |
+| Product API | Hetzner | authenticated `/v1` resources, provider ingress, OpenAPI, SSE, attachment commands, and authorized read models       |
+| Runner      | Hetzner | durable Run execution, schedules, ingestion, integration workers, sandboxes, internal transports, and the LLM broker |
+| Marketing   | Vercel  | public marketing site                                                                                                |
+| Docs        | Vercel  | public product and API documentation                                                                                 |
+| Electric    | Hetzner | private Postgres shape sync for the API-owned authorized read-model proxy                                            |
 
 The Vercel project roots are `apps/web`, `apps/marketing`, and `apps/docs`. Release automation
 verifies every value and requires a distinct project ID for each surface before building. Vercel Git
 deployments are disabled for all three projects; verified production releases are owned by CI. The
-API and runner are separate Render services.
-
-The API, runner and Electric are moving to a Hetzner server deployed with Kamal. The Kamal configs,
-the server, the runner certificate and the cutover runbook are in [hosting](hosting.md). Until that
-cutover, releases deploy to Render as described here.
+API and runner are separate Kamal apps on one Hetzner server. [Hosting](hosting.md) covers the
+server, the Kamal configs, the runner certificate and manual Kamal commands.
 
 ## Release flow
 
@@ -47,16 +44,20 @@ For an endpoint-not-found response, inspect a supported replacement before updat
 contract, then rerun `bun run web:capabilities:contract`. TikTok comments use the App V3
 `/api/v1/tiktok/app/v3/fetch_video_comments` endpoint with integer cursors in `queryParams`.
 
-The workflow loads release credentials from Infisical `prod` `/release`, validates selected
+While the release job waits for the production lock, the `build-images` job builds each selected
+backend image with `kamal build push` and pushes it to GHCR, tagged with the release SHA. A failed
+build stops the release before anything changes in production.
+
+The release job loads release credentials from Infisical `prod` `/release`, validates selected
 web/API/runner configuration, and builds selected Vercel artifacts in runner-local storage before
 changing production. It then rechecks the current `main` SHA, runs production migrations once when
-needed, rechecks `main` again, and deploys the API and runner concurrently. Web waits for selected
-backend dependencies; marketing and docs are independent. Every deployed surface is marked
-successful only after its own smoke or release-aware health check. Before triggering Render, release
-automation also verifies that the live API and runner shutdown delays match `render.yaml` (60 seconds
-and 300 seconds, respectively), so a dashboard or service-config drift cannot silently shorten
-graceful draining. A superseded run leaves unattempted surfaces inactive and cannot publish stale
-code.
+needed, rechecks `main` again, and deploys the API and runner concurrently with
+`scripts/release-kamal-services.mjs`. That script runs `kamal deploy --skip-push --version <sha>`
+for each app, each with only its own Infisical folder in its environment, then smokes it. Web waits
+for selected backend dependencies; marketing and docs are independent. Every deployed surface is
+marked successful only after its own smoke or release-aware health check. A superseded run leaves
+unattempted surfaces inactive and cannot publish stale code. A cancelled run releases Kamal's deploy
+lock on the server.
 
 Personal plugins follow the same backend readiness and draining gate; see
 [the personal plugin cutover and rollback plan](personal-plugins-cutover.md).
@@ -71,7 +72,7 @@ and the database surface unfinished so the next release retries it.
 
 Manual dispatch from `main` forces the requested surfaces through the same verification, preflight,
 deployment, and health checks. Do not bypass preflight or branch protection. The API and runner
-toggles can leave a Render surface on its current deployment only when nothing since that surface's
+toggles can leave the API or runner on its current deployment only when nothing since that surface's
 last successful SHA changes it; planning fails otherwise. Turning off `redeploy_sites` deploys web,
 marketing and docs only when they changed since their last successful release, as a push does. The
 runner certificate workflow dispatches that way to release only the runner. A skipped surface keeps running older
@@ -83,11 +84,12 @@ shapes between the API and the runner.
 - Web: Infisical deployment path `prod` `/web`, synced to the existing Vercel project.
 - Docs: no runtime secrets; CI identifies the existing Vercel project through
   `DOCS_VERCEL_PROJECT_ID` in `prod` `/release`.
-- API: Infisical `prod` `/api`, synced to the `opencompany-api` Render service.
-- Electric: Infisical `prod` `/electric`, copied to the `opencompany-electric` Render service;
-  `render.yaml` owns the image, disk, region, and non-secret configuration.
-- Runner: Infisical `prod` `/runner`, synced to the runner Render service. It also holds the
-  runner's TLS certificate for kamal-proxy.
+- API: Infisical `prod` `/api`, read by the release and Kamal Command workflows when they deploy
+  the API. `apps/api/config/deploy.yml` lists the keys the container receives.
+- Electric: Infisical `prod` `/electric`, read when the API's Kamal config boots the accessory;
+  `apps/api/config/deploy.yml` owns the image, volume, and non-secret configuration.
+- Runner: Infisical `prod` `/runner`, read the same way, listed in `apps/runner/config/deploy.yml`.
+  It also holds the runner's TLS certificate for kamal-proxy.
 - Mobile: Infisical `prod` `/mobile`, loaded by GitHub Actions for EAS builds.
 - Desktop: Infisical `prod` `/desktop`, loaded by GitHub Actions to sign and notarize the macOS app.
 - Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
@@ -215,8 +217,9 @@ release re-verifies the signed output before uploading it.
 
 The release runs `bun run db:migrate` against `PRODUCTION_DATABASE_URL` when the database surface
 changed since its own last successful SHA, or for a manually forced full release. Vercel builds
-finish first, but Render builds happen after migration, so migrations must be additive and compatible
-with the currently deployed API and runner as well as the previous safe application revision. Never
+and backend images finish first, but the API and runner boot after migration, so migrations must be
+additive and compatible with the currently deployed API and runner as well as the previous safe
+application revision. Never
 use a routine release to drop retained compatibility tables or rewrite migration history.
 
 Migration `0230_legacy_skill_cutover.sql` is an explicitly authorized destructive cutover. Before
@@ -240,18 +243,21 @@ database restore or an explicit forward repair.
 Web and API `/healthz` responses include both the deployed release and canonical protocol version;
 the runner reports its deployed release. `scripts/release-smoke.mjs` requires the expected SHA,
 preventing a healthy but stale deployment from passing. Marketing is checked against its immutable
-Vercel deployment before its state is finalized. Render timeouts cancel that surface's in-flight
-deploy where possible; another surface that already passed remains a valid successful deployment.
+Vercel deployment before its state is finalized. kamal-proxy moves traffic to a new container only
+after it passes `/healthz`, so a failed deploy leaves the old one serving. Another surface that
+already passed remains a valid successful deployment.
 
-Application rollback redeploys a known-good commit through the same protected release workflow.
+Application rollback redeploys a known-good commit through the same protected release workflow, or
+boots an image the server still holds with `kamal rollback <sha>` ([hosting](hosting.md)).
 Database migrations remain forward-only. Accepted Runs keep their stable IDs and continue through
 the API/runner path; do not reintroduce a web execution path or move work to a retired queue.
 
-Render switches new traffic to a healthy replacement before signaling the old instance. The API
-then stops accepting requests, ends long-lived Run streams, drains in-flight HTTP work, and only
+kamal-proxy switches new traffic to a healthy replacement, drains the old container (60 seconds for
+the API, 30 for the runner), and Kamal then stops it with `docker stop` (60 and 300 seconds). The API
+stops accepting requests, ends long-lived Run streams, drains in-flight HTTP work, and only
 afterward closes Redis and Postgres. The runner stops claiming new work and gives active Codex turns
 up to four minutes to settle. Remaining turns are cooperatively handed off through their durable
-leases, leaving the final minute of Render's shutdown window for cleanup and telemetry flushing.
+leases, leaving the final minute of the 300-second stop timeout for cleanup and telemetry flushing.
 
 Canonical Chat is fix-forward. Existing Runs continue to settle through the API and runner while a
 corrective release is prepared. Production browser traffic connects directly to
@@ -324,7 +330,7 @@ lives in Infisical `prod` `/api`. The API owns subscription, credit-ledger, auto
 idempotency while preserving the retained billing tables required by current contracts.
 
 Sentry public integration releases require `SENTRY_APP_CLIENT_ID`, `SENTRY_APP_CLIENT_SECRET`,
-and `SENTRY_APP_SLUG` in both Infisical `prod` `/api` and `/runner`. Render declarations and
-preflight cover these values. Provision and verify runtime sync before release. Publication
+and `SENTRY_APP_SLUG` in both Infisical `prod` `/api` and `/runner`. The Kamal configs and preflight
+cover these values. Provision them before release. Publication
 requires a separately authorized live verification and Sentry review approval. See
 [Sentry release notes](./sentry-plugin.md).

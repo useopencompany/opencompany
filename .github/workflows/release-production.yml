@@ -6,11 +6,11 @@ on:
   workflow_dispatch:
     inputs:
       deploy_api:
-        description: Deploy the Render product API (required when it changed since its last release)
+        description: Deploy the product API with Kamal (required when it changed since its last release)
         type: boolean
         default: true
       deploy_runner:
-        description: Deploy the Render runner (required when it changed since its last release)
+        description: Deploy the runner with Kamal (required when it changed since its last release)
         type: boolean
         default: true
       redeploy_sites:
@@ -118,10 +118,59 @@ jobs:
           fi
           node scripts/release-plan.mjs "${args[@]}"
 
+  # The API and runner images build before the release job starts, so a failed build stops the
+  # whole release before any migration. The job needs no production credentials.
+  build-images:
+    name: Build ${{ matrix.app }} image
+    needs: plan
+    if: ${{ needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, runner]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RELEASE_SHA: ${{ github.sha }}
+      SELECTED: ${{ needs.plan.outputs[matrix.app] }}
+      KAMAL_REGISTRY_USERNAME: ${{ github.actor }}
+      KAMAL_REGISTRY_PASSWORD: ${{ github.token }}
+    steps:
+      - name: Checkout verified release commit
+        if: ${{ env.SELECTED == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+
+      - name: Install Kamal
+        if: ${{ env.SELECTED == 'true' }}
+        run: |
+          gem install --user-install kamal -v 2.12.0 --no-document
+          ruby -e 'puts File.join(Gem.user_dir, "bin")' >> "$GITHUB_PATH"
+
+      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+        if: ${{ env.SELECTED == 'true' }}
+        with:
+          cache-key: opencompany/${{ matrix.app }}-image
+
+      # Tags the image with the release SHA, which `kamal deploy --version` boots and /healthz
+      # reports through KAMAL_VERSION.
+      - name: Build and push the ${{ matrix.app }} image
+        if: ${{ env.SELECTED == 'true' }}
+        working-directory: apps/${{ matrix.app }}
+        env:
+          VERSION: ${{ env.RELEASE_SHA }}
+        run: kamal build push
+
   release:
     name: Deploy production surfaces
-    needs: plan
-    if: ${{ needs.plan.outputs.any == 'true' }}
+    needs: [plan, build-images]
+    # build-images is skipped when neither backend is selected, so only its failure blocks.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.any == 'true' && needs.build-images.result != 'failure' }}
     # Verification and planning are safe to run concurrently. Serialize only the
     # production mutation stage so the newest verified commit is ready as soon as
     # an older release finishes or discovers that it has been superseded.
@@ -135,13 +184,20 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      # The server pulls the images build-images pushed.
+      packages: read
     env:
       RELEASE_SHA: ${{ github.sha }}
       GITHUB_TOKEN: ${{ github.token }}
+      KAMAL_REGISTRY_USERNAME: ${{ github.actor }}
+      KAMAL_REGISTRY_PASSWORD: ${{ github.token }}
+      # Infisical file exports for `kamal deploy`. scripts/release-kamal-services.mjs explains why
+      # the job env cannot be used.
+      KAMAL_API_ENV_FILE: ${{ github.workspace }}/.env.release-kamal-api
+      KAMAL_RUNNER_ENV_FILE: ${{ github.workspace }}/.env.release-kamal-runner
       INFISICAL_DOMAIN: "https://infisical.opencompany.cloud"
       INFISICAL_PROJECT_SLUG: "opencompany-xqub"
       INFISICAL_ENV_SLUG: "prod"
-      RENDER_DEPLOY_TIMEOUT_MS: "1200000"
       VERCEL_DEPLOY_TIMEOUT_MS: "600000"
       VERCEL_READY_TIMEOUT_MS: "600000"
     steps:
@@ -299,6 +355,97 @@ jobs:
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.docs == 'true' }}
         run: node scripts/release-vercel-prepare.mjs --surface docs
 
+      # The fetches above feed preflight through one shared job env. Each `kamal deploy` reads its
+      # own folder from a file instead; the files are removed at the end of the job.
+      - name: Export API secrets for Kamal
+        id: kamal-api-secrets
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /api
+          export-type: file
+          file-output-path: /.env.release-kamal-api
+
+      - name: Retry API secrets for Kamal
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.api == 'true' && steps.kamal-api-secrets.outcome == 'failure' }}
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /api
+          export-type: file
+          file-output-path: /.env.release-kamal-api
+
+      - name: Export runner secrets for Kamal
+        id: kamal-runner-secrets
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /runner
+          export-type: file
+          file-output-path: /.env.release-kamal-runner
+
+      - name: Retry runner secrets for Kamal
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && needs.plan.outputs.runner == 'true' && steps.kamal-runner-secrets.outcome == 'failure' }}
+        timeout-minutes: 2
+        uses: Infisical/secrets-action@d2e351f16c6ca20d17c85e6c992e04bdeb64e87d # v1.0.18
+        with:
+          method: universal
+          client-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_MACHINE_IDENTITY_CLIENT_SECRET }}
+          project-slug: ${{ env.INFISICAL_PROJECT_SLUG }}
+          env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+          domain: ${{ env.INFISICAL_DOMAIN }}
+          secret-path: /runner
+          export-type: file
+          file-output-path: /.env.release-kamal-runner
+
+      # The repository allows only a short list of actions, so Kamal runs on the image's own Ruby
+      # and the key goes into a plain ssh-agent, as in kamal-command.yml.
+      - name: Install Kamal
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && (needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true') }}
+        run: |
+          gem install --user-install kamal -v 2.12.0 --no-document
+          ruby -e 'puts File.join(Gem.user_dir, "bin")' >> "$GITHUB_PATH"
+
+      - name: Load the deploy key into ssh-agent
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && (needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true') }}
+        run: |
+          eval "$(ssh-agent -s)" > /dev/null
+          ssh-add - <<< "$VM_SSH_PRIVATE_KEY"
+          {
+            echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK"
+            echo "SSH_AGENT_PID=$SSH_AGENT_PID"
+          } >> "$GITHUB_ENV"
+
+      # The server's host keys from Infisical `/release`, so SSH never trusts a key on first use.
+      - name: Trust the server's host keys
+        if: ${{ steps.current-before-prepare.outputs.should_release == 'true' && (needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true') }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VM_SSH_KNOWN_HOSTS" >> ~/.ssh/known_hosts
+
       - name: Confirm release is current before production changes
         id: current-before-migration
         if: ${{ steps.current-before-prepare.outputs.should_release == 'true' }}
@@ -375,18 +522,34 @@ jobs:
           --prepared-dir "${{ steps.prepare-docs.outputs.prepared_dir }}"
           --smoke-path /
 
-      - name: Deploy and smoke Render services
-        id: deploy-render
+      - name: Deploy and smoke Kamal services
+        id: deploy-kamal
         if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && ((needs.plan.outputs.api == 'true' && steps.deployment-api.outputs.deployment_id != '') || (needs.plan.outputs.runner == 'true' && steps.deployment-runner.outputs.deployment_id != '')) && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) }}
         run: |
           args=()
           if [[ "${{ needs.plan.outputs.api }}" == "true" && -n "${{ steps.deployment-api.outputs.deployment_id }}" ]]; then args+=(--api); fi
           if [[ "${{ needs.plan.outputs.runner }}" == "true" && -n "${{ steps.deployment-runner.outputs.deployment_id }}" ]]; then args+=(--runner); fi
-          node scripts/release-render-services.mjs "${args[@]}"
+          node scripts/release-kamal-services.mjs "${args[@]}"
+
+      # A cancelled deploy leaves Kamal's lock on the server, which would block the next one.
+      # Only the selected apps: Kamal Command may hold the other app's lock. Releasing a lock nobody
+      # holds is a no-op.
+      - name: Release the Kamal deploy locks
+        if: ${{ cancelled() && steps.deploy-kamal.outcome != 'skipped' && env.SSH_AGENT_PID != '' }}
+        env:
+          API_SELECTED: ${{ needs.plan.outputs.api }}
+          RUNNER_SELECTED: ${{ needs.plan.outputs.runner }}
+        run: |
+          apps=()
+          if [[ "$API_SELECTED" == "true" ]]; then apps+=(api); fi
+          if [[ "$RUNNER_SELECTED" == "true" ]]; then apps+=(runner); fi
+          for app in "${apps[@]}"; do
+            (cd "apps/$app" && kamal lock release) || echo "::warning::Could not release the $app deploy lock."
+          done
 
       - name: Deploy web
         id: deploy-web
-        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' && steps.deployment-web.outputs.deployment_id != '' && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && needs.plan.outputs.web == 'true' && steps.deployment-web.outputs.deployment_id != '' && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-kamal.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-kamal.outputs.runner_result == 'success') }}
         run: >-
           node scripts/release-vercel-deploy.mjs
           --label web
@@ -408,7 +571,7 @@ jobs:
 
       - name: Activate Personal Skills and plugins after old services drain
         id: activate-personal-skills
-        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && (needs.plan.outputs.database == 'true' || needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' || needs.plan.outputs.web == 'true') && (needs.plan.outputs.web != 'true' || steps.smoke-web.outcome == 'success') && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-render.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-render.outputs.runner_result == 'success') }}
+        if: ${{ always() && !cancelled() && steps.current-before-deploy.outputs.should_release == 'true' && (needs.plan.outputs.database == 'true' || needs.plan.outputs.api == 'true' || needs.plan.outputs.runner == 'true' || needs.plan.outputs.web == 'true') && (needs.plan.outputs.web != 'true' || steps.smoke-web.outcome == 'success') && (needs.plan.outputs.database != 'true' || (steps.migrate.outcome == 'success' && steps.backfill-wiki-path-links.outcome == 'success')) && (needs.plan.outputs.api != 'true' || steps.deploy-kamal.outputs.api_result == 'success') && (needs.plan.outputs.runner != 'true' || steps.deploy-kamal.outputs.runner_result == 'success') }}
         run: node scripts/activate-personal-skills.mjs
 
       - name: Finalize database deployment
@@ -428,7 +591,7 @@ jobs:
         if: ${{ always() && steps.deployment-api.outputs.deployment_id != '' }}
         env:
           DEPLOYMENT_ID: ${{ steps.deployment-api.outputs.deployment_id }}
-          SURFACE_RESULT: ${{ steps.deploy-render.outputs.api_result }}
+          SURFACE_RESULT: ${{ steps.deploy-kamal.outputs.api_result }}
         run: |
           state=inactive
           if [[ "$SURFACE_RESULT" == "success" ]]; then state=success; fi
@@ -439,7 +602,7 @@ jobs:
         if: ${{ always() && steps.deployment-runner.outputs.deployment_id != '' }}
         env:
           DEPLOYMENT_ID: ${{ steps.deployment-runner.outputs.deployment_id }}
-          SURFACE_RESULT: ${{ steps.deploy-render.outputs.runner_result }}
+          SURFACE_RESULT: ${{ steps.deploy-kamal.outputs.runner_result }}
         run: |
           state=inactive
           if [[ "$SURFACE_RESULT" == "success" ]]; then state=success; fi
@@ -497,10 +660,10 @@ jobs:
           DATABASE_RESULT: ${{ steps.activate-personal-skills.outcome }}
           API_SELECTED: ${{ needs.plan.outputs.api }}
           API_DEPLOYMENT_ID: ${{ steps.deployment-api.outputs.deployment_id }}
-          API_RESULT: ${{ steps.deploy-render.outputs.api_result }}
+          API_RESULT: ${{ steps.deploy-kamal.outputs.api_result }}
           RUNNER_SELECTED: ${{ needs.plan.outputs.runner }}
           RUNNER_DEPLOYMENT_ID: ${{ steps.deployment-runner.outputs.deployment_id }}
-          RUNNER_RESULT: ${{ steps.deploy-render.outputs.runner_result }}
+          RUNNER_RESULT: ${{ steps.deploy-kamal.outputs.runner_result }}
           WEB_SELECTED: ${{ needs.plan.outputs.web }}
           WEB_DEPLOYMENT_ID: ${{ steps.deployment-web.outputs.deployment_id }}
           WEB_RESULT: ${{ steps.smoke-web.outcome }}
@@ -511,3 +674,11 @@ jobs:
           DOCS_DEPLOYMENT_ID: ${{ steps.deployment-docs.outputs.deployment_id }}
           DOCS_RESULT: ${{ steps.deploy-docs.outcome }}
         run: node scripts/check-release-results.mjs
+
+      - name: Remove Kamal env files
+        if: ${{ always() }}
+        run: rm -f "$KAMAL_API_ENV_FILE" "$KAMAL_RUNNER_ENV_FILE"
+
+      - name: Stop ssh-agent
+        if: ${{ always() && env.SSH_AGENT_PID != '' }}
+        run: ssh-agent -k > /dev/null
