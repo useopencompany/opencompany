@@ -1,9 +1,9 @@
 # Hosting
 
-The product API, the runner and Electric are moving from Render to one Hetzner server, deployed
-with [Kamal](https://kamal-deploy.org) 2.12.0. Web, marketing and docs stay on Vercel, the database
-on Neon and secrets in Infisical. Until the cutover below is done, releases still deploy the API and
-runner to Render, and [deployment](deployment.md) describes that flow.
+The product API, the runner and Electric run on one Hetzner server, deployed with
+[Kamal](https://kamal-deploy.org) 2.12.0. Web, marketing and docs stay on Vercel, the database on
+Neon and secrets in Infisical. The Render services stay suspended, never deleted, as a way back; see
+[moving off Render](#moving-off-render).
 
 ```
 kamal-proxy :80/:443
@@ -22,7 +22,8 @@ kamal-proxy :80/:443
 | Docker | from get.docker.com. `main` is in the `docker` group, so Kamal never needs sudo |
 | Firewall | Hetzner Cloud Firewall, inbound 22, 80 and 443 only |
 | Backups | Hetzner backups on |
-| Neon latency | Not measured yet. Record `psql` `\timing` from the server to the direct endpoint here |
+| Swap | 4 GB, `/swapfile` |
+| Neon latency | About 6 ms for `select 1` to the direct endpoint in `eu-central-1`, measured 2026-11-17 |
 
 Containers run without memory limits. Docker rotates each container's stdout at 50 MB
 (`logging.options.max-size`).
@@ -90,7 +91,8 @@ stops claiming work and drains for up to 230 seconds, then hands off what is lef
 `config/deploy.yml` lists the container's keys under `env.secret`. `.kamal/secrets` maps each one
 to the job variable of the same name and holds no values. An unset variable ships as an empty
 string. The Kamal command workflow loads Infisical `prod` `/release`, then the app's folder, which
-wins any key both hold.
+wins any key both hold. A release gives each `kamal deploy` only its app's folder; see
+[releases](#releases).
 
 Three keys differ from Render:
 
@@ -115,6 +117,30 @@ SHA as the version, so `/healthz` reports it as `release` and the release smoke 
 carry `KAMAL_CONTAINER_NAME` as `instance_id`. `deployedRelease()` in
 `packages/observability/src/release.ts` is the one place that picks the release.
 
+## Releases
+
+`.github/workflows/release-production.yml` deploys the API and runner whenever the release plan
+selects them:
+
+1. The `build-images` job runs `kamal build push` from `apps/api` and `apps/runner` with
+   `VERSION` set to the release SHA, on Blacksmith's cached Docker builder. It pushes to GHCR with
+   the job's `GITHUB_TOKEN`. The release job does not start if a build fails, so a broken image
+   never follows a migration.
+2. Before migrations, the release job exports `/api` and `/runner` to separate files with the
+   Infisical action's file export, installs Kamal, and loads the deploy key into
+   ssh-agent. The job env cannot feed Kamal: `/api` and `/runner` share key names there, and
+   `DATABASE_URL` holds the migration URL.
+3. After migrations, `scripts/release-kamal-services.mjs` runs
+   `kamal deploy --skip-push --version <sha>` for both apps in parallel. Each process gets its own
+   folder's values plus `PATH`, `HOME`, the ssh-agent socket and the GHCR login, nothing else.
+   `/electric` stays out, because a deploy never boots the accessory. Each app's release smoke then
+   requires `/healthz` to report the SHA.
+4. A cancelled release runs `kamal lock release` for the apps it selected. Removing a lock nobody
+   holds is a no-op.
+
+A release never runs `kamal setup`, so Electric keeps running. The runner deploy takes longest: the
+old container gets up to 300 seconds to drain after the new one passes its health check.
+
 ## Running a Kamal command
 
 `.github/workflows/kamal-command.yml` runs one Kamal command against production with the release's
@@ -131,7 +157,7 @@ on the server stops two deploys from overlapping. A cancelled run releases that 
 | --- | --- |
 | `kamal app details` | Lists the app's containers |
 | `kamal app logs -n 200` | The last 200 stdout lines. Add `--grep <id>` to follow one run |
-| `kamal build push` | Builds and pushes an image tagged with the checked-out SHA |
+| `kamal build push` | Builds and pushes an image tagged with the checked-out SHA, which the workflow passes as `VERSION` |
 | `kamal deploy --skip-push --version <sha>` | Boots a pushed image. Releases use `kamal deploy`, never `kamal setup` |
 | `kamal rollback <sha>` | Boots an older image that the server still holds (Kamal keeps three) |
 | `kamal lock status`, `kamal lock release` | Shows or clears a stale deploy lock |
@@ -194,9 +220,8 @@ certificate.
 `kamal proxy reboot` also reloads the certificate, but it drops every app on the server for a few
 seconds. Prefer a runner release.
 
-The release preflight refuses a stored certificate that is invalid, misses a host, does not match
-its key or has 7 days or less left. Until the release deploys with Kamal, it only checks the
-certificate when one is stored.
+The release preflight refuses a runner release without a certificate, or with one that is invalid,
+misses a host, does not match its key or has 7 days or less left.
 
 ## Moving off Render
 
@@ -212,6 +237,8 @@ Every release after the merge runs the new preflight, so these values must exist
   `VERCEL_DNS_API_TOKEN`, a Vercel token that can edit DNS for both domains.
 - `/runner`: `RUNNER_PUBLIC_URL`, set to the runner's current onrender.com URL. The Render runner
   receives it through the sync and resolves the same origin it already uses.
+- The GitHub Actions machine identity can create and edit secrets in `prod` `/runner`. The
+  certificate workflow writes both PEMs there.
 
 ### Staging, days before
 
@@ -221,11 +248,13 @@ None of this affects users.
 2. Lower the TTL to 60 seconds on `api.opencompany.chat`, `work.opencompany.space` and
    `*.work.opencompany.space`. Add an A record for `api-next.opencompany.chat` pointing at
    `91.99.204.222`.
-3. Remove the `_acme-challenge.work.opencompany.space` CNAME that points at
-   `opencompany-runner-frankfurt.verify.renderdns.com`. lego follows challenge CNAMEs by default,
-   so leaving Render's verification record in place makes the Vercel provider try to update
-   `renderdns.com`. Render cannot renew its certificate after this change, so make it only when the
-   cutover is committed and the current certificate covers the window.
+3. Replace the `_acme-challenge.work.opencompany.space` CNAME that points at
+   `opencompany-runner-frankfurt.verify.renderdns.com` with a placeholder TXT record. lego follows
+   challenge CNAMEs by default, so Render's verification record makes the Vercel provider try to
+   update `renderdns.com`. Without any record there, the `*.work` wildcard CNAME matches the
+   challenge name instead, with the same result. Render cannot renew its certificate after this
+   change, so make it only when the cutover is committed and the current certificate covers the
+   window.
 4. Dispatch Renew Runner Certificate with `staging`, then without it. Check the stored certificate's
    SANs with `openssl x509 -noout -ext subjectAltName`.
 5. Kamal Command, `app: api`: `kamal build push` with `setup_docker_cache`, then
@@ -282,8 +311,9 @@ Expected impact:
   can run past 5 minutes if verification is slow.
 - Clients with cached DNS reach the Render API for up to 60 seconds.
 
-Add Better Stack uptime monitors on both `/healthz` endpoints. They replace Render's restart on a
-failed health check.
+Uptime monitors on both `/healthz` endpoints are deferred. Until they exist, nothing replaces
+Render's restart on a failed health check: Docker restarts a container that exits, not one that is
+up and unhealthy.
 
 ### Rollback
 
@@ -294,6 +324,8 @@ Until the cleanup PR:
 3. Point DNS back at the Render CNAMEs.
 4. Kamal Command, `app: runner`: `kamal app stop`.
 5. Dispatch a web-only release.
+6. Once the release-workflow PR has merged, revert it before anything else merges to `main`.
+   Otherwise the next push deploys the API and runner to Hetzner again.
 
 The Render API still reads from the Render Electric, which never changed.
 
@@ -304,7 +336,8 @@ columns, so an older image runs on the newer schema.
 
 - Drop the `opencompany_render_v1` publication and slot, following
   [Electric read models](electric-sync.md).
-- Delete the Render services and turn off the Infisical to Render syncs.
+- Leave the Render services suspended and their Infisical syncs on, so a resumed service starts with
+  current values. Never delete them.
 - Delete `RENDER_API_KEY`, `RENDER_SERVICE_ID` and `RENDER_API_SERVICE_ID` from `/release`, and the
   stale `ELECTRIC_URL` from `/api`.
 - Delete `render.yaml`, the Render release scripts, the `RENDER_*` fallbacks, the `render_*` log

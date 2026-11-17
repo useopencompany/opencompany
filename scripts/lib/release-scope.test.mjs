@@ -90,12 +90,22 @@ test("runner image changes deploy only the runner", () => {
   });
 });
 
-test("Render orchestration changes deploy both Render services", () => {
-  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["scripts/lib/render-release.mjs"] }), {
+test("Kamal deploy changes deploy both Kamal apps", () => {
+  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["scripts/lib/release-kamal.mjs"] }), {
     web: false,
     marketing: false,
     docs: false,
     api: true,
+    runner: true,
+  });
+});
+
+test("an app's Kamal config deploys only that app", () => {
+  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["apps/runner/config/deploy.yml"] }), {
+    web: false,
+    marketing: false,
+    docs: false,
+    api: false,
     runner: true,
   });
 });
@@ -180,7 +190,7 @@ test("a manual release can leave unchanged sites to their ranges", () => {
   assert.deepEqual(forcedManualSurfaces({ changedSitesOnly: true }), []);
 });
 
-test("a manual release cannot skip a Render surface its range changes", () => {
+test("a manual release cannot skip an API or runner change in its range", () => {
   assert.deepEqual(
     skippedChangedSurfaces({
       changedSurfaces: { api: true, runner: true },

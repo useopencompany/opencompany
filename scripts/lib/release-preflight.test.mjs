@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
-import { renderSurfaceConfig } from "./release-orchestration.mjs";
 import { surfaceConfig } from "./release-vercel.mjs";
 import { RUNNER_TLS_HOSTS } from "./runner-cert.mjs";
 
@@ -136,14 +135,6 @@ test("production preflight follows the deployed runtime boundaries", async () =>
       .filter((key) => key !== "RUNNER_PUBLIC_URL" && !RUNNER_TLS_KEYS.includes(key))
       .sort(),
   );
-  assert.equal(
-    readRenderShutdownDelay(render, "opencompany-api"),
-    renderSurfaceConfig("api").maxShutdownDelaySeconds,
-  );
-  assert.equal(
-    readRenderShutdownDelay(render, "opencompany-runner"),
-    renderSurfaceConfig("runner").maxShutdownDelaySeconds,
-  );
 });
 
 // Kamal ships a container exactly the keys `env.secret` lists, each read through .kamal/secrets
@@ -200,6 +191,16 @@ test("each Kamal config ships the keys its preflight group checks", async () => 
     private_key_pem: "RUNNER_TLS_PRIVATE_KEY_PEM",
   });
   assert.deepEqual(runner.hosts, RUNNER_TLS_HOSTS);
+
+  // The runner drains its jobs within 300 seconds of SIGTERM (apps/runner/src/index.ts) and the API
+  // its requests within 60. A shorter `docker stop` would kill work mid-drain.
+  for (const [app, seconds] of [
+    [api, "60"],
+    [runner, "300"],
+  ]) {
+    assert.equal(app.stopTimeout, seconds);
+    assert.equal(app.serverStopTimeout, seconds);
+  }
 
   // The accessory takes `/electric` as Render's Electric does, with DATABASE_URL renamed by the
   // deploy job so it cannot collide with another folder's.
@@ -261,16 +262,6 @@ function readRenderKeys(render, serviceName) {
   );
 }
 
-function readRenderShutdownDelay(render, serviceName) {
-  const serviceStart = render.indexOf(`name: ${serviceName}`);
-  const nextService = render.indexOf("\n  - type:", serviceStart);
-  assert.notEqual(serviceStart, -1, `${serviceName} is missing from render.yaml`);
-  const service = render.slice(serviceStart, nextService === -1 ? undefined : nextService);
-  const match = service.match(/^\s+maxShutdownDelaySeconds:\s+(\d+)$/mu);
-  assert.ok(match, `${serviceName} is missing maxShutdownDelaySeconds`);
-  return Number(match[1]);
-}
-
 function readRenderServices(render) {
   return render
     .split(/(?=^  - type:)/gmu)
@@ -293,6 +284,8 @@ async function readKamalApp(app) {
     secret: deploy.env.secret,
     secretsFile: parseKamalSecrets(app, secretsFile),
     accessories: deploy.accessories ?? {},
+    stopTimeout: deploy.stop_timeout,
+    serverStopTimeout: deploy.servers.web.options["stop-timeout"],
     ssl: deploy.proxy.ssl,
     hosts: deploy.proxy.hosts,
   };

@@ -26,20 +26,19 @@ credentials. Electric must connect to the direct Neon endpoint with logical repl
 
 ## Production self-hosting
 
-Production Electric runs as the private `opencompany-electric` Render service in Frankfurt. The
-Render Blueprint pins the Electric image by digest, attaches a 20 GB persistent disk at
-`/var/electric`, and uses the `opencompany_render_v1` replication stream. Infisical prod
-`/electric` owns `DATABASE_URL` and `ELECTRIC_SECRET`; prod `/api` owns the private `ELECTRIC_URL`,
-the same `ELECTRIC_SECRET`, `ELECTRIC_AUTH_MODE=self-hosted`, and
+Production Electric is a Kamal accessory of the API, `opencompany-api-electric`, on the private
+`kamal` Docker network of the Hetzner server. It runs the image digest pinned in
+`apps/api/config/deploy.yml`, keeps its shape log in the named volume `opencompany-electric-data` at
+`/var/electric`, and replicates through the `opencompany_hetzner_v1` stream. Infisical prod
+`/electric` owns `DATABASE_URL` and `ELECTRIC_SECRET`. The API reaches it through
+`ELECTRIC_URL=http://opencompany-api-electric:3000` in the API's Kamal config and shares the same
+`ELECTRIC_SECRET`. Prod `/api` also holds `ELECTRIC_AUTH_MODE=self-hosted` and
 `BUN_CONFIG_MAX_HTTP_REQUESTS=4096` for the Bun read-model proxy.
+[Hosting](hosting.md#electric) covers restarts and rebuilds.
 
-The Hetzner move adds a second production Electric: a Kamal accessory of the API,
-`opencompany-api-electric`, on the private `kamal` Docker network with the same image digest, the
-named volume `opencompany-electric-data` at `/var/electric`, and its own `opencompany_hetzner_v1`
-stream. It reads `/electric`'s `DATABASE_URL` and shares `ELECTRIC_SECRET` with the API. The Kamal
-API reaches it through `ELECTRIC_URL=http://opencompany-api-electric:3000` in
-`apps/api/config/deploy.yml`, while `/api` keeps the Render URL for the Render API. Both run until
-the Render services are deleted; [hosting](hosting.md#electric) covers restarts and rebuilds.
+The suspended Render Electric (`opencompany-electric`, stream `opencompany_render_v1`) and the
+stale Render `ELECTRIC_URL` in `/api` remain only as the way back until the Render services are
+deleted. Its publication and slot are dropped in that cleanup.
 
 The disk state and Postgres replication resources are one consistency unit. Do not change
 `ELECTRIC_STORAGE_DIR`, `ELECTRIC_REPLICATION_STREAM_ID`, or `DATABASE_URL`, clear the disk, or drop
@@ -60,6 +59,6 @@ stream ID and empty disk, then warm and validate shapes before traffic moves.
    replication lag.
 5. Remove the old Cloud publication/slot and credentials only in a separately approved cleanup.
 
-Render's persistent disk permits one Electric instance and causes a brief interruption during an
-upgrade. Clients must be allowed to retry/refetch; do not add an application fallback that bypasses
+One volume permits one Electric instance, and `kamal accessory reboot electric` causes a brief
+interruption. Clients must be allowed to retry/refetch; do not add an application fallback that bypasses
 the authorized read-model proxy.

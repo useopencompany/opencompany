@@ -62,7 +62,7 @@ const groups = {
     ],
   },
   api: {
-    label: "Render canonical product API",
+    label: "Product API",
     required: [
       "API_DATABASE_URL",
       "WORKOS_CLIENT_ID",
@@ -196,7 +196,7 @@ const groups = {
     ],
   },
   electric: {
-    label: "Render Electric sync service",
+    label: "Electric sync service",
     required: [
       "DATABASE_URL",
       "ELECTRIC_SECRET",
@@ -206,7 +206,7 @@ const groups = {
     optional: [],
   },
   runner: {
-    label: "Render runner",
+    label: "Runner",
     required: [
       // Sentry-compatible Better Stack DSN; without it runner exceptions never leave platform logs.
       "BETTER_STACK_ERRORS_DSN",
@@ -257,6 +257,10 @@ const groups = {
       "OPENCOMPANY_CODEX_E2B_TEMPLATE_SMALL",
       "OPENCOMPANY_CODEX_E2B_TEMPLATE_STANDARD",
       "OPENCOMPANY_CODEX_E2B_TEMPLATE_LARGE",
+      // kamal-proxy's certificate for the runner hosts (.github/workflows/renew-runner-cert.yml),
+      // loaded on every runner deploy. Also checked for hosts, key match and expiry below.
+      "RUNNER_TLS_CERTIFICATE_PEM",
+      "RUNNER_TLS_PRIVATE_KEY_PEM",
     ],
     // Agent turns and the crash reconciler both call Browserbase from the
     // runner when browser profiles are enabled.
@@ -268,10 +272,6 @@ const groups = {
       },
     ],
     optional: [
-      // kamal-proxy's certificate for the runner hosts (.github/workflows/renew-runner-cert.yml).
-      // Checked below whenever set; required once the release deploys the runner with Kamal.
-      "RUNNER_TLS_CERTIFICATE_PEM",
-      "RUNNER_TLS_PRIVATE_KEY_PEM",
       "EXA_API_KEY",
       "APIFY_API_TOKEN",
       "RUNNER_DATABASE_URL",
@@ -332,9 +332,6 @@ const groups = {
       "OPENCOMPANY_VERCEL_PROJECT_ID",
       "MARKETING_VERCEL_PROJECT_ID",
       "DOCS_VERCEL_PROJECT_ID",
-      "RENDER_SERVICE_ID",
-      "RENDER_API_SERVICE_ID",
-      "RENDER_API_KEY",
       "PRODUCTION_OPENCOMPANY_URL",
       "PRODUCTION_API_URL",
       "RUNNER_PUBLIC_URL",

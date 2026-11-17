@@ -34,7 +34,6 @@ const FORCE_RULES = [
       "scripts/lib/release-deployments.mjs",
       "scripts/check-release-current.mjs",
       "scripts/check-release-results.mjs",
-      "scripts/release-render-services.mjs",
       "scripts/lib/release-orchestration.mjs",
       "scripts/release-scope.mjs",
       "scripts/lib/release-scope.mjs",
@@ -54,15 +53,16 @@ const FORCE_RULES = [
   },
   { files: ["scripts/next-web.mjs"], surfaces: ["web"] },
   { files: ["scripts/load-env.mjs"], surfaces: ["web"] },
-  { files: ["Dockerfile.api"], surfaces: ["api"] },
-  { files: ["Dockerfile.runner"], surfaces: ["runner"] },
   {
-    files: [
-      ".dockerignore",
-      "render.yaml",
-      "scripts/render-release.mjs",
-      "scripts/lib/render-release.mjs",
-    ],
+    files: ["Dockerfile.api", "apps/api/config/deploy.yml", "apps/api/.kamal/secrets"],
+    surfaces: ["api"],
+  },
+  {
+    files: ["Dockerfile.runner", "apps/runner/config/deploy.yml", "apps/runner/.kamal/secrets"],
+    surfaces: ["runner"],
+  },
+  {
+    files: [".dockerignore", "scripts/release-kamal-services.mjs", "scripts/lib/release-kamal.mjs"],
     surfaces: ["api", "runner"],
   },
 ];
@@ -103,7 +103,7 @@ export function planReleaseSurfaces({
   return Object.fromEntries(RELEASE_SURFACES.map((surface) => [surface, selected.has(surface)]));
 }
 
-// A manual release may keep a Render surface on its current deployment only while nothing since
+// A manual release may keep the API or runner on its current deployment only while nothing since
 // that deployment changes it. Skipping a changed surface leaves it running older shared packages
 // than the surfaces being released, and shared contracts such as stored credential shapes break.
 export function skippedChangedSurfaces({ changedSurfaces, deployApi = true, deployRunner = true }) {
