@@ -2085,6 +2085,74 @@ describe("Sidebar", () => {
       );
     });
 
+    it("moves a project chat to Recents from its row action", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      recentChatsMock.value = [chatRow("chat_filed"), chatRow("chat_loose")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["chat_filed"]),
+      ]);
+      projectsApiMock.removeConversationFromProject.mockResolvedValue([
+        project("project_1", "Launch"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await findLoadedProjects();
+
+      await userEvent.click(
+        within(projects).getByRole("button", {
+          name: "Move chat_filed title to Recents",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(projectsApiMock.removeConversationFromProject).toHaveBeenCalledWith(
+          "project_1",
+          "chat_filed",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Recents" })).getByRole("link", {
+            name: "chat_filed title",
+          }),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    it("moves a project Task to Recents from its row action", async () => {
+      featureFlagsMock.sidebarProjects = true;
+      sidebarTasksMock.value = [taskRow("task_filed")];
+      projectsApiMock.listProjects.mockResolvedValue([
+        project("project_1", "Launch", ["conversation_task_filed"]),
+      ]);
+      projectsApiMock.removeConversationFromProject.mockResolvedValue([
+        project("project_1", "Launch"),
+      ]);
+
+      render(<Sidebar collapsed={false} onToggleCollapsed={() => {}} />);
+      const projects = await findLoadedProjects();
+
+      await userEvent.click(
+        within(projects).getByRole("button", {
+          name: "Move task_filed name to Recents",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(projectsApiMock.removeConversationFromProject).toHaveBeenCalledWith(
+          "project_1",
+          "conversation_task_filed",
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("navigation", { name: "Recents" })).getByRole("link", {
+            name: /task_filed name/,
+          }),
+        ).toBeInTheDocument(),
+      );
+    });
+
     it("collapses one project without hiding the others and remembers the choice", async () => {
       featureFlagsMock.sidebarProjects = true;
       recentChatsMock.value = [chatRow("chat_a"), chatRow("chat_b")];

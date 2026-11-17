@@ -35,15 +35,6 @@ const acceptedAdvisories = [
     expiresOn: "2026-12-31",
   },
   {
-    ghsa: "GHSA-gcqx-w48m-w2h4",
-    package: "deepmerge",
-    // No patched release exists; 4.3.1 is still the latest. Reached only through
-    // @expo/config, which merges repository-owned Expo config at build time. Prototype
-    // poisoning needs attacker-controlled input to mergeObject(), and no runtime code path
-    // deep-merges user data with it. Remove when deepmerge publishes a fix or Expo drops it.
-    expiresOn: "2027-02-28",
-  },
-  {
     ghsa: "GHSA-mrhx-c7xc-m3w5",
     package: "zod",
     // Fixed only in zod 4.6.6. Our own packages use 4.6.7 and the exact 4.1.11 pin from the
