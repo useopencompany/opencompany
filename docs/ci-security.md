@@ -157,12 +157,14 @@ dependency cannot leave a silent hole behind. Prefer an override or an upstream 
 exception only when no released version is both patched and compatible, and record why in the
 script rather than in a commit message.
 
-Three advisories outside decode-uri-component have no patched release on the version line we
-depend on. `deepmerge@4.3.1` (GHSA-gcqx-w48m-w2h4) is reached only through `@expo/config`, which
-merges repository-owned config. The zod 3.x copies (GHSA-mrhx-c7xc-m3w5) come from `@expo/cli` and
-the Vercel CLI builders, which validate repository config rather than request data. Our own
-packages use zod 4.6.7. Both exceptions expire on 2027-02-28. Re-review them before either tool
-processes untrusted input.
+Two advisories outside decode-uri-component have no patched release on the version line we depend
+on. The zod 3.x copies (GHSA-mrhx-c7xc-m3w5) come from `@expo/cli` and the Vercel CLI builders,
+which validate repository config rather than request data. Our own packages use zod 4.6.7. The
+picomatch 4.x copies (GHSA-fc5q-39xc-vjpf) come from Expo, Vite, Rollup, Vercel build tooling, and
+their transitive file globbers. Those paths compile repository-owned patterns and do not accept
+glob patterns from production requests. The picomatch exception expires on 2026-12-31 and the zod
+exception expires on 2027-02-28. Re-review either exception before its tools process untrusted
+input.
 
 `node-forge` is overridden to 1.4.3, which includes the nested DigestAlgorithm element-count fix
 for GHSA-86w9-cpqp-85rv. The Policy job keeps `scripts/lib/node-forge.test.mjs` as a regression
