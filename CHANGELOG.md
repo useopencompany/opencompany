@@ -12,23 +12,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - try the whatsapp assistant beta with a phone number registered in the european economic area. turn it on in preferences, then link your number in settings → channels → whatsapp. text only; actions needing approval must be run in the app (#1924) — @louis.
 
-<!-- Hold #1978 here until a distributed iOS build containing it is confirmed. -->
+<!-- Hold the iOS entries (#1978, #2038, #2045, #2050, #2051, #2064, #2066, #2068) until distribution is confirmed. The 2026-10-04 production build succeeded with auto-submit, but availability to users has not been verified. -->
 
 - copy or share an assistant's reply from the iphone app. attach heic photos from photos or files; the app converts them to jpeg before uploading (#1978) — @louis.
+- choose codex or claude code from the iphone app's model picker and take a photo without leaving the composer (#2064) — @monsterdeveloper.
+- use @ for plugins and repositories, / for skills, and # to start a task or workflow from the iphone composer (#2066) — @monsterdeveloper.
+- pin chats, follow task conversations, and create or revoke read-only sharing links from the iphone app. the sidebar also shows unread activity and pull request status (#2050) — @monsterdeveloper.
+- tap a tool card in the iphone app to inspect its input and result. expand reasoning and finished activity when you want more detail (#2068) — @monsterdeveloper.
 
-<!-- Hold #2013 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
+<!-- Hold #2013 and #2049 here until production GitHub webhook setup and a live event-triggered run are confirmed. -->
 
 - start a workflow or company agent when someone opens a github issue or pull request. an admin connects github under plugins → company, then the trigger's owner selects a repository they can access. events from bots are skipped (#2013) — @louis.
+- start from the pull request review workflow template. choose a connected company github account and repository, then activate the draft to review new pull requests. the person running it also needs their own github connection (#2049) — @louis.
+
+<!-- Hold #2070 here until Sentry publication approval, production installation, and the remaining live release checks in docs/sentry-plugin.md are confirmed. -->
+
+- connect sentry under company plugins to investigate new or recurring errors, propose a fix in a draft pull request, or get a daily issue review. an admin chooses the projects the integration can access (#2070) — @monsterdeveloper.
 
 <!-- Hold #2021 here until a signed macOS release and a real update between published versions are confirmed. Desktop releases are manual (#2028). -->
 
 - the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
 
 ### Fixed
-- opening a recent chat from Home no longer sends you straight back to a new chat when a prefetched server read briefly misses it (#2054) — @louis.
-- starting a new chat no longer throws you back to home while the first reply is on its way, and the chat stays in the sidebar after a reload. the address bar only switches to the chat once the server has it (#2040) — @louis.
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
+- typing, sending, and opening the keyboard in the iphone app keep the composer and conversation in place more reliably (#2038) — @monsterdeveloper.
+- preview chats and tasks from the iphone sidebar without a crash, including conversations you have not opened on that device (#2051) — @monsterdeveloper.
+- signing out of the iphone app now finishes correctly when you return from the browser (#2045) — @monsterdeveloper.
+
+## [1.36.0] - 2026-11-17
+
+### Added
+- let one workflow hand work to another. mention the workflow in a step's instructions, then follow the new task and its pull request status from the original run (#2056) — @louis.
+
+### Changed
+- slimmer scrollbars leave more room for your chats and sidebar (#2044) — @monsterdeveloper.
+
+### Fixed
+- scheduled workflows with long instructions no longer block other scheduled runs (#2079) — @louis.
+- tasks using chat models continue automatically when they reach a run's step limit with work left to do. if they keep reaching the limit, they ask for attention instead of marking unfinished work complete (#2059) — @louis.
+- connect your github account without needing permission to manage the organization's app installation. an organization owner still needs to grant the app access to any missing repositories (#2057) — @louis.
+- in the projects beta, move a chat or task back to recents from its sidebar row (#2063) — @louis.
+- starting a chat or opening a recent one no longer unexpectedly sends you back home. new chats also stay in the sidebar after a reload (#2040, #2054) — @louis.
+- archiving the task you are viewing now opens a new chat instead of leaving you on the archived task (#2062) — @louis.
+- use skill mentions in task replies again, and keep skill highlights in sent chat messages (#2046, #2053) — @louis.
+- selecting an open chat from the sidebar puts the cursor in that pane's composer, ready to type (#2048) — @louis.
+- coding sessions recover more reliably from temporary sandbox maintenance errors and interrupted setup downloads (#2041, #2060) — @louis.
+- opening a chat while signed out now takes you to sign in before trying to load the conversation (#2042) — @louis.
 
 ## [1.35.1] - 2026-09-25
 
