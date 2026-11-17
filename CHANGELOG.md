@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - selecting an open chat from the sidebar focuses its composer, so you can start typing in the right pane immediately (#2048) — @louis.
 - mention a skill in a task reply and the task can use it when it continues. skill mentions also keep their highlights in sent chat messages (#2046, #2053) — @louis.
 - archiving the task you are viewing now opens a new chat instead of leaving you on the archived task (#2062) — @louis.
+- move a chat or task from a project back to Recents directly from its sidebar row (#2063) — @louis.
 - connect github as yourself without needing to manage your organization's app installation. coding sessions can use that connection too (#2057, #2058) — @louis.
 - coding sessions retry temporary downloads that fail while starting codex or claude code, so a brief connection problem is less likely to stop your work (#2060) — @louis.
 - background tasks continue automatically when they reach a limit on how many steps they can take in one run. if repeated continuations still cannot finish, the task asks for attention instead of marking unfinished work complete (#2059) — @louis.
