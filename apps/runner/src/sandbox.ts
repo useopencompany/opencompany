@@ -28,6 +28,10 @@ export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
 export const OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY = "opencompany_execution_backend";
 export const OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY =
   "opencompany_execution_backend_version";
+// The E2B project is shared with other apps. This tag separates our sandboxes in the console and
+// in list queries; the reconciler still scopes by the managed flag and namespace above.
+export const OPENCOMPANY_APP_METADATA_KEY = "app";
+export const OPENCOMPANY_APP_METADATA_VALUE = "opencompany";
 
 export type ManagedSandboxOwnerKind =
   | "codex_chat_session"
@@ -54,6 +58,7 @@ export function managedSandboxMetadata(input: ManagedSandboxMetadataInput) {
   const execution = input.ownerKind === "codex_chat_session" ? input.execution : null;
   return {
     ...input.metadata,
+    [OPENCOMPANY_APP_METADATA_KEY]: OPENCOMPANY_APP_METADATA_VALUE,
     [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
     [OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY]: input.namespace,
     [OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY]: input.ownerKind,

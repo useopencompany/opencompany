@@ -12,7 +12,7 @@ import { codexToolboxTemplateAlias } from "./template";
 // pressure before it is offered.
 //
 // Usage:
-//   E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/soak.pause-resume.ts [size...]
+//   E2B_API_KEY=e2b_... E2B_DOMAIN=e2b-juliett.dev bun apps/runner/e2b/codex/soak.pause-resume.ts [size...]
 //   SOAK_CYCLES=5 SOAK_MEMORY_OCCUPANCY=0.85 bun apps/runner/e2b/codex/soak.pause-resume.ts
 //
 // Run it after `build.prod.ts` and before pointing the runner env at the aliases.
@@ -63,6 +63,7 @@ async function soakSize(size: SandboxSize): Promise<SoakResult> {
     sandbox = await Sandbox.create(alias, {
       timeoutMs: SANDBOX_TIMEOUT_MS,
       lifecycle: { onTimeout: "pause", autoResume: true },
+      metadata: { app: "opencompany" },
     });
   } catch (error) {
     return { size, cycles: 0, failure: `could not spawn ${alias}: ${errorText(error)}` };

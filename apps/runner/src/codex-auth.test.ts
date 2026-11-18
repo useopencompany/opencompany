@@ -36,6 +36,7 @@ vi.mock("./sandbox", () => ({
     metadata?: Record<string, string>;
   }) => ({
     ...input.metadata,
+    app: "opencompany",
     opencompany_managed: "true",
     opencompany_sandbox_namespace: input.namespace,
     opencompany_owner_kind: input.ownerKind,
@@ -141,6 +142,7 @@ describe("startCodexDeviceAuthFlow", () => {
       envs: {},
       metadata: {
         user_id: "user_1",
+        app: "opencompany",
         opencompany_managed: "true",
         opencompany_sandbox_namespace: "test",
         opencompany_owner_kind: "codex_device_auth_flow",

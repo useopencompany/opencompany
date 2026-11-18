@@ -65,7 +65,7 @@ contracts include:
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
   enabled task-worker gate, the stable `RUNNER_SANDBOX_NAMESPACE` that scopes managed E2B cleanup,
-  E2B, Blob (including Plugin data archives), model providers,
+  E2B (`E2B_API_KEY` and `E2B_DOMAIN`), Blob (including Plugin data archives), model providers,
   GitHub/Google/X integration credentials, opencompany PostHog, Redis values, and
   `RUNNER_PUBLIC_URL`; capability controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel credentials and project IDs (including
@@ -133,6 +133,13 @@ The company GitHub plugin reuses that App for workspace-level events. Set the Ap
 subscribe it to Issues and Pull request events, and put the same webhook secret in prod `/api` as `GITHUB_USER_APP_WEBHOOK_SECRET`. The
 variable is optional: without it, admins can still link accounts and the plugin page says events
 are not set up, but the API rejects deliveries. Only the API reads it.
+
+`E2B_DOMAIN` is the API domain of the E2B project that owns `E2B_API_KEY`. The E2B SDK reads both
+itself and falls back to `e2b.app` (US-West-1) when the domain is unset or empty. E2B regions are
+separate deployments: a key works only on its own domain, sandbox IDs resolve only in the region
+that created them, and templates are built per project. The runner project is in EU-West-1, so
+`prod` and `dev` `/runner` set `E2B_DOMAIN=e2b-juliett.dev`. The release preflight requires it, so a
+runner release cannot send the EU key to the US domain. It stays optional locally.
 
 `BLOB_READ_WRITE_TOKEN` must exist in Infisical `prod` `/runner` before enabling Plugin runtime.
 The runner uses it for bounded, durable `PLUGIN_DATA` archives and never injects it into Plugin

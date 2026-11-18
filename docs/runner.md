@@ -29,6 +29,8 @@ lease, and sandbox timeouts are documented beside their values in `.env.example`
 `apps/runner/config/deploy.yml`.
 Managed E2B sandboxes carry `RUNNER_SANDBOX_NAMESPACE`; reconciliation lists only its exact
 namespace, preventing a local runner that shares E2B credentials from selecting production sandboxes.
+The runner's E2B project is in EU-West-1 (`E2B_DOMAIN=e2b-juliett.dev`) and is shared with another
+app, so every managed sandbox also carries `app: opencompany` metadata.
 
 ## Worker admission
 
