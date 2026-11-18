@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { SANDBOX_SIZE_SPECS, type SandboxSize } from "@opencompany/core/sandbox-sizes";
 import { Sandbox } from "e2b";
+import { OPENCOMPANY_APP_SANDBOX_METADATA } from "../../src/sandbox-metadata";
 import { codexToolboxTemplateAlias } from "./template";
 
 // Release gate for every offered sandbox size.
@@ -63,7 +64,7 @@ async function soakSize(size: SandboxSize): Promise<SoakResult> {
     sandbox = await Sandbox.create(alias, {
       timeoutMs: SANDBOX_TIMEOUT_MS,
       lifecycle: { onTimeout: "pause", autoResume: true },
-      metadata: { app: "opencompany" },
+      metadata: OPENCOMPANY_APP_SANDBOX_METADATA,
     });
   } catch (error) {
     return { size, cycles: 0, failure: `could not spawn ${alias}: ${errorText(error)}` };

@@ -18,7 +18,8 @@ import { codingSandboxTemplate } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
 import { INFISICAL_CLI_LINUX_AMD64_SHA256, INFISICAL_CLI_VERSION } from "./infisical-version";
-import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
+import { killSandbox, type SandboxHandle } from "./sandbox";
+import { managedSandboxMetadata } from "./sandbox-metadata";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "infisical-auth" });
 

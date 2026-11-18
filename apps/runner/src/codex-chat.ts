@@ -125,10 +125,10 @@ import {
   isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
-  managedSandboxMetadata,
   type SandboxHandle,
   writeSandboxTextFiles,
 } from "./sandbox";
+import { managedSandboxMetadata } from "./sandbox-metadata";
 import { rowsFromExecute } from "./sql-exec";
 import {
   buildTaskTerminalProjection,

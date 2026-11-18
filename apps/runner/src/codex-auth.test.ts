@@ -29,19 +29,6 @@ vi.mock("./db", () => ({
 
 vi.mock("./sandbox", () => ({
   killSandbox: mocks.killSandbox,
-  managedSandboxMetadata: (input: {
-    namespace: string;
-    ownerKind: string;
-    ownerId: string;
-    metadata?: Record<string, string>;
-  }) => ({
-    ...input.metadata,
-    app: "opencompany",
-    opencompany_managed: "true",
-    opencompany_sandbox_namespace: input.namespace,
-    opencompany_owner_kind: input.ownerKind,
-    opencompany_owner_id: input.ownerId,
-  }),
 }));
 
 describe("parseDeviceLoginDetails", () => {

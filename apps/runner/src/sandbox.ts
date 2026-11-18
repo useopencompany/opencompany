@@ -1,4 +1,3 @@
-import type { ExecutionBackendCompatibility } from "@opencompany/db/product-schema";
 import { createLogger } from "@opencompany/observability";
 import { Sandbox, type SandboxNetworkOpts } from "e2b";
 import { ACTIVE_CODING_SANDBOX_TIMEOUT_MS } from "./coding-sandbox-lifecycle";
@@ -20,57 +19,6 @@ export type SandboxLatencyObservation = {
   requestedSandboxId?: string;
   errorName?: string;
 };
-
-export const OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY = "opencompany_managed";
-export const OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY = "opencompany_sandbox_namespace";
-export const OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY = "opencompany_owner_kind";
-export const OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY = "opencompany_owner_id";
-export const OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY = "opencompany_execution_backend";
-export const OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY =
-  "opencompany_execution_backend_version";
-// The E2B project is shared with other apps. This tag separates our sandboxes in the console and
-// in list queries; the reconciler still scopes by the managed flag and namespace above.
-export const OPENCOMPANY_APP_METADATA_KEY = "app";
-export const OPENCOMPANY_APP_METADATA_VALUE = "opencompany";
-
-export type ManagedSandboxOwnerKind =
-  | "codex_chat_session"
-  | "codex_device_auth_flow"
-  | "infisical_auth_flow"
-  | "doppler_auth_flow";
-
-type ManagedSandboxMetadataInput = {
-  namespace: string;
-  ownerId: string;
-  metadata?: Record<string, string>;
-} & (
-  | {
-      ownerKind: "codex_chat_session";
-      execution: ExecutionBackendCompatibility;
-    }
-  | {
-      ownerKind: Exclude<ManagedSandboxOwnerKind, "codex_chat_session">;
-      execution?: never;
-    }
-);
-
-export function managedSandboxMetadata(input: ManagedSandboxMetadataInput) {
-  const execution = input.ownerKind === "codex_chat_session" ? input.execution : null;
-  return {
-    ...input.metadata,
-    [OPENCOMPANY_APP_METADATA_KEY]: OPENCOMPANY_APP_METADATA_VALUE,
-    [OPENCOMPANY_MANAGED_SANDBOX_METADATA_KEY]: "true",
-    [OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY]: input.namespace,
-    [OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY]: input.ownerKind,
-    [OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY]: input.ownerId,
-    ...(execution
-      ? {
-          [OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY]: execution.backend,
-          [OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY]: String(execution.version),
-        }
-      : {}),
-  };
-}
 
 // This timeout is armed once at create/connect and E2B pauses the sandbox when it elapses. It
 // includes grace beyond the agent turn cap for bootstrap and finalization work outside that timer.

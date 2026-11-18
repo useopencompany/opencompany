@@ -80,9 +80,9 @@ export type RunnerEnv = {
 };
 
 export function loadEnv(): RunnerEnv {
-  // Boot guards for env the runner consumes outside RunnerEnv: the e2b SDK reads
-  // E2B_API_KEY from process.env itself, and @opencompany/db credential modules load the
-  // integration credential encryption key lazily. Fail fast here instead of mid-request.
+  // Boot guards for env the runner consumes outside RunnerEnv: the e2b SDK reads E2B_API_KEY
+  // and the optional E2B_DOMAIN from process.env itself, and @opencompany/db credential modules
+  // load the integration credential encryption key lazily. Fail fast here instead of mid-request.
   requiredEnv("E2B_API_KEY");
   loadEncryptionKey();
   return {
