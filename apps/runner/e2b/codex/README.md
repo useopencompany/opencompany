@@ -33,11 +33,17 @@ bills less with no billing change.
 
 ## Build
 
-Run the build with an E2B API key. It builds every size in sequence from the same image:
+Run the build with an E2B API key and the domain of the project it belongs to. It builds every size
+in sequence from the same image:
 
 ```sh
-E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/build.prod.ts
+E2B_API_KEY=e2b_... E2B_DOMAIN=e2b-juliett.dev bun apps/runner/e2b/codex/build.prod.ts
 ```
+
+Templates belong to one E2B project in one region. The runner project is in EU-West-1
+(`e2b-juliett.dev`). A new project or region needs all three sizes rebuilt there, with that
+project's key and domain, before the runner points at it. Without `E2B_DOMAIN` the CLI and SDK
+target `e2b.app` (US-West-1), which rejects keys from other regions.
 
 ## Pause/resume soak test (release gate)
 
@@ -47,7 +53,7 @@ to be proven against that failure before it is offered, so run the soak after bu
 before pointing the runner env at the new aliases:
 
 ```sh
-E2B_API_KEY=e2b_... bun apps/runner/e2b/codex/soak.pause-resume.ts
+E2B_API_KEY=e2b_... E2B_DOMAIN=e2b-juliett.dev bun apps/runner/e2b/codex/soak.pause-resume.ts
 ```
 
 It starts a headless Chromium, then pins 85% of whatever memory is still free — taken from
@@ -60,10 +66,10 @@ configured in the runner environment.
 
 ## Smoke Test
 
-After building, spawn the template and verify the expected tools:
+After building, spawn the template with the same key and domain and verify the expected tools:
 
 ```sh
-e2b sandbox spawn opencompany-codex-toolbox-standard
+E2B_API_KEY=e2b_... E2B_DOMAIN=e2b-juliett.dev e2b sandbox spawn opencompany-codex-toolbox-standard
 rg --version
 fd --version
 jq --version

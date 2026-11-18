@@ -15,7 +15,8 @@ import { getDb } from "./db";
 import { validateDopplerToken } from "./doppler-api";
 import { DOPPLER_CLI_VERSION, DOPPLER_INSTALL_COMMAND } from "./doppler-version";
 import type { RunnerEnv } from "./env";
-import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
+import { killSandbox, type SandboxHandle } from "./sandbox";
+import { managedSandboxMetadata } from "./sandbox-metadata";
 
 const AUTH_HOME = "/home/user/.opencompany/doppler-auth";
 const LOGIN_LOG = `${AUTH_HOME}/login.log`;

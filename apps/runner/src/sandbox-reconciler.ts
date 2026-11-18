@@ -4,8 +4,8 @@ import { sql } from "drizzle-orm";
 import { Sandbox, type SandboxInfo } from "e2b";
 import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
+import { killSandbox } from "./sandbox";
 import {
-  killSandbox,
   type ManagedSandboxOwnerKind,
   OPENCOMPANY_EXECUTION_BACKEND_METADATA_KEY,
   OPENCOMPANY_EXECUTION_BACKEND_VERSION_METADATA_KEY,
@@ -13,7 +13,7 @@ import {
   OPENCOMPANY_SANDBOX_NAMESPACE_METADATA_KEY,
   OPENCOMPANY_SANDBOX_OWNER_ID_METADATA_KEY,
   OPENCOMPANY_SANDBOX_OWNER_KIND_METADATA_KEY,
-} from "./sandbox";
+} from "./sandbox-metadata";
 import { rowsFromExecute } from "./sql-exec";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "sandbox-reconciler" });

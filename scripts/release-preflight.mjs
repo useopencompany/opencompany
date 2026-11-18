@@ -223,6 +223,8 @@ const groups = {
       "INTEGRATION_CREDENTIAL_ENCRYPTION_KEY",
       "RUNNER_ALLOWED_ORIGINS",
       "E2B_API_KEY",
+      // Without it the SDK sends the key to the default e2b.app (US) domain.
+      "E2B_DOMAIN",
       "VERCEL_AI_GATEWAY_API_KEY",
       "OPENAI_CODEX_API_KEY",
       "BLOB_READ_WRITE_TOKEN",

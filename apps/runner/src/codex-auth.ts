@@ -9,7 +9,8 @@ import { ensureCodexInstalled } from "./codex-cli";
 import { codingSandboxTemplate } from "./coding-sandbox-lifecycle";
 import { getDb } from "./db";
 import type { RunnerEnv } from "./env";
-import { killSandbox, managedSandboxMetadata, type SandboxHandle } from "./sandbox";
+import { killSandbox, type SandboxHandle } from "./sandbox";
+import { managedSandboxMetadata } from "./sandbox-metadata";
 
 const logger = createLogger({ service: "opencompany-runner", runtime: "codex-auth" });
 

@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   validate: vi.fn(),
 }));
 vi.mock("./db", () => ({ getDb: () => mocks.db }));
-vi.mock("./sandbox", () => ({ killSandbox: mocks.kill, managedSandboxMetadata: () => ({}) }));
+vi.mock("./sandbox", () => ({ killSandbox: mocks.kill }));
 vi.mock("e2b", () => ({ Sandbox: { create: mocks.create, connect: mocks.connect } }));
 vi.mock("@opencompany/db/workspaces", () => ({ getWorkspaceRole: mocks.member }));
 vi.mock("./doppler-api", () => ({ validateDopplerToken: mocks.validate }));

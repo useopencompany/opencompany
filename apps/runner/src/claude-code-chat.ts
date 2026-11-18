@@ -139,8 +139,8 @@ import {
   isRetryablePackageInstallError,
   isRetryableSandboxAcquisitionError,
   isUnresponsiveGuestError,
-  managedSandboxMetadata,
 } from "./sandbox";
+import { managedSandboxMetadata } from "./sandbox-metadata";
 import {
   buildTaskTerminalProjection,
   buildTaskTurnCompletion,
