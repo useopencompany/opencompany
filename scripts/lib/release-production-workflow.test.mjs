@@ -51,7 +51,6 @@ test("builds Vercel outputs before migrations and rechecks main before deploys",
   ]);
   assert.doesNotMatch(workflow, /node <<['"]?NODE/u);
   assert.match(workflow, /timeout-minutes: 45/u);
-  assert.doesNotMatch(workflow, /RENDER_|release-render-services/u);
   assert.match(workflow, /VERCEL_DEPLOY_TIMEOUT_MS: "600000"/u);
   assert.match(workflow, /run: bun scripts\/backfill-wiki-path-links\.ts/u);
   assert.match(workflow, /run: node scripts\/activate-personal-skills\.mjs/u);

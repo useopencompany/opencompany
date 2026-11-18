@@ -40,11 +40,12 @@ continue.
 
 ## Production
 
-Edit secrets in the runtime's Infisical path and verify the integration sync on the destination:
+Edit secrets in the runtime's Infisical path, then verify them on the destination:
 
 - Web: deployment path `prod` `/web` → Vercel product project.
-- API: `prod` `/api` → Render product API.
-- Runner: `prod` `/runner` → Render runner.
+- API: `prod` `/api` → the Kamal deploy, exported to a file by the release workflow. See
+  [hosting](hosting.md#secrets).
+- Runner: `prod` `/runner` → the Kamal deploy, exported the same way.
 - Release automation: `prod` `/release` → GitHub Actions through `infisical run`.
 - Mobile build automation: `prod` `/mobile` → GitHub Actions through the Infisical secrets action
   and the universal-auth machine identity.

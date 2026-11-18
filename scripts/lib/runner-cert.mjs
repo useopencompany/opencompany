@@ -17,27 +17,6 @@ export const REDEPLOY_WITHIN_DAYS = 10;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function certificateRenewalDecision({
-  certificatePem,
-  privateKeyPem,
-  runnerPublicUrl,
-  eventName,
-  now,
-  force = false,
-}) {
-  const storedPairIsMissing = !certificatePem?.trim() && !privateKeyPem?.trim();
-  if (eventName === "schedule" && !force && storedPairIsMissing && isRenderUrl(runnerPublicUrl)) {
-    return { renew: false, status: "bootstrap-pending", reason: null };
-  }
-
-  const reason = renewalReason({ certificatePem, privateKeyPem, now, force });
-  return {
-    renew: Boolean(reason),
-    status: reason ? "renew" : "current",
-    reason,
-  };
-}
-
 // Reads a certificate and its key without throwing: `problems` lists everything wrong.
 export function inspectCertificate({ certificatePem, privateKeyPem, now = new Date() }) {
   const problems = [];
@@ -86,10 +65,9 @@ export function renewalReason({ certificatePem, privateKeyPem, now = new Date(),
 }
 
 // kamal-proxy loads the certificate only when the runner deploys. A renewal therefore reaches
-// clients with the next runner release, and this decides when the workflow must force one. Until
-// the cutover another server answers for the hostname (Vercel's *.opencompany.chat wildcard), so
-// only a certificate covering every runner host counts as kamal-proxy's. The probe validates the
-// chain, so an expired certificate arrives as `{ expired: true }` with nothing else to compare.
+// clients with the next runner release, and this decides when the workflow must force one. Only a
+// certificate covering every runner host counts as kamal-proxy's. The probe validates the chain,
+// so an expired certificate arrives as `{ expired: true }` with nothing else to compare.
 export function servedCertificateAction({ served, stored }) {
   if (served?.expired) {
     return stored.daysLeft > REDEPLOY_WITHIN_DAYS ? "redeploy" : "renewal-failed";
@@ -112,12 +90,4 @@ export function parseSubjectAltNames(value) {
     .map((entry) => entry.trim())
     .filter((entry) => entry.startsWith("DNS:"))
     .map((entry) => entry.slice(4));
-}
-
-function isRenderUrl(value) {
-  try {
-    return new URL(value).hostname.endsWith(".onrender.com");
-  } catch {
-    return false;
-  }
 }

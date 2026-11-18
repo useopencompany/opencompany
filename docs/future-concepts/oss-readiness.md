@@ -78,8 +78,8 @@ the launch or accepting an external pull request.
 - **Secrets (resolved 2026-09-07):** an independent TruffleHog scan over the same refs found no
   verified credentials. Its four unverified findings all point to one documented dummy PostgreSQL
   test fixture, not a live account.
-- **Deployment metadata and maintenance tools (resolved 2026-09-07):** tracked Render and Vercel
-  files contain topology, build commands, disabled deployment flags, placeholders, and environment
+- **Deployment metadata and maintenance tools (resolved 2026-09-07):** tracked Vercel files
+  contain topology, build commands, disabled deployment flags, placeholders, and environment
   variable names rather than credentials or live project bindings. The Infisical selector is
   non-secret. One-off maintenance scripts require explicit operator inputs and are not reachable
   from the untrusted pull-request workflow. No launch-critical deletion is warranted.

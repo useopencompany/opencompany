@@ -27,7 +27,7 @@ the workspace's organization. Historical Tasks remain available.
 
 Set `SENTRY_APP_CLIENT_ID`, `SENTRY_APP_CLIENT_SECRET`, and `SENTRY_APP_SLUG` in Infisical `prod`
 `/api` and `/runner`, with matching values. These are server secrets, never browser configuration.
-The Render declarations and release preflight require them in both runtimes. Local setup mirrors
+The Kamal configs and release preflight require them in both runtimes. Local setup mirrors
 these values from the development environment. The existing integration encryption key and
 refresh lease serialize credential rotation across workers. JWT refresh replaces installation
 tokens before their eight-hour expiry. A rejected refresh marks the connection `needs_reauth`.

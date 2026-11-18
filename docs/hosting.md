@@ -2,12 +2,11 @@
 
 The product API, the runner and Electric run on one Hetzner server, deployed with
 [Kamal](https://kamal-deploy.org) 2.12.0. Web, marketing and docs stay on Vercel, the database on
-Neon and secrets in Infisical. The Render services stay suspended, never deleted, as a way back; see
-[moving off Render](#moving-off-render).
+Neon and secrets in Infisical.
 
 ```
 kamal-proxy :80/:443
-├── api.opencompany.chat, api-next.opencompany.chat → opencompany-api (3001, /healthz), Let's Encrypt
+├── api.opencompany.chat                            → opencompany-api (3001, /healthz), Let's Encrypt
 ├── runner.opencompany.chat, work.opencompany.space, *.work.opencompany.space
 │                                                    → opencompany-runner (3040, /healthz), custom cert
 └── kamal network: opencompany-api-electric:3000 (volume opencompany-electric-data:/var/electric)
@@ -71,20 +70,19 @@ repository root.
 | | `apps/api` | `apps/runner` |
 | --- | --- | --- |
 | Service | `opencompany-api` | `opencompany-runner` |
-| Hosts | `api.opencompany.chat`, `api-next.opencompany.chat` | `runner.opencompany.chat`, `work.opencompany.space`, `*.work.opencompany.space` |
+| Hosts | `api.opencompany.chat` | `runner.opencompany.chat`, `work.opencompany.space`, `*.work.opencompany.space` |
 | TLS | Let's Encrypt, issued by kamal-proxy on the first request | the certificate in Infisical `/runner` |
 | Port, health check | 3001, `/healthz` | 3040, `/healthz` |
 | Stopping the old container | kamal-proxy drains 60 s, then `docker stop -t 60` | kamal-proxy drains 30 s, then `docker stop -t 300` |
 | Accessory | Electric | none |
-| Image | `Dockerfile.api` at the repository root | `Dockerfile.runner` at the repository root |
+| Image | `apps/api/Dockerfile`, built from the repository root | `apps/runner/Dockerfile`, built from the repository root |
 
 Both apps set `response_timeout: 0`, which turns off kamal-proxy's response-header timeout, and
 `buffering.responses: false`, so SSE chat streams and Electric live shapes reach clients chunk by
 chunk. Bun and the clients still bound each request.
 
-The runner's `stop_timeout: 300` matches Render's `maxShutdownDelaySeconds`. On SIGTERM the runner
-stops claiming work and drains for up to 230 seconds, then hands off what is left
-(`apps/runner/src/index.ts`).
+The runner has `stop_timeout: 300`. On SIGTERM it stops claiming work and drains for up to 230
+seconds, then hands off what is left (`apps/runner/src/index.ts`).
 
 ### Secrets
 
@@ -94,21 +92,19 @@ string. The Kamal command workflow loads Infisical `prod` `/release`, then the a
 wins any key both hold. A release gives each `kamal deploy` only its app's folder; see
 [releases](#releases).
 
-Three keys differ from Render:
+Two keys need care:
 
-- `ELECTRIC_URL` is `http://opencompany-api-electric:3000` in the API's `env.clear`. Infisical `/api`
-  still syncs the Render Electric URL to the Render API, so the Kamal value cannot live there.
+- `ELECTRIC_URL` is `http://opencompany-api-electric:3000` in the API's `env.clear`. It is the
+  accessory's address on the `kamal` network, which is deploy config rather than a secret, so it
+  lives beside the accessory definition instead of in Infisical.
 - The Electric accessory needs `/electric`'s `DATABASE_URL`. The workflow exports it as
   `ELECTRIC_DATABASE_URL`, and the accessory aliases it back (`DATABASE_URL:ELECTRIC_DATABASE_URL`).
   The API and the accessory share `ELECTRIC_SECRET`. The workflow fails when `/api` and `/electric`
   hold different values.
-- The runner requires `RUNNER_PUBLIC_URL`. Render supplied `RENDER_EXTERNAL_URL`, and the runner
-  keeps that fallback until Render is gone.
 
-`scripts/lib/release-preflight.test.mjs` fails when `env.secret`, `.kamal/secrets`, the preflight
-group in `scripts/release-preflight.mjs` and the service's keys in `render.yaml` disagree. The
-policy job in `verify.yml` runs `kamal config` for both apps with an empty environment whenever a
-Kamal file changes.
+`scripts/lib/release-preflight.test.mjs` fails when `env.secret`, `.kamal/secrets` and the preflight
+group in `scripts/release-preflight.mjs` disagree. The policy job in `verify.yml` runs `kamal config`
+for both apps with an empty environment whenever a Kamal file changes.
 
 ### Release identity
 
@@ -167,16 +163,14 @@ on the server stops two deploys from overlapping. A cancelled run releases that 
 Never run `kamal setup` on the API once Electric is up. It reboots the accessory, which restarts
 Electric's shape log.
 
-Render's log search goes away with Render. Errors still reach Better Stack through
-`BETTER_STACK_ERRORS_DSN`. For raw stdout, use `kamal app logs`.
+Errors reach Better Stack through `BETTER_STACK_ERRORS_DSN`. For raw stdout, use `kamal app logs`.
 
 ## Electric
 
 Electric is a Kamal accessory of the API: `opencompany-api-electric`, private on Kamal's `kamal`
-Docker network, with no published port. It runs the image digest pinned in `render.yaml`, stores
-its shape log in the named volume `opencompany-electric-data`, and replicates through its own
-stream, `opencompany_hetzner_v1`. The Render Electric keeps `opencompany_render_v1` until PR 3 of
-the move drops it.
+Docker network, with no published port. It runs an image pinned by digest in
+`apps/api/config/deploy.yml`, stores its shape log in the named volume `opencompany-electric-data`,
+and replicates through the stream `opencompany_hetzner_v1`.
 
 `kamal deploy` leaves a running accessory alone. To restart it, run `kamal accessory reboot
 electric`. That causes a brief read-model interruption, which clients retry.
@@ -199,10 +193,6 @@ Let's Encrypt's HTTP challenge cannot issue `*.work.opencompany.space`, so the r
 certificate for all three hosts, issued with a DNS-01 challenge.
 `.github/workflows/renew-runner-cert.yml` runs every Monday and on dispatch:
 
-Before the first bundled certificate is stored, scheduled runs stay idle while
-`RUNNER_PUBLIC_URL` still points at Render. Bootstrap the certificate with the staging dispatch in
-the runbook below; after that, the schedule renews it normally.
-
 1. It reads the certificate from Infisical `/runner`. With 30 days or less left, or when the stored
    pair is invalid, it issues a new one with lego and the Vercel DNS provider. `VERCEL_DNS_API_TOKEN`
    and `VERCEL_ORG_ID` from `/release` create the TXT records. Both `opencompany.chat` and
@@ -223,126 +213,10 @@ seconds. Prefer a runner release.
 The release preflight refuses a runner release without a certificate, or with one that is invalid,
 misses a host, does not match its key or has 7 days or less left.
 
-## Moving off Render
+## Rollback
 
-The move is three pull requests: prep (Kamal configs, workflows and this document, with releases
-still on Render), the release workflow on Kamal (merged right after the cutover) and cleanup a week
-later. Traffic is low, and up to 5 minutes of downtime is acceptable.
-
-### Before merging the prep PR
-
-Every release after the merge runs the new preflight, so these values must exist first:
-
-- `/release`: `VM_SSH_PRIVATE_KEY`, `VM_SSH_KNOWN_HOSTS` (provisioning step 5) and
-  `VERCEL_DNS_API_TOKEN`, a Vercel token that can edit DNS for both domains.
-- `/runner`: `RUNNER_PUBLIC_URL`, set to the runner's current onrender.com URL. The Render runner
-  receives it through the sync and resolves the same origin it already uses.
-- The GitHub Actions machine identity can create and edit secrets in `prod` `/runner`. The
-  certificate workflow writes both PEMs there.
-
-### Staging, days before
-
-None of this affects users.
-
-1. Merge the prep PR. Production behavior does not change.
-2. Lower the TTL to 60 seconds on `api.opencompany.chat`, `work.opencompany.space` and
-   `*.work.opencompany.space`. Add an A record for `api-next.opencompany.chat` pointing at
-   `91.99.204.222`.
-3. Replace the `_acme-challenge.work.opencompany.space` CNAME that points at
-   `opencompany-runner-frankfurt.verify.renderdns.com` with a placeholder TXT record. lego follows
-   challenge CNAMEs by default, so Render's verification record makes the Vercel provider try to
-   update `renderdns.com`. Without any record there, the `*.work` wildcard CNAME matches the
-   challenge name instead, with the same result. Render cannot renew its certificate after this
-   change, so make it only when the cutover is committed and the current certificate covers the
-   window.
-4. Dispatch Renew Runner Certificate with `staging`, then without it. Check the stored certificate's
-   SANs with `openssl x509 -noout -ext subjectAltName`.
-5. Kamal Command, `app: api`: `kamal build push` with `setup_docker_cache`, then
-   `kamal setup --skip-push`. This installs kamal-proxy and boots Electric on the new stream and the API.
-6. Wait for Electric's `/v1/health` to report `active` and for the `opencompany_hetzner_v1` slot to
-   be active with bounded lag. Warm every named read model through `api-next`.
-7. On `https://api-next.opencompany.chat`, check:
-   - `/healthz` reports the staged SHA
-   - an authenticated `/v1` call
-   - a live chat SSE stream that lasts more than 2 minutes
-   - Electric live updates
-   - an attachment upload
-8. Kamal Command, `app: runner`: `kamal build push` with `setup_docker_cache`, so the runner
-   image is ready. Do not boot it. The runner is not staged, because two runners would both claim jobs.
-
-Merge nothing to `main` from the start of the cutover until the release-workflow PR lands.
-
-### Cutover window
-
-1. T0:
-   - Set `RUNNER_PUBLIC_URL=https://runner.opencompany.chat` in `/runner`, `/api`, `/web` and
-     `/release`. The Render API receives it through the sync too, which is harmless.
-   - Suspend the Render runner. It stops claiming jobs and drains for up to 300 seconds.
-2. T0: dispatch Release Production with `deploy_api` and `deploy_runner` off, so web picks up the
-   new URL while the runner drains.
-3. T0, in Vercel DNS:
-   - add an A record for `runner.opencompany.chat`
-   - replace the `work.opencompany.space` and `*.work.opencompany.space` CNAMEs
-     (`opencompany-runner-frankfurt.onrender.com`) with A records
-   - replace `api.opencompany.chat` with an A record
-
-   All point at `91.99.204.222`.
-4. T0, Kamal Command, `app: api`: `kamal deploy --skip-push --version <staged sha>`, so the API
-   picks up the new `RUNNER_PUBLIC_URL`.
-5. Once the Render runner has exited (300 seconds at most), Kamal Command, `app: runner`:
-   `kamal setup --skip-push --version <sha>`. This is the runner's first boot, with workers on.
-6. Smoke:
-   - both `/healthz` endpoints report the expected release
-   - a chat turn completes on the Hetzner runner (`instance_id` in the logs)
-   - a preview opens on `*.work.opencompany.space`
-   - dictation works once the web release lands
-   - the Better Stack probe in [observability](observability.md) passes
-7. After the TTL plus 10 minutes with no Render traffic, suspend the Render API and the Render
-   Electric. Do not delete them.
-8. Merge the release-workflow PR, then dispatch a full release (API, runner and web). Both `/healthz`
-   endpoints must match `KAMAL_VERSION`, and the `production-api` and `production-runner`
-   deployments must be `success`.
-
-Expected impact:
-
-- Jobs pause from T0 until step 5: the Render drain plus a boot, about 5 to 6 minutes at worst and
-  less when idle.
-- Web dictation and web-to-runner task calls fail from T0 until the web release lands. That release
-  can run past 5 minutes if verification is slow.
-- Clients with cached DNS reach the Render API for up to 60 seconds.
-
-Uptime monitors on both `/healthz` endpoints are deferred. Until they exist, nothing replaces
-Render's restart on a failed health check: Docker restarts a container that exits, not one that is
-up and unhealthy.
-
-### Rollback
-
-Until the cleanup PR:
-
-1. Resume the Render runner, API and Electric.
-2. Restore the onrender.com URL in `RUNNER_PUBLIC_URL` in all four folders.
-3. Point DNS back at the Render CNAMEs.
-4. Kamal Command, `app: runner`: `kamal app stop`.
-5. Dispatch a web-only release.
-6. Once the release-workflow PR has merged, revert it before anything else merges to `main`.
-   Otherwise the next push deploys the API and runner to Hetzner again.
-
-The Render API still reads from the Render Electric, which never changed.
-
-After the cleanup PR, roll back with Kamal Command: `kamal rollback <sha>`. Migrations only add
-columns, so an older image runs on the newer schema.
-
-### Cleanup, a week later
-
-- Drop the `opencompany_render_v1` publication and slot, following
-  [Electric read models](electric-sync.md).
-- Leave the Render services suspended and their Infisical syncs on, so a resumed service starts with
-  current values. Never delete them.
-- Delete `RENDER_API_KEY`, `RENDER_SERVICE_ID` and `RENDER_API_SERVICE_ID` from `/release`, and the
-  stale `ELECTRIC_URL` from `/api`.
-- Delete `render.yaml`, the Render release scripts, the `RENDER_*` fallbacks, the `render_*` log
-  fields and `api-next.opencompany.chat`.
-- Keep the product's Render plugin. It is a feature, not hosting.
+Kamal Command: `kamal rollback <sha>` boots an older image that the server still holds. Migrations
+only add columns, so an older image runs on the newer schema.
 
 ## Known costs and risks
 
@@ -352,5 +226,6 @@ columns, so an older image runs on the newer schema.
   log in.
 - `response_timeout: 0` means a backend that never sends headers holds the connection until the
   client gives up.
-- One server is a single point of failure. Hetzner backups and Render, until the cleanup PR, are the
-  way back.
+- One server is a single point of failure. Hetzner backups are the way back.
+- Docker restarts a container that exits, not one that is up and failing `/healthz`. Uptime
+  monitors on both `/healthz` endpoints are not set up yet.

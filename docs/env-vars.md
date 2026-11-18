@@ -73,9 +73,7 @@ contracts include:
   certificate's DNS challenge.
 
 `RUNNER_PUBLIC_URL` is the runner origin that browsers and sandboxes reach. It is required in prod
-`/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. The runner still
-falls back to Render's `RENDER_EXTERNAL_URL` until the Render services are deleted; the Kamal deploy
-has no such fallback. A runner release requires `RUNNER_TLS_CERTIFICATE_PEM` and `RUNNER_TLS_PRIVATE_KEY_PEM` in
+`/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. A runner release requires `RUNNER_TLS_CERTIFICATE_PEM` and `RUNNER_TLS_PRIVATE_KEY_PEM` in
 `/runner`. `.github/workflows/renew-runner-cert.yml` writes them, and only kamal-proxy reads them,
 never the container. See
 [hosting](./hosting.md#runner-certificate).

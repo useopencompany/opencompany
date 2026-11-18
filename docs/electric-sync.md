@@ -36,28 +36,21 @@ Production Electric is a Kamal accessory of the API, `opencompany-api-electric`,
 `BUN_CONFIG_MAX_HTTP_REQUESTS=4096` for the Bun read-model proxy.
 [Hosting](hosting.md#electric) covers restarts and rebuilds.
 
-The suspended Render Electric (`opencompany-electric`, stream `opencompany_render_v1`) and the
-stale Render `ELECTRIC_URL` in `/api` remain only as the way back until the Render services are
-deleted. Its publication and slot are dropped in that cleanup.
-
 The disk state and Postgres replication resources are one consistency unit. Do not change
 `ELECTRIC_STORAGE_DIR`, `ELECTRIC_REPLICATION_STREAM_ID`, or `DATABASE_URL`, clear the disk, or drop
 the corresponding publication/slot independently. A deliberate rebuild must start with a fresh
 stream ID and empty disk, then warm and validate shapes before traffic moves.
 
-### Electric Cloud cutover
+Electric names its slot `electric_slot_<stream id>` and its publication
+`electric_publication_<stream id>`. Neon keeps WAL for an inactive slot, so drop a retired stream's
+pair on the direct endpoint with the `/electric` URL:
 
-1. Provision the self-hosted service with a unique replication stream while Electric Cloud remains
-   connected. Confirm `/v1/health` reports `active` and the new slot is active with bounded lag.
-2. Warm every named read model through the API proxy and verify Chat, Tasks, Workflows, Wiki,
-   Skills, schedules, and integrations. Postgres is authoritative; no Electric data is copied.
-3. Set prod `/api` `ELECTRIC_URL` to the Render private origin and switch `ELECTRIC_AUTH_MODE` to
-   `self-hosted`. Keep both the self-hosted secret and Cloud source credentials during the
-   observation window so rollback is a URL and auth-mode change, not secret recovery.
-4. Redeploy the API and verify a new Chat message streams live, survives reload, and appears in the
-   conversation list. Monitor API 502/503 responses, Electric logs/resources, disk usage, and
-   replication lag.
-5. Remove the old Cloud publication/slot and credentials only in a separately approved cleanup.
+```sql
+SELECT pg_drop_replication_slot('electric_slot_<old stream id>');
+DROP PUBLICATION electric_publication_<old stream id>;
+```
+
+Then check that `pg_replication_slots` lists only the current stream's slot, and that it is active.
 
 One volume permits one Electric instance, and `kamal accessory reboot electric` causes a brief
 interruption. Clients must be allowed to retry/refetch; do not add an application fallback that bypasses

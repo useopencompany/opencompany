@@ -54,11 +54,15 @@ const FORCE_RULES = [
   { files: ["scripts/next-web.mjs"], surfaces: ["web"] },
   { files: ["scripts/load-env.mjs"], surfaces: ["web"] },
   {
-    files: ["Dockerfile.api", "apps/api/config/deploy.yml", "apps/api/.kamal/secrets"],
+    files: ["apps/api/Dockerfile", "apps/api/config/deploy.yml", "apps/api/.kamal/secrets"],
     surfaces: ["api"],
   },
   {
-    files: ["Dockerfile.runner", "apps/runner/config/deploy.yml", "apps/runner/.kamal/secrets"],
+    files: [
+      "apps/runner/Dockerfile",
+      "apps/runner/config/deploy.yml",
+      "apps/runner/.kamal/secrets",
+    ],
     surfaces: ["runner"],
   },
   {

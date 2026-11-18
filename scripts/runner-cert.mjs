@@ -13,10 +13,10 @@ import { connect } from "node:tls";
 import { parseArgs } from "node:util";
 
 import {
-  certificateRenewalDecision,
   inspectCertificate,
   parseSubjectAltNames,
   RUNNER_TLS_HOSTS,
+  renewalReason,
   servedCertificateAction,
 } from "./lib/runner-cert.mjs";
 
@@ -41,23 +41,13 @@ try {
 }
 
 function plan() {
-  const decision = certificateRenewalDecision({
+  const reason = renewalReason({
     certificatePem: process.env.RUNNER_TLS_CERTIFICATE_PEM,
     privateKeyPem: process.env.RUNNER_TLS_PRIVATE_KEY_PEM,
-    runnerPublicUrl: process.env.RUNNER_PUBLIC_URL,
-    eventName: process.env.GITHUB_EVENT_NAME,
     force: process.env.FORCE_RENEWAL === "true",
   });
-  if (decision.status === "bootstrap-pending") {
-    console.log(
-      "The runner still uses Render and its bundled certificate has not been bootstrapped; scheduled renewal is idle.",
-    );
-  } else {
-    console.log(
-      decision.reason ? `Renewing: ${decision.reason}.` : "The stored certificate is current.",
-    );
-  }
-  writeOutput("renew", String(decision.renew));
+  console.log(reason ? `Renewing: ${reason}.` : "The stored certificate is current.");
+  writeOutput("renew", String(Boolean(reason)));
 }
 
 async function store() {
@@ -102,8 +92,8 @@ async function checkServed() {
     );
   }
   if (action === "not-served") {
-    // Before the cutover another server answers for the hostname, or none does. After it, Better
-    // Stack's uptime monitor reports an unreachable runner long before the certificate matters.
+    // Another server answers for the hostname, or none does. That is an outage for the release
+    // smoke to catch, not a certificate problem.
     console.log(`::notice::${host} does not serve the runner certificate yet.`);
   } else if (action === "redeploy") {
     console.log("The served certificate is about to expire and Infisical holds a newer one.");

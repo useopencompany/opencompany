@@ -6,7 +6,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  certificateRenewalDecision,
   inspectCertificate,
   parseSubjectAltNames,
   RUNNER_TLS_HOSTS,
@@ -94,30 +93,6 @@ test("renews a month ahead, on request, or when the stored pair is unusable", ()
   );
 });
 
-test("keeps scheduled renewal idle until the Render runner certificate is bootstrapped", () => {
-  assert.deepEqual(
-    certificateRenewalDecision({
-      eventName: "schedule",
-      runnerPublicUrl: "https://opencompany-runner-frankfurt.onrender.com",
-    }),
-    { renew: false, status: "bootstrap-pending", reason: null },
-  );
-  assert.equal(
-    certificateRenewalDecision({
-      eventName: "workflow_dispatch",
-      runnerPublicUrl: "https://opencompany-runner-frankfurt.onrender.com",
-    }).status,
-    "renew",
-  );
-  assert.equal(
-    certificateRenewalDecision({
-      eventName: "schedule",
-      runnerPublicUrl: "https://runner.opencompany.chat",
-    }).status,
-    "renew",
-  );
-});
-
 test("forces a runner release only when kamal-proxy serves an expiring, replaced certificate", () => {
   const served = (daysLeft, fingerprint, hosts = RUNNER_TLS_HOSTS) => ({
     daysLeft,
@@ -126,7 +101,7 @@ test("forces a runner release only when kamal-proxy serves an expiring, replaced
   });
   const stored = (fingerprint, daysLeft = 89) => ({ fingerprint, daysLeft });
   assert.equal(servedCertificateAction({ served: null, stored: stored("A") }), "not-served");
-  // Vercel's wildcard answers for runner.opencompany.chat until the cutover.
+  // Another server, such as a wildcard DNS target, answers for the runner hostname.
   assert.equal(
     servedCertificateAction({
       served: served(5, "V", ["*.opencompany.chat", "opencompany.chat"]),

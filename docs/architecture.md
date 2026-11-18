@@ -36,7 +36,7 @@ The detailed product flow is maintained in
 | Authentication | WorkOS AuthKit | browser sessions and API identity |
 | Models | Vercel AI Gateway, AI SDK | runner model access and API-owned Auto routing |
 | Sandboxes | E2B, Vercel Sandbox | cloud coding and browser-capable workspaces |
-| Hosting | Vercel, Render | web, docs, and marketing on Vercel; API and runner on Render |
+| Hosting | Vercel, Hetzner (Kamal) | web, docs, and marketing on Vercel; API, runner and Electric on Hetzner |
 | Secrets | Infisical | development and production environment authority |
 | Observability | Better Stack, Sentry, SigNoz, Latitude | errors, logs, traces, and LLM telemetry |
 

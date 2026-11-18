@@ -259,9 +259,6 @@ function getServerRuntimeContext(): LogFields {
   if (isBrowser()) return {};
 
   return compactLogFields({
-    render_git_commit: getEnv("RENDER_GIT_COMMIT"),
-    render_service_id: getEnv("RENDER_SERVICE_ID"),
-    render_instance_id: getEnv("RENDER_INSTANCE_ID"),
     // Kamal names each container `<service>-<role>-<version>`, so it tells deploys apart.
     instance_id: getEnv("KAMAL_CONTAINER_NAME"),
   });

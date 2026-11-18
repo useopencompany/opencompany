@@ -2958,7 +2958,6 @@ export function createApiApp(input: CreateApiAppInput) {
       environment: resolveObservabilityEnvironment(),
       protocolVersion: PROTOCOL_VERSION,
       release: deployedRelease() ?? null,
-      renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
     }),
   );
   app.get("/openapi.json", (c) => c.json(createOpenApiDocument()));
@@ -3262,7 +3261,7 @@ export function createApiApp(input: CreateApiAppInput) {
 }
 
 // Ingress webhooks read the raw body before signature verification can reject
-// anything; Render has no platform request cap, so each route sets one.
+// anything. kamal-proxy's `response_timeout: 0` sets no cap, so each route sets one.
 function ingressBodyLimit(maxSize: number) {
   return bodyLimit({
     maxSize,

@@ -71,7 +71,7 @@ test("Vercel orchestration changes deploy only Vercel surfaces", () => {
 });
 
 test("API image changes deploy only the API", () => {
-  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["Dockerfile.api"] }), {
+  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["apps/api/Dockerfile"] }), {
     web: false,
     marketing: false,
     docs: false,
@@ -81,7 +81,7 @@ test("API image changes deploy only the API", () => {
 });
 
 test("runner image changes deploy only the runner", () => {
-  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["Dockerfile.runner"] }), {
+  assert.deepEqual(planReleaseSurfaces({ changedFiles: ["apps/runner/Dockerfile"] }), {
     web: false,
     marketing: false,
     docs: false,

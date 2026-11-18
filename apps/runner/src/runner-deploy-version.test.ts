@@ -6,12 +6,12 @@ describe("runnerDeployVersion", () => {
     expect(
       runnerDeployVersion({
         KAMAL_VERSION: "kamal_1",
-        RENDER_GIT_COMMIT: "commit_1",
+        OBSERVABILITY_RELEASE: "release_1",
       } as NodeJS.ProcessEnv),
     ).toBe("kamal_1");
     expect(
       runnerDeployVersion({
-        RENDER_GIT_COMMIT: "commit_1",
+        VERCEL_GIT_COMMIT_SHA: "commit_1",
         OBSERVABILITY_RELEASE: "release_1",
       } as NodeJS.ProcessEnv),
     ).toBe("commit_1");

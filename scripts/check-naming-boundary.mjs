@@ -258,6 +258,12 @@ const retiredEnvKeys = new Set([
   "OPENCOMPANY_IMESSAGE_PROVIDER",
   ["OPENCOMPANY", "SLACK", "SIGNING", "SECRET"].join("_"),
   ["RUNNER", "CLAUDE", "CODE", "ACP", "ENABLED"].join("_"),
+  // Render release automation, retired with the move to Kamal on Hetzner.
+  "RENDER_SERVICE_ID",
+  "RENDER_API_SERVICE_ID",
+  "RENDER_API_KEY",
+  "RENDER_DEPLOY_TIMEOUT_MS",
+  "RENDER_DEPLOY_POLL_MS",
 ]);
 const expectedEnvKeys = [
   ...new Set([

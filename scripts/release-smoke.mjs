@@ -164,7 +164,6 @@ function releaseFields(payload) {
     release: payload.release,
     gitCommit: payload.gitCommit,
     vercelGitCommitSha: payload.vercelGitCommitSha,
-    renderGitCommit: payload.renderGitCommit,
   };
 }
 

@@ -1,5 +1,5 @@
 # The release workflow deploys this from apps/runner with `kamal deploy`. docs/hosting.md covers
-# the server, the manual commands, the TLS certificate and the Render cutover.
+# the server, the manual commands and the TLS certificate.
 service: opencompany-runner
 image: useopencompany/opencompany-runner
 
@@ -34,8 +34,8 @@ proxy:
     responses: false
 
 # kamal-proxy stops routing to the old runner after 30 seconds of in-flight requests. Then
-# `docker stop -t 300`: the runner stops claiming and drains its jobs within the 300 seconds
-# Render allowed too (apps/runner/src/index.ts).
+# `docker stop -t 300`: the runner stops claiming and drains its jobs within those 300 seconds
+# (apps/runner/src/index.ts).
 drain_timeout: 30
 stop_timeout: 300
 # Boot and the first /healthz answer must finish within this.
@@ -53,7 +53,7 @@ builder:
   arch: amd64
   context: ../..
   # Relative to this directory: Kamal passes it to `docker buildx build --file` from here.
-  dockerfile: ../../Dockerfile.runner
+  dockerfile: Dockerfile
   # The selected buildx builder: Blacksmith's cached builder in CI.
   driver: docker
 
@@ -62,7 +62,7 @@ logging:
     max-size: 50m
 
 # scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets, the runner group
-# in scripts/release-preflight.mjs and the runner keys in render.yaml.
+# in scripts/release-preflight.mjs.
 env:
   clear:
     NODE_ENV: production

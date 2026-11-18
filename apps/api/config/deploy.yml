@@ -1,6 +1,6 @@
 # The release workflow deploys this from apps/api with `kamal deploy`. Never run `kamal setup` once
-# the server is up: it reboots the Electric accessory. docs/hosting.md covers the server, the
-# manual commands and the Render cutover.
+# the server is up: it reboots the Electric accessory. docs/hosting.md covers the server and the
+# manual commands.
 service: opencompany-api
 image: useopencompany/opencompany-api
 
@@ -15,10 +15,8 @@ servers:
 proxy:
   ssl: true
   # kamal-proxy issues one Let's Encrypt certificate per host on its first request.
-  # api-next is the pre-cutover test hostname; PR 3 of the Hetzner move removes it.
   hosts:
     - api.opencompany.chat
-    - api-next.opencompany.chat
   app_port: 3001
   healthcheck:
     path: /healthz
@@ -31,8 +29,7 @@ proxy:
   buffering:
     responses: false
 
-# kamal-proxy waits this long for in-flight requests before Kamal stops the old container. Render
-# allowed the API 60 seconds as well.
+# kamal-proxy waits this long for in-flight requests before Kamal stops the old container.
 drain_timeout: 60
 # Then `docker stop -t 60`, for work the API finishes after a response.
 stop_timeout: 60
@@ -49,7 +46,7 @@ builder:
   arch: amd64
   context: ../..
   # Relative to this directory: Kamal passes it to `docker buildx build --file` from here.
-  dockerfile: ../../Dockerfile.api
+  dockerfile: Dockerfile
   # The selected buildx builder: Blacksmith's cached builder in CI.
   driver: docker
 
@@ -58,14 +55,13 @@ logging:
     max-size: 50m
 
 # scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets, the api group
-# in scripts/release-preflight.mjs and the API keys in render.yaml.
+# in scripts/release-preflight.mjs.
 env:
   clear:
     NODE_ENV: production
     PORT: "3001"
-    # The Electric accessory below, on Kamal's private Docker network. It lives here rather than
-    # in Infisical `/api` because that folder also syncs to the Render API, which keeps its own
-    # Electric until the cutover.
+    # The Electric accessory below, on Kamal's private Docker network. Its address is deploy
+    # config, not a secret, so it lives beside the accessory definition instead of in Infisical.
     ELECTRIC_URL: http://opencompany-api-electric:3000
   secret:
     - API_DATABASE_URL
@@ -171,7 +167,7 @@ accessories:
   # running accessory alone; `kamal accessory reboot electric` restarts it.
   electric:
     host: 91.99.204.222
-    # The same digest as render.yaml, so both stacks run the same Electric build.
+    # Pinned by digest so every deploy runs the same build.
     image: docker.io/electricsql/electric@sha256:c9c666a59e12d7d10e0ff6c3619a3a39569ae15236b1023655c422d844da5fa7
     # No published port: only the API reaches it, as opencompany-api-electric on the kamal network.
     volumes:
@@ -179,8 +175,7 @@ accessories:
     env:
       clear:
         ELECTRIC_STORAGE_DIR: /var/electric
-        # Its own publication and replication slot, so it warms beside the Render Electric
-        # (opencompany_render_v1) without contending for either.
+        # Names its own publication and replication slot in Postgres.
         ELECTRIC_REPLICATION_STREAM_ID: opencompany_hetzner_v1
       secret:
         # Infisical `/electric` holds DATABASE_URL. The deploy job exports it as
