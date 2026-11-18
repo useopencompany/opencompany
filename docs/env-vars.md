@@ -59,7 +59,8 @@ contracts include:
   generic PostHog compatibility sink remains optional.
 - Electric: direct database and service auth. The storage path and replication-stream ID are clear
   values in `apps/api/config/deploy.yml`. `DATABASE_URL` must not use Neon's pooled hostname. Keep
-  the stream ID and disk contents paired; changing either requires the recovery procedure in [Electric read models](./electric-sync.md).
+  the stream ID and disk contents paired; changing either requires the recovery procedure in
+  [Electric read models](./electric-sync.md).
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
