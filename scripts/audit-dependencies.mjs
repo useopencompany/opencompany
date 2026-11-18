@@ -44,19 +44,6 @@ const acceptedAdvisories = [
     // tools move to zod >= 4.6.6.
     expiresOn: "2027-02-28",
   },
-  {
-    ghsa: "GHSA-fc5q-39xc-vjpf",
-    package: "picomatch",
-    // The advisory covers every released picomatch 4.x version through 4.0.7 and has no patched
-    // release. The copies in this repository are reached through Expo, Vite, Rollup, Vercel build
-    // tooling, and their transitive file globbers. Those tools compile glob patterns from
-    // repository-owned configuration; production request data cannot supply the repeated extglob
-    // pattern required to trigger the denial of service.
-    //
-    // Remove this exception when picomatch publishes a patched release and the transitive tools
-    // accept it, or before any of these tools accept user-controlled glob patterns.
-    expiresOn: "2026-12-31",
-  },
 ];
 
 const audit = spawnSync("bun", ["audit", "--json"], { encoding: "utf8" });

@@ -92,7 +92,7 @@ shapes between the API and the runner.
   It also holds the runner's TLS certificate for kamal-proxy.
 - Mobile: Infisical `prod` `/mobile`, loaded by GitHub Actions for EAS builds.
 - Desktop: Infisical `prod` `/desktop`, loaded by GitHub Actions to sign and notarize the macOS app.
-- Release: Infisical `prod` `/release`, containing deployment credentials, service/project IDs,
+- Release: Infisical `prod` `/release`, containing deployment credentials, Vercel project IDs,
   production URLs, the migration database URL, the Hetzner server's SSH key and known hosts, and
   the Vercel DNS token for the runner certificate.
 

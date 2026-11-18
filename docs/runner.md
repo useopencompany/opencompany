@@ -1,7 +1,7 @@
 # opencompany runner
 
 `apps/runner` is opencompany's durable execution composition root. It is a Bun/Fastify process
-deployed on Render and started locally by `bun run dev:web`.
+deployed with Kamal on Hetzner and started locally by `bun run dev:web`.
 
 ## Responsibilities
 
@@ -18,14 +18,15 @@ LLM-broker and billing compatibility tables through `@opencompany/db`.
 ## Entry points
 
 `src/index.ts` builds the HTTP server and starts enabled workers. opencompany-specific internal routes are
-under `/internal/goat/*`; `/healthz` is public for Render and release checks. Private routes require
+under `/internal/goat/*`; `/healthz` is public for kamal-proxy and release checks. Private routes require
 `RUNNER_INTERNAL_TOKEN`. Browser and sandbox transports validate narrow signed tickets. The shared
 Codex and Claude Code MCP gateway rechecks persisted Conversation, Run, Attempt, lease, membership,
 and workspace Wiki authority for every operation; Wiki commands cross the canonical API
 boundary instead of reading the Wiki database from the runner.
 
 `RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED` controls the durable task worker. Worker concurrency, DB pool,
-lease, and sandbox timeouts are documented beside their values in `.env.example` and `render.yaml`.
+lease, and sandbox timeouts are documented beside their values in `.env.example` and
+`apps/runner/config/deploy.yml`.
 Managed E2B sandboxes carry `RUNNER_SANDBOX_NAMESPACE`; reconciliation lists only its exact
 namespace, preventing a local runner that shares E2B credentials from selecting production sandboxes.
 

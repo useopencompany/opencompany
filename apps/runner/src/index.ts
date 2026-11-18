@@ -38,11 +38,11 @@ const logger = createLogger({
   service: "opencompany-runner",
   runtime: "index",
 });
-// The host sends SIGTERM on deploy and SIGKILLs 300 seconds later: Render's
-// `maxShutdownDelaySeconds` (render.yaml) and Kamal's `stop_timeout` (apps/runner/config/deploy.yml)
-// are both 300. Workers stop claiming immediately, then active runner jobs and durable opencompany
-// Codex turns get most of that window to finish in place. The remaining minute covers interruption
-// or handoff, stream/telemetry flushes, and closing the DB pool before the hard kill.
+// Kamal sends SIGTERM on deploy and SIGKILLs 300 seconds later (`stop_timeout` in
+// apps/runner/config/deploy.yml). Workers stop claiming immediately, then active runner jobs and
+// durable opencompany Codex turns get most of that window to finish in place. The remaining minute
+// covers interruption or handoff, stream/telemetry flushes, and closing the DB pool before the
+// hard kill.
 const SHUTDOWN_DRAIN_MS = 230_000;
 const SHUTDOWN_POST_DRAIN_WAIT_MS = 30_000;
 const SHUTDOWN_DB_CLOSE_MS = 10_000;

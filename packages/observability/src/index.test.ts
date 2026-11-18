@@ -18,7 +18,6 @@ const serverReleaseEnvKeys = [
   "KAMAL_VERSION",
   "KAMAL_CONTAINER_NAME",
   "VERCEL_GIT_COMMIT_SHA",
-  "RENDER_GIT_COMMIT",
   "RELEASE_SHA",
   "GITHUB_SHA",
   "OBSERVABILITY_RELEASE",
@@ -119,27 +118,9 @@ describe("createLogger", () => {
     });
   });
 
-  it("adds Render correlation fields to server logs", () => {
-    process.env.RENDER_GIT_COMMIT = "render-sha";
-    process.env.RENDER_SERVICE_ID = "srv_123";
-    process.env.RENDER_INSTANCE_ID = "inst_123";
-    const logger = createLogger({ service: "opencompany-test", runtime: "server" });
-
-    logger.info("Hello from Render", { session_id: "ses_123" });
-
-    const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
-    expect(record).toMatchObject({
-      render_git_commit: "render-sha",
-      render_service_id: "srv_123",
-      render_instance_id: "inst_123",
-      session_id: "ses_123",
-    });
-  });
-
   it("reports the Kamal release and container on server logs", () => {
     process.env.KAMAL_VERSION = "kamal-sha";
     process.env.KAMAL_CONTAINER_NAME = "opencompany-runner-web-kamal-sha";
-    process.env.RENDER_GIT_COMMIT = "render-sha";
     const logger = createLogger({ service: "opencompany-test", runtime: "server" });
 
     logger.info("Hello from Kamal");
@@ -151,15 +132,15 @@ describe("createLogger", () => {
     });
   });
 
-  it("does not add Render correlation fields to browser logs", () => {
+  it("does not add the container name to browser logs", () => {
     vi.stubGlobal("window", {});
-    process.env.RENDER_SERVICE_ID = "srv_123";
+    process.env.KAMAL_CONTAINER_NAME = "opencompany-runner-web-kamal-sha";
     const logger = createLogger({ service: "opencompany-test", runtime: "browser" });
 
     logger.info("Hello from browser");
 
     const record = JSON.parse(vi.mocked(console.info).mock.calls[0]?.[0] as string);
-    expect(record).not.toHaveProperty("render_service_id");
+    expect(record).not.toHaveProperty("instance_id");
   });
 });
 

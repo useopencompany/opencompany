@@ -10,13 +10,9 @@ const preflightUrl = new URL("../release-preflight.mjs", import.meta.url);
 const appsUrl = new URL("../../apps/", import.meta.url);
 const DEPLOY_ONLY_KEYS = ["KAMAL_REGISTRY_USERNAME", "KAMAL_REGISTRY_PASSWORD"];
 const RUNNER_TLS_KEYS = ["RUNNER_TLS_CERTIFICATE_PEM", "RUNNER_TLS_PRIVATE_KEY_PEM"];
-const renderUrl = new URL("../../render.yaml", import.meta.url);
 
 test("production preflight follows the deployed runtime boundaries", async () => {
-  const [source, render] = await Promise.all([
-    readFile(preflightUrl, "utf8"),
-    readFile(renderUrl, "utf8"),
-  ]);
+  const source = await readFile(preflightUrl, "utf8");
   const groups = readGroups(source);
 
   assertIncludes(groups.release.required, [
@@ -28,7 +24,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   assert.match(
     source,
     /requested\.length > 0 \? requested : \["web", "api", "runner", "release"\]/u,
-    "the documented default preflight must include the release-only cutover gate",
+    "the documented default preflight must include the release group",
   );
 
   assertIncludes(groups.web.required, [
@@ -70,10 +66,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "BUN_CONFIG_MAX_HTTP_REQUESTS",
   ]);
 
-  assert.deepEqual(
-    [...groups.electric.required],
-    ["DATABASE_URL", "ELECTRIC_SECRET", "ELECTRIC_STORAGE_DIR", "ELECTRIC_REPLICATION_STREAM_ID"],
-  );
+  assert.deepEqual([...groups.electric.required], ["DATABASE_URL", "ELECTRIC_SECRET"]);
 
   assertIncludes(groups.release.required, [
     "VM_SSH_PRIVATE_KEY",
@@ -122,30 +115,13 @@ test("production preflight follows the deployed runtime boundaries", async () =>
   }
 
   assert.deepEqual([...surfaceConfig("web").requiredEnv].sort(), [...groups.web.required].sort());
-  assert.deepEqual(readRenderKeys(render, "opencompany-api").sort(), groupKeys(groups.api).sort());
-  assert.deepEqual(
-    readRenderKeys(render, "opencompany-electric").sort(),
-    groupKeys(groups.electric).sort(),
-  );
-  // Render supplies RENDER_EXTERNAL_URL instead of RUNNER_PUBLIC_URL, and only kamal-proxy reads
-  // the TLS certificate.
-  assert.deepEqual(
-    readRenderKeys(render, "opencompany-runner").sort(),
-    groupKeys(groups.runner)
-      .filter((key) => key !== "RUNNER_PUBLIC_URL" && !RUNNER_TLS_KEYS.includes(key))
-      .sort(),
-  );
 });
 
 // Kamal ships a container exactly the keys `env.secret` lists, each read through .kamal/secrets
 // from the deploy job's env. A key missing from one list never reaches the container, and a key
 // missing from the preflight group is never checked before a deploy.
 test("each Kamal config ships the keys its preflight group checks", async () => {
-  const [source, render] = await Promise.all([
-    readFile(preflightUrl, "utf8"),
-    readFile(renderUrl, "utf8"),
-  ]);
-  const groups = readGroups(source);
+  const groups = readGroups(await readFile(preflightUrl, "utf8"));
   const [api, runner] = await Promise.all([readKamalApp("api"), readKamalApp("runner")]);
 
   for (const [name, app] of Object.entries({ api, runner })) {
@@ -158,17 +134,10 @@ test("each Kamal config ships the keys its preflight group checks", async () => 
     assert.equal(app.clear.NODE_ENV, "production");
   }
 
-  // The API reaches the Electric accessory through a clear ELECTRIC_URL, because Infisical `/api`
-  // still syncs the Render Electric URL to the Render API.
+  // The API reaches the Electric accessory on the kamal network. The address is deploy config,
+  // so it is a clear value rather than an Infisical key.
   assert.equal(api.clear.ELECTRIC_URL, "http://opencompany-api-electric:3000");
-  assert.deepEqual(
-    sorted(api.secret),
-    sorted(groupKeys(groups.api).filter((key) => key !== "ELECTRIC_URL")),
-  );
-  assert.deepEqual(
-    sorted(api.secret),
-    sorted(readRenderKeys(render, "opencompany-api").filter((key) => key !== "ELECTRIC_URL")),
-  );
+  assert.deepEqual(sorted(api.secret), sorted(groupKeys(groups.api)));
   assert.deepEqual(
     sorted(api.secretsFile),
     sorted([...DEPLOY_ONLY_KEYS, "ELECTRIC_DATABASE_URL", ...api.secret]),
@@ -177,10 +146,6 @@ test("each Kamal config ships the keys its preflight group checks", async () => 
   assert.deepEqual(
     sorted(runner.secret),
     sorted(groupKeys(groups.runner).filter((key) => !RUNNER_TLS_KEYS.includes(key))),
-  );
-  assert.deepEqual(
-    sorted(runner.secret),
-    sorted([...readRenderKeys(render, "opencompany-runner"), "RUNNER_PUBLIC_URL"]),
   );
   assert.deepEqual(
     sorted(runner.secretsFile),
@@ -202,35 +167,22 @@ test("each Kamal config ships the keys its preflight group checks", async () => 
     assert.equal(app.serverStopTimeout, seconds);
   }
 
-  // The accessory takes `/electric` as Render's Electric does, with DATABASE_URL renamed by the
-  // deploy job so it cannot collide with another folder's.
+  // The accessory takes its secrets from Infisical `/electric`, with DATABASE_URL renamed by the
+  // deploy job so it cannot collide with another folder's. The rest is clear deploy config.
   const electric = api.accessories.electric;
   assert.deepEqual(sorted(electric.env.secret), [
     "DATABASE_URL:ELECTRIC_DATABASE_URL",
     "ELECTRIC_SECRET",
   ]);
   assert.deepEqual(
-    sorted([
-      ...electric.env.secret.map((key) => key.split(":")[0]),
-      ...Object.keys(electric.env.clear),
-    ]),
+    sorted(electric.env.secret.map((key) => key.split(":")[0])),
     sorted(groupKeys(groups.electric)),
   );
-  assert.equal(electric.env.clear.ELECTRIC_REPLICATION_STREAM_ID, "opencompany_hetzner_v1");
-  assert.equal(electric.image, readRenderElectricImage(render));
-});
-
-test("Render health checks are limited to web services", async () => {
-  const services = readRenderServices(await readFile(renderUrl, "utf8"));
-
-  for (const service of services) {
-    if (!service.hasHealthCheckPath) continue;
-    assert.equal(
-      service.type,
-      "web",
-      `${service.name} is a ${service.type}; Render only accepts healthCheckPath on web services`,
-    );
-  }
+  assert.deepEqual(electric.env.clear, {
+    ELECTRIC_STORAGE_DIR: "/var/electric",
+    ELECTRIC_REPLICATION_STREAM_ID: "opencompany_hetzner_v1",
+  });
+  assert.match(electric.image, /^docker\.io\/electricsql\/electric@sha256:[a-f0-9]{64}$/u);
 });
 
 function readGroups(source) {
@@ -250,27 +202,6 @@ function assertIncludes(actual, expected) {
 
 function assertExcludes(actual, expected) {
   for (const key of expected) assert.ok(!actual.includes(key), `${key} should not be in the group`);
-}
-
-function readRenderKeys(render, serviceName) {
-  const serviceStart = render.indexOf(`name: ${serviceName}`);
-  const nextService = render.indexOf("\n  - type:", serviceStart);
-  assert.notEqual(serviceStart, -1, `${serviceName} is missing from render.yaml`);
-  const service = render.slice(serviceStart, nextService === -1 ? undefined : nextService);
-  return [...service.matchAll(/^\s+- key: (?<key>[A-Z][A-Z0-9_]*)$/gmu)].map(
-    (match) => match.groups.key,
-  );
-}
-
-function readRenderServices(render) {
-  return render
-    .split(/(?=^  - type:)/gmu)
-    .slice(1)
-    .map((service) => ({
-      type: service.match(/^  - type:\s+(\S+)$/mu)?.[1],
-      name: service.match(/^    name:\s+(\S+)$/mu)?.[1],
-      hasHealthCheckPath: /^    healthCheckPath:/mu.test(service),
-    }));
 }
 
 async function readKamalApp(app) {
@@ -349,12 +280,6 @@ function parseDeployYaml(text) {
 function scalar(value) {
   const quoted = /^"(.*)"$/u.exec(value);
   return quoted ? quoted[1] : value;
-}
-
-function readRenderElectricImage(render) {
-  const match = render.match(/^\s+url: (docker\.io\/electricsql\/electric@sha256:[a-f0-9]{64})$/mu);
-  assert.ok(match, "render.yaml must pin the Electric image by digest");
-  return match[1];
 }
 
 function sorted(keys) {

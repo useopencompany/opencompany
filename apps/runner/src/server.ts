@@ -75,7 +75,6 @@ export function createServer(
     },
     environment: resolveObservabilityEnvironment(),
     release: deployedRelease() ?? null,
-    renderGitCommit: process.env.RENDER_GIT_COMMIT ?? null,
   }));
 
   app.post("/internal/goat/codex-chat/wake", async (request, reply) => {

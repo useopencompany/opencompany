@@ -351,7 +351,7 @@ describe("canonical Hono API", () => {
 
   it("reports the deployed API release for expected-SHA health gates", async () => {
     vi.stubEnv("KAMAL_VERSION", "kamal-release-sha");
-    vi.stubEnv("RENDER_GIT_COMMIT", "render-release-sha");
+    vi.stubEnv("OBSERVABILITY_RELEASE", "configured-release");
     vi.stubEnv("OBSERVABILITY_ENV", "");
     vi.stubEnv("NODE_ENV", "production");
     try {
@@ -365,7 +365,6 @@ describe("canonical Hono API", () => {
         protocolVersion: PROTOCOL_VERSION,
         environment: "production",
         release: "kamal-release-sha",
-        renderGitCommit: "render-release-sha",
       });
     } finally {
       vi.unstubAllEnvs();

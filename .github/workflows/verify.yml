@@ -303,8 +303,8 @@ jobs:
         run: |
           docker_inputs=(
             .dockerignore
-            Dockerfile.api
-            Dockerfile.runner
+            apps/api/Dockerfile
+            apps/runner/Dockerfile
             bun.lock
             package.json
             patches
@@ -326,12 +326,12 @@ jobs:
           fi
 
           if [[ "$build_api" == "true" ]]; then
-            docker build --file Dockerfile.api --tag "opencompany-api-verify:${TURBO_SCM_HEAD}" .
+            docker build --file apps/api/Dockerfile --tag "opencompany-api-verify:${TURBO_SCM_HEAD}" .
           fi
 
           if [[ "$build_runner" == "true" ]]; then
             image="opencompany-runner-verify:${TURBO_SCM_HEAD}"
-            docker build --file Dockerfile.runner --tag "$image" .
+            docker build --file apps/runner/Dockerfile --tag "$image" .
             docker run --rm --entrypoint bun "$image" -e '
               import { readFileSync } from "node:fs";
               import { extractDocumentMarkdown } from "./packages/file-extract/src/index.ts";

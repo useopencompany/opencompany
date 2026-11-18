@@ -24,8 +24,7 @@ export type RunnerEnv = {
   openaiApiKey?: string | undefined;
   dictationRealtimeModel?: string | undefined;
   dictationFinalModel?: string | undefined;
-  // Browser/sandbox-reachable runner origin. Production sets RUNNER_PUBLIC_URL; the
-  // RENDER_EXTERNAL_URL fallback covers the Render service until it is deleted.
+  // Browser/sandbox-reachable runner origin, from RUNNER_PUBLIC_URL.
   runnerPublicUrl?: string | undefined;
   // Wildcard preview hostname routed to this runner, for example preview.opencompany.example.com.
   // Capability labels are prepended to this domain. A port may be included for local development.
@@ -96,7 +95,7 @@ export function loadEnv(): RunnerEnv {
     openaiApiKey: optionalEnv("OPENAI_API_KEY"),
     dictationRealtimeModel: optionalEnv("OPENCOMPANY_DICTATION_REALTIME_MODEL"),
     dictationFinalModel: optionalEnv("OPENCOMPANY_DICTATION_FINAL_MODEL"),
-    runnerPublicUrl: optionalEnv("RUNNER_PUBLIC_URL") ?? optionalEnv("RENDER_EXTERNAL_URL"),
+    runnerPublicUrl: optionalEnv("RUNNER_PUBLIC_URL"),
     previewBaseDomain: optionalPreviewBaseDomainEnv(),
     previewProtocol: optionalPreviewProtocolEnv(),
     exaApiKey: optionalEnv("EXA_API_KEY"),
@@ -136,7 +135,7 @@ export function loadEnv(): RunnerEnv {
     // model token streaming + remote E2B sandboxes), so this is bounded by the single
     // event loop, the E2B concurrent-sandbox quota, and model-gateway rate limits — not
     // CPU/RAM. The DB pool (RUNNER_DB_POOL_MAX) must comfortably exceed this. Scale past one
-    // instance's ceiling with Render `numInstances`; the job + run leases make that safe.
+    // container's ceiling with more containers; the job + run leases make that safe.
     workerConcurrency: optionalPositiveIntegerEnv("RUNNER_WORKER_CONCURRENCY", 8),
     port: Number(process.env.PORT ?? "3040"),
     allowedOrigins: (process.env.RUNNER_ALLOWED_ORIGINS ?? "http://localhost:3000")

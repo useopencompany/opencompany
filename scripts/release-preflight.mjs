@@ -78,7 +78,6 @@ const groups = {
       "OPENCOMPANY_API_OAUTH_AUDIENCE",
       "VERCEL_AI_GATEWAY_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
-      "ELECTRIC_URL",
       "ELECTRIC_AUTH_MODE",
       "BUN_CONFIG_MAX_HTTP_REQUESTS",
       "REDIS_URL",
@@ -197,12 +196,8 @@ const groups = {
   },
   electric: {
     label: "Electric sync service",
-    required: [
-      "DATABASE_URL",
-      "ELECTRIC_SECRET",
-      "ELECTRIC_STORAGE_DIR",
-      "ELECTRIC_REPLICATION_STREAM_ID",
-    ],
+    // The storage dir and stream ID are clear values in apps/api/config/deploy.yml.
+    required: ["DATABASE_URL", "ELECTRIC_SECRET"],
     optional: [],
   },
   runner: {
@@ -248,8 +243,7 @@ const groups = {
       "REDIS_URL",
       "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
       "RUNNER_SANDBOX_NAMESPACE",
-      // Browser- and sandbox-reachable origin. Render also supplies RENDER_EXTERNAL_URL, but the
-      // Kamal deploy has no such fallback, so production sets it explicitly.
+      // Browser- and sandbox-reachable origin. The runner has no fallback for it.
       "RUNNER_PUBLIC_URL",
       // One built template per user-selectable sandbox size. A missing alias would
       // silently fall back to E2B's stock template, so a workspace would get — and
