@@ -45,7 +45,7 @@ registry:
 builder:
   arch: amd64
   context: ../..
-  # Relative to this directory: Kamal passes it to `docker buildx build --file` from here.
+  # Relative to apps/api, where Kamal runs `docker buildx build --file`.
   dockerfile: Dockerfile
   # The selected buildx builder: Blacksmith's cached builder in CI.
   driver: docker
@@ -54,8 +54,8 @@ logging:
   options:
     max-size: 50m
 
-# scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets, the api group
-# in scripts/release-preflight.mjs.
+# scripts/lib/release-preflight.test.mjs checks env.secret against .kamal/secrets and the api
+# group in scripts/release-preflight.mjs.
 env:
   clear:
     NODE_ENV: production

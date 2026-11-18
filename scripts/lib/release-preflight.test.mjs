@@ -66,10 +66,7 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "BUN_CONFIG_MAX_HTTP_REQUESTS",
   ]);
 
-  assert.deepEqual(
-    [...groups.electric.required],
-    ["DATABASE_URL", "ELECTRIC_SECRET", "ELECTRIC_STORAGE_DIR", "ELECTRIC_REPLICATION_STREAM_ID"],
-  );
+  assert.deepEqual([...groups.electric.required], ["DATABASE_URL", "ELECTRIC_SECRET"]);
 
   assertIncludes(groups.release.required, [
     "VM_SSH_PRIVATE_KEY",
@@ -170,21 +167,21 @@ test("each Kamal config ships the keys its preflight group checks", async () => 
     assert.equal(app.serverStopTimeout, seconds);
   }
 
-  // The accessory takes Infisical `/electric`, with DATABASE_URL renamed by the deploy job so it
-  // cannot collide with another folder's.
+  // The accessory takes its secrets from Infisical `/electric`, with DATABASE_URL renamed by the
+  // deploy job so it cannot collide with another folder's. The rest is clear deploy config.
   const electric = api.accessories.electric;
   assert.deepEqual(sorted(electric.env.secret), [
     "DATABASE_URL:ELECTRIC_DATABASE_URL",
     "ELECTRIC_SECRET",
   ]);
   assert.deepEqual(
-    sorted([
-      ...electric.env.secret.map((key) => key.split(":")[0]),
-      ...Object.keys(electric.env.clear),
-    ]),
+    sorted(electric.env.secret.map((key) => key.split(":")[0])),
     sorted(groupKeys(groups.electric)),
   );
-  assert.equal(electric.env.clear.ELECTRIC_REPLICATION_STREAM_ID, "opencompany_hetzner_v1");
+  assert.deepEqual(electric.env.clear, {
+    ELECTRIC_STORAGE_DIR: "/var/electric",
+    ELECTRIC_REPLICATION_STREAM_ID: "opencompany_hetzner_v1",
+  });
   assert.match(electric.image, /^docker\.io\/electricsql\/electric@sha256:[a-f0-9]{64}$/u);
 });
 

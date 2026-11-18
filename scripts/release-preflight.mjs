@@ -196,12 +196,8 @@ const groups = {
   },
   electric: {
     label: "Electric sync service",
-    required: [
-      "DATABASE_URL",
-      "ELECTRIC_SECRET",
-      "ELECTRIC_STORAGE_DIR",
-      "ELECTRIC_REPLICATION_STREAM_ID",
-    ],
+    // The storage dir and stream ID are clear values in apps/api/config/deploy.yml.
+    required: ["DATABASE_URL", "ELECTRIC_SECRET"],
     optional: [],
   },
   runner: {

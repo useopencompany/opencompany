@@ -3261,7 +3261,8 @@ export function createApiApp(input: CreateApiAppInput) {
 }
 
 // Ingress webhooks read the raw body before signature verification can reject
-// anything. kamal-proxy's `response_timeout: 0` sets no cap, so each route sets one.
+// anything. kamal-proxy accepts request bodies up to 1 GB by default, so each
+// route sets its own cap.
 function ingressBodyLimit(maxSize: number) {
   return bodyLimit({
     maxSize,

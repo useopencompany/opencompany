@@ -84,25 +84,28 @@ async function checkServed() {
   const served = await servedCertificate(host);
   const action = servedCertificateAction({ served, stored });
 
-  if (served?.expired) {
+  if (served.expired) {
     console.log(`${host} serves an expired certificate.`);
-  } else if (served) {
+  } else {
     console.log(
       `${host} serves ${served.fingerprint} for ${served.hosts.join(", ")}, expiring ${served.notAfter} (${Math.floor(served.daysLeft)} days).`,
     );
   }
-  if (action === "not-served") {
-    // Another server answers for the hostname, or none does. That is an outage for the release
-    // smoke to catch, not a certificate problem.
-    console.log(`::notice::${host} does not serve the runner certificate yet.`);
-  } else if (action === "redeploy") {
-    console.log("The served certificate is about to expire and Infisical holds a newer one.");
+  if (action === "redeploy") {
+    console.log("The served certificate is stale and Infisical holds a newer one.");
   } else if (action === "renewal-failed") {
     throw new Error(
-      `${host} serves a certificate that ${served.expired ? "has expired" : `expires in ${Math.floor(served.daysLeft)} days`}, and Infisical holds no newer one. Renew it with force_renewal.`,
+      `${host} serves a stale certificate (${servedProblem(served)}), and Infisical holds no newer one. Renew it with force_renewal.`,
     );
   }
   writeOutput("action", action);
+}
+
+function servedProblem(served) {
+  if (served.expired) return "it has expired";
+  const missingHosts = RUNNER_TLS_HOSTS.filter((host) => !served.hosts.includes(host));
+  if (missingHosts.length > 0) return `it does not cover ${missingHosts.join(", ")}`;
+  return `it expires in ${Math.floor(served.daysLeft)} days`;
 }
 
 function servedCertificate(host) {
@@ -121,8 +124,7 @@ function servedCertificate(host) {
       });
     });
     socket.once("error", (error) => {
-      if (error.code === "ENOTFOUND") resolve(null);
-      else if (error.code === "CERT_HAS_EXPIRED") resolve({ expired: true });
+      if (error.code === "CERT_HAS_EXPIRED") resolve({ expired: true });
       else reject(new Error(`Could not read the certificate ${host} serves: ${error.message}`));
     });
   });

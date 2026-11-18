@@ -32,7 +32,8 @@ these values from the development environment. The existing integration encrypti
 refresh lease serialize credential rotation across workers. JWT refresh replaces installation
 tokens before their eight-hour expiry. A rejected refresh marks the connection `needs_reauth`.
 
-Do not deploy until the values have synced to the hosted API and runner. This change adds the
+Do not deploy until the values are in Infisical `/api` and `/runner`; the release exports them to
+Kamal at deploy time. This change adds the
 configuration contracts; it does not provision real app secrets or submit the integration.
 
 ## Events and admission

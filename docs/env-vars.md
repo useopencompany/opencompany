@@ -16,11 +16,11 @@ takes precedence. Codex availability is separate from the opencompany engine's G
 | `dev` `/runner` | local runner | runner tokens, provider credentials, sandbox configuration |
 | `prod` `/web` | Vercel web | browser auth, first-party origins, public URL and cron relays, email sender, and telemetry |
 | `prod` `/api` | product API, through Kamal | database, auth, billing/Stripe, provider ingress, managed capabilities, Auto-routing gateway, Blob, Electric, Redis, and telemetry configuration |
-| `prod` `/electric` | Electric accessory, through the API's Kamal config | direct production database URL, service auth, persistent storage path, and replication-stream identity |
+| `prod` `/electric` | Electric accessory, through the API's Kamal config | direct production database URL and service auth |
 | `prod` `/runner` | runner, through Kamal | production worker and broker configuration, and kamal-proxy's runner TLS certificate |
 | `prod` `/mobile` | GitHub Actions | EAS and App Store Connect build credentials, Sentry artifact upload credential, and public mobile configuration |
 | `prod` `/desktop` | GitHub Actions | macOS Developer ID certificate and App Store Connect notarization key |
-| `prod` `/release` | GitHub Actions | production URLs, project/service IDs, deploy tokens, DB URL |
+| `prod` `/release` | GitHub Actions | production URLs, Vercel project IDs, deploy tokens, DB URL |
 | `prod` `/ci/turbo` | GitHub Actions | optional Turborepo remote-cache credentials |
 
 The `/web` path is the Vercel deployment namespace; it does not imply that web owns a
@@ -57,9 +57,9 @@ contracts include:
   persistence relays, the runner token/URL for the engine-auth control calls, and
   `API_INTERNAL_TOKEN` to validate the runner→API internal wiki command endpoint. The retained
   generic PostHog compatibility sink remains optional.
-- Electric: direct database, service auth, persistent storage, and a stable replication-stream ID.
-  `DATABASE_URL` must not use Neon's pooled hostname. Keep the stream ID and disk contents paired;
-  changing either requires the recovery procedure in [Electric read models](./electric-sync.md).
+- Electric: direct database and service auth. The storage path and replication-stream ID are clear
+  values in `apps/api/config/deploy.yml`. `DATABASE_URL` must not use Neon's pooled hostname. Keep
+  the stream ID and disk contents paired; changing either requires the recovery procedure in [Electric read models](./electric-sync.md).
 - Runner: database, internal/stream tokens, `OPENCOMPANY_API_ORIGIN` and `API_INTERNAL_TOKEN` for
   the internal wiki command endpoint (agent wiki writes cross the canonical API, never the wiki
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
@@ -73,10 +73,10 @@ contracts include:
   certificate's DNS challenge.
 
 `RUNNER_PUBLIC_URL` is the runner origin that browsers and sandboxes reach. It is required in prod
-`/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. A runner release requires `RUNNER_TLS_CERTIFICATE_PEM` and `RUNNER_TLS_PRIVATE_KEY_PEM` in
-`/runner`. `.github/workflows/renew-runner-cert.yml` writes them, and only kamal-proxy reads them,
-never the container. See
-[hosting](./hosting.md#runner-certificate).
+`/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. A runner release
+requires `RUNNER_TLS_CERTIFICATE_PEM` and `RUNNER_TLS_PRIVATE_KEY_PEM` in `/runner`.
+`.github/workflows/renew-runner-cert.yml` writes them, and only kamal-proxy reads them, never the
+container. See [hosting](./hosting.md#runner-certificate).
 
 Kamal sets `KAMAL_VERSION` (the deployed commit SHA) and `KAMAL_CONTAINER_NAME` in each container.
 The services report them as their release and log `instance_id`; never set them by hand.

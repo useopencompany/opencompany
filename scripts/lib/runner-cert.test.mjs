@@ -93,22 +93,17 @@ test("renews a month ahead, on request, or when the stored pair is unusable", ()
   );
 });
 
-test("forces a runner release only when kamal-proxy serves an expiring, replaced certificate", () => {
+test("forces a runner release only when kamal-proxy serves a stale, replaced certificate", () => {
   const served = (daysLeft, fingerprint, hosts = RUNNER_TLS_HOSTS) => ({
     daysLeft,
     fingerprint,
     hosts,
   });
   const stored = (fingerprint, daysLeft = 89) => ({ fingerprint, daysLeft });
-  assert.equal(servedCertificateAction({ served: null, stored: stored("A") }), "not-served");
-  // Another server, such as a wildcard DNS target, answers for the runner hostname.
-  assert.equal(
-    servedCertificateAction({
-      served: served(5, "V", ["*.opencompany.chat", "opencompany.chat"]),
-      stored: stored("A"),
-    }),
-    "not-served",
-  );
+  // A certificate that misses a runner host is stale however long it has left.
+  const partial = served(80, "A", ["runner.opencompany.chat"]);
+  assert.equal(servedCertificateAction({ served: partial, stored: stored("B") }), "redeploy");
+  assert.equal(servedCertificateAction({ served: partial, stored: stored("A") }), "renewal-failed");
   assert.equal(servedCertificateAction({ served: served(40, "A"), stored: stored("B") }), "ok");
   assert.equal(
     servedCertificateAction({ served: served(9, "A"), stored: stored("B") }),

@@ -215,8 +215,9 @@ misses a host, does not match its key or has 7 days or less left.
 
 ## Rollback
 
-Kamal Command: `kamal rollback <sha>` boots an older image that the server still holds. Migrations
-only add columns, so an older image runs on the newer schema.
+Kamal Command: `kamal rollback <sha>` boots an older image that the server still holds. Routine
+migrations are additive, so an older image runs on the newer schema; check
+[deployment](deployment.md) for the destructive exceptions before rolling back past one.
 
 ## Known costs and risks
 
