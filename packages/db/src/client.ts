@@ -8,16 +8,24 @@ const schema = { ...legacyBillingSchema, ...llmBrokerSchema, ...productSchema };
 
 let db: NeonHttpDatabase<typeof schema> | undefined;
 
-function getDatabaseUrl(databaseUrl = process.env.DATABASE_URL) {
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required for database access.");
+export function resolveDatabaseUrl(databaseUrl?: string) {
+  const resolved = [
+    databaseUrl,
+    process.env.DATABASE_URL,
+    process.env.API_DATABASE_URL,
+    process.env.RUNNER_DATABASE_URL,
+  ].find((value) => value?.trim());
+  if (!resolved) {
+    throw new Error(
+      "DATABASE_URL, API_DATABASE_URL, or RUNNER_DATABASE_URL is required for database access.",
+    );
   }
 
-  return databaseUrl;
+  return resolved.trim();
 }
 
 export function createDb(databaseUrl?: string) {
-  return drizzle(neon(getDatabaseUrl(databaseUrl)), { schema });
+  return drizzle(neon(resolveDatabaseUrl(databaseUrl)), { schema });
 }
 
 export function getDb() {
