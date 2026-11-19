@@ -47,8 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - slimmer scrollbars leave more room for your chats and sidebar (#2044) — @monsterdeveloper.
+- coding sandboxes now run in europe. the first time you continue a chat from before the move, it gets a fresh sandbox; files left only in the old sandbox do not carry over (#2109) — @monsterdeveloper.
 
 ### Fixed
+- pull request status in the sidebar loads again after a server configuration issue (#2106) — @louis.
 - scheduled workflows with long instructions no longer block other scheduled runs (#2079) — @louis.
 - tasks using chat models continue automatically when they reach a run's step limit with work left to do. if they keep reaching the limit, they ask for attention instead of marking unfinished work complete (#2059) — @louis.
 - connect your github account without needing permission to manage the organization's app installation. an organization owner still needs to grant the app access to any missing repositories (#2057) — @louis.
