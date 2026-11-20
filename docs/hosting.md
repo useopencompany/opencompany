@@ -165,6 +165,11 @@ Electric's shape log.
 
 Errors reach Better Stack through `BETTER_STACK_ERRORS_DSN`. For raw stdout, use `kamal app logs`.
 
+Better Stack uptime monitors cover the public web (`/api/healthz`), API (`/healthz`), and runner
+(`/healthz`) endpoints. Keep each monitor's URL aligned with the canonical hosts in the deployment
+configuration. When a host moves, update the monitor before retiring the old service, then confirm
+the new endpoint returns the deployed release from every configured region.
+
 ## Electric
 
 Electric is a Kamal accessory of the API: `opencompany-api-electric`, private on Kamal's `kamal`
@@ -228,5 +233,5 @@ migrations are additive, so an older image runs on the newer schema; check
 - `response_timeout: 0` means a backend that never sends headers holds the connection until the
   client gives up.
 - One server is a single point of failure. Hetzner backups are the way back.
-- Docker restarts a container that exits, not one that is up and failing `/healthz`. Uptime
-  monitors on both `/healthz` endpoints are not set up yet.
+- Docker restarts a container that exits, not one that is up and failing `/healthz`. Better Stack
+  detects unhealthy public endpoints, but recovery still requires an operator or a release.
