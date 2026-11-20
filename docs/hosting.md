@@ -166,9 +166,9 @@ Electric's shape log.
 Errors reach Better Stack through `BETTER_STACK_ERRORS_DSN`. For raw stdout, use `kamal app logs`.
 
 Better Stack uptime monitors cover the public web, API, and runner health endpoints. Keep each
-monitor's URL aligned with the canonical hosts in the Kamal configs. When a host moves, update the
-monitor before retiring the old service, then confirm the new `/healthz` returns the deployed release
-from every configured region.
+monitor's URL aligned with the canonical hosts in the deployment configuration. When a host moves,
+update the monitor before retiring the old service, then confirm the new `/healthz` returns the
+deployed release from every configured region.
 
 ## Electric
 
