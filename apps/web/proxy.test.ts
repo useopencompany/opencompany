@@ -1,6 +1,7 @@
+import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localHttpsRedirectUrl } from "@/lib/local-https-redirect";
-import { isUnauthenticatedPath, signInRedirectUrl } from "./proxy";
+import proxy, { isUnauthenticatedPath, isUntrustedAuthPagePost, signInRedirectUrl } from "./proxy";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -110,6 +111,38 @@ describe("opencompany public routes", () => {
   it("keeps normal chats behind authentication", () => {
     expect(isUnauthenticatedPath("/chat/goat_chat_123")).toBe(false);
     expect(isUnauthenticatedPath("/share")).toBe(false);
+  });
+});
+
+describe("auth page form posts", () => {
+  it("rejects an opaque-origin sign-in action before Next.js turns it into a 500", async () => {
+    const formData = new FormData();
+    formData.set("$ACTION_ID_test", "");
+    formData.set("returnPathname", "/");
+
+    const response = await proxy(
+      new NextRequest("https://my.opencompany.chat/signin", {
+        method: "POST",
+        headers: { origin: "null" },
+        body: formData,
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("accepts the canonical origin through Vercel's forwarded host", () => {
+    const request = new NextRequest("https://internal.vercel.invalid/signin", {
+      method: "POST",
+      headers: {
+        host: "internal.vercel.invalid",
+        origin: "https://my.opencompany.chat",
+        "x-forwarded-host": "my.opencompany.chat",
+      },
+    });
+
+    expect(isUntrustedAuthPagePost(request)).toBe(false);
   });
 });
 
