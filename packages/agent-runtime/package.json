@@ -30,7 +30,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "cron-parser": "^5.10.0",
+    "cron-parser": "^5.10.6",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
