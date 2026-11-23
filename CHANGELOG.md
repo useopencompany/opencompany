@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - coding sessions recover more reliably from temporary sandbox maintenance errors and interrupted setup downloads (#2041, #2060) — @louis.
 - opening a chat while signed out now takes you to sign in before trying to load the conversation (#2042) — @louis.
 
+### Security
+- sign-in and sign-up pages now reject form submissions from other sites without a server error (#2112) — @louis.
+
 ## [1.35.1] - 2026-09-25
 
 ### Fixed
