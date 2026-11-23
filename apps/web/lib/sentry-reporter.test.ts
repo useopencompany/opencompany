@@ -22,11 +22,11 @@ describe("scrubSentryEvent", () => {
 
     const scrubbed = scrubSentryEvent(event);
 
-    expect(scrubbed.request).toEqual({
+    expect(scrubbed?.request).toEqual({
       url: "https://my.opencompany.chat/app",
       method: "GET",
     });
-    expect(scrubbed.user).toEqual({ ip_address: "0.0.0.0" });
+    expect(scrubbed?.user).toEqual({ ip_address: "0.0.0.0" });
   });
 
   it("keeps an explicit internal user id but removes all other user fields", () => {
@@ -39,11 +39,63 @@ describe("scrubSentryEvent", () => {
       },
     };
 
-    expect(scrubSentryEvent(event).user).toEqual({ id: "user_123", ip_address: "0.0.0.0" });
+    expect(scrubSentryEvent(event)?.user).toEqual({
+      id: "user_123",
+      ip_address: "0.0.0.0",
+    });
   });
 
   it("explicitly disables transport IP inference when an event has no user", () => {
-    expect(scrubSentryEvent({ type: undefined }).user).toEqual({ ip_address: "0.0.0.0" });
+    expect(scrubSentryEvent({ type: undefined })?.user).toEqual({ ip_address: "0.0.0.0" });
+  });
+
+  it("drops errors raised entirely by injected browser scripts", () => {
+    const event = {
+      type: undefined,
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: "Cannot read properties of undefined (reading 'search')",
+            stacktrace: {
+              frames: [
+                { filename: "moz-extension://extension-id/content.js" },
+                {
+                  filename: "app:///userscript.html?name=search.user.js&id=browser-userscript-id",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(scrubSentryEvent(event)).toBeNull();
+  });
+
+  it("keeps errors with an application frame even when an injected script is also present", () => {
+    const event = {
+      type: undefined,
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: "Application failure",
+            stacktrace: {
+              frames: [
+                { filename: "chrome-extension://extension-id/content.js" },
+                { filename: "app:///_next/static/chunks/app.js" },
+              ],
+            },
+          },
+        ],
+      },
+    };
+
+    expect(scrubSentryEvent(event)).toMatchObject({
+      exception: event.exception,
+      user: { ip_address: "0.0.0.0" },
+    });
   });
 
   it("drops console breadcrumbs that could contain application secrets", () => {

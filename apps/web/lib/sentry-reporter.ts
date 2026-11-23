@@ -6,7 +6,9 @@ type SentryBreadcrumb = Parameters<
   NonNullable<Parameters<typeof Sentry.init>[0]["beforeBreadcrumb"]>
 >[0];
 
-export function scrubSentryEvent(event: SentryEvent): SentryEvent {
+export function scrubSentryEvent(event: SentryEvent): SentryEvent | null {
+  if (hasOnlyInjectedBrowserScriptFrames(event)) return null;
+
   if (event.request) {
     const { method, url } = event.request;
     event.request = {
@@ -24,6 +26,24 @@ export function scrubSentryEvent(event: SentryEvent): SentryEvent {
   };
 
   return event;
+}
+
+function hasOnlyInjectedBrowserScriptFrames(event: SentryEvent): boolean {
+  const filenames =
+    event.exception?.values?.flatMap((exception) =>
+      (exception.stacktrace?.frames ?? [])
+        .map((frame) => frame.filename)
+        .filter((filename): filename is string => Boolean(filename)),
+    ) ?? [];
+
+  return filenames.length > 0 && filenames.every(isInjectedBrowserScriptFilename);
+}
+
+function isInjectedBrowserScriptFilename(filename: string): boolean {
+  return (
+    /^(?:chrome|moz|safari-web)-extension:\/\//i.test(filename) ||
+    /^app:\/\/\/userscript\.html(?:[?#]|$)/i.test(filename)
+  );
 }
 
 export function scrubSentryBreadcrumb(breadcrumb: SentryBreadcrumb): SentryBreadcrumb | null {
