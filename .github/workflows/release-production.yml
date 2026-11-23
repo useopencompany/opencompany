@@ -152,7 +152,7 @@ jobs:
           gem install --user-install kamal -v 2.12.0 --no-document
           ruby -e 'puts File.join(Gem.user_dir, "bin")' >> "$GITHUB_PATH"
 
-      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2.3.0
+      - uses: useblacksmith/setup-docker-builder@9657a6e02ca6445e6d6ce5ffaf370f4828dea50d # v2.4.0
         if: ${{ env.SELECTED == 'true' }}
         with:
           cache-key: opencompany/${{ matrix.app }}-image
