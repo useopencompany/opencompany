@@ -108,13 +108,18 @@ function capResult(
   return { markdown: capped, truncated: capped.length < markdown.length, format };
 }
 
-// Maps AnyDoc's ConvertErrorCode onto the stable application errors. A PDF that AnyDoc reports as
-// `unsupported` was recognized as a PDF but yielded no text, i.e. it is scanned/image-only.
+// Maps AnyDoc's ConvertErrorCode onto the stable application errors. Older AnyDoc versions reported
+// a PDF that yielded no text as `unsupported`; newer versions use the explicit `needsOcr` code.
 function normalizeError(error: unknown, format: DocumentFormat): DocumentExtractionError {
   const code =
     typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
   const message = error instanceof Error ? error.message : "Document could not be parsed.";
   switch (code) {
+    case "needsOcr":
+      return new DocumentExtractionError(
+        "image_only_pdf",
+        "This PDF is scanned or image-only; text extraction (OCR) is not supported.",
+      );
     case "unsupported":
       return format === PDF_FORMAT
         ? new DocumentExtractionError(

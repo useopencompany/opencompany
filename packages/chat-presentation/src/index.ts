@@ -96,7 +96,7 @@ export class RedisChatPresentationStream
         : null;
       const messages = input.afterStreamId
         ? (streams?.flatMap((stream) => stream.messages) ?? [])
-        : await client.xRange(key, "-", "+", { COUNT: limit });
+        : ((await client.xRange(key, "-", "+", { COUNT: limit })) ?? []);
       const entries: ChatPresentationEntry[] = [];
       for (const message of messages) {
         try {

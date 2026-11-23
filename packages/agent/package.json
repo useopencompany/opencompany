@@ -34,7 +34,7 @@
     "bench": "bun --env-file=../../.env.local evals/index.ts"
   },
   "dependencies": {
-    "@ai-sdk/mcp": "^2.0.101",
+    "@ai-sdk/mcp": "^2.0.44",
     "@ai-sdk/openai": "^4.0.121",
     "@browserbasehq/sdk": "^2.29.0",
     "@modelcontextprotocol/sdk": "1.32.2",
@@ -54,7 +54,7 @@
     "@vercel/sandbox": "^3.2.1",
     "ai": "^7.0.177",
     "ajv": "8.20.0",
-    "convex": "1.51.0",
+    "convex": "1.45.0",
     "drizzle-orm": "^0.45.4",
     "jose": "^6.2.18",
     "mcp-handler": "^1.1.0",
