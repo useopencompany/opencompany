@@ -11,6 +11,7 @@ import {
   savePreparedVercelDirectory,
   surfaceConfig,
   validateProject,
+  verifyOtlpTraceExporter,
 } from "./lib/release-vercel.mjs";
 
 await main().catch((error) => {
@@ -95,21 +96,46 @@ async function validateWebEnvironment(projectId, envs, teamId, token) {
     ["OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
     ["NEXT_PUBLIC_OPENCOMPANY_API_ORIGIN", expectedApiOrigin],
     ["WORKOS_COOKIE_DOMAIN", "opencompany.chat"],
+    ["OPENCOMPANY_OBSERVABILITY_ENABLED", "true"],
   ]);
   const entries = productionEnvironmentEntries(envs);
   for (const [key, expected] of expectedValues) {
-    const matches = entries.filter((env) => env.key === key);
-    if (matches.length !== 1) {
-      throw new Error(`web must have exactly one production ${key}; found ${matches.length}.`);
-    }
-    const env = await vercelRequest(
-      `/v1/projects/${projectId}/env/${matches[0].id}?teamId=${teamId}`,
-      token,
-    );
-    if (env.decrypted !== true || env.value?.trim() !== expected) {
+    const value = await readProductionEnvironmentValue({ projectId, entries, teamId, token, key });
+    if (value !== expected) {
       throw new Error(`Web Vercel production ${key} does not match the release contract.`);
     }
   }
+
+  const endpoint = await readProductionEnvironmentValue({
+    projectId,
+    entries,
+    teamId,
+    token,
+    key: "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+  });
+  const serializedHeaders = await readProductionEnvironmentValue({
+    projectId,
+    entries,
+    teamId,
+    token,
+    key: "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
+  });
+  await verifyOtlpTraceExporter({ endpoint, serializedHeaders });
+}
+
+async function readProductionEnvironmentValue({ projectId, entries, teamId, token, key }) {
+  const matches = entries.filter((env) => env.key === key);
+  if (matches.length !== 1) {
+    throw new Error(`web must have exactly one production ${key}; found ${matches.length}.`);
+  }
+  const env = await vercelRequest(
+    `/v1/projects/${projectId}/env/${matches[0].id}?teamId=${teamId}`,
+    token,
+  );
+  if (env.decrypted !== true || !env.value?.trim()) {
+    throw new Error(`Web Vercel production ${key} is not readable by release automation.`);
+  }
+  return env.value.trim();
 }
 
 async function vercelRequest(path, token) {
