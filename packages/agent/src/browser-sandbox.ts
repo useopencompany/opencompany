@@ -40,7 +40,9 @@ export function chatSandboxName(chatSessionId: string) {
 
 export async function getChatSandbox(input: { chatSessionId: string; signal: AbortSignal }) {
   const image = process.env.OPENCOMPANY_CHAT_SANDBOX_IMAGE?.trim();
+  const credentials = vercelSandboxCredentials();
   return Sandbox.getOrCreate({
+    ...credentials,
     name: chatSandboxName(input.chatSessionId),
     ...(image ? { image } : { runtime: "node24" as const }),
     persistent: true,
@@ -62,6 +64,24 @@ export async function getChatSandbox(input: { chatSessionId: string; signal: Abo
         signal: input.signal,
       }),
   });
+}
+
+export function vercelSandboxCredentials(
+  env: NodeJS.ProcessEnv = process.env,
+): { token: string; teamId: string; projectId: string } | Record<string, never> {
+  const token = env.VERCEL_TOKEN?.trim();
+  const teamId = env.VERCEL_ORG_ID?.trim();
+  const projectId = env.OPENCOMPANY_VERCEL_PROJECT_ID?.trim();
+
+  // Vercel deployments and linked local development use VERCEL_OIDC_TOKEN implicitly.
+  if (!token && !teamId && !projectId) return {};
+  if (!token || !teamId || !projectId) {
+    throw new Error(
+      "Vercel Sandbox access-token authentication requires VERCEL_TOKEN, VERCEL_ORG_ID, and OPENCOMPANY_VERCEL_PROJECT_ID together.",
+    );
+  }
+
+  return { token, teamId, projectId };
 }
 
 export async function provisionChatSandbox(

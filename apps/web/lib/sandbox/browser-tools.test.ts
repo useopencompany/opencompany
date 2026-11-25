@@ -60,11 +60,17 @@ describe("opencompany chat browser sandbox", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.stubEnv("VERCEL_TOKEN", "");
+    vi.stubEnv("VERCEL_ORG_ID", "");
+    vi.stubEnv("OPENCOMPANY_VERCEL_PROJECT_ID", "");
     mocks.getOrCreate.mockResolvedValue(sandbox);
     mocks.put.mockResolvedValue({});
   });
 
   it("configures a named persistent sandbox and provisions the stock runtime once", async () => {
+    vi.stubEnv("VERCEL_TOKEN", "vercel-token");
+    vi.stubEnv("VERCEL_ORG_ID", "team_1");
+    vi.stubEnv("OPENCOMPANY_VERCEL_PROJECT_ID", "project_1");
     const signal = new AbortController().signal;
     await getChatSandbox({ chatSessionId: "chat/1", signal });
 
@@ -75,6 +81,9 @@ describe("opencompany chat browser sandbox", () => {
       runtime?: string;
       networkPolicy: unknown;
       signal: AbortSignal;
+      token: string;
+      teamId: string;
+      projectId: string;
       onCreate: (value: typeof sandbox) => Promise<void>;
     };
     expect(params).toMatchObject({
@@ -83,6 +92,9 @@ describe("opencompany chat browser sandbox", () => {
       runtime: "node24",
       networkPolicy: CHAT_SANDBOX_NETWORK_POLICY,
       signal,
+      token: "vercel-token",
+      teamId: "team_1",
+      projectId: "project_1",
     });
     expect(CHAT_SANDBOX_NETWORK_POLICY).toMatchObject({
       subnets: {
@@ -139,6 +151,15 @@ describe("opencompany chat browser sandbox", () => {
         signal,
       }),
     );
+  });
+
+  it("rejects a partial Vercel Sandbox access-token configuration", async () => {
+    vi.stubEnv("VERCEL_TOKEN", "vercel-token");
+
+    await expect(
+      getChatSandbox({ chatSessionId: "chat_1", signal: new AbortController().signal }),
+    ).rejects.toThrow(/VERCEL_ORG_ID.*OPENCOMPANY_VERCEL_PROJECT_ID/u);
+    expect(mocks.getOrCreate).not.toHaveBeenCalled();
   });
 
   it("creates lazily, reuses one sandbox, and snapshots after page-changing actions", async () => {

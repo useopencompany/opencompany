@@ -226,6 +226,11 @@ const groups = {
       "E2B_API_KEY",
       // Without it the SDK sends the key to the default e2b.app (US) domain.
       "E2B_DOMAIN",
+      // The runner is outside Vercel, so its browser sandboxes use the release-owned
+      // access-token credentials instead of the OIDC identity available to Vercel Functions.
+      "VERCEL_TOKEN",
+      "VERCEL_ORG_ID",
+      "OPENCOMPANY_VERCEL_PROJECT_ID",
       "VERCEL_AI_GATEWAY_API_KEY",
       "OPENAI_CODEX_API_KEY",
       "BLOB_READ_WRITE_TOKEN",
