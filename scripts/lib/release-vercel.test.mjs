@@ -21,6 +21,7 @@ import {
   validateProject,
   vercelCurlArgs,
   vercelDeployArgs,
+  verifyOtlpTraceExporter,
 } from "./release-vercel.mjs";
 
 test("validates the web project root and skew protection", () => {
@@ -162,4 +163,35 @@ test("archives prebuilt Vercel deployments to avoid per-file upload limits", () 
     "--project",
     "project",
   ]);
+});
+
+test("authenticates an empty OTLP trace batch before deployment", async () => {
+  let request;
+  await verifyOtlpTraceExporter({
+    endpoint: "https://ingest.eu2.signoz.cloud:443",
+    serializedHeaders: "signoz-ingestion-key=secret, x-extra = value",
+    fetchImpl: async (...args) => {
+      request = args;
+      return { ok: true, status: 200, statusText: "OK" };
+    },
+  });
+
+  assert.equal(request[0].toString(), "https://ingest.eu2.signoz.cloud/v1/traces");
+  assert.deepEqual(request[1].headers, {
+    "content-type": "application/json",
+    "signoz-ingestion-key": "secret",
+    "x-extra": "value",
+  });
+  assert.equal(request[1].body, '{"resourceSpans":[]}');
+});
+
+test("rejects an OTLP credential that the collector will not accept", async () => {
+  await assert.rejects(
+    verifyOtlpTraceExporter({
+      endpoint: "https://ingest.eu2.signoz.cloud/v1/traces",
+      serializedHeaders: "signoz-ingestion-key=stale",
+      fetchImpl: async () => ({ ok: false, status: 401, statusText: "Unauthorized" }),
+    }),
+    /authentication probe failed: 401 Unauthorized/u,
+  );
 });

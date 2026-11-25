@@ -38,6 +38,8 @@ and explicit internal user ID. Before export they remove request headers, cookie
 strings, anonymous user details, and console breadcrumbs so authentication material does not enter
 the error tracker.
 SigNoz export requires `OPENCOMPANY_OBSERVABILITY_ENABLED` plus an OTLP endpoint and any required headers.
+The production web release verifies those credentials with an empty OTLP trace batch before it builds
+the deployment, so an expired or unsynced ingestion key stops the release without exporting user data.
 Latitude full-content LLM tracing requires `LATITUDE_API_KEY` and `LATITUDE_PROJECT_SLUG` and can be
 disabled with `LATITUDE_TELEMETRY_DISABLED`.
 

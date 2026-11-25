@@ -23,6 +23,9 @@ const WEB_REQUIRED_ENV = [
   "OBSERVABILITY_ENV",
   "NEXT_PUBLIC_OBSERVABILITY_ENABLED",
   "NEXT_PUBLIC_OBSERVABILITY_ENV",
+  "OPENCOMPANY_OBSERVABILITY_ENABLED",
+  "OPENCOMPANY_OTEL_EXPORTER_OTLP_ENDPOINT",
+  "OPENCOMPANY_OTEL_EXPORTER_OTLP_HEADERS",
 ];
 const MARKETING_REQUIRED_ENV = [
   "NEXT_PUBLIC_OPENCOMPANY_POSTHOG_TOKEN",
@@ -106,6 +109,25 @@ export function missingProductionKeys(surface, envs) {
   return surfaceConfig(surface).requiredEnv.filter((key) => !present.has(key));
 }
 
+export async function verifyOtlpTraceExporter({ endpoint, serializedHeaders, fetchImpl = fetch }) {
+  const url = otlpSignalEndpoint(endpoint, "traces");
+  const headers = parseOtlpHeaders(serializedHeaders);
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify({ resourceSpans: [] }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `OpenTelemetry trace exporter authentication probe failed: ${response.status} ${response.statusText}.`,
+    );
+  }
+}
+
 export function cleanVercelWorkDirectory(directory = ".vercel") {
   mkdirSync(directory, { recursive: true });
   for (const entry of readdirSync(directory)) {
@@ -151,6 +173,29 @@ export function vercelDeployArgs({ token, teamId, projectId }) {
     "--project",
     projectId,
   ];
+}
+
+function parseOtlpHeaders(value) {
+  const headers = {};
+  for (const item of value.split(",")) {
+    const separator = item.indexOf("=");
+    if (separator <= 0) continue;
+    const key = item.slice(0, separator).trim();
+    const headerValue = item.slice(separator + 1).trim();
+    if (key && headerValue) headers[key] = headerValue;
+  }
+  return headers;
+}
+
+function otlpSignalEndpoint(endpoint, signal) {
+  const normalized = endpoint.trim().replace(/\/+$/u, "");
+  const url = new URL(
+    normalized.endsWith(`/v1/${signal}`) ? normalized : `${normalized}/v1/${signal}`,
+  );
+  if (url.protocol !== "https:") {
+    throw new Error("The production OpenTelemetry exporter endpoint must use HTTPS.");
+  }
+  return url;
 }
 
 function copyDirectoryContents(source, destination) {
