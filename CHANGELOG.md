@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - the mac app downloads updates in the background. click update when one is ready, or install it when you quit. the app needs to be in applications to update itself (#2021) — @louis.
 
 ### Fixed
+<!-- Hold #2118 here until its production runner deployment succeeds. Release Production run 45726749922 failed at Prepare web deployment before the runner deployed. -->
+
+- chat can open and interact with websites again after a server configuration issue prevented its browser from starting (#2118) — @louis.
+
 - the iphone app's keyboard, sidebar search, and composer now stay out of each other's way. opening a chat takes you to its latest messages, and replies keep text and tool activity in order (#1978) — @louis.
 - iphone chats recover more reliably after inactivity or a connection drop. temporary connection problems keep you signed in; expired sessions take you back to sign in (#1978) — @louis.
 - typing, sending, and opening the keyboard in the iphone app keep the composer and conversation in place more reliably (#2038) — @monsterdeveloper.
