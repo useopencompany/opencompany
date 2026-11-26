@@ -88,6 +88,9 @@ test("production preflight follows the deployed runtime boundaries", async () =>
     "MONID_API_KEY",
     "RUNNER_OPENCOMPANY_TASK_WORKER_ENABLED",
     "RUNNER_SANDBOX_NAMESPACE",
+    "VERCEL_TOKEN",
+    "VERCEL_ORG_ID",
+    "OPENCOMPANY_VERCEL_PROJECT_ID",
   ]);
   assertIncludes(groups.runner.optional, [
     "BROWSERBASE_API_KEY",

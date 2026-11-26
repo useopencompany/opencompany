@@ -18,6 +18,10 @@ const JOB_ENV_KEYS = [
   "KAMAL_REGISTRY_PASSWORD",
 ];
 
+// The runner calls Vercel Sandbox from Hetzner. Its access-token credentials are owned by the
+// release environment, so pass only this explicit subset alongside the runner folder export.
+const RUNNER_RELEASE_ENV_KEYS = ["VERCEL_TOKEN", "VERCEL_ORG_ID", "OPENCOMPANY_VERCEL_PROJECT_ID"];
+
 // Infisical/secrets-action v1.0.18 file export writes `KEY='value'` lines joined by newlines,
 // without escaping. Values can hold quotes and newlines (the runner's PEMs do), so an entry ends
 // only where the next `KEY='` line starts.
@@ -45,6 +49,12 @@ export function kamalDeployEnv({ app, jobEnv, appSecrets }) {
   for (const key of JOB_ENV_KEYS) {
     delete env[key];
     if (jobEnv[key] !== undefined) env[key] = jobEnv[key];
+  }
+  if (app === "runner") {
+    for (const key of RUNNER_RELEASE_ENV_KEYS) {
+      delete env[key];
+      if (jobEnv[key] !== undefined) env[key] = jobEnv[key];
+    }
   }
   for (const key of ["SSH_AUTH_SOCK", "KAMAL_REGISTRY_USERNAME", "KAMAL_REGISTRY_PASSWORD"]) {
     if (!env[key]?.trim()) throw new Error(`${key} is required to deploy ${app}.`);

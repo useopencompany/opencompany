@@ -17,8 +17,9 @@ import {
 } from "./lib/release-kamal.mjs";
 import { backendSurfaceResults } from "./lib/release-orchestration.mjs";
 
-// Each app's Infisical folder, exported to a file by the workflow. The job env cannot be used:
-// `/api` and `/runner` share key names there, and DATABASE_URL is the migration URL.
+// Each app's Infisical folder, exported to a file by the workflow. Shared app keys cannot come
+// from the job env because DATABASE_URL is the migration URL; release-kamal.mjs allowlists the
+// runner's release-owned Vercel Sandbox credentials separately.
 const ENV_FILE_VARIABLES = {
   api: "KAMAL_API_ENV_FILE",
   runner: "KAMAL_RUNNER_ENV_FILE",

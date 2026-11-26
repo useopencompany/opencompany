@@ -13,6 +13,9 @@ const jobEnv = {
   DATABASE_URL: "postgres://migration",
   API_DATABASE_URL: "postgres://job-api",
   PRODUCTION_DATABASE_URL: "postgres://migration",
+  VERCEL_TOKEN: "vercel-token",
+  VERCEL_ORG_ID: "team_1",
+  OPENCOMPANY_VERCEL_PROJECT_ID: "project_1",
 };
 
 test("parses Infisical file exports, including quotes and multi-line values", () => {
@@ -38,7 +41,7 @@ test("rejects an Infisical export it cannot read", () => {
   assert.throws(() => parseInfisicalEnvFile("A='1'\nA='2'"), /lists A twice/u);
 });
 
-test("builds the runner env from its own folder, never the job's Infisical values", () => {
+test("builds the runner env from its folder plus the release-owned Vercel credentials", () => {
   const env = kamalDeployEnv({
     app: "runner",
     jobEnv,
@@ -55,6 +58,9 @@ test("builds the runner env from its own folder, never the job's Infisical value
   assert.equal(env.PRODUCTION_DATABASE_URL, undefined);
   assert.equal(env.SSH_AUTH_SOCK, "/tmp/agent.sock");
   assert.equal(env.KAMAL_REGISTRY_PASSWORD, "ghs_token");
+  assert.equal(env.VERCEL_TOKEN, "vercel-token");
+  assert.equal(env.VERCEL_ORG_ID, "team_1");
+  assert.equal(env.OPENCOMPANY_VERCEL_PROJECT_ID, "project_1");
 });
 
 test("keeps /electric and the migration URL out of the API deploy", () => {
@@ -67,6 +73,7 @@ test("keeps /electric and the migration URL out of the API deploy", () => {
   assert.equal(env.API_DATABASE_URL, "postgres://api");
   assert.equal(env.DATABASE_URL, undefined);
   assert.equal(env.ELECTRIC_DATABASE_URL, undefined);
+  assert.equal(env.VERCEL_TOKEN, undefined);
 });
 
 test("requires the deploy key and registry login from the job", () => {

@@ -66,12 +66,18 @@ contracts include:
   database directly), opencompany origin, allowed origins, integration encryption, an explicitly
   enabled task-worker gate, the stable `RUNNER_SANDBOX_NAMESPACE` that scopes managed E2B cleanup,
   E2B (`E2B_API_KEY` and `E2B_DOMAIN`), Blob (including Plugin data archives), model providers,
+  Vercel Sandbox (`VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `OPENCOMPANY_VERCEL_PROJECT_ID`) for
+  browser tools running outside Vercel,
   GitHub/Google/X integration credentials, opencompany PostHog, Redis values, and
   `RUNNER_PUBLIC_URL`; capability controls and provider-specific tuning remain optional.
 - Release: production DB URL, Vercel credentials and project IDs (including
   `DOCS_VERCEL_PROJECT_ID`), opencompany/API/runner URLs, the Hetzner server's SSH key and known
   hosts (`VM_SSH_PRIVATE_KEY`, `VM_SSH_KNOWN_HOSTS`), and `VERCEL_DNS_API_TOKEN` for the runner
   certificate's DNS challenge.
+
+The runner reuses the release-owned Vercel access-token triple for Vercel Sandbox. The release
+workflow passes only `VERCEL_TOKEN`, `VERCEL_ORG_ID`, and `OPENCOMPANY_VERCEL_PROJECT_ID` into the
+runner deploy; the SDK receives all three explicitly because Hetzner has no Vercel OIDC identity.
 
 `RUNNER_PUBLIC_URL` is the runner origin that browsers and sandboxes reach. It is required in prod
 `/runner`, `/api`, `/web` and `/release`, and all four must hold the same value. A runner release

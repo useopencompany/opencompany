@@ -128,7 +128,8 @@ selects them:
    `DATABASE_URL` holds the migration URL.
 3. After migrations, `scripts/release-kamal-services.mjs` runs
    `kamal deploy --skip-push --version <sha>` for both apps in parallel. Each process gets its own
-   folder's values plus `PATH`, `HOME`, the ssh-agent socket and the GHCR login, nothing else.
+   folder's values plus `PATH`, `HOME`, the ssh-agent socket and the GHCR login. The runner also gets
+   the release-owned Vercel access-token triple used by its browser sandboxes.
    `/electric` stays out, because a deploy never boots the accessory. Each app's release smoke then
    requires `/healthz` to report the SHA.
 4. A cancelled release runs `kamal lock release` for the apps it selected. Removing a lock nobody
