@@ -5,7 +5,7 @@ import { createTestPGlite } from "@opencompany/db/test-pglite";
 import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { sweepDueTaskSchedules } from "./scheduler";
+import { CLAUDE_CODE_SCHEDULE_REAUTH_MESSAGE, sweepDueTaskSchedules } from "./scheduler";
 
 const mocks = vi.hoisted(() => ({
   captureProductTaskSpawned: vi.fn(async () => undefined),
@@ -105,6 +105,11 @@ describe("sweepDueTaskSchedules", () => {
           workspace_id text NOT NULL,
           user_workos_id text NOT NULL,
           created_at timestamptz NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE goat.claude_code_credentials (
+          user_workos_id text PRIMARY KEY,
+          status text NOT NULL
         );
       `);
       await pg.query(
@@ -297,6 +302,55 @@ describe("sweepDueTaskSchedules", () => {
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("INSERT INTO goat.chat_sessions");
     expect(sqlTextFromExecuteCall(execute, 3)).toContain("workflow_id");
     expect(sqlTextFromExecuteCall(execute, 4)).toContain("UPDATE goat.workflow_schedule_runs");
+  });
+
+  it("records a failed schedule run without creating a Task when Claude Code is disconnected", async () => {
+    const claudeHarnessSpec: HarnessSpec = {
+      ...harnessSpec,
+      engine: "claude_code",
+      model: "anthropic/claude-sonnet-5",
+    };
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "workflow_1",
+          triggerId: "trigger_hourly",
+          workspaceId: "workspace_1",
+          slug: "code-review",
+          kind: "workflow",
+          userWorkosId: "user_1",
+          name: "Code review",
+          cron: "0 * * * *",
+          timezone: "UTC",
+          prompt: "Review the repository.",
+          firstStepInstructions: "Review the repository.",
+          scheduleHarnessSpec: claudeHarnessSpec,
+          claudeCodeConnected: false,
+          nextRunAt: new Date("2026-06-03T11:00:00.000Z"),
+        },
+      ])
+      .mockResolvedValueOnce([{ id: "workflow_schedule_run_1" }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    mocks.transaction.mockImplementation(async (callback) => callback({ execute }));
+
+    const onTaskCreated = vi.fn();
+    await expect(
+      sweepDueTaskSchedules({
+        now: new Date("2026-06-03T12:00:00.000Z"),
+        onTaskCreated,
+      }),
+    ).resolves.toEqual({ checked: 1, created: 0 });
+
+    expect(onTaskCreated).not.toHaveBeenCalled();
+    expect(mocks.captureProductTaskSpawned).not.toHaveBeenCalled();
+    expect(sqlTextFromExecuteCall(execute, 0)).toContain("goat.claude_code_credentials");
+    expect(sqlTextFromExecuteCall(execute, 0)).toContain("credential.status = 'connected'");
+    const failedRun = new PgDialect().sqlToQuery(execute.mock.calls[2]![0] as SQL);
+    expect(failedRun.sql).toContain("UPDATE goat.workflow_schedule_runs");
+    expect(failedRun.params).toContain(CLAUDE_CODE_SCHEDULE_REAUTH_MESSAGE);
+    expect(sqlTextFromExecuteCall(execute, 3)).toContain("UPDATE goat.workflows");
   });
 
   it("uses a bounded Task goal for oversized workflow instructions", async () => {
