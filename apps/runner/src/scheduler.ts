@@ -19,6 +19,8 @@ import { getDb } from "./db";
 import { createPollingWorker } from "./polling-worker";
 
 const SCHEDULE_POLL_INTERVAL_MS = 30_000;
+export const CLAUDE_CODE_SCHEDULE_REAUTH_MESSAGE =
+  "Claude Code is disconnected. Reconnect Claude Code in opencompany settings before the next scheduled run.";
 
 type DueWorkflowScheduleRow = {
   id: string;
@@ -37,6 +39,7 @@ type DueWorkflowScheduleRow = {
   // directly and a wedged claim would stall every later due schedule behind it.
   firstStepInstructions: string | null;
   scheduleHarnessSpec: HarnessSpec;
+  claudeCodeConnected: boolean;
   nextRunAt: Date | string;
 };
 
@@ -112,6 +115,12 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           automation_trigger.value->>'prompt' AS "prompt",
           workflow.steps->0->>'instructions' AS "firstStepInstructions",
           automation_trigger.value->'harnessSpec' AS "scheduleHarnessSpec",
+          EXISTS (
+            SELECT 1
+            FROM goat.claude_code_credentials AS credential
+            WHERE credential.user_workos_id = automation_trigger.value->>'userWorkosId'
+              AND credential.status = 'connected'
+          ) AS "claudeCodeConnected",
           (automation_trigger.value->>'nextRunAt')::timestamptz AS "nextRunAt"
         FROM goat.workflows AS workflow
         CROSS JOIN LATERAL jsonb_array_elements(workflow.automation_triggers)
@@ -217,6 +226,18 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       return { status: "duplicate" as const };
     }
 
+    if (workflow.scheduleHarnessSpec.engine === "claude_code" && !workflow.claudeCodeConnected) {
+      await tx.execute(sql`
+        UPDATE goat.workflow_schedule_runs
+        SET status = 'failed',
+            error = ${CLAUDE_CODE_SCHEDULE_REAUTH_MESSAGE},
+            updated_at = ${now}
+        WHERE id = ${runId}
+      `);
+      await advanceWorkflowSchedule(tx, workflow, { scheduledFor, futureRunAt, now });
+      return { status: "failed" as const };
+    }
+
     const taskPrompt = scheduledWorkflowTaskPrompt(workflow);
     const createdTask = await createScheduledTask(tx, {
       userWorkosId: workflow.userWorkosId,
@@ -242,14 +263,29 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
       WHERE id = ${runId}
     `);
 
-    await tx.execute(sql`
+    await advanceWorkflowSchedule(tx, workflow, { scheduledFor, futureRunAt, now });
+
+    return {
+      status: "created" as const,
+      taskId: createdTask.taskId,
+      analytics: createdTask,
+    };
+  });
+}
+
+async function advanceWorkflowSchedule(
+  tx: ScheduleTransaction,
+  workflow: Pick<DueWorkflowScheduleRow, "id" | "triggerId">,
+  input: { scheduledFor: Date; futureRunAt: Date; now: Date },
+) {
+  await tx.execute(sql`
       UPDATE goat.workflows AS workflow
       SET automation_triggers = (
             SELECT jsonb_agg(
               CASE WHEN item.value->>'id' = ${workflow.triggerId}
                 THEN jsonb_set(
-                  jsonb_set(item.value, '{lastRunAt}', to_jsonb(${scheduledFor}::timestamptz)),
-                  '{nextRunAt}', to_jsonb(${futureRunAt}::timestamptz)
+                  jsonb_set(item.value, '{lastRunAt}', to_jsonb(${input.scheduledFor}::timestamptz)),
+                  '{nextRunAt}', to_jsonb(${input.futureRunAt}::timestamptz)
                 )
                 ELSE item.value END
               ORDER BY item.ordinality
@@ -259,24 +295,17 @@ async function claimAndCreateOneDueScheduleRun(now: Date) {
           ),
           schedule_last_run_at = CASE
             WHEN workflow.automation_triggers->0->>'id' = ${workflow.triggerId}
-              THEN ${scheduledFor}
+              THEN ${input.scheduledFor}
             ELSE workflow.schedule_last_run_at
           END,
           schedule_next_run_at = CASE
             WHEN workflow.automation_triggers->0->>'id' = ${workflow.triggerId}
-              THEN ${futureRunAt}
+              THEN ${input.futureRunAt}
             ELSE workflow.schedule_next_run_at
           END,
-          updated_at = ${now}
+          updated_at = ${input.now}
       WHERE workflow.id = ${workflow.id}
     `);
-
-    return {
-      status: "created" as const,
-      taskId: createdTask.taskId,
-      analytics: createdTask,
-    };
-  });
 }
 
 async function createScheduledTask(
